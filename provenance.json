@@ -1,0 +1,30 @@
+{
+ "upstream": "micropython/micropython v1.28.0",
+ "migrated-from": "PyDevices/cmods (patches/, wasmbridge/, variants/) on 2026-08-29",
+ "patches": {
+  "0001-micropython-windows-enable-networking-sockets-select-ssl-msvc.patch": {
+   "sha256": "6b74f2376c2d41ccc001f530273f8d5d188cc19616e3038b39d44399e8c19805"
+  },
+  "0002-micropython-unix-raise-MICROPY_SCHEDULER_DEPTH-for-desktop-SDL.patch": {
+   "sha256": "ff1622d5bfc3ee4573186321b3f5f6ea12b768b128089164e39af4cedf355db6"
+  },
+  "0003-micropython-windows-enable-ffi-modffi-libffi.patch": {
+   "sha256": "421849ad2d8b18ce8ae5af32d1d8c6859d76309fc13e6ebdb4fb3a37af1acbe2"
+  },
+  "0004-micropython-webassembly-allow-Asyncify-in-runPythonAsync.patch": {
+   "sha256": "563e85fcd9f2c6762f8d78a6d2caae091ad3c3a130d041f5854629a4e99320f0"
+  },
+  "0005-micropython-webassembly-fix-node-hook-ccall-signatures.patch": {
+   "sha256": "47b9058b38350740a147b4cdd962d12593606bad3dc2df36b2e1813f3bdf911e"
+  },
+  "0006-micropython-webassembly-support-soft-reinitialization.patch": {
+   "sha256": "17f53e11b1a948a4a57e8c0e6ade7b57005f4cded3dffa4414c659229eada81a"
+  },
+  "0007-micropython-webassembly-inert-jsffi-callbacks-across-reinit.patch": {
+   "sha256": "0771733d29f80418202c094c52066b971113f7e242fd39418191ed3e4636f727"
+  },
+  "0008-micropython-webassembly-fix-empty-single-input-lexer-eof-primer.patch": {
+   "sha256": "60fd92772c5f83b1e9ad20ca27722d4ca8d580e688027a964cc7b798db0b9ad4"
+  }
+ }
+}
