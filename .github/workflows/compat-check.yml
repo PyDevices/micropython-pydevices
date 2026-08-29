@@ -1,0 +1,35 @@
+# Scheduled compatibility check: every profile must apply cleanly to the
+# pinned upstream, so drift is known before a pin move is ever attempted.
+name: Overlay compatibility
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '43 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apply-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: overlay
+      - name: Check out the pinned upstream
+        uses: actions/checkout@v4
+        with:
+          repository: micropython/micropython
+          ref: v1.28.0
+          path: micropython
+          fetch-depth: 1
+      - name: Every profile applies clean to the pin
+        run: |
+          for p in overlay/profiles/*.series; do
+            name=$(basename "$p" .series)
+            echo "== $name"
+            ./overlay/apply.sh "$name" micropython --check
+          done
