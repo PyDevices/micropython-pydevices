@@ -14,8 +14,12 @@ provenance, applied to a clean tree, never a fork.
   the WebAssembly set (Asyncify, node hooks, soft reinitialization, jsffi
   across reinit, lexer EOF).
 - `profiles/` — named subsets: `windows-networked`, `windows-full`,
-  `desktop-pydevices`, `webassembly-pydevices` (`*.series` = ordered patch
-  numbers).
+  `desktop-pydevices`, `webassembly-pydevices`, `esp32-s3-debug`, and
+  `vst3-engine` (`*.series` = ordered patch numbers). `vst3-engine` is a
+  security profile: the micropython-vst3 sidecar interpreter deliberately
+  excludes the networking (0001) and FFI (0003) patches so DAW plugin
+  content — compositions are code, and some of it runs at plugin-scan
+  time — cannot reach the network or arbitrary native libraries.
 - `usermods/wasmbridge/` — the wasm bridge user C module.
 - `variants/webassembly/` — the external WebAssembly variant tree
   (including the Fetch-backed `requests`).
