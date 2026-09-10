@@ -19,11 +19,18 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: overlay
+      # Read the ref from UPSTREAM rather than repeating it here. The two drifted
+      # during the move to v1.29.0 -- the series was rebased, this ref was not --
+      # and the whole check quietly became "does the new series apply to the old
+      # tree?", which it does not and should not.
+      - name: Read the pinned upstream from UPSTREAM
+        id: pin
+        run: echo "ref=$(cat overlay/UPSTREAM)" >> "$GITHUB_OUTPUT"
       - name: Check out the pinned upstream
         uses: actions/checkout@v7
         with:
           repository: micropython/micropython
-          ref: v1.28.0
+          ref: ${{ steps.pin.outputs.ref }}
           path: micropython
           fetch-depth: 1
       - name: Every profile applies clean to the pin
