@@ -9,10 +9,10 @@ provenance, applied to a clean tree, never a fork.
 ## Layout
 
 - `UPSTREAM` — the upstream MicroPython release this series applies to.
-- `patches/` — the ordered mailbox series (`0001-…` to `0008-…`): Windows
-  networking/sockets/select/SSL, Windows FFI, desktop scheduler depth, and
-  the WebAssembly set (Asyncify, node hooks, soft reinitialization, jsffi
-  across reinit, lexer EOF).
+- `patches/` — the ordered mailbox series (`0001-…` to `0009-…`): Windows
+  networking/sockets/select/SSL, Windows FFI, desktop scheduler depth, the
+  WebAssembly set (Asyncify, node hooks, soft reinitialization, jsffi across
+  reinit, lexer EOF), and the esp32s3 `SPIRAM_OCT_DEBUG` variant.
 - `profiles/` — named subsets: `windows-networked`, `windows-full`,
   `desktop-pydevices`, `webassembly-pydevices`, `esp32-s3-debug`, and
   `vst3-engine` (`*.series` = ordered patch numbers). `vst3-engine` is a
