@@ -12,10 +12,11 @@ provenance, applied to a clean tree, never a fork.
 - `patches/` — the ordered mailbox series (`0001-…` to `0009-…`): Windows
   networking/sockets/select/SSL, Windows FFI, desktop scheduler depth, the
   WebAssembly set (Asyncify, node hooks, soft reinitialization, jsffi across
-  reinit, lexer EOF), and the esp32s3 `SPIRAM_OCT_DEBUG` variant.
+  reinit, lexer EOF), the esp32s3 `SPIRAM_OCT_DEBUG` variant, and esp32
+  `machine.I2S` MCLK (`mck=`).
 - `profiles/` — named subsets: `windows-networked`, `windows-full`,
-  `desktop-pydevices`, `webassembly-pydevices`, `esp32-s3-debug`, and
-  `vst3-engine` (`*.series` = ordered patch numbers). `vst3-engine` is a
+  `desktop-pydevices`, `webassembly-pydevices`, `esp32-s3-debug`,
+  `esp32-audio`, and `vst3-engine` (`*.series` = ordered patch numbers). `vst3-engine` is a
   security profile: the micropython-vst3 sidecar interpreter deliberately
   excludes the networking (0001) and FFI (0003) patches so DAW plugin
   content — compositions are code, and some of it runs at plugin-scan
