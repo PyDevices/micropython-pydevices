@@ -1,0 +1,60 @@
+# The partition table beside this file. The path is relative to the esp32
+# port directory, which is where idf.py runs; the layout is the work directory's
+# (this repository beside the MicroPython clone).
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../../../micropython-pydevices/boards/esp32/LILYGO_T_EMBED_S3/partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="../../../micropython-pydevices/boards/esp32/LILYGO_T_EMBED_S3/partitions.csv"
+
+# from cmods/esp32_partitions/ESP32_GENERIC_S3_SPIRAM_OCT.sdkconfig
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+
+# mbedTLS allocates from PSRAM. MicroPython's default is "Default alloc mode",
+# which with SPIRAM_MALLOC_ALWAYSINTERNAL=8192 puts every TLS allocation under
+# 8 KB -- contexts, the parsed certificate chain, the 4 KB output buffer -- in
+# internal DRAM. That is the pool FreeRTOS task stacks and I2S DMA buffers must
+# come from, and on the T-Embed spremote ran it down to 49 KB free with a
+# largest block of 23 KB, unable to start its audio thread. The IDF choice
+# symbol is loaded after the defaults, so this line wins over the port's.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# Core dump to the coredump partition (already in the table above). On a board
+# whose only serial line is the REPL, a panic prints nowhere anyone can see:
+# TinyUSB stops being serviced the instant the CPU faults, so the console dies
+# before the backtrace. The dump survives the reboot and reads back with
+# esptool + esp-coredump against the build's ELF.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+
+# More lwIP sockets. spremote alone holds the AP session, the dealer's TLS
+# websocket, mDNS and the pairing listener, and every pairing-HTTP client, DNS
+# lookup and phone poll takes one more. With the default 10, the pairing server
+# and the dealer were seen dying together under polling while WiFi and the VM
+# stayed up (2026-09-16 04:00). Each socket is a few hundred bytes.
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# Light heap poisoning: a canary on every block, checked on free. The
+# pairing-server thread crashed twice inside a locked heap walk on a garbage
+# block header (2026-09-16), so something writes out of bounds in internal
+# DRAM. This makes the offending free abort where the damage is, instead of
+# a later walk aborting where it is not.
+CONFIG_HEAP_POISONING_LIGHT=y
+
+# TCP over a weak link. The port defaults gave lwIP a 5760-byte receive window
+# and a 1.5 s minimum RTO; on the T-Embed at -77 dBm a burst of losses backed the
+# retransmit timer off until chunk data stopped for 40 s at a time (2026-09-16
+# 22:00, ring log). A 32 KB window, selective ACK and a 1 s RTO, with the WiFi
+# and lwIP buffers taken from PSRAM so internal DRAM is not the price.
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=16
+CONFIG_LWIP_TCP_RTO_TIME=1000
+CONFIG_LWIP_TCP_SACK_OUT=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_ESP_WIFI_RX_BA_WIN=16
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=48
+
+# from cmods/esp32_boards/LILYGO_T_EMBED_S3/sdkconfig.autosuspend
+CONFIG_SPI_FLASH_AUTO_SUSPEND=y
+CONFIG_SPI_FLASH_AUTO_CHECK_SUSPEND_STATUS=y

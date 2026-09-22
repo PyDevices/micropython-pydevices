@@ -2,7 +2,7 @@
 
 The versioned runtime overlay for MicroPython in the PyDevices project:
 every downstream patch, usermod, and variant PyDevices maintains on top of
-a **pinned upstream release** (`UPSTREAM`, currently v1.28.0), kept the way
+a **pinned upstream release** (`UPSTREAM`, currently v1.29.0), kept the way
 a distribution keeps its patch queue — an ordered mailbox series with
 provenance, applied to a clean tree, never a fork.
 
@@ -21,6 +21,19 @@ provenance, applied to a clean tree, never a fork.
   excludes the networking (0001) and FFI (0003) patches so DAW plugin
   content — compositions are code, and some of it runs at plugin-scan
   time — cannot reach the network or arbitrary native libraries.
+- `manifests/` — presets: frozen manifests a build is pointed at with
+  `FROZEN_MANIFEST=`, each a short list of the sibling repositories it
+  carries (`kitchen-sink.py` finds every sibling with a manifest). See
+  `manifests/README.md`.
+- `boards/esp32/` — out-of-tree board directories (`BOARD_DIR=`): the stock
+  board plus this board's partition table and sdkconfig fragments, and a
+  default manifest.
+- `variants/unix/`, `variants/windows/` — out-of-tree variants
+  (`VARIANT_DIR=`): `pydevices` (upstream's default variant plus ours) and
+  `vst3-engine` (the micropython-vst3 sidecar: no sockets, SSL or FFI).
+- `tools/make-work-dir.sh` — lays out a work directory in which all of the
+  above builds with upstream's own `make`, nothing of ours on the command
+  line but these paths.
 - `usermods/wasmbridge/` — the wasm bridge user C module.
 - `variants/webassembly/` — the external WebAssembly variant tree
   (including the Fetch-backed `requests`).
