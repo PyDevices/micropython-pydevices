@@ -2,16 +2,19 @@
 
 `micropython-pydevices` is PyDevices' versioned MicroPython runtime overlay. It holds the patch queue, user-module manifests, board directories, and build variants applied to one pinned upstream MicroPython release. It is not a fork and it does not publish a Python package.
 
-## Start by selecting a preset
+## Start by preparing a checkout
 
-Choose the target shape before modifying a MicroPython checkout:
+`tools/prepare-micropython.sh` is the documented path, and it takes no profile. It checks out the pinned tag in a `micropython` clone beside this repository, applies the `windows-full`, `webassembly-pydevices`, `esp32-s3-debug` and `esp32-audio` profiles (together, all ten patches) plus the usbif and cameraif module patches, and records the result as one local commit.
 
-- A `profile` selects an ordered subset of upstream patches.
-- A `manifest` selects the sibling PyDevices user modules frozen into a build.
+After that you choose what to build with paths passed to upstream's `make`:
+
+- A `manifest` selects the sibling PyDevices repositories frozen into a build.
 - A `board` supplies ESP32 board-specific sdkconfig, partitions, and defaults.
 - A `variant` supplies Unix, Windows, or WebAssembly build configuration.
 
-The root [README](../README.md) is the source of truth for these categories. `apply.sh <profile> <micropython-dir> --check` verifies whether a checkout matches a named patch profile before modifying it.
+Profiles matter only when you call `apply.sh <profile> <micropython-dir>` directly. `apply.sh <profile> <micropython-dir> --check` tests whether that profile's patches apply cumulatively to the checkout's HEAD, in a scratch worktree, without touching the checkout. Run it against a clean checkout at the pinned tag: on a checkout prepare has already patched, it reports DOES NOT APPLY.
+
+The root [README](../README.md) is the source of truth for these categories.
 
 ## The mental model
 
@@ -19,10 +22,8 @@ The root [README](../README.md) is the source of truth for these categories. `ap
 pinned upstream MicroPython tag
              |
              v
-ordered profile patch series
-             |
-             v
-clean prepared checkout
+tools/prepare-micropython.sh: all ten patches
++ usbif and cameraif patches, one local commit
              |
      +-------+--------+
      |                |
@@ -33,7 +34,7 @@ manifest         board or variant
        upstream build command
 ```
 
-`tools/prepare-micropython.sh` prepares a sibling checkout at the pinned tag and records the selected overlay work locally. After preparation, builds use upstream's normal tools; PyDevices-specific choices are expressed by the profile, manifest, board, and variant paths.
+After preparation, builds use upstream's normal tools; PyDevices-specific choices are expressed by the manifest, board, and variant paths.
 
 ## Repository map
 
@@ -45,6 +46,7 @@ manifest         board or variant
 | `manifests/` | Frozen-module presets that include sibling repositories. |
 | `boards/esp32/` | Out-of-tree ESP32 boards, sdkconfig, partitions, and defaults. |
 | `variants/` | Out-of-tree Unix, Windows, and WebAssembly variants. |
+| `usermods/wasmbridge/` | The `_wasm_bridge` C module the WebAssembly `pydevices` variant builds in: browser framebuffers, input events, timers, audio, and HTTP. |
 | `tools/prepare-micropython.sh` | Pinned-checkout preparation tool. |
 | `apply.sh` | Apply or verify a profile against a checkout. |
 | `provenance.json` | Patch checksums and migration records. |
@@ -53,10 +55,10 @@ manifest         board or variant
 
 The upstream tag is a compatibility boundary. Moving `UPSTREAM` requires revalidating every patch and changing the overlay release identity. Do not hand-edit an already patched MicroPython checkout; change the overlay source and regenerate the affected patch.
 
-Profiles are deliberately different. The `vst3-engine` profile excludes networking and FFI patches so untrusted plugin content cannot acquire those capabilities. Do not replace it with a broader desktop profile merely because it builds.
+The `vst3-engine` variants are deliberately narrow. They set `MICROPY_PY_SOCKET`, `MICROPY_PY_SSL` and `MICROPY_PY_FFI` to 0 so untrusted plugin content cannot reach the network or native libraries. That is the enforcement: a prepared checkout carries the Windows networking and FFI patches (0001, 0003) anyway, and the `vst3-engine` profile, which leaves them out, only matters when you apply it by hand. Do not replace the variant with a broader desktop one merely because it builds.
 
-A manifest names modules from sibling repositories. It controls what freezes into firmware, not what gets installed later with MIP. Consult [the manifests guide](../manifests/README.md) before adding a repository or duplicating a preset.
+A manifest names modules from sibling repositories. It controls what is built into firmware (frozen Python and C modules), not what gets installed later with MIP. Consult [the manifests guide](../manifests/README.md) before adding a repository or duplicating a preset.
 
 ## Safe first contributions
 
-Start with documentation, provenance, or a narrowly scoped profile/manifest correction. Validate a profile with `apply.sh --check` against a clean checkout before changing patches. Board and variant work should preserve the split between upstream configuration and PyDevices-owned overlay files.
+Start with documentation, provenance, or a narrowly scoped profile/manifest correction. Validate a profile with `apply.sh --check` against a clean checkout at the pinned tag before changing patches. Board and variant work should preserve the split between upstream configuration and PyDevices-owned overlay files.
