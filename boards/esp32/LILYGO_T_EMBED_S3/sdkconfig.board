@@ -58,3 +58,21 @@ CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=48
 # from cmods/esp32_boards/LILYGO_T_EMBED_S3/sdkconfig.autosuspend
 CONFIG_SPI_FLASH_AUTO_SUSPEND=y
 CONFIG_SPI_FLASH_AUTO_CHECK_SUSPEND_STATUS=y
+
+# usbif: USB host settings the module needs (moved here from cmods' board
+# patch, 2026-09-23). External hub support is off by default upstream, which
+# makes a hub enumerate as a device the host stack cannot use with everything
+# behind it invisible; a powered hub is also how a board that cannot source
+# VBUS reaches a bus-powered peripheral at all. The control-transfer buffer is
+# raised from IDF's 256-byte default because IDF allocates one per attached
+# device and refuses any device whose configuration descriptor is larger: a
+# USB audio CODEC publishes 1191 bytes, the bench camera 2306, and at the
+# default they never enumerate -- no error, no event, just absent.
+CONFIG_USB_HOST_HUBS_SUPPORTED=y
+CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE=4096
+# Bias the host FIFOs toward IN: hosting a camera needs a 512-byte isochronous
+# IN endpoint, and the balanced preset caps IN below that so interface_claim
+# refuses the camera outright. Costs periodic OUT 600 -> 128 bytes, which still
+# carries 48 kHz mono but not stereo; picking this at runtime from the classes
+# host_start() was asked for is usbif#2.
+CONFIG_USB_HOST_HW_BUFFER_BIAS_IN=y
