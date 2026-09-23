@@ -31,9 +31,11 @@ provenance, applied to a clean tree, never a fork.
 - `variants/unix/`, `variants/windows/` — out-of-tree variants
   (`VARIANT_DIR=`): `pydevices` (upstream's default variant plus ours) and
   `vst3-engine` (the micropython-vst3 sidecar: no sockets, SSL or FFI).
-- `tools/make-work-dir.sh` — lays out a work directory in which all of the
-  above builds with upstream's own `make`, nothing of ours on the command
-  line but these paths.
+- `tools/prepare-micropython.sh` — puts the pinned tag, the patch series
+  and the module-tied patches on a MicroPython checkout beside this
+  repository, once, as a local commit. After that everything above builds
+  with upstream's own `make`, nothing of ours on the command line but
+  these paths.
 - `usermods/wasmbridge/` — the wasm bridge user C module.
 - `variants/webassembly/` — the external WebAssembly variant tree
   (including the Fetch-backed `requests`).

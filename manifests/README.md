@@ -17,10 +17,11 @@ only a list.
 | `kitchen-sink.py` | every sibling that has a manifest -- what the workspace built before presets existed |
 | `vst3-engine.py` | the kitchen sink plus the engine's two usermods |
 
-Paths are relative to this directory, so the layout is the one
-`tools/make-work-dir.sh` lays out: this repository and the module
-repositories as siblings of the MicroPython clone. A user who wants a set
-nobody wrote makes a file of the same shape.
+Paths are relative to this directory, so the layout is this repository,
+the module repositories and the MicroPython checkout as siblings (the
+workspace's own layout; `tools/prepare-micropython.sh` readies the
+checkout). A user who wants a set nobody wrote makes a file of the same
+shape.
 
 ulab is a dependency audiodsp owns and names from its own manifest, so no
 preset mentions it.
