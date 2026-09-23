@@ -6,6 +6,9 @@ a **pinned upstream release** (`UPSTREAM`, currently v1.29.0), kept the way
 a distribution keeps its patch queue — an ordered mailbox series with
 provenance, applied to a clean tree, never a fork.
 
+New here? Read the [newcomer's guide](docs/newcomers.md) for the overlay
+model, preset selection, and upstream-boundary rules.
+
 ## Layout
 
 - `UPSTREAM` — the upstream MicroPython release this series applies to.
