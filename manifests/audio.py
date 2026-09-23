@@ -32,7 +32,5 @@ except Exception as _e:
         raise
 require("mip-cmdline")
 
-if _board_port:
-    c_module("../../ulab/code")                  # audiodsp's Make glue includes it on the desktop ports
 include("../../audiodsp/manifest.py")
 include("../../audioif/manifest.py")

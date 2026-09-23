@@ -32,8 +32,6 @@ except Exception as _e:
         raise
 require("mip-cmdline")
 
-if _board_port:
-    c_module("../../ulab/code")
 # Every sibling repository that carries a manifest.py, found rather than
 # listed. A sibling is included when it has a micropython.mk, or lacks an
 # apply_cp_patches.sh (which marks a CircuitPython-only tree that would

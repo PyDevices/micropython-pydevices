@@ -22,9 +22,9 @@ Paths are relative to this directory, so the layout is the one
 repositories as siblings of the MicroPython clone. A user who wants a set
 nobody wrote makes a file of the same shape.
 
-ulab is upstream's repository with no manifest of ours: on the CMake board
-ports a preset names `../../ulab/code`; on the Make ports audiodsp's own
-`micropython.mk` includes it, so naming it twice would compile it twice.
+ulab is a dependency audiodsp owns and names from its own manifest, so no
+preset mentions it.
+
 The webassembly variant has its own manifest with a copy of the kitchen
 sink's scan, because its `requests` module must be frozen before anything
 resolves the socket-backed one that a preset's prologue would pull in.
