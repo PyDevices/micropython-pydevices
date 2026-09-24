@@ -1,0 +1,45 @@
+From d9730830da9cedd46115de069265d024acc43ffb Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Thu, 24 Sep 2026 01:39:09 -0500
+Subject: [PATCH] unix: let a variant set the default GC heap size.
+
+The unix port's GC heap defaults to 1 MB per 32 bits of pointer (2 MB
+on a 64-bit host), fixed in main.c. A variant that expects larger
+programs, such as desktop builds that run LVGL display stacks, can
+only change it by passing -X heapsize= on every invocation.
+
+This wraps the default in MICROPY_UNIX_DEFAULT_HEAP_SIZE, so a port or
+variant can set it from its mpconfigvariant.h. The upstream default is
+unchanged when the macro is not defined, -X heapsize= still overrides
+it, and the -h help text reports whichever default is in effect since
+it already prints heap_size. The windows port compiles the same main.c
+and picks the macro up too.
+
+Based-on: micropython 0fd6c573e (tag v1.29.0)
+---
+ ports/unix/main.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/ports/unix/main.c b/ports/unix/main.c
+index 8f42d4f56..e066447e6 100644
+--- a/ports/unix/main.c
++++ b/ports/unix/main.c
+@@ -62,9 +62,13 @@ bool mp_compile_only = false;
+ static uint emit_opt = MP_EMIT_OPT_NONE;
+ 
+ #if MICROPY_ENABLE_GC
+-// Heap size of GC heap (if enabled)
++// Heap size of GC heap (if enabled). A port or variant may set its own
++// default; -X heapsize= still overrides it at run time.
+ // Make it larger on a 64 bit machine, because pointers are larger.
+-long heap_size = 1024 * 1024 * (sizeof(mp_uint_t) / 4);
++#ifndef MICROPY_UNIX_DEFAULT_HEAP_SIZE
++#define MICROPY_UNIX_DEFAULT_HEAP_SIZE (1024 * 1024 * (sizeof(mp_uint_t) / 4))
++#endif
++long heap_size = MICROPY_UNIX_DEFAULT_HEAP_SIZE;
+ #endif
+ 
+ // Number of heaps to assign by default if MICROPY_GC_SPLIT_HEAP=1
+-- 
+2.43.0
+
