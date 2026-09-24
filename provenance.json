@@ -31,6 +31,9 @@
   },
   "0010-micropython-esp32-i2s-mck-pin.patch": {
    "sha256": "982eac9b7884aaea4e2f3ab70cec4b1d6908ebfd6375483594f2311595ed121e"
+  },
+  "0011-micropython-esp32-webrepl-ctrl-c-in-tight-loops.patch": {
+   "sha256": "067d54faa178f67abd99d489a6c5000aa212d01a4709e4f029e5bf0c8a4e8fb3"
   }
  }
 }
