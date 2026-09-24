@@ -1,0 +1,142 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Wed, 23 Sep 2026 00:00:00 -0500
+Subject: [PATCH] esp32: let Ctrl-C over WebREPL break a loop that never waits.
+
+Over WebREPL, `while True: pass` cannot be interrupted, and a second
+WebREPL client cannot even connect until the loop ends. Over serial the
+same Ctrl-C works.
+
+Serial Ctrl-C arrives by interrupt: uart.c and usb_serial_jtag.c call
+mp_sched_keyboard_interrupt() from their ISRs, and the VM raises it at
+its next branch. WebREPL's bytes arrive on a socket nobody reads until
+socket_events_handler() (modsocket.c) runs the socket's callback --
+os.dupterm_notify, which is where dupterm sees the interrupt character
+(extmod/os_dupterm.c) -- and the port calls socket_events_handler() only
+from MICROPY_EVENT_POLL_HOOK and mp_hal_delay_ms(), i.e. only while the
+program sleeps, waits or idles. A loop that never waits never gets
+there; the listen socket's accept callback is starved the same way.
+
+This adds MICROPY_VM_HOOK_LOOP for the port. Every 1024 branches it
+calls socket_events_vm_hook(), which, when any socket has a callback
+registered and at most once per 20 ms, schedules a poll of those
+sockets on a static scheduler node. The poll is the same select() and
+callbacks socket_events_handler() already runs, minus its divisor.
+
+Why scheduled rather than called from the hook: the hook runs inside
+the VM on whichever thread holds the GIL, and the callbacks may be
+Python (webrepl's accept handler is). Run from the scheduler, they get
+the context every scheduled callback gets -- main thread only, scheduler
+locked so the poll cannot nest in itself, pending exceptions raised
+after it returns -- which is also the context mp_handle_pending() gives
+them on the existing idle path. A static node never queues twice and
+does not use a slot of MICROPY_SCHEDULER_DEPTH; one left pending over a
+soft reset runs once and finds no sockets.
+
+Cost: in running bytecode, one decrement and test per branch, and a
+function call every 1024 branches that returns at once unless a socket
+has a callback (i.e. WebREPL is running). With WebREPL up, a tick read
+per 1024 branches and at most 50 zero-timeout select()s a second.
+
+Code compiled with the native or viper emitters does not run VM hooks
+and is not covered, as it is not covered on any other port.
+
+Based-on: micropython 0fd6c573e (tag v1.29.0)
+---
+diff --git a/ports/esp32/modsocket.c b/ports/esp32/modsocket.c
+index f5fd96422..9fc6fe2a2 100644
+--- a/ports/esp32/modsocket.c
++++ b/ports/esp32/modsocket.c
+@@ -96,6 +96,11 @@ void _socket_settimeout(socket_obj_t *sock, uint64_t timeout_ms);
+ // This divisor is used to reduce the load on the system, so it doesn't poll sockets too often
+ #define USOCKET_EVENTS_DIVISOR (8)
+ 
++// How often running bytecode polls the sockets: every this many branches, at
++// most once per this many milliseconds.
++#define SOCKET_EVENTS_VM_HOOK_DIVISOR (1024)
++#define SOCKET_EVENTS_VM_HOOK_MS (20)
++
+ static uint8_t socket_events_divisor;
+ static socket_obj_t *socket_events_head;
+ 
+@@ -120,14 +125,10 @@ static void socket_events_remove(socket_obj_t *sock) {
+ }
+ 
+ // Polls all registered sockets for readability and calls their callback if they are readable
+-void socket_events_handler(void) {
++static void socket_events_poll(void) {
+     if (socket_events_head == NULL) {
+         return;
+     }
+-    if (--socket_events_divisor) {
+-        return;
+-    }
+-    socket_events_divisor = USOCKET_EVENTS_DIVISOR;
+ 
+     fd_set rfds;
+     FD_ZERO(&rfds);
+@@ -153,6 +154,45 @@ void socket_events_handler(void) {
+     }
+ }
+ 
++// Called from MICROPY_EVENT_POLL_HOOK, i.e. whenever the VM waits or idles.
++void socket_events_handler(void) {
++    if (socket_events_head == NULL) {
++        return;
++    }
++    if (--socket_events_divisor) {
++        return;
++    }
++    socket_events_divisor = USOCKET_EVENTS_DIVISOR;
++    socket_events_poll();
++}
++
++// Code that never waits (eg `while True: pass`) never reaches the event poll
++// hook, so without this a WebREPL Ctrl-C would sit unread in its socket.
++// MICROPY_VM_HOOK_LOOP calls this every SOCKET_EVENTS_VM_HOOK_DIVISOR
++// branches; at most every SOCKET_EVENTS_VM_HOOK_MS it schedules a poll, which
++// then runs from the scheduler like any other scheduled callback: on the main
++// thread, with the scheduler locked, never nested inside the VM hook itself.
++uint16_t socket_events_vm_hook_count;
++static mp_sched_node_t socket_events_sched_node;
++static mp_uint_t socket_events_vm_hook_ms;
++
++static void socket_events_sched_callback(mp_sched_node_t *node) {
++    (void)node;
++    socket_events_poll();
++}
++
++void socket_events_vm_hook(void) {
++    socket_events_vm_hook_count = SOCKET_EVENTS_VM_HOOK_DIVISOR;
++    if (socket_events_head == NULL) {
++        return;
++    }
++    mp_uint_t now = mp_hal_ticks_ms();
++    if (now - socket_events_vm_hook_ms >= SOCKET_EVENTS_VM_HOOK_MS) {
++        socket_events_vm_hook_ms = now;
++        mp_sched_schedule_node(&socket_events_sched_node, socket_events_sched_callback);
++    }
++}
++
+ #endif // MICROPY_PY_SOCKET_EVENTS
+ 
+ static inline void check_for_exceptions(void) {
+diff --git a/ports/esp32/mpconfigport.h b/ports/esp32/mpconfigport.h
+index 45d789f46..191d9918c 100644
+--- a/ports/esp32/mpconfigport.h
++++ b/ports/esp32/mpconfigport.h
+@@ -342,6 +342,14 @@ void *esp_native_code_commit(void *, size_t, void *);
+ 
+ #if MICROPY_PY_SOCKET_EVENTS
+ #define MICROPY_PY_SOCKET_EVENTS_HANDLER extern void socket_events_handler(void); socket_events_handler();
++// Also poll the sockets from running bytecode, so a Ctrl-C over WebREPL can
++// break a loop that never waits. The per-branch cost is one decrement.
++extern uint16_t socket_events_vm_hook_count;
++void socket_events_vm_hook(void);
++#define MICROPY_VM_HOOK_LOOP \
++    if (--socket_events_vm_hook_count == 0) { \
++        socket_events_vm_hook(); \
++    }
+ #else
+ #define MICROPY_PY_SOCKET_EVENTS_HANDLER
+ #endif

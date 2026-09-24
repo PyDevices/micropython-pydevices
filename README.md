@@ -12,16 +12,18 @@ model, preset selection, and upstream-boundary rules.
 ## Layout
 
 - `UPSTREAM` — the upstream MicroPython release this series applies to.
-- `patches/` — the ordered mailbox series (`0001-…` to `0010-…`): Windows
+- `patches/` — the ordered mailbox series (`0001-…` to `0011-…`): Windows
   networking/sockets/select/SSL, Windows FFI, desktop scheduler depth, the
   WebAssembly set (Asyncify, node hooks, soft reinitialization, jsffi across
-  reinit, lexer EOF), the esp32s3 `SPIRAM_OCT_DEBUG` variant, and esp32
-  `machine.I2S` MCLK (`mck=`).
+  reinit, lexer EOF), the esp32s3 `SPIRAM_OCT_DEBUG` variant, esp32
+  `machine.I2S` MCLK (`mck=`), and esp32 WebREPL Ctrl-C in loops that
+  never wait.
 - `profiles/` — named subsets: `windows-networked`, `windows-full`,
   `desktop-pydevices`, `webassembly-pydevices`, `esp32-s3-debug`,
-  `esp32-audio`, and `vst3-engine` (`*.series` = ordered patch numbers).
+  `esp32-audio`, `esp32-webrepl`, and `vst3-engine` (`*.series` = ordered
+  patch numbers).
   They matter only when you call `apply.sh` yourself:
-  `tools/prepare-micropython.sh` applies all ten patches regardless.
+  `tools/prepare-micropython.sh` applies all eleven patches regardless.
   `vst3-engine` leaves out the networking (0001) and FFI (0003) patches, but
   the micropython-vst3 sidecar's real guard is the `vst3-engine` variant
   below, which switches sockets, SSL and FFI off so DAW plugin content —

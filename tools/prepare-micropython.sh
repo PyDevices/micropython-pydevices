@@ -35,7 +35,7 @@ else
     if [[ "$(git -C "$MP" describe --tags --exact-match 2>/dev/null)" != "$UPSTREAM" ]]; then
         git -C "$MP" checkout --quiet "$UPSTREAM"
     fi
-    for profile in windows-full webassembly-pydevices esp32-s3-debug esp32-audio; do
+    for profile in windows-full webassembly-pydevices esp32-s3-debug esp32-audio esp32-webrepl; do
         "$HERE/apply.sh" "$profile" "$MP"
     done
     # Module-tied patches, from the repositories that need them (retool draft,

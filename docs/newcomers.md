@@ -4,7 +4,7 @@
 
 ## Start by preparing a checkout
 
-`tools/prepare-micropython.sh` is the documented path, and it takes no profile. It checks out the pinned tag in a `micropython` clone beside this repository, applies the `windows-full`, `webassembly-pydevices`, `esp32-s3-debug` and `esp32-audio` profiles (together, all ten patches) plus the usbif and cameraif module patches, and records the result as one local commit.
+`tools/prepare-micropython.sh` is the documented path, and it takes no profile. It checks out the pinned tag in a `micropython` clone beside this repository, applies the `windows-full`, `webassembly-pydevices`, `esp32-s3-debug`, `esp32-audio` and `esp32-webrepl` profiles (together, all eleven patches) plus the usbif and cameraif module patches, and records the result as one local commit.
 
 After that you choose what to build with paths passed to upstream's `make`:
 
@@ -22,7 +22,7 @@ The root [README](../README.md) is the source of truth for these categories.
 pinned upstream MicroPython tag
              |
              v
-tools/prepare-micropython.sh: all ten patches
+tools/prepare-micropython.sh: all eleven patches
 + usbif and cameraif patches, one local commit
              |
      +-------+--------+
