@@ -12,12 +12,12 @@ model, preset selection, and upstream-boundary rules.
 ## Layout
 
 - `UPSTREAM` — the upstream MicroPython release this series applies to.
-- `patches/` — the ordered mailbox series (`0001-…` to `0011-…`): Windows
+- `patches/` — the ordered mailbox series (`0001-…` to `0012-…`): Windows
   networking/sockets/select/SSL, Windows FFI, desktop scheduler depth, the
   WebAssembly set (Asyncify, node hooks, soft reinitialization, jsffi across
   reinit, lexer EOF), the esp32s3 `SPIRAM_OCT_DEBUG` variant, esp32
-  `machine.I2S` MCLK (`mck=`), and esp32 WebREPL Ctrl-C in loops that
-  never wait.
+  `machine.I2S` MCLK (`mck=`), esp32 WebREPL Ctrl-C in loops that
+  never wait, and a variant-settable default GC heap for the desktop ports.
 - `profiles/` — named subsets: `windows-networked`, `windows-full`,
   `desktop-pydevices`, `webassembly-pydevices`, `esp32-s3-debug`,
   `esp32-audio`, `esp32-webrepl`, and `vst3-engine` (`*.series` = ordered
