@@ -16,17 +16,26 @@
 #   MICROPYTHON_DIR  an existing clone of micropython/micropython (default:
 #                    `micropython` beside this repository). It is checked out
 #                    at the pinned tag if it is not there already; a tree with
-#                    the overlay commit already on top is left alone.
+#                    the overlay commit already on top is left alone, unless
+#                    patches/ has changed since; then it says how to redo it.
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SRC=$(cd "$HERE/.." && pwd)
 MP=${1:-$SRC/micropython}
 UPSTREAM=$(tr -d '[:space:]' < "$HERE/UPSTREAM")
 MARK="The PyDevices overlay applied to $UPSTREAM (a local record, never pushed)"
+# Which series the overlay commit was made from, so a tree prepared before a
+# patch was added or changed is caught instead of silently built.
+SERIES_ID="Overlay-Series: $(cat "$HERE"/patches/*.patch | sha256sum | cut -c1-16)"
 
 [[ -d "$MP/.git" ]] || { echo "not a git checkout: $MP (clone micropython/micropython there first)" >&2; exit 1; }
 
 if [[ "$(git -C "$MP" log -1 --format=%s 2>/dev/null)" == "$MARK" ]]; then
+    if ! git -C "$MP" log -1 --format=%b | grep -qxF "$SERIES_ID"; then
+        echo "$MP carries an older overlay than patches/ holds. Go back to the tag and prepare again:" >&2
+        echo "  git -C $MP checkout $UPSTREAM && $0 $MP" >&2
+        exit 1
+    fi
     echo "overlay already applied: $(git -C "$MP" log -1 --format=%h) on $UPSTREAM"
 else
     if [[ -n "$(git -C "$MP" status --porcelain --untracked-files=no | grep -v '^ m')" ]]; then
@@ -45,7 +54,7 @@ else
         [[ -x "$SRC/$mod/apply_patches.sh" ]] && "$SRC/$mod/apply_patches.sh" --apply "$MP"
     done
     git -C "$MP" add -A -- . ':!ports/*/build*'
-    git -C "$MP" -c user.name=pydevices -c user.email=pydevices@local commit --quiet -m "$MARK"
+    git -C "$MP" -c user.name=pydevices -c user.email=pydevices@local commit --quiet -m "$MARK" -m "$SERIES_ID"
     echo "overlay applied: $(git -C "$MP" log -1 --format=%h) on $UPSTREAM"
 fi
 # Every manifest require()s from micropython-lib, so a clone without it cannot
