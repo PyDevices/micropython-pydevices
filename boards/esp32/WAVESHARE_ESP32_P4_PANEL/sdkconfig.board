@@ -36,3 +36,19 @@ CONFIG_CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
 # default they never enumerate -- no error, no event, just absent.
 CONFIG_USB_HOST_HUBS_SUPPORTED=y
 CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE=4096
+
+# BLE through the C6 companion (ESP-Hosted VHCI). Upstream's
+# sdkconfig.p4_wifi_common turns NimBLE on but, unlike sdkconfig.ble (which the
+# P4's hosted variants don't include), leaves two of its settings at IDF's
+# defaults:
+#
+# - STATIC_TO_DYNAMIC defaults to y in IDF 5.5, which moves NimBLE's host
+#   globals into a context struct allocated by nimble_port_init().
+#   MicroPython's bindings zero ble_hs_max_attrs before that call, so
+#   bluetooth.BLE().active(True) panics with a store access fault at 0x2.
+# - NimBLE's host task defaults to core 0; MicroPython runs on core 1 on the
+#   P4, and its ring buffer and scheduler expect the host on the same core.
+CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC=n
+CONFIG_BT_NIMBLE_PINNED_TO_CORE_0=n
+CONFIG_BT_NIMBLE_PINNED_TO_CORE_1=y
+CONFIG_BT_NIMBLE_PINNED_TO_CORE=1
