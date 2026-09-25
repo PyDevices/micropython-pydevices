@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 25 Sep 2026 10:00:00 -0500
+Subject: [PATCH] windows: read piped stdin in the REPL.
+
+`micropython.exe -i` with stdin from a pipe printed empty prompts in a
+tight loop and never ran a line. ports/unix/main.c, which the windows
+port builds, enters the REPL when stdin is not a tty if -i (or
+MICROPYINSPECT) is given, and mp_hal_stdin_rx_chr reads keys with
+ReadConsoleInput, which fails on anything but a console handle. The
+failure returned Ctrl-C, which only cancels the line, so the REPL read
+again, failed again and printed another prompt.
+
+When stdin is not a console (GetConsoleMode fails), read bytes with
+ReadFile instead, the way the unix port uses read(): CR LF or a lone LF
+is Enter, and end of input is Ctrl-D, which ends the REPL. A last line
+with no newline is submitted before the Ctrl-D. A failed console read
+now returns Ctrl-D as well, so it ends the REPL instead of spinning.
+
+Based-on: micropython 0fd6c573e (tag v1.29.0)
+---
+ ports/windows/windows_mphal.c | 49 ++++++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 47 insertions(+), 2 deletions(-)
+
+diff --git a/ports/windows/windows_mphal.c b/ports/windows/windows_mphal.c
+index 50b7a40bf..4825d935f 100644
+--- a/ports/windows/windows_mphal.c
++++ b/ports/windows/windows_mphal.c
+@@ -186,6 +186,44 @@
+     return 0;
+ }
+ 
++// Stdin that is not a console (a pipe, a file, NUL): ReadConsoleInput fails on
++// it, so read bytes the way the unix port does. A CR LF pair is one Enter, a
++// lone LF is Enter too, and end of input or a failed read is Ctrl-D, which ends
++// the REPL. A last line with no newline is submitted before that Ctrl-D.
++static int stdin_rx_chr_pipe(void) {
++    static bool after_cr = false;
++    static bool at_eof = false;
++    static bool line_open = false;
++    for (;;) {
++        if (at_eof) {
++            if (line_open) {
++                line_open = false;
++                return '\r';
++            }
++            return CHAR_CTRL_D;
++        }
++        unsigned char c;
++        DWORD num_read = 0;
++        MP_THREAD_GIL_EXIT();
++        BOOL status = ReadFile(std_in, &c, 1, &num_read, NULL);
++        MP_THREAD_GIL_ENTER();
++        if (!status || !num_read) {
++            at_eof = true;
++            continue;
++        }
++        if (c == '\n' && after_cr) {
++            after_cr = false;
++            continue;
++        }
++        after_cr = c == '\r';
++        if (c == '\n') {
++            c = '\r';
++        }
++        line_open = c != '\r';
++        return c;
++    }
++}
++
+ int mp_hal_stdin_rx_chr(void) {
+     // currently processing escape seq?
+     const int ret = esc_seq_chr();
+@@ -193,8 +231,13 @@
+         return ret;
+     }
+ 
+-    // poll until key which we handle is pressed
+     assure_stdin_handle();
++    DWORD console_mode;
++    if (!GetConsoleMode(std_in, &console_mode)) {
++        return stdin_rx_chr_pipe();
++    }
++
++    // poll until key which we handle is pressed
+     BOOL status;
+     DWORD num_read;
+     INPUT_RECORD rec;
+@@ -203,7 +246,9 @@
+         status = ReadConsoleInput(std_in, &rec, 1, &num_read);
+         MP_THREAD_GIL_ENTER();
+         if (!status || !num_read) {
+-            return CHAR_CTRL_C; // EOF, ctrl-D
++            // A failed read has to end the REPL. Ctrl-C only cancels the line,
++            // so the REPL would read again, fail again and spin on prompts.
++            return CHAR_CTRL_D;
+         }
+         if (rec.EventType != KEY_EVENT || !rec.Event.KeyEvent.bKeyDown) { // only want key down events
+             continue;
+-- 
+2.43.0
+
