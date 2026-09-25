@@ -3,7 +3,7 @@
  "migrated-from": "PyDevices/cmods (patches/, wasmbridge/, variants/) on 2026-08-29",
  "patches": {
   "0001-micropython-windows-enable-networking-sockets-select-ssl-msvc.patch": {
-   "sha256": "d59696670e6b6c019f4fb855cedd2e921c0c0fcfbd0a06316929e7d21f60a43c"
+   "sha256": "c7684833d612947a2ba1f7038fc796bcff77039201e236a2c00948e1a58dd1b7"
   },
   "0002-micropython-unix-raise-MICROPY_SCHEDULER_DEPTH-for-desktop-SDL.patch": {
    "sha256": "b3827e1dea6b189d401c58d9addbda62389c94edc2043a38d8347abcbcaa0818"
