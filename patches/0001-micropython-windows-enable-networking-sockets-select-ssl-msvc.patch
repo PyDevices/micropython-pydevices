@@ -9,14 +9,14 @@ and related test updates.
 
 Based-on: micropython 0fd6c573e (tag v1.29.0)
 ---
- extmod/modselect.c                            |   58 +
+ extmod/modselect.c                            |   60 +
  ports/windows/Makefile                        |    1 +
  ports/windows/README.md                       |    1 +
  ports/windows/init.c                          |   12 +
  ports/windows/mbedtls/mbedtls_config_port.h   |    2 +
  ports/windows/micropython.vcxproj             |    4 +-
  ports/windows/modsocket.c                     | 1188 +++++++++++++++++
- ports/windows/mpconfigport.h                  |    6 +
+ ports/windows/mpconfigport.h                  |    8 +
  ports/windows/msvc/common.props               |   12 +
  ports/windows/msvc/genhdr.targets             |    6 +-
  ports/windows/variants/dev/manifest.py        |    3 +
@@ -39,34 +39,36 @@ Based-on: micropython 0fd6c573e (tag v1.29.0)
  tests/net_hosted/connect_timeout.py           |    2 +-
  tests/net_inet/ssl_errors.py                  |    3 +-
  tests/run-tests.py                            |    6 +
- 30 files changed, 1470 insertions(+), 16 deletions(-)
+ 30 files changed, 1474 insertions(+), 16 deletions(-)
  create mode 100644 ports/windows/mbedtls/mbedtls_config_port.h
  create mode 100644 ports/windows/modsocket.c
  create mode 100644 tests/multi_net/tcp_recv_timeout.py
  create mode 100644 tests/multi_net/tcp_recv_timeout.py.exp
 
 diff --git a/extmod/modselect.c b/extmod/modselect.c
-index 229f8f737..66ec666ba 100644
+index 229f8f737..cf0d8ad2b 100644
 --- a/extmod/modselect.c
 +++ b/extmod/modselect.c
-@@ -39,6 +39,12 @@
+@@ -39,6 +39,14 @@
  #error "select.select is not supported with MICROPY_PY_SELECT_POSIX_OPTIMISATIONS"
  #endif
  
-+#if defined(_WIN32) && !MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
++#if defined(_WIN32) && MICROPY_PY_SOCKET && !MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
 +// Winsock select() is used to sleep until socket readiness; plain Sleep() cannot
 +// be interrupted by network events (see poll_set_poll_until_ready_or_timeout).
++// A build without sockets has nothing Winsock could wake it for, and never
++// initialises Winsock, so it keeps upstream's plain wait.
 +#include <winsock2.h>
 +#endif
 +
  #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
  
  #include <string.h>
-@@ -404,11 +410,63 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
+@@ -404,11 +412,63 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
          if (n_ready > 0 || (has_timeout && elapsed >= timeout)) {
              return n_ready;
          }
-+        #if defined(_WIN32)
++        #if defined(_WIN32) && MICROPY_PY_SOCKET
 +        // On Windows, mp_event_wait_ms() is an uninterruptible sleep.  Socket
 +        // readiness is only visible via ioctl(MP_STREAM_POLL) (non-blocking
 +        // select).  Block in Winsock select() so incoming connections/data wake
@@ -1421,7 +1423,7 @@ index 000000000..df251a7a1
 +
 +#endif // MICROPY_PY_SOCKET
 diff --git a/ports/windows/mpconfigport.h b/ports/windows/mpconfigport.h
-index 1edcd0ede..935212455 100644
+index 1edcd0ede..8f167a0d0 100644
 --- a/ports/windows/mpconfigport.h
 +++ b/ports/windows/mpconfigport.h
 @@ -77,6 +77,11 @@
@@ -1436,11 +1438,13 @@ index 1edcd0ede..935212455 100644
  #define MICROPY_VFS                 (1)
  #define MICROPY_VFS_POSIX           (1)
  #define MICROPY_PY_FUNCTION_ATTRS   (1)
-@@ -107,6 +112,7 @@
+@@ -107,6 +112,9 @@
  #define MICROPY_PY_ARRAY_SLICE_ASSIGN (1)
  #define MICROPY_PY_BUILTINS_SLICE_ATTRS (1)
  #define MICROPY_PY_SYS_PATH_ARGV_DEFAULTS (0)
++#ifndef MICROPY_PY_SOCKET
 +#define MICROPY_PY_SOCKET           (1)
++#endif
  #define MICROPY_PY_SYS_EXIT         (1)
  #define MICROPY_PY_SYS_ATEXIT       (1)
  #define MICROPY_PY_SYS_PLATFORM     "win32"

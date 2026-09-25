@@ -1,5 +1,6 @@
-# The micropython-vst3 sidecar interpreter on windows: no sockets, no SSL, no
-# FFI (see the unix variant for why), the dev variant's ROM text compression,
+# The mpvst sidecar interpreter on windows: no sockets, no SSL, no
+# FFI (see the unix variant for why; mpconfigvariant.h is where the C side is
+# switched off), the dev variant's ROM text compression,
 # SDL2 for displayif's usdl2, and the engine's own icon.
 PROG ?= mpvst-engine
 MICROPY_ROM_TEXT_COMPRESSION = 1

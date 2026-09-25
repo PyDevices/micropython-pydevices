@@ -23,7 +23,7 @@ model, preset selection, and upstream-boundary rules.
   `esp32-audio`, `esp32-webrepl`, and `vst3-engine` (`*.series` = ordered
   patch numbers).
   They matter only when you call `apply.sh` yourself:
-  `tools/prepare-micropython.sh` applies all eleven patches regardless.
+  `tools/prepare-micropython.sh` applies every patch regardless.
   `vst3-engine` leaves out the networking (0001) and FFI (0003) patches, but
   the micropython-vst3 sidecar's real guard is the `vst3-engine` variant
   below, which switches sockets, SSL and FFI off so DAW plugin content —
