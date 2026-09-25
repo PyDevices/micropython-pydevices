@@ -52,3 +52,15 @@ CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC=n
 CONFIG_BT_NIMBLE_PINNED_TO_CORE_0=n
 CONFIG_BT_NIMBLE_PINNED_TO_CORE_1=y
 CONFIG_BT_NIMBLE_PINNED_TO_CORE=1
+
+# BLE flow control from the controller to the host. The P4's NimBLE host gets
+# its ACL packets over ESP-Hosted, and ESP-Hosted's receive path
+# (host/drivers/bt/vhci_drv.c) drops a packet when NimBLE's ACL pool is empty
+# ("Rx: alloc_acl_from_ll failed"). The pool empties whenever the NimBLE host
+# task waits on Python, which it does for every event because the esp32 port
+# runs BLE events synchronously. On a chip with its own radio, IDF's transport
+# waits for a buffer instead, and the controller holds the link back. Host flow
+# control gets the same result over the hosted link: the host tells the C6's
+# controller how many buffers it has, and the controller sends no more than
+# that until the host reports them free (pydevices#79, #87).
+CONFIG_BT_NIMBLE_HS_FLOW_CTRL=y
