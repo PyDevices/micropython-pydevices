@@ -1,6 +1,7 @@
 # Name, Type, SubType, Offset, Size, Flags
 # The LilyGO T-Embed S3 and the Waveshare ESP32-S3-LCD-4.3 carry images built
-# from this table. factory stays at 0x380000 and vfs at 0x3a0000: a build that
+# from this table, and so does the Waveshare ESP32-S3-Touch-LCD-7 (its board
+# directory uses this one). factory stays at 0x380000 and vfs at 0x3a0000: a build that
 # moved them left one board hanging in fs_corrupted() before USB came up and
 # formatted over the other one's filesystem (cmods#30). 8MB flash.
 

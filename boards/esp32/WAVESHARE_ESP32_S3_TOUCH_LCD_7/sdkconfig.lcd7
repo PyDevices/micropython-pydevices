@@ -1,0 +1,28 @@
+# Waveshare ESP32-S3-Touch-LCD-7, on top of the 4.3" board's sdkconfig.board.
+# Measured 2026-09-25 with spotapi's remote on the panel and earful streaming
+# Spotify into a USB sound card hosted on the native port (earful
+# docs/lcd-7.md).
+#
+# Internal DMA-capable RAM is what runs out first on this board: the panel's
+# bounce buffers, the Wi-Fi driver, hardware AES and the USB host all need
+# it. With the shared settings the DMA region sat at 24 bytes free, then
+# esp-aes failed to allocate and Wi-Fi dropped.
+#
+# Every malloc() under this size went to internal RAM first (the port's
+# default is 8 KB); code that needs internal or DMA memory asks for it
+# explicitly and still gets it.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=512
+# Unread socket data holds Wi-Fi RX buffers, which are internal DMA RAM: cap
+# how many exist and how much a socket may have in flight. Audio at 160 kbps
+# and Web API replies need far less than the shared 32 KB window.
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=24
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+CONFIG_ESP_WIFI_RX_BA_WIN=8
+CONFIG_LWIP_TCP_WND_DEFAULT=16384
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=16
+
+# 1 ms tick. At 100 Hz, MicroPython's sleep_ms() under one tick falls through
+# to mp_hal_delay_us() and busy-waits with the GIL held: appdev's 10 ms loop
+# kept the UI thread 54 % busy while idle and starved every other Python
+# thread, and 2-5 ms native waits rounded down to zero ticks.
+CONFIG_FREERTOS_HZ=1000
