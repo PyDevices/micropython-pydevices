@@ -26,3 +26,14 @@ CONFIG_LWIP_TCP_RECVMBOX_SIZE=16
 # kept the UI thread 54 % busy while idle and starved every other Python
 # thread, and 2-5 ms native waits rounded down to zero ticks.
 CONFIG_FREERTOS_HZ=1000
+
+# Caches sized for LVGL. Its code runs from flash and its objects and
+# framebuffers live in PSRAM, which the RGB scanout is streaming from at the
+# same time; with the port's 16 KB instruction cache and 32-byte lines every
+# LVGL call ran 5-10x slower than its code. Measured on the remote's UI
+# (2026-09-25): 64-byte lines took a full-screen redraw from 176 to 146 ms;
+# a 32 KB instruction cache then took a list row from 66 to 44 ms and the
+# redraw to 117 ms. It costs 16 KB of internal RAM (DMA-capable free 64 ->
+# 48 KB). A 64 KB data cache (rows 30 ms) would leave ~13 KB, too little.
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
