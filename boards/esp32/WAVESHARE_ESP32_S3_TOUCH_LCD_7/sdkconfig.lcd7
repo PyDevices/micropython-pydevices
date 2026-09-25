@@ -1,7 +1,7 @@
 # Waveshare ESP32-S3-Touch-LCD-7, on top of the 4.3" board's sdkconfig.board.
-# Measured 2026-09-25 with spotapi's remote on the panel and earful streaming
-# Spotify into a USB sound card hosted on the native port (earful
-# docs/lcd-7.md).
+# Measured 2026-09-25 with an LVGL remote-control UI on the panel and a
+# Spotify Connect speaker streaming into a USB sound card hosted on the
+# native port.
 #
 # Internal DMA-capable RAM is what runs out first on this board: the panel's
 # bounce buffers, the Wi-Fi driver, hardware AES and the USB host all need
@@ -33,7 +33,18 @@ CONFIG_FREERTOS_HZ=1000
 # LVGL call ran 5-10x slower than its code. Measured on the remote's UI
 # (2026-09-25): 64-byte lines took a full-screen redraw from 176 to 146 ms;
 # a 32 KB instruction cache then took a list row from 66 to 44 ms and the
-# redraw to 117 ms. It costs 16 KB of internal RAM (DMA-capable free 64 ->
-# 48 KB). A 64 KB data cache (rows 30 ms) would leave ~13 KB, too little.
+# redraw to 117 ms.
+#
+# A 64 KB data cache on top, measured while the board also decodes and
+# streams audio: full redraw 205 -> 147 ms, panel switch 88 -> 59 ms, 30
+# list rows built 780 -> 399 ms and laid out 608 -> 335 ms. The same layout
+# runs ~216x faster on a desktop, so this board is memory-bound, and the
+# data cache is the lever. Together the caches take 48 KB of internal RAM:
+# free internal went 54 -> 23 KB. Soaked 30 min of real use (about 25 skips
+# and track picks, Wi-Fi streaming and a USB host running): the minimum
+# stayed at 17 KB, with no allocation failures, Wi-Fi drops or audio
+# stalls. (The 24-byte failure above came from every malloc under 8 KB
+# landing in internal RAM; ALWAYSINTERNAL=512 sends those to PSRAM now.)
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
