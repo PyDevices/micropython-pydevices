@@ -12,7 +12,8 @@ MICE_PORT = 7250
 
 
 def utf16(s):
-    return "".join(c + "\x00" for c in s).encode()  # ASCII only, little-endian UTF-16
+    """UTF-16LE with a byte-order mark, as GNOME's source sends it."""
+    return b"\xff\xfe" + "".join(c + "\x00" for c in s if ord(c) < 128).encode()
 
 
 def tlv(t, v):
@@ -117,7 +118,7 @@ class Session:
         mc.settimeout(10)
         mc.connect((self.sink, MICE_PORT))
         mc.setblocking(False)
-        ready = mice_msg(1, [tlv(0, utf16("﻿" + self.name)), tlv(2, struct.pack(">H", self.rtsp_port)), tlv(3, self.source_id)])
+        ready = mice_msg(1, [tlv(0, utf16(self.name)), tlv(2, struct.pack(">H", self.rtsp_port)), tlv(3, self.source_id)])
         mc.write(ready)
         log("MICE >>> Source Ready to", self.sink)
         poller = select.poll()
@@ -229,7 +230,7 @@ class Session:
             return "timeout"
         finally:
             try:
-                mc.write(mice_msg(2, [tlv(0, utf16("﻿" + self.name)), tlv(3, self.source_id)]))
+                mc.write(mice_msg(2, [tlv(0, utf16(self.name)), tlv(3, self.source_id)]))
                 time.sleep_ms(300)
             except Exception as e:
                 log("stop:", e)

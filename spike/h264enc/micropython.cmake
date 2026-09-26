@@ -4,6 +4,6 @@ target_sources(usermod_h264enc INTERFACE ${CMAKE_CURRENT_LIST_DIR}/src/mod_h264e
 target_include_directories(usermod_h264enc INTERFACE ${CMAKE_CURRENT_LIST_DIR}/src)
 if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32p4")
     target_compile_definitions(usermod_h264enc INTERFACE H264ENC_HAVE_HW=1)
-    target_link_libraries(usermod_h264enc INTERFACE idf::esp_h264)
+    target_link_libraries(usermod_h264enc INTERFACE idf::esp_h264 idf::esp_driver_ppa)
 endif()
 target_link_libraries(usermod INTERFACE usermod_h264enc)

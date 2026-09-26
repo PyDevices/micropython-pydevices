@@ -11,6 +11,10 @@ PID_PMT = 0x1000
 PID_VIDEO = 0x100
 PID_AUDIO = 0x101
 AUD = b"\x00\x00\x00\x01\x09\xf0"
+# How far ahead of the clock (PCR) each frame's presentation time sits. The
+# Windows receiver reports an 80 ms decoder latency in its wfd_video_formats;
+# with a 50 ms lead it dropped every frame and showed nothing.
+PCR_LEAD = 36000   # 400 ms in 90 kHz ticks (ffmpeg uses about 700 ms)
 
 
 def _crc_table():
@@ -34,10 +38,13 @@ def crc32_mpeg(data):
 
 
 def _section(table_id, ident, body):
+    # table_id, section_length (syntax indicator, '0', reserved '11', 12 bits),
+    # transport_stream_id or program_number, reserved/version/current_next (0xC1),
+    # section_number, last_section_number, body, CRC. The length counts everything
+    # after the length field.
     length = 5 + len(body) + 4
-    head = struct.pack(">BHHBB", table_id, 0xB000 | length, ident, 0xC1, 0) + body
-    # 0xB000: section_syntax_indicator=1, '0', reserved '11', then the 12-bit length
-    return head + struct.pack(">I", crc32_mpeg(head[:]))
+    head = struct.pack(">BHHBBB", table_id, 0xB000 | length, ident, 0xC1, 0, 0) + body
+    return head + struct.pack(">I", crc32_mpeg(head))
 
 
 class TsMux:
@@ -56,9 +63,13 @@ class TsMux:
         self.mv = memoryview(self.pkt)
         self.pes_video = bytearray(14)
         self.pes_video[0:6] = b"\x00\x00\x01\xe0\x00\x00"
-        self.pes_video[6] = 0x84
+        self.pes_video[6] = 0x80
         self.pes_video[7] = 0x80
         self.pes_video[8] = 0x05
+        # the same header followed by an access unit delimiter, for encoder output
+        self.pes_video_aud = bytearray(20)
+        self.pes_video_aud[0:14] = self.pes_video
+        self.pes_video_aud[14:20] = AUD
         self.packets = 0
 
     def _header(self, pid, pusi, afc):
@@ -90,8 +101,11 @@ class TsMux:
         buf[off + 3] = (pts >> 7) & 0xFF
         buf[off + 4] = 0x01 | ((pts << 1) & 0xFE)
 
-    def _pes(self, pid, pes_header, payload, pcr, out):
-        """One PES packet (header bytes + payload) as TS packets, PCR on the first."""
+    def _pes(self, pid, pes_header, payload, pcr, out, rai=False):
+        """One PES packet (header bytes + payload) as TS packets, PCR on the first when given.
+
+        rai marks the first packet as a random access point (a keyframe).
+        """
         pkt = self.pkt
         mv = self.mv
         hlen = len(pes_header)
@@ -101,10 +115,12 @@ class TsMux:
         while pos < total:
             room = 184
             body = 4
-            if first:
+            if first and pcr is None:
+                self._header(pid, 1, 1)
+            elif first:
                 self._header(pid, 1, 3)
                 pkt[4] = 7
-                pkt[5] = 0x10
+                pkt[5] = 0x50 if rai else 0x10
                 base = pcr
                 pkt[6] = (base >> 25) & 0xFF
                 pkt[7] = (base >> 17) & 0xFF
@@ -118,8 +134,8 @@ class TsMux:
             if remaining < room:
                 # stuff with an adaptation field so the payload ends the packet
                 pad = room - remaining
-                if not first:
-                    self._header(pid, 0, 3)
+                if not first or pcr is None:
+                    self._header(pid, 1 if first else 0, 3)
                     pkt[4] = pad - 1
                     if pad >= 2:
                         pkt[5] = 0
@@ -152,10 +168,15 @@ class TsMux:
             self.packets += 1
             first = False
 
-    def video(self, au, pts, out, pcr=None):
-        """One H.264 access unit (Annex-B, AUD included), PTS/PCR in 90 kHz ticks."""
-        self._pts(self.pes_video, 9, pts)
-        self._pes(PID_VIDEO, self.pes_video, au, pts - 4500 if pcr is None else pcr, out)
+    def video(self, au, pts, out, pcr=None, aud=False, key=False):
+        """One H.264 access unit (Annex-B), PTS/PCR in 90 kHz ticks.
+
+        aud=True prepends an access unit delimiter for raw encoder output;
+        a file from ffmpeg already carries one.
+        """
+        head = self.pes_video_aud if aud else self.pes_video
+        self._pts(head, 9, pts)
+        self._pes(PID_VIDEO, head, au, pts - PCR_LEAD if pcr is None else pcr, out, rai=key)
 
     def lpcm(self, pcm_be, pts, out, pcr=None):
         """One LPCM PES: 16-bit big-endian stereo 48 kHz, up to about 1920 bytes."""
@@ -164,7 +185,7 @@ class TsMux:
         head[0:6] = b"\x00\x00\x01\xbd\x00\x00"
         head[4] = ((n + 8) >> 8) & 0xFF
         head[5] = (n + 8) & 0xFF
-        head[6] = 0x84
+        head[6] = 0x80
         head[7] = 0x80
         head[8] = 0x05
         self._pts(head, 9, pts)
@@ -172,7 +193,7 @@ class TsMux:
         head[15] = 6
         head[16] = 0
         head[17] = 0x11
-        self._pes(PID_AUDIO, head, pcm_be, pts - 4500 if pcr is None else pcr, out)
+        self._pes(PID_AUDIO, head, pcm_be, pcr, out)   # the clock rides on the video PID
 
 
 class RtpOut:
