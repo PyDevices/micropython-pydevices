@@ -1,0 +1,357 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sat, 26 Sep 2026 06:06:30 +0000
+Subject: [PATCH] windows: a _timing module, and waits that wake on its deadline.
+
+micropython.exe has no signals, no machine.Timer and no threads in the
+VM, so nothing could wake the main thread on a deadline: multimer's
+old win32 provider needed the thread in an alertable wait, which the
+REPL's console read is not, and a plain time.sleep starved it.
+
+_timing owns one waitable timer, high resolution where Windows offers
+it (10 1803+), waited on by a helper thread that only sets a flag and
+signals an event. The main thread notices the flag in the VM's periodic
+hook (between bytecodes), in mp_event_wait_ms (so time.sleep_ms sees
+it) and in the console wait, and hands the callback to
+mp_sched_schedule from its own context, so the callback runs at a
+bytecode boundary exactly as a board's soft machine.Timer callback
+does. The port's waits block on the event: MICROPY_INTERNAL_WFE, the
+console wait in mp_hal_stdin_rx_chr and the piped-stdin path (0013) all
+return the moment a deadline passes, so a sleep or a REPL waiting for a
+key is served at once, not at the end of a time slice. init() also asks
+Windows for its 1 ms timer resolution (timeBeginPeriod, as SDL and
+pygame do); without it every wait in the process rounds up to the
+15.6 ms system tick, time.sleep_ms included.
+
+Measured on Windows 11 with a 10 ms multimer timer over 5 s: 507 of 500
+delivered with 0.5 ms median jitter and 4 ms p99 lateness, both with
+the main thread idle in sleep_ms and with it spinning in Python; at an
+idle REPL prompt about 100 callbacks a second. The first version of
+this patch (a timer-queue timer and 10 ms wait slices) managed 348 idle,
+339 busy and 20 a second at the prompt, all at the system tick.
+
+_timing.init(callback), _timing.arm(ms), _timing.cancel(); multimer's
+native wake source is the only caller.
+
+Based-on: micropython 0fd6c573e (tag v1.29.0)
+---
+ ports/windows/Makefile        |   3 +-
+ ports/windows/mod_timing.c    | 199 ++++++++++++++++++++++++++++++++++++++++++
+ ports/windows/mpconfigport.h  |  19 ++++
+ ports/windows/windows_mphal.c |  22 +++++
+ ports/windows/windows_mphal.h |   6 +-
+ 5 files changed, 247 insertions(+), 2 deletions(-)
+
+diff --git a/ports/windows/Makefile b/ports/windows/Makefile
+index 4b6b18270..5f90114bf 100644
+--- a/ports/windows/Makefile
++++ b/ports/windows/Makefile
+@@ -47,7 +47,7 @@ INC += -I$(VARIANT_DIR)
+ 
+ # compiler settings
+ CFLAGS += $(INC) -Wall -Wpointer-arith -Wdouble-promotion -Werror -std=gnu99 -DUNIX -D__USE_MINGW_ANSI_STDIO=1 $(COPT) $(CFLAGS_EXTRA)
+-LDFLAGS += -lm -lbcrypt $(LDFLAGS_EXTRA)
++LDFLAGS += -lm -lbcrypt -lwinmm $(LDFLAGS_EXTRA)
+ 
+ # Force the use of 64-bits for file sizes in C library functions on 32-bit platforms.
+ # This option has no effect on 64-bit builds.
+@@ -74,6 +74,7 @@ SRC_C = \
+ 	modsocket.c \
+ 	ports/unix/gccollect.c \
+ 	windows_mphal.c \
++	mod_timing.c \
+ 	realpath.c \
+ 	init.c \
+ 	fmode.c \
+diff --git a/ports/windows/mod_timing.c b/ports/windows/mod_timing.c
+new file mode 100644
+index 000000000..357118932
+--- /dev/null
++++ b/ports/windows/mod_timing.c
+@@ -0,0 +1,199 @@
++/*
++ * This file is part of the MicroPython project, http://micropython.org/
++ *
++ * The MIT License (MIT)
++ *
++ * Copyright (c) 2026 Brad Barnett
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++ */
++
++// _timing: one OS timer that wakes the main thread, for a port with no
++// signals, no machine.Timer and no threads in the VM.
++//
++//     import _timing
++//     _timing.init(callback)   # a callable of one argument (None)
++//     _timing.arm(ms)          # one-shot: callback is scheduled in ms
++//     _timing.cancel()
++//
++// One waitable timer (high resolution where Windows 10 1803+ offers it, so
++// it is not bound to the 15.6 ms system tick) is waited on by a helper
++// thread that only sets a flag and signals an event when the deadline
++// passes. The main thread notices the flag in the VM's periodic hook, in
++// mp_event_wait_ms (so time.sleep_ms sees it) and in the console wait of
++// mp_hal_stdin_rx_chr, and hands the callback to mp_sched_schedule from its
++// own context. So the callback runs at a bytecode boundary of the main
++// thread, exactly as machine.Timer's soft callbacks do on a board, and no VM
++// state is ever touched from the helper thread. The event is what the
++// port's waits block on: a sleep or a REPL waiting for a key returns the
++// moment a deadline passes instead of at the end of a time slice.
++//
++// init() also asks Windows for its 1 ms timer resolution (timeBeginPeriod),
++// as SDL and pygame do: without it every wait in the process, time.sleep_ms
++// included, is rounded up to the 15.6 ms system tick.
++
++#include <windows.h>
++#include <mmsystem.h>
++
++#include "py/runtime.h"
++#include "py/mphal.h"
++
++#if MICROPY_PY_TIMING
++
++#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
++#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
++#endif
++
++static HANDLE timing_timer = NULL;
++static HANDLE timing_event = NULL;
++static HANDLE timing_thread = NULL;
++static volatile LONG timing_pending = 0;
++static bool timing_period_raised = false;
++
++static DWORD WINAPI timing_thread_main(LPVOID param) {
++    (void)param;
++    for (;;) {
++        if (WaitForSingleObject(timing_timer, INFINITE) != WAIT_OBJECT_0) {
++            return 0;
++        }
++        InterlockedExchange(&timing_pending, 1);
++        SetEvent(timing_event);
++    }
++}
++
++// Called from the main thread at safe points (see the header comment).
++void mp_timing_poll(void) {
++    if (!timing_pending) {
++        return;
++    }
++    mp_obj_t cb = MP_STATE_PORT(timing_callback);
++    if (InterlockedExchange(&timing_pending, 0) && cb != MP_OBJ_NULL) {
++        if (!mp_sched_schedule(cb, mp_const_none)) {
++            // The scheduler queue is full. Keep the deadline pending so the
++            // next poll retries; dropping it would leave nothing to re-arm
++            // the timer and every multimer timer would stop.
++            InterlockedExchange(&timing_pending, 1);
++        }
++    }
++}
++
++// Wait until the next deadline or timeout_ms, whichever comes first, with
++// the GIL released. Alertable, so APCs a library queues still run.
++void mp_timing_wfe(unsigned long timeout_ms) {
++    MP_THREAD_GIL_EXIT();
++    if (timing_event != NULL) {
++        WaitForSingleObjectEx(timing_event, timeout_ms, TRUE);
++    } else {
++        SleepEx(timeout_ms, TRUE);
++    }
++    MP_THREAD_GIL_ENTER();
++}
++
++// Wait for console input or the next deadline. True when input is ready (or
++// the wait could not be made, so the caller's blocking read runs as before).
++int mp_timing_wait_input(void *input, unsigned long timeout_ms) {
++    HANDLE hs[2] = { (HANDLE)input, timing_event };
++    DWORD n = timing_event != NULL ? 2 : 1;
++    MP_THREAD_GIL_EXIT();
++    DWORD r = WaitForMultipleObjectsEx(n, hs, FALSE, timeout_ms, TRUE);
++    MP_THREAD_GIL_ENTER();
++    return r == WAIT_OBJECT_0 || r == WAIT_FAILED;
++}
++
++static mp_obj_t timing_init(mp_obj_t callback) {
++    if (!mp_obj_is_callable(callback)) {
++        mp_raise_TypeError(MP_ERROR_TEXT("callback must be callable"));
++    }
++    if (timing_event == NULL) {
++        timing_event = CreateEventW(NULL, FALSE, FALSE, NULL);
++        if (timing_event == NULL) {
++            mp_raise_OSError(GetLastError());
++        }
++    }
++    if (timing_timer == NULL) {
++        timing_timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
++        if (timing_timer == NULL) {
++            timing_timer = CreateWaitableTimerW(NULL, FALSE, NULL);
++        }
++        if (timing_timer == NULL) {
++            mp_raise_OSError(GetLastError());
++        }
++    }
++    if (timing_thread == NULL) {
++        timing_thread = CreateThread(NULL, 0, timing_thread_main, NULL, 0, NULL);
++        if (timing_thread == NULL) {
++            mp_raise_OSError(GetLastError());
++        }
++    }
++    if (!timing_period_raised) {
++        timeBeginPeriod(1);
++        timing_period_raised = true;
++    }
++    CancelWaitableTimer(timing_timer);
++    InterlockedExchange(&timing_pending, 0);
++    MP_STATE_PORT(timing_callback) = callback;
++    return mp_const_none;
++}
++static MP_DEFINE_CONST_FUN_OBJ_1(timing_init_obj, timing_init);
++
++static mp_obj_t timing_arm(mp_obj_t ms_in) {
++    mp_int_t ms = mp_obj_get_int(ms_in);
++    if (ms < 0) {
++        ms = 0;
++    }
++    if (timing_timer == NULL || MP_STATE_PORT(timing_callback) == MP_OBJ_NULL) {
++        mp_raise_ValueError(MP_ERROR_TEXT("init() first"));
++    }
++    // Relative due time in 100 ns units; -1 fires at once (0 would mean the
++    // epoch, an absolute time).
++    LARGE_INTEGER due;
++    due.QuadPart = ms == 0 ? -1 : -(LONGLONG)ms * 10000;
++    if (!SetWaitableTimer(timing_timer, &due, 0, NULL, NULL, FALSE)) {
++        mp_raise_OSError(GetLastError());
++    }
++    return mp_const_none;
++}
++static MP_DEFINE_CONST_FUN_OBJ_1(timing_arm_obj, timing_arm);
++
++static mp_obj_t timing_cancel(void) {
++    if (timing_timer != NULL) {
++        CancelWaitableTimer(timing_timer);
++    }
++    InterlockedExchange(&timing_pending, 0);
++    return mp_const_none;
++}
++static MP_DEFINE_CONST_FUN_OBJ_0(timing_cancel_obj, timing_cancel);
++
++static const mp_rom_map_elem_t timing_module_globals_table[] = {
++    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR__timing) },
++    { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&timing_init_obj) },
++    { MP_ROM_QSTR(MP_QSTR_arm), MP_ROM_PTR(&timing_arm_obj) },
++    { MP_ROM_QSTR(MP_QSTR_cancel), MP_ROM_PTR(&timing_cancel_obj) },
++};
++static MP_DEFINE_CONST_DICT(timing_module_globals, timing_module_globals_table);
++
++const mp_obj_module_t mp_module_timing = {
++    .base = { &mp_type_module },
++    .globals = (mp_obj_dict_t *)&timing_module_globals,
++};
++
++MP_REGISTER_MODULE(MP_QSTR__timing, mp_module_timing);
++MP_REGISTER_ROOT_POINTER(mp_obj_t timing_callback);
++
++#endif // MICROPY_PY_TIMING
+diff --git a/ports/windows/mpconfigport.h b/ports/windows/mpconfigport.h
+index 4b6b96d1b..a4f17ecde 100644
+--- a/ports/windows/mpconfigport.h
++++ b/ports/windows/mpconfigport.h
+@@ -82,6 +82,25 @@
+ #ifndef MICROPY_SCHEDULER_DEPTH
+ #define MICROPY_SCHEDULER_DEPTH     (16)
+ #endif
++// _timing (mod_timing.c): one OS timer that wakes the main thread, for a port
++// with no signals and no machine.Timer. The VM hook and the internal event
++// hook let the main thread notice a deadline between bytecodes and inside
++// sleeps; the port's waits (sleeps, the console, a piped stdin) block on the
++// timer's event, so a deadline wakes them at once.
++#ifndef MICROPY_PY_TIMING
++#define MICROPY_PY_TIMING           (1)
++#endif
++#if MICROPY_PY_TIMING
++void mp_timing_poll(void);
++void mp_timing_wfe(unsigned long timeout_ms);
++int mp_timing_wait_input(void *input, unsigned long timeout_ms);
++#define MICROPY_VM_HOOK_COUNT       (64)
++#define MICROPY_VM_HOOK_INIT        static unsigned int vm_hook_divisor = MICROPY_VM_HOOK_COUNT;
++#define MICROPY_VM_HOOK_POLL        if (--vm_hook_divisor == 0) { vm_hook_divisor = MICROPY_VM_HOOK_COUNT; mp_timing_poll(); }
++#define MICROPY_VM_HOOK_LOOP        MICROPY_VM_HOOK_POLL
++#define MICROPY_VM_HOOK_RETURN      MICROPY_VM_HOOK_POLL
++#define MICROPY_INTERNAL_EVENT_HOOK mp_timing_poll()
++#endif
+ #define MICROPY_VFS                 (1)
+ #define MICROPY_VFS_POSIX           (1)
+ #define MICROPY_PY_FUNCTION_ATTRS   (1)
+diff --git a/ports/windows/windows_mphal.c b/ports/windows/windows_mphal.c
+index 4825d935f..3d0bb0908 100644
+--- a/ports/windows/windows_mphal.c
++++ b/ports/windows/windows_mphal.c
+@@ -204,6 +204,18 @@ static int stdin_rx_chr_pipe(void) {
+         }
+         unsigned char c;
+         DWORD num_read = 0;
++        #if MICROPY_PY_TIMING
++        // A pipe read blocks with nothing to wake it: while it is empty, wait
++        // on _timing's event (10 ms at most) and run what came due, so timers
++        // and other pending callbacks are served while the REPL waits for a
++        // line (a file redirect fails the peek and reads on).
++        DWORD avail = 0;
++        if (PeekNamedPipe(std_in, NULL, 0, NULL, &avail, NULL) && avail == 0) {
++            mp_timing_wfe(10);
++            mp_event_handle_nowait();
++            continue;
++        }
++        #endif
+         MP_THREAD_GIL_EXIT();
+         BOOL status = ReadFile(std_in, &c, 1, &num_read, NULL);
+         MP_THREAD_GIL_ENTER();
+@@ -242,6 +254,16 @@ int mp_hal_stdin_rx_chr(void) {
+     DWORD num_read;
+     INPUT_RECORD rec;
+     for (;;) {
++        #if MICROPY_PY_TIMING
++        // Wait for a key or a _timing deadline, whichever comes first, so a
++        // timer callback runs the moment it is due while the REPL sits at its
++        // prompt. The console handle signals when an input record is
++        // available; the 100 ms bound is only a safety net.
++        if (!mp_timing_wait_input(std_in, 100)) {
++            mp_event_handle_nowait();
++            continue;
++        }
++        #endif
+         MP_THREAD_GIL_EXIT();
+         status = ReadConsoleInput(std_in, &rec, 1, &num_read);
+         MP_THREAD_GIL_ENTER();
+diff --git a/ports/windows/windows_mphal.h b/ports/windows/windows_mphal.h
+index e70d00def..f56d55b8b 100644
+--- a/ports/windows/windows_mphal.h
++++ b/ports/windows/windows_mphal.h
+@@ -30,7 +30,11 @@
+ // Don't use the unix version of this macro.
+ #undef MICROPY_INTERNAL_WFE
+ 
+-#if MICROPY_ENABLE_SCHEDULER
++#if MICROPY_ENABLE_SCHEDULER && MICROPY_PY_TIMING
++// Wait on _timing's event (mod_timing.c), so a sleep returns the moment a
++// deadline passes instead of at the end of its time slice.
++#define MICROPY_INTERNAL_WFE(TIMEOUT_MS) mp_timing_wfe((unsigned long)MAX(1, (TIMEOUT_MS)))
++#elif MICROPY_ENABLE_SCHEDULER
+ // Use minimum 1mSec sleep to make sure there is effectively a wait period:
+ // something like usleep(500) truncates and ends up calling Sleep(0).
+ #define MICROPY_INTERNAL_WFE(TIMEOUT_MS) msec_sleep(MAX(1.0, (double)(TIMEOUT_MS)))

@@ -43,6 +43,9 @@
   },
   "0014-micropython-esp32-tinyusb-0.21.patch": {
    "sha256": "15a101901c7bebd93b5846e02fb1ff62b3c9a5e043b43c7c76de455007e02492"
+  },
+  "0015-micropython-windows-timing-module-and-idle-console.patch": {
+   "sha256": "77ce5f8b4a0745bf4764e3b47255b023a335209c649c60400f335ec2f11ae30a"
   }
  }
 }
