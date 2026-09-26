@@ -261,6 +261,7 @@ def run(seconds=0, auto_cast_after=0, log=print):
     t0 = ticks_ms()
     last_ingest = -10000
     last_touch = -10000
+    last_draw = -10000
     auto_done = auto_cast_after <= 0
 
     log("house panel up; TV on:", tv.is_on())
@@ -286,7 +287,14 @@ def run(seconds=0, auto_cast_after=0, log=print):
             log("ALERT:", ", ".join(sorted(fresh)))
             audio.chime_now()
         prev = keys
-        draw_panel(snap, texts, casting, hub.name)
+        # A full redraw holds the GIL ~0.2 s. While casting, the cast runs in a
+        # Python thread and shares that GIL, so redraw rarely (once a second is
+        # plenty for a house panel) to keep the stream smooth enough for the TV
+        # to foreground it. The Phase 1 C task removes this trade-off.
+        draw_ms = 1000 if casting else 250
+        if ticks_diff(now, last_draw) >= draw_ms:
+            last_draw = now
+            draw_panel(snap, texts, casting, hub.name)
 
         # touch: toggle the cast (debounced)
         try:
