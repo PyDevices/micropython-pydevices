@@ -32,6 +32,15 @@ class Scene:
         display_drv.fill_rect(x, 110, 80, 80, 0xFFE0)
 
 
+try:
+    import wifi, network
+    if not network.WLAN(network.STA_IF).isconnected():
+        log("connecting Wi-Fi...")
+        wifi.connect_from_secrets()
+    log("Wi-Fi", network.WLAN(network.STA_IF).ifconfig()[0])
+except Exception as e:
+    log("wifi error", e)
+
 log("building melody...")
 pc = PumpCast(log=log)
 log("melody: %d blocks, %d bytes" % (pc.frames // 480, pc.total))
