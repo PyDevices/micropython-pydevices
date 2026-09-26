@@ -218,17 +218,20 @@ def draw_card(name, cur, alert):
     hum = cur.get("humidity", 0)
     big_text("%.1f C" % t, x + 16, y + 66, 5, WARN if t >= 26 else INK)
     big_text("%.0f %% RH" % hum, x + 16, y + 128, 4, WARN if hum >= 60 else COOL)
-    big_text("light %3.0f" % cur.get("light", 0), x + 16, y + 182, 2, DIM)
+    # Light as a bar: a scale-2 "light NN" was unreadable at panel scale.
+    lv = cur.get("light", 0)
+    bw = CARD_W - 132
+    display_drv.fill_rect(x + 16, y + 192, bw, 26, rgb(38, 44, 60))
+    display_drv.fill_rect(x + 16, y + 192, int(bw * lv / 100), 26, rgb(232, 200, 90))
     if cur.get("motion", 0):
-        display_drv.fill_rect(x + CARD_W - 90, y + 176, 74, 40, ACCENT)
-        big_text("MOVE", x + CARD_W - 84, y + 184, 2, 0x0000)
+        display_drv.fill_rect(x + CARD_W - 106, y + 184, 100, 46, ACCENT)
+        big_text("MOVE", x + CARD_W - 100, y + 195, 3, 0x0000)
 
 
 def draw_panel(snap, alert_texts, casting, hubname):
     display_drv.fill(BG)
     display_drv.fill_rect(0, 0, W, 96, rgb(18, 22, 34))
-    big_text("PyDevices House", 16, 20, 4, INK)
-    big_text(hubname, 16, 62, 2, DIM)
+    big_text("PyDevices House", 16, 30, 4, INK)
     # cast button
     bx, by, bw, bh = CAST_BTN
     display_drv.fill_rect(bx, by, bw, bh, WARN if casting else OK)
