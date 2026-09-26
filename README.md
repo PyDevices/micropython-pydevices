@@ -19,7 +19,7 @@ model, preset selection, and upstream-boundary rules.
   `machine.I2S` MCLK (`mck=`), esp32 WebREPL Ctrl-C in loops that
   never wait, a variant-settable default GC heap for the desktop ports,
   piped stdin for the Windows REPL (`micropython.exe -i`), and TinyUSB 0.21
-  for the ESP32-P4 (the S2 and S3 stay on 0.18).
+  for the esp32 port.
 - `profiles/` — named subsets: `windows-networked`, `windows-full`,
   `desktop-pydevices`, `webassembly-pydevices`, `esp32-s3-debug`,
   `esp32-audio`, `esp32-webrepl`, `esp32-tinyusb`, and `vst3-engine` (`*.series` = ordered
