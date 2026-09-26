@@ -53,9 +53,14 @@ def big_text(s, x, y, scale, color):
     tmp.fill(0)
     tmp.text(s, 0, 0, 0xFFFF)
     for j in range(8):
+        py = y + j * scale
+        if py < 0 or py > H - scale:
+            continue
         for i in range(8 * n):
             if tmp.pixel(i, j):
-                display_drv.fill_rect(x + i * scale, y + j * scale, scale, scale, color)
+                px = x + i * scale
+                if 0 <= px <= W - scale:
+                    display_drv.fill_rect(px, py, scale, scale, color)
 
 
 # --------------------------------------------------------------------------
@@ -213,10 +218,10 @@ def draw_card(name, cur, alert):
     edge = WARN if alert else CARD
     display_drv.fill_rect(x, y, CARD_W, CARD_H, CARD)
     display_drv.fill_rect(x, y, CARD_W, 6, edge)
-    big_text(name.upper(), x + 16, y + 18, 3, INK if not alert else WARN)
+    big_text(name.upper(), x + 16, y + 16, 4, INK if not alert else WARN)
     t = cur.get("temp", 0)
     hum = cur.get("humidity", 0)
-    big_text("%.1f C" % t, x + 16, y + 66, 5, WARN if t >= 26 else INK)
+    big_text("%.1f C" % t, x + 16, y + 70, 5, WARN if t >= 26 else INK)
     big_text("%.0f %% RH" % hum, x + 16, y + 128, 4, WARN if hum >= 60 else COOL)
     # Light as a bar: a scale-2 "light NN" was unreadable at panel scale.
     lv = cur.get("light", 0)
@@ -224,8 +229,8 @@ def draw_card(name, cur, alert):
     display_drv.fill_rect(x + 16, y + 192, bw, 26, rgb(38, 44, 60))
     display_drv.fill_rect(x + 16, y + 192, int(bw * lv / 100), 26, rgb(232, 200, 90))
     if cur.get("motion", 0):
-        display_drv.fill_rect(x + CARD_W - 106, y + 184, 100, 46, ACCENT)
-        big_text("MOVE", x + CARD_W - 100, y + 195, 3, 0x0000)
+        display_drv.fill_rect(x + CARD_W - 116, y + 184, 112, 46, ACCENT)
+        big_text("MOVE", x + CARD_W - 108, y + 195, 3, 0x0000)
 
 
 def draw_panel(snap, alert_texts, casting, hubname):
@@ -239,7 +244,7 @@ def draw_panel(snap, alert_texts, casting, hubname):
     # alert banner
     if alert_texts:
         display_drv.fill_rect(0, 104, W, 56, WARN)
-        big_text(("! " + "   ".join(alert_texts))[:44], 12, 118, 3, 0x0000)
+        big_text(("! " + "  ".join(alert_texts))[:29], 12, 118, 3, 0x0000)
     else:
         display_drv.fill_rect(0, 104, W, 56, rgb(18, 40, 28))
         big_text("all rooms nominal", 12, 118, 3, OK)

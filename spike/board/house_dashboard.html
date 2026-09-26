@@ -82,7 +82,7 @@
     if (alerts.length) {
       banner.className = "tripped";
       banner.dataset.tripped = "1";
-      banner.textContent = "⚠ " + alerts.join("   ");
+      banner.innerHTML = alerts.map(a => `<div>⚠ ${a}</div>`).join("");
     } else {
       banner.className = "";
       banner.dataset.tripped = "0";
