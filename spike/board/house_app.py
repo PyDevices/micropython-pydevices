@@ -27,6 +27,23 @@ async def feeder(hub, sim):
 async def painter(hub, audio, state):
     prev = set()
     while True:
+        try:
+            prev = _paint_once(hub, audio, state, prev)
+        except Exception as e:
+            # a painter that dies takes the panel with it while the hub keeps
+            # answering, which looks like a frozen screen: log it and go on
+            sys.print_exception(e)
+            try:
+                with open("/cast/house_app.log", "a") as f:
+                    f.write("painter: %r\n" % (e,))
+            except Exception:
+                pass
+        # a full redraw holds the GIL ~0.2 s; yield generously so the hub server stays responsive
+        await asyncio.sleep(0.8)
+
+
+def _paint_once(hub, audio, state, prev):
+    if True:
         snap = hub.snapshot()
         items = []
         panel_rooms, all_rooms = hp.room_list(snap)   # real nodes (the FunHouse) take the first cards
@@ -61,8 +78,7 @@ async def painter(hub, audio, state):
                 else:
                     # the castif C task streams (core 0); the audio feed shares the chime's speaker stream
                     state["casting"] = bool(tv.start_cast(fb, audio=audio.cast_feed(), seconds=3600))
-        # a full redraw holds the GIL ~0.2 s; yield generously so the hub server stays responsive
-        await asyncio.sleep(0.8)
+        return prev
 
 
 async def main(port=80):
