@@ -4,3 +4,4 @@
 include("/home/brad/gh/pydevices/micropython-pydevices/manifests/kitchen-sink.py")
 c_module("$(BOARD_DIR)/../../h264enc")
 c_module("$(BOARD_DIR)/../../jpegdec")
+c_module("$(BOARD_DIR)/../../castif")
