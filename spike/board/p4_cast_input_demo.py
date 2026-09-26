@@ -2,8 +2,8 @@
 # over UIBC, become touch and key events through the board's own touch_read and
 # keypad_read and appdev's ordinary Touch and Keypad adapters, and the scene
 # draws what it sees: a cursor, a dot per click, the last keys typed. The panel
-# and the cast show the same thing. (An appdev.App in the cast loop starved the
-# cast to a frame every seven seconds; the adapters alone are what an app uses.)
+# and the cast show the same thing. The stream is the castif C task (core 0);
+# Python only polls the adapters and draws, stepped from the session loop.
 import sys
 sys.path.insert(0, "/cast")
 import time, gc, framebuf
@@ -12,7 +12,7 @@ from board_config import fb, display_drv
 import events
 from appdev.devices import Touch, Keypad
 from micecast import Session
-from castlive import LiveStreamer
+from castfast import CastifStreamer, make_caster
 from uibcinput import UibcInput
 
 SINK = "192.168.1.143"
@@ -62,6 +62,14 @@ for i in range(0, W, 90):
     display_drv.fill_rect(0, i, W, 1, 0x2945)
 
 
+def rect(x, y, w, h, color):
+    """fill_rect clipped to the panel: the cursor and dots may sit at an edge."""
+    x0 = max(x, 0); y0 = max(y, 0)
+    x1 = min(x + w, W); y1 = min(y + h, H)
+    if x1 > x0 and y1 > y0:
+        display_drv.fill_rect(x0, y0, x1 - x0, y1 - y0, color)
+
+
 def big_text(s, x, y, scale, color):
     tmp = framebuf.FrameBuffer(bytearray(8 * 8 * 2 * len(s)), 8 * len(s), 8, framebuf.RGB565)
     tmp.fill(0)
@@ -76,10 +84,12 @@ big_text("laptop drives P4", 40, 30, 4, 0xFFE0)
 
 
 class Scene:
-    def __init__(self):
+    def __init__(self, cast=None):
         self.last = None
         self.n = 0
         self.shown_keys = 0
+        self.shown_dots = 0
+        self.cast = cast
 
     def step(self):
         for ev in touch.poll():          # devices to events, as an App would
@@ -88,26 +98,35 @@ class Scene:
         for ev in keypad.poll():
             if ev.type == events.KEYDOWN:
                 on_key(ev)
-        if self.last:
-            x, y = self.last
-            display_drv.fill_rect(x - 12, y - 1, 25, 3, BG)
-            display_drv.fill_rect(x - 1, y - 12, 3, 25, BG)
-        for x, y in dots[-64:]:
-            display_drv.fill_rect(x - 6, y - 6, 12, 12, 0xF800)
         x, y = uibc.cx, uibc.cy
-        display_drv.fill_rect(x - 12, y - 1, 25, 3, 0x07FF)
-        display_drv.fill_rect(x - 1, y - 12, 3, 25, 0x07FF)
-        self.last = (x, y)
+        changed = self.last != (x, y) or len(dots) != self.shown_dots or len(typed) != self.shown_keys
+        if self.last and self.last != (x, y):
+            lx, ly = self.last
+            rect(lx - 12, ly - 1, 25, 3, BG)
+            rect(lx - 1, ly - 12, 3, 25, BG)
+        if len(dots) != self.shown_dots:
+            self.shown_dots = len(dots)
+            for dx, dy in dots[-64:]:
+                rect(dx - 6, dy - 6, 12, 12, 0xF800)
+        if self.last != (x, y):
+            rect(x - 12, y - 1, 25, 3, 0x07FF)
+            rect(x - 1, y - 12, 3, 25, 0x07FF)
+            self.last = (x, y)
         if len(typed) != self.shown_keys:
             self.shown_keys = len(typed)
-            display_drv.fill_rect(40, H - 90, W - 80, 60, BG)
+            rect(40, H - 90, W - 80, 60, BG)
             text = "".join(chr(k) if 32 <= k < 127 else "#" for k in typed[-16:])
             big_text(text or "-", 40, H - 80, 5, 0x07E0)
+        if changed and self.cast:
+            self.cast.mark_dirty()       # beat the sampled hash: a 3-pixel cursor is easy to miss
         self.n += 1
 
 
+cast = make_caster(W, H, fps=30, bitrate=3_000_000)
+
+
 def make(dst_ip, dst_port, server_port):
-    return LiveStreamer(dst_ip, dst_port, server_port, fb, fps=30, bitrate=3_000_000, scene=Scene(), seconds=SECONDS, log=log)
+    return CastifStreamer(cast, fb, dst_ip, dst_port, server_port, SECONDS, log, scene=Scene(cast))
 
 
 gc.collect()
@@ -118,5 +137,7 @@ try:
     log("result:", result, "reports", uibc.reports, "moves", uibc.moved, "clicks", len(dots), "keys", len(typed), "cursor", uibc.cx, uibc.cy)
 except Exception as e:
     log("EXC", repr(e))
+finally:
+    cast.close()
 LOG.close()
 print("INPUT_DEMO_DONE")

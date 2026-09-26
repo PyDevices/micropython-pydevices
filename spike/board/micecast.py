@@ -116,7 +116,7 @@ class Session:
         either generic input events or an HID report. Logs the first packets raw."""
         self.uibc_packets += 1
         if self.uibc_packets <= 12:
-            self.log("UIBC raw:", p.hex())
+            self.log("UIBC raw:", p.hex()[:64] + ("..." if len(p) > 32 else ""))   # descriptors run to 1 KB
         cat = p[1] & 0x0F
         off = 4
         if p[0] & 0x10:

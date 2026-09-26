@@ -21,10 +21,11 @@ class CastifStreamer:
     """Adapts the castif task to the micecast streamer interface (pump/done/
     force_idr/close) so micecast.Session drives it unchanged."""
 
-    def __init__(self, cast, fb, dst_ip, dst_port, server_port, seconds, log):
+    def __init__(self, cast, fb, dst_ip, dst_port, server_port, seconds, log, scene=None):
         self.cast = cast
         self.log = log
         self.seconds = seconds
+        self.scene = scene          # stepped from pump(): input polling and drawing stay in Python
         self.t0 = time.ticks_ms()
         self.done = False
         self.idle_poll = True   # the C task streams; the Session loop can block, not spin
@@ -32,8 +33,10 @@ class CastifStreamer:
         log("castif task -> %s:%d from :%d" % (dst_ip, dst_port, server_port))
 
     def pump(self, budget_us):
-        # the C task does the streaming; here we only enforce the duration and
-        # surface a stats line every few seconds
+        # the C task does the streaming; here we step the scene (if any), enforce
+        # the duration and surface a stats line every few seconds
+        if self.scene:
+            self.scene.step()
         now = time.ticks_ms()
         if now - getattr(self, "_beat", 0) > 3000:
             self._beat = now
