@@ -28,6 +28,15 @@ def log(*a):
     LOG.flush()
 
 
+try:
+    import wifi, network
+    if not network.WLAN(network.STA_IF).isconnected():
+        log("connecting Wi-Fi...")
+        wifi.connect_from_secrets()
+    log("Wi-Fi", network.WLAN(network.STA_IF).ifconfig()[0])
+except Exception as e:
+    log("wifi error", e)
+
 W, H = display_drv.width, display_drv.height
 uibc = UibcInput(W, H).install(board_config)      # an app cannot tell laptop from panel
 touch = Touch(board_config.touch_read, display=display_drv)   # the adapters an appdev App would build
