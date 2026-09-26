@@ -20,7 +20,15 @@
 #                    patches/ has changed since; then it says how to redo it.
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-SRC=$(cd "$HERE/.." && pwd)
+# The siblings hang off the main checkout, also when this runs from one of
+# its worktrees (micropython-pydevices/.worktrees/NAME), whose parent is not
+# where the module repositories live.
+COMMON=$(git -C "$HERE" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+if [[ -n "$COMMON" ]]; then
+    SRC=$(cd "$(dirname "$COMMON")/.." && pwd)
+else
+    SRC=$(cd "$HERE/.." && pwd)
+fi
 MP=${1:-$SRC/micropython}
 UPSTREAM=$(tr -d '[:space:]' < "$HERE/UPSTREAM")
 MARK="The PyDevices overlay applied to $UPSTREAM (a local record, never pushed)"
@@ -50,8 +58,14 @@ else
     # Module-tied patches, from the repositories that need them (retool draft,
     # "Patches"): each script defaults to a `micropython` beside its repo, so
     # the directory is passed explicitly here.
+    # A module that is missing is an error, not a skip: an overlay without
+    # its patches builds, and builds the wrong thing.
     for mod in usbif cameraif; do
-        [[ -x "$SRC/$mod/apply_patches.sh" ]] && "$SRC/$mod/apply_patches.sh" --apply "$MP"
+        if [[ ! -x "$SRC/$mod/apply_patches.sh" ]]; then
+            echo "missing $SRC/$mod/apply_patches.sh: clone $mod beside micropython-pydevices, then prepare again from the tag" >&2
+            exit 1
+        fi
+        "$SRC/$mod/apply_patches.sh" --apply "$MP"
     done
     git -C "$MP" add -A -- . ':!ports/*/build*'
     git -C "$MP" -c user.name=pydevices -c user.email=pydevices@local commit --quiet -m "$MARK" -m "$SERIES_ID"
