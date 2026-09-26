@@ -311,7 +311,14 @@ static void mux_lpcm(castif_obj_t *c, const uint8_t *pcm, uint32_t pts) {
         }
         uint32_t k = room, dst = body;
         if (pos < hlen) { uint32_t hh = (hlen - pos < k) ? (hlen - pos) : k; memcpy(pkt+dst, head+pos, hh); dst+=hh; pos+=hh; k-=hh; }
-        if (k) { memcpy(pkt+dst, pcm + (pos - hlen), k); pos += k; }
+        if (k) {
+            // the ring holds the pump's native little-endian PCM; LPCM on the
+            // wire is big-endian, so swap as we copy (offsets are even: the
+            // 18-byte header and 184-byte payloads keep samples whole)
+            uint32_t off = pos - hlen;
+            for (uint32_t i = 0; i < k; i++) pkt[dst + i] = pcm[(off + i) ^ 1];
+            pos += k;
+        }
         rtp_push(c, pkt);
         first = 0;
     }
@@ -654,7 +661,7 @@ static mp_obj_t castif_set_bitrate(mp_obj_t self_in, mp_obj_t bps) {
 static MP_DEFINE_CONST_FUN_OBJ_2(castif_set_bitrate_obj, castif_set_bitrate);
 
 static mp_obj_t castif_feed_audio(mp_obj_t self_in, mp_obj_t block) {
-    // one 10 ms block of 48 kHz stereo 16-bit big-endian LPCM into the ring;
+    // one 10 ms block of 48 kHz stereo 16-bit little-endian PCM (the pump's own bytes) into the ring;
     // False when the ring is full (the caller is ahead of real time)
     castif_obj_t *self = MP_OBJ_TO_PTR(self_in);
     if (!self->audio_on) return mp_const_false;
