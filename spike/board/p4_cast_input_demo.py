@@ -81,6 +81,7 @@ def big_text(s, x, y, scale, color):
 
 
 big_text("laptop drives P4", 40, 30, 4, 0xFFE0)
+display_drv.show()      # the DSI panel samples the buffer only on refresh: nothing reaches the glass without this
 
 
 class Scene:
@@ -117,8 +118,10 @@ class Scene:
             rect(40, H - 90, W - 80, 60, BG)
             text = "".join(chr(k) if 32 <= k < 127 else "#" for k in typed[-16:])
             big_text(text or "-", 40, H - 80, 5, 0x07E0)
-        if changed and self.cast:
-            self.cast.mark_dirty()       # beat the sampled hash: a 3-pixel cursor is easy to miss
+        if changed:
+            display_drv.show()           # to the glass (msync + resubmit); the cast reads the same buffer
+            if self.cast:
+                self.cast.mark_dirty()   # beat the sampled hash: a 3-pixel cursor is easy to miss
         self.n += 1
 
 
