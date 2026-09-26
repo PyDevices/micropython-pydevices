@@ -33,6 +33,8 @@
 #define PID_VIDEO 0x100
 #define PCR_LEAD  36000           // 400 ms in 90 kHz ticks
 #define AU_MAX    (256 * 1024)    // encoder output cap when out_size not given
+#define A_BLOCK   1920            // one 10 ms LPCM block: 480 frames * 4 bytes (48 kHz stereo s16)
+#define A_BLOCKS  64              // ring depth: 640 ms of audio
 
 typedef struct _castif_obj_t {
     mp_obj_base_t base;
@@ -81,6 +83,16 @@ typedef struct _castif_obj_t {
     uint32_t max_skip_us;        // send at least this often even when static (0 = feature off)
     // stats
     volatile uint32_t frames, packets, sent, stalls, idr_reqs, skipped;
+    // audio (Phase 2): Python feeds 10 ms LPCM blocks into this ring; the core-0
+    // task drains it and muxes on the shared 90 kHz clock (audio kept ~100 ms
+    // ahead of the video, as the Python spike did).
+    bool audio_on;
+    uint8_t *audio_ring;                 // A_BLOCKS * A_BLOCK, in SPIRAM
+    volatile uint32_t a_head, a_tail;    // block write / read indices
+    uint8_t cc_audio;
+    uint8_t apes[18];
+    uint32_t apts;                        // audio PTS, 90 kHz
+    volatile uint32_t audio_fed, audio_muxed, audio_underruns;
     volatile uint32_t enc_us, ppa_us, mux_us, send_us;
     volatile uint32_t last_len;
     volatile int last_type;
@@ -137,7 +149,16 @@ static void build_tables(castif_obj_t *c) {
     pmt_body[4] = 0x1B;                                     // stream_type H.264
     pmt_body[5] = 0xE0 | (PID_VIDEO >> 8); pmt_body[6] = PID_VIDEO & 0xFF;
     pmt_body[7] = 0xF0; pmt_body[8] = 0x00;                 // ES_info_length 0
-    c->pmt_len = build_section(c->pmt + 5, 0x02, 1, pmt_body, 9);
+    uint8_t pmt_a[9 + 5 + 6];
+    memcpy(pmt_a, pmt_body, 9);
+    uint32_t pmt_n = 9;
+    if (c->audio_on) {
+        pmt_a[pmt_n++] = 0x83;                             // HDMV LPCM
+        pmt_a[pmt_n++] = 0xE0 | (0x101 >> 8); pmt_a[pmt_n++] = 0x101 & 0xFF;
+        pmt_a[pmt_n++] = 0xF0; pmt_a[pmt_n++] = 0x04;      // ES_info_length 4
+        pmt_a[pmt_n++] = 0x83; pmt_a[pmt_n++] = 0x02; pmt_a[pmt_n++] = 0x46; pmt_a[pmt_n++] = 0x2f;
+    }
+    c->pmt_len = build_section(c->pmt + 5, 0x02, 1, pmt_a, pmt_n);
     c->pmt[4] = 0;
     // pad both to 188
     for (uint32_t i = 5 + pat_sec; i < 188; i++) c->pat[i] = 0xFF;
@@ -258,6 +279,37 @@ static void mux_video(castif_obj_t *c, const uint8_t *au, uint32_t au_len,
     }
 }
 
+static void mux_lpcm(castif_obj_t *c, const uint8_t *pcm, uint32_t pts) {
+    uint8_t *pkt = c->pkt;
+    uint8_t *head = c->apes;               // 18 bytes
+    uint32_t n = A_BLOCK + 4;
+    head[0]=0;head[1]=0;head[2]=1;head[3]=0xbd;
+    head[4]=((n+8)>>8)&0xFF; head[5]=(n+8)&0xFF;
+    head[6]=0x80; head[7]=0x80; head[8]=0x05;
+    pts_field(head, 9, pts);
+    head[14]=0xA0; head[15]=6; head[16]=0; head[17]=0x11;
+    uint32_t hlen = 18, total = hlen + A_BLOCK, pos = 0;
+    int first = 1;
+    while (pos < total) {
+        uint32_t room = 184, body = 4;
+        uint32_t remaining = total - pos;
+        if (remaining < room) {
+            uint32_t pad = room - remaining;
+            ts_header(pkt, 0x101, &c->cc_audio, first, 3);
+            pkt[4] = pad - 1;
+            if (pad >= 2) { pkt[5] = 0; for (uint32_t i = 6; i < 4 + pad; i++) pkt[i] = 0xFF; }
+            body = 4 + pad; room = remaining;
+        } else {
+            ts_header(pkt, 0x101, &c->cc_audio, first, 1);
+        }
+        uint32_t k = room, dst = body;
+        if (pos < hlen) { uint32_t hh = (hlen - pos < k) ? (hlen - pos) : k; memcpy(pkt+dst, head+pos, hh); dst+=hh; pos+=hh; k-=hh; }
+        if (k) { memcpy(pkt+dst, pcm + (pos - hlen), k); pos += k; }
+        rtp_push(c, pkt);
+        first = 0;
+    }
+}
+
 static void emit_tables(castif_obj_t *c) {
     c->pat[3] = (1 << 4) | (c->cc_pat & 15); c->cc_pat = (c->cc_pat + 1) & 15;
     c->pat[0] = 0x47; c->pat[1] = 0x40; c->pat[2] = 0x00;
@@ -347,6 +399,18 @@ static void cast_task(void *arg) {
         c->ts90 = pts - PCR_LEAD;
         if (key) emit_tables(c);
         mux_video(c, c->out_buf, outf.length, pts, key);
+        if (c->audio_on) {
+            // keep the LPCM track about 100 ms ahead of the picture, on the same
+            // 90 kHz clock; an empty ring is an underrun (counted, not padded)
+            if (c->apts == 0) c->apts = pts;
+            while ((int32_t)(c->apts - (pts + 9000)) < 0) {
+                if (c->a_tail == c->a_head) { c->audio_underruns++; break; }
+                mux_lpcm(c, c->audio_ring + (c->a_tail % A_BLOCKS) * A_BLOCK, c->apts);
+                c->a_tail++;
+                c->apts += 900;
+                c->audio_muxed++;
+            }
+        }
         rtp_flush(c);
         c->mux_us = (uint32_t)(esp_timer_get_time() - m0);
         pts += 90000 * c->frame_us / 1000000;
@@ -371,7 +435,7 @@ static void castif_check(esp_h264_err_t err, const char *what) {
 }
 
 static mp_obj_t castif_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
-    enum { ARG_width, ARG_height, ARG_canvas_w, ARG_canvas_h, ARG_fps, ARG_gop, ARG_bitrate, ARG_qp_min, ARG_qp_max, ARG_out_size };
+    enum { ARG_width, ARG_height, ARG_canvas_w, ARG_canvas_h, ARG_fps, ARG_gop, ARG_bitrate, ARG_qp_min, ARG_qp_max, ARG_out_size, ARG_audio };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_width, MP_ARG_REQUIRED | MP_ARG_INT, {.u_int = 0} },
         { MP_QSTR_height, MP_ARG_REQUIRED | MP_ARG_INT, {.u_int = 0} },
@@ -383,6 +447,7 @@ static mp_obj_t castif_make_new(const mp_obj_type_t *type, size_t n_args, size_t
         { MP_QSTR_qp_min, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 10} },
         { MP_QSTR_qp_max, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 45} },
         { MP_QSTR_out_size, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_audio, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed), allowed, args);
@@ -433,6 +498,12 @@ static mp_obj_t castif_make_new(const mp_obj_type_t *type, size_t n_args, size_t
     memcpy(self->pes_head, H, 20);
     self->ssrc = 0x50344341;
     self->seq = 1;
+    self->audio_on = args[ARG_audio].u_bool;
+    if (self->audio_on) {
+        uint32_t got = 0;
+        self->audio_ring = esp_h264_aligned_calloc(16, 1, A_BLOCKS * A_BLOCK, &got, ESP_H264_MEM_SPIRAM);
+        if (!self->audio_ring) mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("castif: audio ring"));
+    }
     build_tables(self);
     return MP_OBJ_FROM_PTR(self);
 }
@@ -473,6 +544,8 @@ static mp_obj_t castif_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
     self->running = true;
     self->want_idr = true;   // start with a keyframe
     self->last_hash = 0; self->last_real_us = 0; self->skipped = 0;
+    self->a_head = self->a_tail = 0; self->apts = 0; self->cc_audio = 0;
+    self->audio_fed = self->audio_muxed = self->audio_underruns = 0;
     if (self->max_skip_us == 0) self->max_skip_us = 500000;   // static UIs: >=2 fps floor
     // pin the framebuffer object so the GC does not move/free it while the task reads it
     // (a bytearray/Display buffer is long-lived; we also keep fb_obj referenced).
@@ -513,6 +586,22 @@ static mp_obj_t castif_set_bitrate(mp_obj_t self_in, mp_obj_t bps) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(castif_set_bitrate_obj, castif_set_bitrate);
 
+static mp_obj_t castif_feed_audio(mp_obj_t self_in, mp_obj_t block) {
+    // one 10 ms block of 48 kHz stereo 16-bit big-endian LPCM into the ring;
+    // False when the ring is full (the caller is ahead of real time)
+    castif_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (!self->audio_on) return mp_const_false;
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(block, &b, MP_BUFFER_READ);
+    if (b.len < A_BLOCK) mp_raise_ValueError(MP_ERROR_TEXT("audio block is 1920 bytes"));
+    if (self->a_head - self->a_tail >= A_BLOCKS) return mp_const_false;
+    memcpy(self->audio_ring + (self->a_head % A_BLOCKS) * A_BLOCK, b.buf, A_BLOCK);
+    self->a_head++;
+    self->audio_fed++;
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(castif_feed_audio_obj, castif_feed_audio);
+
 static mp_obj_t castif_mark_dirty(mp_obj_t self_in) {
     castif_obj_t *self = MP_OBJ_TO_PTR(self_in);
     self->dirty = true;   // the panel changed: send the next frame, do not wait for the hash/floor
@@ -547,6 +636,10 @@ static mp_obj_t castif_stats(mp_obj_t self_in) {
     PUT(MP_QSTR_stalls, self->stalls);
     PUT(MP_QSTR_idr, self->idr_reqs);
     PUT(MP_QSTR_skipped, self->skipped);
+    PUT(MP_QSTR_audio_fed, self->audio_fed);
+    PUT(MP_QSTR_audio_muxed, self->audio_muxed);
+    PUT(MP_QSTR_audio_underruns, self->audio_underruns);
+    PUT(MP_QSTR_audio_level, self->a_head - self->a_tail);
     PUT(MP_QSTR_enc_us, self->enc_us);
     PUT(MP_QSTR_ppa_us, self->ppa_us);
     PUT(MP_QSTR_mux_us, self->mux_us);
@@ -565,6 +658,7 @@ static mp_obj_t castif_close(mp_obj_t self_in) {
     if (self->ppa) { ppa_unregister_client(self->ppa); self->ppa = NULL; }
     if (self->yuv) { esp_h264_free(self->yuv); self->yuv = NULL; }
     if (self->out_buf) { esp_h264_free(self->out_buf); self->out_buf = NULL; }
+    if (self->audio_ring) { esp_h264_free(self->audio_ring); self->audio_ring = NULL; }
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(castif_close_obj, castif_close);
@@ -577,6 +671,7 @@ static const mp_rom_map_elem_t castif_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_fps), MP_ROM_PTR(&castif_set_fps_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_skip), MP_ROM_PTR(&castif_set_skip_obj) },
     { MP_ROM_QSTR(MP_QSTR_mark_dirty), MP_ROM_PTR(&castif_mark_dirty_obj) },
+    { MP_ROM_QSTR(MP_QSTR_feed_audio), MP_ROM_PTR(&castif_feed_audio_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&castif_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&castif_close_obj) },
     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&castif_close_obj) },
