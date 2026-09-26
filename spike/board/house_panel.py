@@ -244,10 +244,14 @@ def draw_card(name, cur, alert, slot=0):
     big_text("%.1f C" % t, x + 16, y + 70, 5, WARN if t >= 26 else INK)
     big_text("%.0f %% RH" % hum, x + 16, y + 128, 4, WARN if hum >= 60 else COOL)
     # Light as a bar: a scale-2 "light NN" was unreadable at panel scale.
-    lv = cur.get("light", 0)
+    # a real node may report lux (hundreds); the bar is 0..100, and a zero-width
+    # fill is out of range for the framebuffer, so clamp and skip
+    lv = min(100, max(0, cur.get("light", 0)))
     bw = CARD_W - 132
     display_drv.fill_rect(x + 16, y + 192, bw, 26, rgb(38, 44, 60))
-    display_drv.fill_rect(x + 16, y + 192, int(bw * lv / 100), 26, rgb(232, 200, 90))
+    lw = int(bw * lv / 100)
+    if lw > 0:
+        display_drv.fill_rect(x + 16, y + 192, lw, 26, rgb(232, 200, 90))
     if cur.get("motion", 0):
         display_drv.fill_rect(x + CARD_W - 116, y + 184, 112, 46, ACCENT)
         big_text("MOVE", x + CARD_W - 108, y + 195, 3, 0x0000)
