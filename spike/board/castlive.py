@@ -37,10 +37,22 @@ class LiveStreamer:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("0.0.0.0", server_port))
         self.rtp = RtpOut(self.sock, (dst_ip, dst_port))
-        # audio: None, "silence", or a tone amplitude (16 is -66 dBFS, inaudible)
+        # audio: None; "silence"; a tone amplitude (16 is -66 dBFS inaudible,
+        # ~4000 is a moderate, clearly audible level); (amplitude, hz); or a
+        # callable returning one 1920-byte LPCM block per 10 ms (real audio).
         self.audio = audio
         self.mux = TsMux(audio="lpcm" if audio is not None else None)
-        self.pcm = lpcm_block(0 if audio in (None, "silence") else int(audio)) if audio is not None else None
+        self._audio_cb = audio if callable(audio) else None
+        if audio is None:
+            self.pcm = None
+        elif callable(audio):
+            self.pcm = lpcm_block(0)          # placeholder; blocks come from the callable
+        elif audio == "silence":
+            self.pcm = lpcm_block(0)
+        elif isinstance(audio, (tuple, list)):
+            self.pcm = lpcm_block(int(audio[0]), int(audio[1]) if len(audio) > 1 else 500)
+        else:
+            self.pcm = lpcm_block(int(audio))
         self.apts = 0
         self.audio_blocks = 0
         self.scene = scene
@@ -90,7 +102,8 @@ class LiveStreamer:
             if self.apts == 0:
                 self.apts = pts
             while self.apts < pts + 9000:
-                self.mux.lpcm(self.pcm, self.apts, self.rtp)
+                block = self._audio_cb() if self._audio_cb else self.pcm
+                self.mux.lpcm(block, self.apts, self.rtp)
                 self.apts += 900
                 self.audio_blocks += 1
         self.rtp.ts90 = pts - PCR_LEAD
@@ -116,7 +129,8 @@ class LiveStreamer:
             self.frames, now / 1e6, self.frames * 1e6 / max(now, 1), self.draw_us // f, self.ppa_us // f, (self.enc_us - self.ppa_us) // f, self.max_enc,
             self.mux_us // f, self.bytes // f, self.bytes * 8 * 1000 // max(now, 1), self.rtp.sent, self.rtp.stalls))
         if self.pcm is not None:
-            self.log("audio: %d LPCM blocks (%.1f s), %s" % (self.audio_blocks, self.audio_blocks / 100, "silence" if self.audio == "silence" else "tone amplitude %s" % self.audio))
+            desc = "callable source" if self._audio_cb else ("silence" if self.audio == "silence" else "tone %s" % (self.audio,))
+            self.log("audio: %d LPCM blocks (%.1f s), %s" % (self.audio_blocks, self.audio_blocks / 100, desc))
 
     def force_idr(self):
         self.enc.force_idr()

@@ -161,7 +161,7 @@ class Session:
             except Exception as e:
                 self.log("on_input:", repr(e))
 
-    def run(self, make_streamer, seconds=3600, idle_after_done=3):
+    def run(self, make_streamer, seconds=3600, idle_after_done=3, stop=None):
         log = self.log
         w = network.WLAN(network.STA_IF)
         my_ip = w.ifconfig()[0]
@@ -218,6 +218,9 @@ class Session:
 
         try:
             while time.ticks_diff(deadline, time.ticks_ms()) > 0:
+                if stop is not None and stop():
+                    log("stop requested")
+                    return "stopped"
                 if streamer and not streamer.done:
                     tp = time.ticks_ms()
                     streamer.pump(4000)
