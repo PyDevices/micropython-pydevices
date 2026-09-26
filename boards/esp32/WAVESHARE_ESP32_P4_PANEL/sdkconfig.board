@@ -64,3 +64,11 @@ CONFIG_BT_NIMBLE_PINNED_TO_CORE=1
 # controller how many buffers it has, and the controller sends no more than
 # that until the host reports them free (pydevices#79, #87).
 CONFIG_BT_NIMBLE_HS_FLOW_CTRL=y
+
+# A cache writeback (esp_cache_msync) runs with interrupts off. A display
+# syncing hundreds of KB a frame held the USB interrupt off long enough to lose
+# sound-card packets (98.7-99.4 % delivered while drawing). Sliced into 8 KB
+# pieces, drawing costs nothing measurable (99.75-99.88 % against a 99.77-99.86 %
+# baseline).
+CONFIG_ESP_MM_CACHE_MSYNC_C2M_CHUNKED_OPS=y
+CONFIG_ESP_MM_CACHE_MSYNC_C2M_CHUNKED_OPS_MAX_LEN=0x2000
