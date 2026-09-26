@@ -55,6 +55,11 @@ class Scene:
 class Melody:
     def __init__(self):
         self.buf, self.frames = build_melody()
+        # build_melody writes big-endian (the Python cast path's format); the
+        # pump and the castif ring take little-endian, so swap once here
+        b = self.buf
+        for i in range(0, len(b), 2):
+            b[i], b[i + 1] = b[i + 1], b[i]
         self.mv = memoryview(self.buf)
         self.total = self.frames * 4
         self.pos = 0

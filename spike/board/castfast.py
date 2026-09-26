@@ -26,20 +26,26 @@ BLOCK_BYTES = 1920          # 10 ms of 48 kHz stereo s16
 class PumpFeed:
     """The one producer for both listeners: the P4's speaker (the pump) and the cast.
 
-    ``source()`` returns the next 10 ms block, 1920 bytes of 48 kHz stereo
-    16-bit *big-endian* PCM (what LPCM over Miracast wants; the pump stream
-    takes the same bytes). ``pump()`` writes blocks into the pump's stream
-    while it has room, so production is paced by the I2S clock, and feeds each
-    block to the cast as it goes. Blocks the cast could not take (its ring
-    full) are counted in ``full``.
+    ``source()`` returns the next 10 ms block: 1920 bytes of 48 kHz stereo
+    16-bit little-endian PCM, the pump's own format; the cast byte-swaps to
+    LPCM on the wire. Production is paced by the wall clock, one block per
+    10 ms plus a small lead, because the pump's stream ring never pushes back
+    on this board (measured 2026-09-27: a 320 ms ring drained in 1.7 ms, and
+    a feeder paced on ``space()`` ran at 1.5x real time). A stall longer than
+    the lead is skipped, not caught up: what was not produced in time is
+    silence at the sink, never a burst.
     """
 
-    def __init__(self, source, stream=None, log=print):
+    def __init__(self, source, stream=None, lead=8, log=print):
         self.source = source
         self.stream = stream
         self.cast = None
+        self.lead = lead            # blocks kept ahead of the clock (80 ms)
+        self.t0 = None
+        self.n = 0                  # blocks produced since t0
         self.fed = 0
         self.full = 0
+        self.skipped = 0            # blocks a stall cost
         self.log = log
         if stream is None:
             try:
@@ -51,26 +57,28 @@ class PumpFeed:
                 self.stream = None
 
     def pump(self, limit=12):
+        now = time.ticks_ms()
+        if self.t0 is None:
+            self.t0 = now
+        want = time.ticks_diff(now, self.t0) // 10 + self.lead
+        due = want - self.n
+        if due > self.lead + limit:          # a stall: skip the lost time
+            self.skipped += due - self.lead
+            self.n = want - self.lead
+            due = self.lead
+        n = 0
         s = self.stream
         c = self.cast
-        n = 0
-        if s is None:
-            # no speaker: pace on the cast ring instead (keep ~40 blocks queued)
-            while c is not None and n < limit and c.stats()["audio_level"] < 40:
-                if not c.feed_audio(self.source()):
-                    self.full += 1
-                    break
-                self.fed += 1
-                n += 1
-            return n
-        while n < limit and s.space() >= BLOCK_BYTES:
+        while n < due and n < limit:
             b = self.source()
-            s.write(b)
+            if s is not None and s.space() >= BLOCK_BYTES:
+                s.write(b)
             if c is not None:
                 if c.feed_audio(b):
                     self.fed += 1
                 else:
                     self.full += 1
+            self.n += 1
             n += 1
         return n
 
@@ -119,6 +127,7 @@ class CastifStreamer:
                 line += " | audio fed %d muxed %d level %d underruns %d drift %d ms ins %d drop %d ringfull %d" % (
                     s["audio_fed"], s["audio_muxed"], s["audio_level"], s["audio_underruns"],
                     s["audio_drift_ms"], s["audio_inserted"], s["audio_dropped"], self.audio.full)
+                line += " skipped %d" % self.audio.skipped
             self.log(line)
         if self.seconds and time.ticks_diff(now, self.t0) > self.seconds * 1000:
             self.done = True
