@@ -6,8 +6,8 @@ applies one; `--check` verifies applicability without touching the tree.
 
 | Profile | Patches | Extras |
 |---|---|---|
-| `windows-networked` | 0001, 0013 | |
-| `windows-full` | 0001, 0002, 0003, 0012, 0013 | |
+| `windows-networked` | 0001, 0013, 0015 | |
+| `windows-full` | 0001, 0002, 0003, 0012, 0013, 0015 | |
 | `desktop-pydevices` | 0002, 0012 | |
 | `webassembly-pydevices` | 0004, 0005, 0006, 0007, 0008 | `usermods/wasmbridge`, `variants/webassembly` |
 | `esp32-s3-debug` | 0009 | |

@@ -67,7 +67,12 @@ extern uintptr_t pydevices_http_get(const char *, int *, size_t *, uintptr_t *);
 extern void pydevices_sleep_ms(int);
 extern void pydevices_host_reset(void);
 extern void external_call_depth_inc(void);
-extern void external_call_depth_dec(void);
+// MicroPython v1.29.0 gives the decrement the object to keep rooted while
+// the call unwinds (ports/webassembly/main.c). Declaring it without that
+// argument compiled, but the call went through an invoke_* wrapper with the
+// wrong signature and every timer callback ended in "null function or
+// function signature mismatch": fatal under node, a console error in a page.
+extern void external_call_depth_dec(mp_obj_t root_obj);
 
 void pydevices_bridge_deinit(void) {
     pydevices_host_reset();
@@ -319,11 +324,11 @@ EMSCRIPTEN_KEEPALIVE void pydevices_timer_dispatch(int id) {
             } else {
                 mp_obj_print_exception(&mp_plat_print, MP_OBJ_FROM_PTR(nlr.ret_val));
             }
-            external_call_depth_dec();
+            external_call_depth_dec(mp_const_none);
             return;
         }
     }
-    external_call_depth_dec();
+    external_call_depth_dec(mp_const_none);
 }
 
 static mp_obj_t bridge_timer_cancel(mp_obj_t id) {
