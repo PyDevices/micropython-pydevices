@@ -6,7 +6,9 @@
 // Python GIL. The app keeps its frame rate on core 1, and the receiver, fed a
 // steady stream, foregrounds at once instead of after ~35 s.
 //
-// Phase 1 is video only; sound (LPCM from the audio pump) is Phase 2.
+// Phase 2 adds sound: audio=True gives the Cast a ring of 10 ms LPCM blocks that
+// Python fills from the audio pump (feed_audio) and the task muxes on the same
+// wall clock as the video.
 //
 //   c = castif.Cast(w, h, canvas_w=1280, canvas_h=720, fps=30, bitrate=3_000_000)
 //   c.start(framebuffer, sink_ip, dst_port, src_port)   # after RTSP PLAY
@@ -92,7 +94,12 @@ typedef struct _castif_obj_t {
     uint8_t cc_audio;
     uint8_t apes[18];
     uint32_t apts;                        // audio PTS, 90 kHz
-    volatile uint32_t audio_fed, audio_muxed, audio_underruns;
+    int64_t t0;                           // esp_timer at start(): the wall clock both PTS come from
+    uint32_t a_stamp[A_BLOCKS];           // wall-clock (90 kHz) when each block was fed
+    int32_t drift, drift_ref;             // EMA of stamp - apts, and its value once settled
+    bool drift_ref_set;
+    uint32_t sync_limit;                  // drop/insert past this (90 kHz ticks); 0 = measure only
+    volatile uint32_t audio_fed, audio_muxed, audio_underruns, audio_inserted, audio_dropped;
     volatile uint32_t enc_us, ppa_us, mux_us, send_us;
     volatile uint32_t last_len;
     volatile int last_type;
@@ -346,9 +353,64 @@ static int ppa_convert(castif_obj_t *c) {
     return err == ESP_OK ? 0 : -1;
 }
 
+static void mux_pcr_only(castif_obj_t *c, uint32_t pcr) {
+    // a PCR with no payload on the video PID, for ticks whose frame was skipped:
+    // the sink's clock keeps running while the picture is static and audio plays
+    uint8_t *pkt = c->pkt;
+    pkt[0] = 0x47; pkt[1] = PID_VIDEO >> 8; pkt[2] = PID_VIDEO & 0xFF;
+    pkt[3] = (2 << 4) | ((c->cc_video - 1) & 15);   // adaptation field only: cc does not advance
+    pkt[4] = 183;
+    pkt[5] = 0x10;
+    pkt[6] = (pcr >> 25) & 0xFF; pkt[7] = (pcr >> 17) & 0xFF;
+    pkt[8] = (pcr >> 9) & 0xFF; pkt[9] = (pcr >> 1) & 0xFF;
+    pkt[10] = ((pcr & 1) << 7) | 0x7E; pkt[11] = 0;
+    memset(pkt + 12, 0xFF, 176);
+    rtp_push(c, pkt);
+}
+
+// ---- audio (Phase 2) ------------------------------------------------------
+//
+// Python feeds 10 ms blocks as the pump plays them; feed_audio stamps each with
+// the wall clock. Every tick, skipped frames included, the task sends all that
+// is waiting: the first block takes the tick's PTS and the rest follow
+// contiguously, so the sink hears one unbroken LPCM track on the video's clock.
+// The stamps measure how far that track drifts from the wall clock (the pump's
+// I2S rate against esp_timer). Past sync_limit the task drops one block or
+// inserts one silent one -- 10 ms at a time, never a PTS jump.
+
+static const uint8_t SILENCE[A_BLOCK] = {0};
+
+static void drain_audio(castif_obj_t *c, uint32_t pts) {
+    while (c->a_tail != c->a_head) {
+        uint32_t i = c->a_tail % A_BLOCKS;
+        if (c->apts == 0) { c->apts = pts; c->drift = 0; c->drift_ref_set = false; }
+        int32_t d = (int32_t)(c->a_stamp[i] - c->apts);   // + : the track sits behind the clock
+        c->drift += (d - c->drift) / 64;
+        if (!c->drift_ref_set) {
+            if (c->audio_muxed >= 300) { c->drift_ref = c->drift; c->drift_ref_set = true; }
+        } else if (c->sync_limit) {
+            int32_t off = c->drift - c->drift_ref;
+            if (off > (int32_t)c->sync_limit) {          // audio would play early: pad
+                mux_lpcm(c, SILENCE, c->apts);
+                c->apts += 900; c->audio_inserted++; c->drift -= 900;
+                continue;
+            }
+            if (off < -(int32_t)c->sync_limit) {         // audio would play late: drop one
+                c->a_tail++; c->audio_dropped++; c->drift += 900;
+                continue;
+            }
+        }
+        mux_lpcm(c, c->audio_ring + i * A_BLOCK, c->apts);
+        c->a_tail++; c->apts += 900; c->audio_muxed++;
+    }
+    // the producer has stopped: the track is more than 100 ms behind the picture
+    if (c->apts && (int32_t)(pts - c->apts) > 9000) c->audio_underruns++;
+}
+
+// ---- the streaming task (core 0) -----------------------------------------
+
 static void cast_task(void *arg) {
     castif_obj_t *c = (castif_obj_t *)arg;
-    uint32_t pts = 90000;
     int64_t next = esp_timer_get_time();
     int64_t win_t0 = next;
     uint32_t win_frames = 0;
@@ -362,60 +424,61 @@ static void cast_task(void *arg) {
             esp_h264_enc_set_bitrate((esp_h264_enc_param_handle_t)c->param, c->new_bitrate);
             c->new_bitrate = -1;
         }
-        if (c->want_idr) {
+        int idr = c->want_idr;
+        if (idr) {
             esp_h264_enc_force_idr((esp_h264_enc_param_handle_t)c->param);
             c->want_idr = false;
         }
+        // one wall clock for both tracks: this tick's PTS in 90 kHz ticks
+        uint32_t pts = 90000 + (uint32_t)(((now - c->t0) * 9) / 100);
+        int skip = 0;
         if (c->max_skip_us) {
             const uint32_t *w = (const uint32_t *)c->fb;
             uint32_t words = c->fb_len / 4;
             uint32_t hsh = 2166136261u;
             for (uint32_t i = 0; i < words; i += 512) hsh = (hsh ^ w[i]) * 16777619u;
-            int64_t tn = esp_timer_get_time();
-            if (hsh == c->last_hash && !c->want_idr && !c->dirty && (tn - c->last_real_us) < (int64_t)c->max_skip_us) {
+            if (hsh == c->last_hash && !idr && !c->dirty && (now - c->last_real_us) < (int64_t)c->max_skip_us) {
                 c->skipped++;
-                continue;
+                skip = 1;
+            } else {
+                c->last_hash = hsh;
+                c->last_real_us = now;
+                c->dirty = false;
             }
-            c->last_hash = hsh;
-            c->last_real_us = tn;
-            c->dirty = false;
         }
-        if (ppa_convert(c) != 0) continue;
-        esp_h264_enc_in_frame_t inf = {0};
-        inf.raw_data.buffer = c->yuv;
-        inf.raw_data.len = c->in_len;
-        inf.pts = (uint32_t)((uint64_t)c->frames * c->frame_us / 1000);
-        esp_h264_enc_out_frame_t outf = {0};
-        outf.raw_data.buffer = c->out_buf;
-        outf.raw_data.len = c->out_cap;
-        int64_t e0 = esp_timer_get_time();
-        esp_h264_err_t err = esp_h264_enc_process(c->enc, &inf, &outf);
-        c->enc_us = (uint32_t)(esp_timer_get_time() - e0);
-        if (err != ESP_H264_ERR_OK) continue;
-        c->last_len = outf.length;
-        c->last_type = outf.frame_type;
-        int key = (outf.frame_type == 0);
-        int64_t m0 = esp_timer_get_time();
+        int64_t m0 = now;
         c->ts90 = pts - PCR_LEAD;
-        if (key) emit_tables(c);
-        mux_video(c, c->out_buf, outf.length, pts, key);
-        if (c->audio_on) {
-            // keep the LPCM track about 100 ms ahead of the picture, on the same
-            // 90 kHz clock; an empty ring is an underrun (counted, not padded)
-            if (c->apts == 0) c->apts = pts;
-            while ((int32_t)(c->apts - (pts + 9000)) < 0) {
-                if (c->a_tail == c->a_head) { c->audio_underruns++; break; }
-                mux_lpcm(c, c->audio_ring + (c->a_tail % A_BLOCKS) * A_BLOCK, c->apts);
-                c->a_tail++;
-                c->apts += 900;
-                c->audio_muxed++;
+        if (!skip && ppa_convert(c) != 0) skip = 1;
+        if (!skip) {
+            esp_h264_enc_in_frame_t inf = {0};
+            inf.raw_data.buffer = c->yuv;
+            inf.raw_data.len = c->in_len;
+            inf.pts = (uint32_t)((uint64_t)c->frames * c->frame_us / 1000);
+            esp_h264_enc_out_frame_t outf = {0};
+            outf.raw_data.buffer = c->out_buf;
+            outf.raw_data.len = c->out_cap;
+            int64_t e0 = esp_timer_get_time();
+            esp_h264_err_t err = esp_h264_enc_process(c->enc, &inf, &outf);
+            c->enc_us = (uint32_t)(esp_timer_get_time() - e0);
+            if (err != ESP_H264_ERR_OK) {
+                skip = 1;
+            } else {
+                c->last_len = outf.length;
+                c->last_type = outf.frame_type;
+                int key = (outf.frame_type == 0);
+                m0 = esp_timer_get_time();
+                if (key) emit_tables(c);
+                mux_video(c, c->out_buf, outf.length, pts, key);
+                c->frames++;
+                win_frames++;
             }
+        }
+        if (c->audio_on) {
+            if (skip) mux_pcr_only(c, pts - PCR_LEAD);
+            drain_audio(c, pts);
         }
         rtp_flush(c);
-        c->mux_us = (uint32_t)(esp_timer_get_time() - m0);
-        pts += 90000 * c->frame_us / 1000000;
-        c->frames++;
-        win_frames++;
+        if (!skip) c->mux_us = (uint32_t)(esp_timer_get_time() - m0);
         if (now - win_t0 >= 1000000) {
             c->mfps = (uint32_t)((uint64_t)win_frames * 1000000000ull / (now - win_t0));
             win_t0 = now; win_frames = 0;
@@ -499,6 +562,7 @@ static mp_obj_t castif_make_new(const mp_obj_type_t *type, size_t n_args, size_t
     self->ssrc = 0x50344341;
     self->seq = 1;
     self->audio_on = args[ARG_audio].u_bool;
+    self->sync_limit = 20 * 90;
     if (self->audio_on) {
         uint32_t got = 0;
         self->audio_ring = esp_h264_aligned_calloc(16, 1, A_BLOCKS * A_BLOCK, &got, ESP_H264_MEM_SPIRAM);
@@ -544,8 +608,11 @@ static mp_obj_t castif_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
     self->running = true;
     self->want_idr = true;   // start with a keyframe
     self->last_hash = 0; self->last_real_us = 0; self->skipped = 0;
+    self->t0 = esp_timer_get_time();
     self->a_head = self->a_tail = 0; self->apts = 0; self->cc_audio = 0;
+    self->drift = self->drift_ref = 0; self->drift_ref_set = false;
     self->audio_fed = self->audio_muxed = self->audio_underruns = 0;
+    self->audio_inserted = self->audio_dropped = 0;
     if (self->max_skip_us == 0) self->max_skip_us = 500000;   // static UIs: >=2 fps floor
     // pin the framebuffer object so the GC does not move/free it while the task reads it
     // (a bytearray/Display buffer is long-lived; we also keep fb_obj referenced).
@@ -595,12 +662,22 @@ static mp_obj_t castif_feed_audio(mp_obj_t self_in, mp_obj_t block) {
     mp_get_buffer_raise(block, &b, MP_BUFFER_READ);
     if (b.len < A_BLOCK) mp_raise_ValueError(MP_ERROR_TEXT("audio block is 1920 bytes"));
     if (self->a_head - self->a_tail >= A_BLOCKS) return mp_const_false;
-    memcpy(self->audio_ring + (self->a_head % A_BLOCKS) * A_BLOCK, b.buf, A_BLOCK);
+    uint32_t i = self->a_head % A_BLOCKS;
+    memcpy(self->audio_ring + i * A_BLOCK, b.buf, A_BLOCK);
+    self->a_stamp[i] = 90000 + (uint32_t)(((esp_timer_get_time() - self->t0) * 9) / 100);
+    __sync_synchronize();
     self->a_head++;
     self->audio_fed++;
     return mp_const_true;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(castif_feed_audio_obj, castif_feed_audio);
+
+static mp_obj_t castif_set_sync(mp_obj_t self_in, mp_obj_t ms) {
+    castif_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    self->sync_limit = (uint32_t)mp_obj_get_int(ms) * 90;   // 0 = measure the drift, never correct it
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(castif_set_sync_obj, castif_set_sync);
 
 static mp_obj_t castif_mark_dirty(mp_obj_t self_in) {
     castif_obj_t *self = MP_OBJ_TO_PTR(self_in);
@@ -640,6 +717,10 @@ static mp_obj_t castif_stats(mp_obj_t self_in) {
     PUT(MP_QSTR_audio_muxed, self->audio_muxed);
     PUT(MP_QSTR_audio_underruns, self->audio_underruns);
     PUT(MP_QSTR_audio_level, self->a_head - self->a_tail);
+    PUT(MP_QSTR_audio_inserted, self->audio_inserted);
+    PUT(MP_QSTR_audio_dropped, self->audio_dropped);
+    // how far the audio track has moved against the wall clock since it settled, ms (+ = early)
+    PUT(MP_QSTR_audio_drift_ms, self->drift_ref_set ? (self->drift - self->drift_ref) / 90 : 0);
     PUT(MP_QSTR_enc_us, self->enc_us);
     PUT(MP_QSTR_ppa_us, self->ppa_us);
     PUT(MP_QSTR_mux_us, self->mux_us);
@@ -672,6 +753,7 @@ static const mp_rom_map_elem_t castif_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_skip), MP_ROM_PTR(&castif_set_skip_obj) },
     { MP_ROM_QSTR(MP_QSTR_mark_dirty), MP_ROM_PTR(&castif_mark_dirty_obj) },
     { MP_ROM_QSTR(MP_QSTR_feed_audio), MP_ROM_PTR(&castif_feed_audio_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_sync), MP_ROM_PTR(&castif_set_sync_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&castif_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&castif_close_obj) },
     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&castif_close_obj) },
