@@ -10,7 +10,8 @@ from board_config import fb, display_drv
 SINK = "192.168.1.143"
 FPS = 30
 BITRATE = 3_000_000
-SECONDS = 40
+SECONDS = 60
+AUDIO = 16        # LPCM tone at -66 dBFS: present in the stream, inaudible; None for no audio
 LOG = open("/cast/cast_live.log", "w")
 T0 = time.ticks_ms()
 
@@ -57,7 +58,7 @@ from castlive import LiveStreamer
 
 
 def make(dst_ip, dst_port, server_port):
-    return LiveStreamer(dst_ip, dst_port, server_port, fb, fps=FPS, bitrate=BITRATE, scene=Scene(), seconds=SECONDS, log=log)
+    return LiveStreamer(dst_ip, dst_port, server_port, fb, fps=FPS, bitrate=BITRATE, scene=Scene(), seconds=SECONDS, log=log, audio=AUDIO)
 
 
 gc.collect()
