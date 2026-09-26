@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 25 Sep 2026 00:00:00 -0500
+Subject: [PATCH] esp32: build TinyUSB 0.21 from the component registry.
+
+The esp32 port builds TinyUSB from the espressif/tinyusb managed
+component, pinned to micropython/tinyusb-espressif's
+cherrypick/dwc2_zlp_fix branch: TinyUSB 0.18 plus the DWC2 OUT-endpoint
+ZLP fix (hathach/tinyusb#3154, fixed by #3293). The pin's own comment
+says it can go once that fix is released in espressif/tinyusb. It has
+been: espressif/tinyusb 0.21.0~2 carries it (dcd_dwc2.c, "short packet
+(including ZLP when byte_count == 0)"). Every other port already builds
+0.21, from lib/tinyusb, so shared/tinyusb is written for it.
+
+What this changes for a USB audio device: from 0.19 the audio class
+finishes an isochronous OUT packet in the USB interrupt
+(audiod_xfer_isr): it copies the packet into the endpoint FIFO, re-arms
+the endpoint and calls tud_audio_rx_done_isr(). In 0.18 all of that
+waited for tud_task(), which on this port runs in the MicroPython task
+through the scheduler, so a busy interpreter left the endpoint unarmed
+and lost packets. Measured on an ESP32-P4 sound card (usbif) with the
+interpreter allocating in a tight loop: 91-95 % of packets delivered
+on 0.18, heard as a tick every few tens of milliseconds.
+
+The API changes that reach a user C module are 0.19's and 0.20's:
+tud_audio_rx_done_post_read_cb() became tud_audio_rx_done_isr() and
+runs in the ISR, and TUD_AUDIO_EP_SIZE() takes the bus speed as its
+first argument. Nothing in MicroPython itself uses either.
+
+One behaviour change to know about: 0.21's DWC2 driver arms an
+isochronous OUT endpoint for the microframe after the current one,
+whatever its interval (0.18 did that only for bInterval 1). A
+high-speed isochronous OUT endpoint with a longer interval then waits
+on the wrong frame parity and receives nothing; usbif's sound card at
+bInterval 4 got no packets at all until it went back to 1, which the
+interrupt-time re-arm makes safe.
+
+The lockfiles under ports/esp32/lockfiles are not part of this patch.
+The component manager re-solves on the first build after the manifest
+changes and rewrites the target's lockfile, as it already does for any
+overlay that edits idf_component.yml.
+
+---
+diff --git a/ports/esp32/main/idf_component.yml b/ports/esp32/main/idf_component.yml
+index ddd7cb2..344f898 100644
+--- a/ports/esp32/main/idf_component.yml
++++ b/ports/esp32/main/idf_component.yml
+@@ -5,10 +5,10 @@ dependencies:
+   espressif/tinyusb:
+     rules:
+       - if: "target in [esp32s2, esp32s3, esp32p4]"
+-    # Temporary workaround for https://github.com/hathach/tinyusb/issues/3154
+-    # Can be removed once fix is released in espressif/tinyusb
+-    git: https://github.com/micropython/tinyusb-espressif.git
+-    version: cherrypick/dwc2_zlp_fix
++    # 0.21 carries the OUT-endpoint ZLP fix (hathach/tinyusb#3293) that the
++    # cherrypick/dwc2_zlp_fix branch was holding, and it re-arms the audio
++    # class's isochronous OUT endpoint in the ISR, not in tud_task().
++    version: "0.21.0~2"
+   espressif/esp_hosted:
+     rules:
+       - if: "target == esp32p4"

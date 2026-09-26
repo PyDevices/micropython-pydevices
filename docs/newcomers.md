@@ -4,7 +4,7 @@
 
 ## Start by preparing a checkout
 
-`tools/prepare-micropython.sh` is the documented path, and it takes no profile. It checks out the pinned tag in a `micropython` clone beside this repository, applies the `windows-full`, `webassembly-pydevices`, `esp32-s3-debug`, `esp32-audio` and `esp32-webrepl` profiles (together, all eleven patches) plus the usbif and cameraif module patches, and records the result as one local commit.
+`tools/prepare-micropython.sh` is the documented path, and it takes no profile. It checks out the pinned tag in a `micropython` clone beside this repository, applies the `windows-full`, `webassembly-pydevices`, `esp32-s3-debug`, `esp32-audio`, `esp32-webrepl` and `esp32-tinyusb` profiles (together, all fourteen patches) plus the usbif and cameraif module patches, and records the result as one local commit.
 
 After that you choose what to build with paths passed to upstream's `make`:
 
