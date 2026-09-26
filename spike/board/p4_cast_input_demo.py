@@ -63,11 +63,16 @@ for i in range(0, W, 90):
 
 
 def rect(x, y, w, h, color):
-    """fill_rect clipped to the panel: the cursor and dots may sit at an edge."""
+    """fill_rect clipped to the panel, then only those rows to the glass.
+
+    This DSI panel shows the framebuffer only on a refresh, and a whole-frame
+    refresh (a 1 MB cache write-back) flashes the glass white; syncing the few
+    rows that changed does not."""
     x0 = max(x, 0); y0 = max(y, 0)
     x1 = min(x + w, W); y1 = min(y + h, H)
     if x1 > x0 and y1 > y0:
         display_drv.fill_rect(x0, y0, x1 - x0, y1 - y0, color)
+        display_drv.flush_rect(x0, y0, x1 - x0, y1 - y0)
 
 
 def big_text(s, x, y, scale, color):
@@ -118,10 +123,9 @@ class Scene:
             rect(40, H - 90, W - 80, 60, BG)
             text = "".join(chr(k) if 32 <= k < 127 else "#" for k in typed[-16:])
             big_text(text or "-", 40, H - 80, 5, 0x07E0)
-        if changed:
-            display_drv.show()           # to the glass (msync + resubmit); the cast reads the same buffer
-            if self.cast:
-                self.cast.mark_dirty()   # beat the sampled hash: a 3-pixel cursor is easy to miss
+            display_drv.flush_rect(40, H - 90, W - 80, 60)
+        if changed and self.cast:
+            self.cast.mark_dirty()       # beat the sampled hash: a 3-pixel cursor is easy to miss
         self.n += 1
 
 
