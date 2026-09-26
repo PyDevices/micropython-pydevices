@@ -72,8 +72,14 @@ typedef struct _castif_obj_t {
     volatile bool want_idr;
     volatile int new_bitrate;
     volatile uint32_t frame_us;
+    // skip-unchanged (lever a): a cheap sampled hash of the framebuffer; when
+    // it has not changed and a real frame went out recently, skip the PPA +
+    // encode + send so a static UI costs almost no memory bandwidth.
+    uint32_t last_hash;
+    int64_t last_real_us;
+    uint32_t max_skip_us;        // send at least this often even when static (0 = feature off)
     // stats
-    volatile uint32_t frames, packets, sent, stalls, idr_reqs;
+    volatile uint32_t frames, packets, sent, stalls, idr_reqs, skipped;
     volatile uint32_t enc_us, ppa_us, mux_us, send_us;
     volatile uint32_t last_len;
     volatile int last_type;
@@ -307,6 +313,19 @@ static void cast_task(void *arg) {
             esp_h264_enc_force_idr((esp_h264_enc_param_handle_t)c->param);
             c->want_idr = false;
         }
+        if (c->max_skip_us) {
+            const uint32_t *w = (const uint32_t *)c->fb;
+            uint32_t words = c->fb_len / 4;
+            uint32_t hsh = 2166136261u;
+            for (uint32_t i = 0; i < words; i += 512) hsh = (hsh ^ w[i]) * 16777619u;
+            int64_t tn = esp_timer_get_time();
+            if (hsh == c->last_hash && !c->want_idr && (tn - c->last_real_us) < (int64_t)c->max_skip_us) {
+                c->skipped++;
+                continue;
+            }
+            c->last_hash = hsh;
+            c->last_real_us = tn;
+        }
         if (ppa_convert(c) != 0) continue;
         esp_h264_enc_in_frame_t inf = {0};
         inf.raw_data.buffer = c->yuv;
@@ -451,6 +470,8 @@ static mp_obj_t castif_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
     self->frames = self->packets = self->sent = self->stalls = self->idr_reqs = 0;
     self->running = true;
     self->want_idr = true;   // start with a keyframe
+    self->last_hash = 0; self->last_real_us = 0; self->skipped = 0;
+    if (self->max_skip_us == 0) self->max_skip_us = 500000;   // static UIs: >=2 fps floor
     // pin the framebuffer object so the GC does not move/free it while the task reads it
     // (a bytearray/Display buffer is long-lived; we also keep fb_obj referenced).
     xTaskCreatePinnedToCore(cast_task, "cast", 6144, self, 18, &self->task, 0);
@@ -490,6 +511,13 @@ static mp_obj_t castif_set_bitrate(mp_obj_t self_in, mp_obj_t bps) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(castif_set_bitrate_obj, castif_set_bitrate);
 
+static mp_obj_t castif_set_skip(mp_obj_t self_in, mp_obj_t ms) {
+    castif_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    self->max_skip_us = (uint32_t)mp_obj_get_int(ms) * 1000;   // 0 = send every frame
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(castif_set_skip_obj, castif_set_skip);
+
 static mp_obj_t castif_set_fps(mp_obj_t self_in, mp_obj_t fps) {
     castif_obj_t *self = MP_OBJ_TO_PTR(self_in);
     int f = mp_obj_get_int(fps);
@@ -509,6 +537,7 @@ static mp_obj_t castif_stats(mp_obj_t self_in) {
     PUT(MP_QSTR_sent, self->sent);
     PUT(MP_QSTR_stalls, self->stalls);
     PUT(MP_QSTR_idr, self->idr_reqs);
+    PUT(MP_QSTR_skipped, self->skipped);
     PUT(MP_QSTR_enc_us, self->enc_us);
     PUT(MP_QSTR_ppa_us, self->ppa_us);
     PUT(MP_QSTR_mux_us, self->mux_us);
@@ -537,6 +566,7 @@ static const mp_rom_map_elem_t castif_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_force_idr), MP_ROM_PTR(&castif_force_idr_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_bitrate), MP_ROM_PTR(&castif_set_bitrate_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_fps), MP_ROM_PTR(&castif_set_fps_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_skip), MP_ROM_PTR(&castif_set_skip_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&castif_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&castif_close_obj) },
     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&castif_close_obj) },
