@@ -142,8 +142,8 @@ def _tone_blocks(hz, ms, amp, phase0=0.0):
             phase += step
             hi = (v >> 8) & 0xFF
             lo = v & 0xFF
-            b[4 * k] = hi; b[4 * k + 1] = lo
-            b[4 * k + 2] = hi; b[4 * k + 3] = lo
+            b[4 * k] = lo; b[4 * k + 1] = hi      # little-endian: the speaker's and the castif ring's format
+            b[4 * k + 2] = lo; b[4 * k + 3] = hi
         out.append(bytes(b))
         i += 480
     return out, phase
