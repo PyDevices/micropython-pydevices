@@ -9,12 +9,15 @@ from tsmux import TsMux, RtpOut, PCR_LEAD
 
 class LiveStreamer:
     def __init__(self, dst_ip, dst_port, server_port, fb, fps=30, bitrate=3_000_000,
-                 canvas=(1280, 720), scene=None, seconds=60, log=print):
+                 canvas=(1280, 720), scene=None, seconds=60, log=print, size=None):
+        """fb: any RGB565 buffer (the panel's Display, or a memoryview) with width and
+        height, or size=(w, h) for a plain buffer."""
         self.fb = fb
         self.fps = fps
         self.log = log
-        cw, ch = canvas if canvas else (fb.width, fb.height)
-        self.enc = h264enc.Encoder(fb.width, fb.height, fps=fps, gop=fps, bitrate=bitrate, canvas_w=cw, canvas_h=ch)
+        w, h = size if size else (fb.width, fb.height)
+        cw, ch = canvas if canvas else (w, h)
+        self.enc = h264enc.Encoder(w, h, fps=fps, gop=fps, bitrate=bitrate, canvas_w=cw, canvas_h=ch)
         self.out = bytearray(cw * ch // 2)
         self.mv = memoryview(self.out)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -33,7 +36,7 @@ class LiveStreamer:
         self.max_enc = 0
         self.done = False
         self.end_us = seconds * 1000000
-        log("live: %dx%d in %dx%d at %d fps, %d bps, to %s:%d from %d" % (fb.width, fb.height, cw, ch, fps, bitrate, dst_ip, dst_port, server_port))
+        log("live: %dx%d in %dx%d at %d fps, %d bps, to %s:%d from %d" % (w, h, cw, ch, fps, bitrate, dst_ip, dst_port, server_port))
 
     def pump(self, budget_us):
         self.pumps = getattr(self, "pumps", 0) + 1
