@@ -1,19 +1,27 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
 Date: Fri, 25 Sep 2026 00:00:00 -0500
-Subject: [PATCH] esp32: build TinyUSB 0.21 from the component registry.
+Subject: [PATCH] esp32: build TinyUSB 0.21 on the P4, keep 0.18 on the S2/S3.
 
 The esp32 port builds TinyUSB from the espressif/tinyusb managed
 component, pinned to micropython/tinyusb-espressif's
 cherrypick/dwc2_zlp_fix branch: TinyUSB 0.18 plus the DWC2 OUT-endpoint
-ZLP fix (hathach/tinyusb#3154, fixed by #3293). The pin's own comment
-says it can go once that fix is released in espressif/tinyusb. It has
-been: espressif/tinyusb 0.21.0~2 carries it (dcd_dwc2.c, "short packet
-(including ZLP when byte_count == 0)"). Every other port already builds
-0.21, from lib/tinyusb, so shared/tinyusb is written for it.
+ZLP fix (hathach/tinyusb#3154, fixed by #3293). This keeps that source
+and picks a ref per target with the component manager's `matches`
+list: the ESP32-P4 takes v0.21.0.1-micropython1, the S2 and S3 keep the
+cherry-pick, and every other target still gets no TinyUSB.
 
-What this changes for a USB audio device: from 0.19 the audio class
-finishes an isochronous OUT packet in the USB interrupt
+v0.21.0.1-micropython1 is MicroPython's own tag in the same fork:
+espressif/tinyusb 0.21.0~1 plus Damien George's "don't flush pending
+data in cdcd_open" (hathach/tinyusb#3807). It carries the ZLP fix
+("short packet (including ZLP when byte_count == 0)" in dcd_dwc2.c).
+Against the registry's 0.21.0~2 it lacks only a DWC2 periodic-transfer
+option that is off by default and an NCM divisor change, neither of
+which this port uses. A registry version would need a second source,
+and one dependency can only have one.
+
+What this changes for a USB audio device on the P4: from 0.19 the audio
+class finishes an isochronous OUT packet in the USB interrupt
 (audiod_xfer_isr): it copies the packet into the endpoint FIFO, re-arms
 the endpoint and calls tud_audio_rx_done_isr(). In 0.18 all of that
 waited for tud_task(), which on this port runs in the MicroPython task
@@ -22,10 +30,22 @@ and lost packets. Measured on an ESP32-P4 sound card (usbif) with the
 interpreter allocating in a tight loop: 91-95 % of packets delivered
 on 0.18, heard as a tick every few tens of milliseconds.
 
+Why not the S3 as well, for now: on a LILYGO T-Embed (ESP32-S3, full
+speed) espressif's 0.21.0~1 and ~2 enumerate, but the moment the host
+opens the CDC port the chip trips the interrupt watchdog inside the
+DWC2 IN-endpoint handler (dcd_int_handler -> handle_ep_irq, dir IN) and
+reboots. The one commit v0.21.0.1-micropython1 adds, hathach/tinyusb
+#3808's "don't flush pending data in cdcd_open", fixes it: on that tag
+the S3 opens its port and runs normally. Moving the S2 and S3 is a
+separate change (usbif#48); until then they stay where upstream has
+them.
+
 The API changes that reach a user C module are 0.19's and 0.20's:
 tud_audio_rx_done_post_read_cb() became tud_audio_rx_done_isr() and
 runs in the ISR, and TUD_AUDIO_EP_SIZE() takes the bus speed as its
-first argument. Nothing in MicroPython itself uses either.
+first argument. Nothing in MicroPython itself uses either. A module
+that builds for both chips now sees both versions, so it guards on
+TUSB_VERSION_NUMBER.
 
 One behaviour change to know about: 0.21's DWC2 driver arms an
 isochronous OUT endpoint for the microframe after the current one,
@@ -35,28 +55,64 @@ on the wrong frame parity and receives nothing; usbif's sound card at
 bInterval 4 got no packets at all until it went back to 1, which the
 interrupt-time re-arm makes safe.
 
-The lockfiles under ports/esp32/lockfiles are not part of this patch.
-The component manager re-solves on the first build after the manifest
-changes and rewrites the target's lockfile, as it already does for any
-overlay that edits idf_component.yml.
-
+The P4's lockfile is part of this patch, and only its TinyUSB entry
+moves, to the tag's commit. The component manager re-solves when the
+manifest changes, but it keeps a git commit it has already locked for
+as long as the source is the same, and here the source is. Without the
+lockfile change the P4 would quietly go on building 0.18. The other
+targets' lockfiles keep the cherry-pick commit they already hold.
 ---
 diff --git a/ports/esp32/main/idf_component.yml b/ports/esp32/main/idf_component.yml
-index ddd7cb2..344f898 100644
+index ddd7cb2..15a481f 100644
 --- a/ports/esp32/main/idf_component.yml
 +++ b/ports/esp32/main/idf_component.yml
-@@ -5,10 +5,10 @@ dependencies:
+@@ -3,12 +3,21 @@ dependencies:
+   # resource usage
+   espressif/mdns: "~1.3.0"
    espressif/tinyusb:
-     rules:
-       - if: "target in [esp32s2, esp32s3, esp32p4]"
+-    rules:
+-      - if: "target in [esp32s2, esp32s3, esp32p4]"
 -    # Temporary workaround for https://github.com/hathach/tinyusb/issues/3154
 -    # Can be removed once fix is released in espressif/tinyusb
--    git: https://github.com/micropython/tinyusb-espressif.git
++    # One source, a ref per target. The P4 takes TinyUSB 0.21 (MicroPython's
++    # own v0.21.0.1-micropython1 tag), which re-arms the audio class's
++    # isochronous OUT endpoint in the ISR, not in tud_task(). The S2 and S3
++    # stay on the 0.18 cherry-pick for now (usbif#48: espressif's 0.21.0~2
++    # resets an S3 when the host opens the CDC port; this tag does not).
++    # The first matching `if` picks the ref; a target that matches none
++    # (esp32, the C-series) gets no TinyUSB, as before.
+     git: https://github.com/micropython/tinyusb-espressif.git
 -    version: cherrypick/dwc2_zlp_fix
-+    # 0.21 carries the OUT-endpoint ZLP fix (hathach/tinyusb#3293) that the
-+    # cherrypick/dwc2_zlp_fix branch was holding, and it re-arms the audio
-+    # class's isochronous OUT endpoint in the ISR, not in tud_task().
-+    version: "0.21.0~2"
++    matches:
++      - if: "target == esp32p4"
++        version: v0.21.0.1-micropython1
++      # Temporary workaround for https://github.com/hathach/tinyusb/issues/3154
++      # Can be removed once fix is released in espressif/tinyusb
++      - if: "target in [esp32s2, esp32s3]"
++        version: cherrypick/dwc2_zlp_fix
    espressif/esp_hosted:
      rules:
        - if: "target == esp32p4"
+diff --git a/ports/esp32/lockfiles/dependencies.lock.esp32p4 b/ports/esp32/lockfiles/dependencies.lock.esp32p4
+index a338b20..cc6e557 100644
+--- a/ports/esp32/lockfiles/dependencies.lock.esp32p4
++++ b/ports/esp32/lockfiles/dependencies.lock.esp32p4
+@@ -64,7 +64,7 @@ dependencies:
+       type: service
+     version: 1.3.2
+   espressif/tinyusb:
+-    component_hash: ee1c962cff61eb975d508258d509974d58031cc27ff0d6c4117a67a613a49594
++    component_hash: b8cf4577c72e77dcc180f2fd46fe6ea9883190e389c5fe90504a47908ae02637
+     dependencies:
+     - name: idf
+       version: '>=5.0'
+@@ -77,7 +77,8 @@ dependencies:
+     - esp32s3
+     - esp32p4
+     - esp32h4
+-    version: e4c0ec3caab3d9c25374de7047653b9ced8f14ff
++    - esp32s31
++    version: 5c5c660317943820d49ce5c188f1bd60cd8aade6
+   idf:
+     source:
+       type: idf
