@@ -26,7 +26,10 @@ sizes = [struct.unpack_from("<I", idx, 4 * i)[0] for i in range(len(idx) // 4)]
 f = open(PATH, "rb")
 log("loading %s%s" % (PATH, " into RAM" if FROM_RAM else ""))
 if FROM_RAM:
-    clip = memoryview(f.read())
+    clip = bytearray(sum(sizes))     # one allocation, one read: f.read() with no size regrows and copies
+    f.readinto(clip)
+    clip = memoryview(clip)
+    log("loaded %d bytes" % len(clip))
     offsets = []
     o = 0
     for sz in sizes:
