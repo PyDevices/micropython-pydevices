@@ -70,6 +70,7 @@ typedef struct _castif_obj_t {
     TaskHandle_t task;
     volatile bool running;
     volatile bool want_idr;
+    volatile bool dirty;   // a real change signal (mark_dirty): beats the sampled hash
     volatile int new_bitrate;
     volatile uint32_t frame_us;
     // skip-unchanged (lever a): a cheap sampled hash of the framebuffer; when
@@ -319,12 +320,13 @@ static void cast_task(void *arg) {
             uint32_t hsh = 2166136261u;
             for (uint32_t i = 0; i < words; i += 512) hsh = (hsh ^ w[i]) * 16777619u;
             int64_t tn = esp_timer_get_time();
-            if (hsh == c->last_hash && !c->want_idr && (tn - c->last_real_us) < (int64_t)c->max_skip_us) {
+            if (hsh == c->last_hash && !c->want_idr && !c->dirty && (tn - c->last_real_us) < (int64_t)c->max_skip_us) {
                 c->skipped++;
                 continue;
             }
             c->last_hash = hsh;
             c->last_real_us = tn;
+            c->dirty = false;
         }
         if (ppa_convert(c) != 0) continue;
         esp_h264_enc_in_frame_t inf = {0};
@@ -511,6 +513,13 @@ static mp_obj_t castif_set_bitrate(mp_obj_t self_in, mp_obj_t bps) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(castif_set_bitrate_obj, castif_set_bitrate);
 
+static mp_obj_t castif_mark_dirty(mp_obj_t self_in) {
+    castif_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    self->dirty = true;   // the panel changed: send the next frame, do not wait for the hash/floor
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(castif_mark_dirty_obj, castif_mark_dirty);
+
 static mp_obj_t castif_set_skip(mp_obj_t self_in, mp_obj_t ms) {
     castif_obj_t *self = MP_OBJ_TO_PTR(self_in);
     self->max_skip_us = (uint32_t)mp_obj_get_int(ms) * 1000;   // 0 = send every frame
@@ -567,6 +576,7 @@ static const mp_rom_map_elem_t castif_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_bitrate), MP_ROM_PTR(&castif_set_bitrate_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_fps), MP_ROM_PTR(&castif_set_fps_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_skip), MP_ROM_PTR(&castif_set_skip_obj) },
+    { MP_ROM_QSTR(MP_QSTR_mark_dirty), MP_ROM_PTR(&castif_mark_dirty_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&castif_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&castif_close_obj) },
     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&castif_close_obj) },
