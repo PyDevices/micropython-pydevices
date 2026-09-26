@@ -23,6 +23,33 @@ import castif
 BLOCK_BYTES = 1920          # 10 ms of 48 kHz stereo s16
 
 
+def pump_stream(fmt=None, volume=85, capacity=32, log=print):
+    """A pump stream wired to the board's speaker, at the given listening level.
+
+    ``pump.attach_stream(fmt)`` on its own attaches to a pump with NO hardware
+    driver: it pulls the stream into nothing, at any speed (measured
+    2026-09-27 on the P4: silent, a 320 ms ring drained in 1.7 ms). The driver
+    is the board's I2S transport, found the way audiodev's AudioOut finds it.
+    """
+    from audiodev import pump, AudioFormat
+    from boarddev import pcm_out
+    fmt = fmt or AudioFormat(48000, 2, 16)
+    transport = pcm_out(fmt)
+    while transport is not None and getattr(transport, "wire", None) is None:
+        transport = getattr(transport, "_inner", None)
+    if transport is None:
+        raise RuntimeError("this board publishes no I2S transport for the pump")
+    try:
+        transport.volume = volume
+    except Exception:
+        pass
+    driver = pump.BusioDriver(transport.wire, fmt, power=getattr(transport, "audio_power", None),
+                              volume=volume, transport=transport)
+    stream = pump.attach_stream(fmt, driver=driver, frames=256, capacity=capacity)
+    log("pump stream on the speaker at %d %% (%d bytes free)" % (volume, stream.space()))
+    return stream
+
+
 class PumpFeed:
     """The one producer for both listeners: the P4's speaker (the pump) and the cast.
 
@@ -49,9 +76,7 @@ class PumpFeed:
         self.log = log
         if stream is None:
             try:
-                from audiodev import pump, AudioFormat
-                self.stream = pump.attach_stream(AudioFormat(48000, 2, 16), capacity=32)
-                log("pumpfeed: pump stream attached (%d bytes free)" % self.stream.space())
+                self.stream = pump_stream(log=log)
             except Exception as e:
                 log("pumpfeed: no pump stream (%r); the cast gets the audio, the speaker does not" % (e,))
                 self.stream = None

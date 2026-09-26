@@ -159,7 +159,8 @@ class HouseAudio:
         self.pos = -1
         self.stream = None
         try:
-            self.stream = pump.attach_stream(AudioFormat(RATE, 2, 16), capacity=32)
+            from castfast import pump_stream
+            self.stream = pump_stream(AudioFormat(RATE, 2, 16), volume=85, log=log)
         except Exception as e:
             log("house audio: no pump output (%r)" % (e,))
             self.stream = None
