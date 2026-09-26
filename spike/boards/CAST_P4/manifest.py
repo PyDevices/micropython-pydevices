@@ -3,3 +3,4 @@
 # at the workspace root), plus the spike's encoder module.
 include("/home/brad/gh/pydevices/micropython-pydevices/manifests/kitchen-sink.py")
 c_module("$(BOARD_DIR)/../../h264enc")
+c_module("$(BOARD_DIR)/../../jpegdec")
