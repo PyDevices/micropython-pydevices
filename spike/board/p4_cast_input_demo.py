@@ -30,7 +30,7 @@ def log(*a):
 
 W, H = display_drv.width, display_drv.height
 uibc = UibcInput(W, H).install(board_config)      # an app cannot tell laptop from panel
-touch = Touch(board_config.touch_read)             # the adapters an appdev App would build
+touch = Touch(board_config.touch_read, display=display_drv)   # the adapters an appdev App would build
 keypad = Keypad(board_config.keypad_read)
 dots = []
 typed = []
