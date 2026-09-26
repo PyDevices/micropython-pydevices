@@ -27,6 +27,7 @@ class CastifStreamer:
         self.seconds = seconds
         self.t0 = time.ticks_ms()
         self.done = False
+        self.idle_poll = True   # the C task streams; the Session loop can block, not spin
         cast.start(fb, dst_ip, dst_port, server_port)
         log("castif task -> %s:%d from :%d" % (dst_ip, dst_port, server_port))
 

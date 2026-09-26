@@ -227,7 +227,12 @@ class Session:
                     dp = time.ticks_diff(time.ticks_ms(), tp)
                     if dp > 500:
                         log("slow pump: %d ms" % dp)
-                    timeout = 0
+                    # A Python pump has to be called back often, so it busy-polls.
+                    # A streamer that does its own streaming (castif, on core 0)
+                    # sets idle_poll: then this loop blocks in poll() instead of
+                    # spinning, and hands the GIL to the app it is meant to keep
+                    # out of the way of.
+                    timeout = 50 if getattr(streamer, "idle_poll", False) else 0
                 else:
                     timeout = 200
                 tq = time.ticks_ms()
