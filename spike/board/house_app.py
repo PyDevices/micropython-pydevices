@@ -29,15 +29,16 @@ async def painter(hub, audio, state):
     while True:
         snap = hub.snapshot()
         items = []
-        for name in hp.SimHouse.ROOMS:
+        panel_rooms, all_rooms = hp.room_list(snap)   # real nodes (the FunHouse) take the first cards
+        for name in all_rooms:
             node = snap["nodes"].get(name)
             cur = hp.latest(node["series"]) if node else {}
             items += hp.alerts_for(name, cur)
         keys = set(k for k, _ in items)
         if keys - prev:
-            audio.chime_now()
+            audio.chime_now(feeding=state["casting"])
         prev = keys
-        hp.draw_panel(snap, [t for _, t in items], state["casting"], "house")
+        hp.draw_panel(snap, [t for _, t in items], state["casting"], "house", panel_rooms)
         # SHOW-TV touch button toggles the cast (the RokuScreen is made on first use)
         try:
             pts = touch_read()
@@ -58,7 +59,8 @@ async def painter(hub, audio, state):
                     tv.stop_cast()
                     state["casting"] = False
                 else:
-                    state["casting"] = bool(tv.start_cast(fb, audio=audio.block, seconds=3600))
+                    # the castif C task streams (core 0); the audio feed shares the chime's speaker stream
+                    state["casting"] = bool(tv.start_cast(fb, audio=audio.cast_feed(), seconds=3600))
         # a full redraw holds the GIL ~0.2 s; yield generously so the hub server stays responsive
         await asyncio.sleep(0.8)
 

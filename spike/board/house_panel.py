@@ -109,8 +109,22 @@ class SimHouse:
 # --------------------------------------------------------------------------
 # Thresholds -> alerts.
 # --------------------------------------------------------------------------
+_KEYS = {"temperature": "temp", "pir": "motion", "hum": "humidity", "lux": "light"}
+
+
 def latest(series):
-    return {k: (v[-1] if v else 0) for k, v in series.items()}
+    """The newest value per series, under the panel's names (a real node may
+    say temperature or pir; the sim and the dashboard say temp and motion)."""
+    return {_KEYS.get(k, k): (v[-1] if v else 0) for k, v in series.items()}
+
+
+def room_list(snap):
+    """(rooms on the panel, all rooms): real nodes first, then the simulated
+    rooms fill the four card slots; alerts run over every room."""
+    nodes = snap["nodes"]
+    real = sorted(n for n, e in nodes.items() if e.get("via") != "sim")
+    rooms = real + [r for r in SimHouse.ROOMS if r not in real]
+    return rooms[:4], rooms
 
 
 def alerts_for(node, cur):
@@ -165,11 +179,19 @@ class HouseAudio:
             log("house audio: no pump output (%r)" % (e,))
             self.stream = None
 
-    def chime_now(self):
-        # burst the chime into the pump so the P4 speaker sounds it whether or
-        # not a cast is running, and arm it for the cast's block source.
+    def cast_feed(self, log=print):
+        """The cast's audio producer: block() paced by the clock, into this
+        stream (the speaker) and the cast alike. One producer, two listeners."""
+        from castfast import PumpFeed
+        return PumpFeed(self.block, stream=self.stream, log=log)
+
+    def chime_now(self, feeding=False):
+        # arm the chime for block(); with a cast feeding the speaker from
+        # block() that is all it takes, otherwise burst it into the pump here
         self.pos = 0
         s = self.stream
+        if feeding:
+            return
         if s is not None:
             for blk in self.chime:
                 try:
@@ -203,10 +225,7 @@ class HouseAudio:
 # --------------------------------------------------------------------------
 CARD_W = 344
 CARD_H = 250
-CARDS = {
-    "living": (16, 168), "bedroom": (360, 168),
-    "kitchen": (16, 430), "bath": (360, 430),
-}
+SLOTS = ((16, 168), (360, 168), (16, 430), (360, 430))   # four card slots, row-major
 CAST_BTN = (W - 214, 18, 196, 64)
 
 
@@ -214,8 +233,8 @@ def in_rect(x, y, r):
     return r[0] <= x <= r[0] + r[2] and r[1] <= y <= r[1] + r[3]
 
 
-def draw_card(name, cur, alert):
-    x, y = CARDS[name]
+def draw_card(name, cur, alert, slot=0):
+    x, y = SLOTS[slot]
     edge = WARN if alert else CARD
     display_drv.fill_rect(x, y, CARD_W, CARD_H, CARD)
     display_drv.fill_rect(x, y, CARD_W, 6, edge)
@@ -234,7 +253,7 @@ def draw_card(name, cur, alert):
         big_text("MOVE", x + CARD_W - 108, y + 195, 3, 0x0000)
 
 
-def draw_panel(snap, alert_texts, casting, hubname):
+def draw_panel(snap, alert_texts, casting, hubname, rooms=None):
     display_drv.fill(BG)
     display_drv.fill_rect(0, 0, W, 96, rgb(18, 22, 34))
     big_text("PyDevices House", 16, 30, 4, INK)
@@ -249,10 +268,12 @@ def draw_panel(snap, alert_texts, casting, hubname):
     else:
         display_drv.fill_rect(0, 104, W, 56, rgb(18, 40, 28))
         big_text("all rooms nominal", 12, 118, 3, OK)
-    for name in SimHouse.ROOMS:
+    if rooms is None:
+        rooms = room_list(snap)[0]
+    for slot, name in enumerate(rooms[:4]):
         node = snap["nodes"].get(name)
         cur = latest(node["series"]) if node else {}
-        draw_card(name, cur, bool(alerts_for(name, cur)))
+        draw_card(name, cur, bool(alerts_for(name, cur)), slot)
     # the DSI panel samples the framebuffer only on refresh: without this the
     # glass keeps whatever it last showed while the cast (same buffer) moves on
     display_drv.show()
@@ -288,7 +309,8 @@ def run(seconds=0, auto_cast_after=0, log=print):
                 hub.ingest(line, "sim")
         snap = hub.snapshot()
         items = []
-        for name in SimHouse.ROOMS:
+        panel_rooms, all_rooms = room_list(snap)
+        for name in all_rooms:
             node = snap["nodes"].get(name)
             cur = latest(node["series"]) if node else {}
             items += alerts_for(name, cur)
@@ -306,7 +328,7 @@ def run(seconds=0, auto_cast_after=0, log=print):
         draw_ms = 1000 if casting else 250
         if ticks_diff(now, last_draw) >= draw_ms:
             last_draw = now
-            draw_panel(snap, texts, casting, hub.name)
+            draw_panel(snap, texts, casting, hub.name, panel_rooms)
 
         # touch: toggle the cast (debounced)
         try:
