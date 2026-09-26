@@ -8,7 +8,7 @@ from roku_cast import RokuScreen
 from pumpcast import PumpCast
 
 TV = "192.168.1.129"
-SECONDS = 30
+SECONDS = 90   # the Python cast path takes up to 40 s to foreground on the Roku
 LOG = open("/cast/roku_pumpcast.log", "w")
 T0 = time.ticks_ms()
 
@@ -44,8 +44,18 @@ except Exception as e:
 log("building melody...")
 pc = PumpCast(log=log)
 log("melody: %d blocks, %d bytes" % (pc.frames // 480, pc.total))
+try:
+    import board_peripherals as bp
+    bp.audio_power(True, volume=85)      # the panel's listening level
+    log("P4 codec at 85 %")
+except Exception as e:
+    log("codec volume not set:", e)
 tv = RokuScreen(TV, name="PyDevices P4", log=log)
 tv.on()
+TV_UP = 11                               # the TV sat at volume 1; bring it to about 12
+if TV_UP:
+    tv.volume_up(TV_UP)
+    log("TV volume +%d" % TV_UP)
 log("casting the melody %d s" % SECONDS)
 try:
     result = tv.cast(fb, scene=Scene(), seconds=SECONDS, audio=pc.block)
