@@ -252,6 +252,9 @@ def draw_panel(snap, alert_texts, casting, hubname):
         node = snap["nodes"].get(name)
         cur = latest(node["series"]) if node else {}
         draw_card(name, cur, bool(alerts_for(name, cur)))
+    # the DSI panel samples the framebuffer only on refresh: without this the
+    # glass keeps whatever it last showed while the cast (same buffer) moves on
+    display_drv.show()
 
 
 # --------------------------------------------------------------------------
