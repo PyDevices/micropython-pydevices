@@ -35,6 +35,7 @@ class LiveStreamer:
         self.out = bytearray(cw * ch // 2)
         self.mv = memoryview(self.out)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # rebind at once on a back-to-back start
         self.sock.bind(("0.0.0.0", server_port))
         self.rtp = RtpOut(self.sock, (dst_ip, dst_port))
         # audio: None; "silence"; a tone amplitude (16 is -66 dBFS inaudible,
