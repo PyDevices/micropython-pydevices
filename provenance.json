@@ -40,6 +40,9 @@
   },
   "0013-micropython-windows-read-piped-stdin-in-the-repl.patch": {
    "sha256": "7eaa2034dcaf86b30910daceb9ce704dfe49ed06a361ac066b1f674e26367954"
+  },
+  "0014-micropython-esp32-tinyusb-0.21.patch": {
+   "sha256": "7fe43ea3525b2c9edb80041c6588300110d8319d8bff41040133d7177b9bf14a"
   }
  }
 }
