@@ -204,6 +204,18 @@ class Session:
         last_keepalive = time.ticks_ms()
         deadline = time.ticks_add(time.ticks_ms(), seconds * 1000)
         done_at = None
+
+        def send_m3(r):
+            # Wi-Fi Display M3 (GET_PARAMETER) is valid only once BOTH our M1
+            # OPTIONS has been answered AND we have answered the sink's own M2
+            # OPTIONS. Windows tolerates M3 straight after M1; the Roku returns
+            # 455 "Method Not Valid In This State" unless M2 has completed, so
+            # gate the request on both conditions.
+            if r.m1_ok and r.m2_done and not r.m3_sent:
+                r.m3_sent = True
+                r.request("GET_PARAMETER", "rtsp://localhost/wfd1.0", "M3",
+                          body="wfd_content_protection\r\nwfd_video_formats\r\nwfd_audio_codecs\r\nwfd_client_rtp_ports\r\nwfd_uibc_capability\r\n")
+
         try:
             while time.ticks_diff(deadline, time.ticks_ms()) > 0:
                 if streamer and not streamer.done:
@@ -238,6 +250,7 @@ class Session:
                         log("RTSP client connected from", addr)
                         conn.setblocking(False)
                         r = Rtsp(conn, log)
+                        r.m1_ok = r.m2_done = r.m3_sent = False
                         poller.register(conn, select.POLLIN)
                         r.request("OPTIONS", "*", "M1", extra="Require: org.wfa.wfd1.0\r\n")
                     elif obj is uls:
@@ -278,8 +291,8 @@ class Session:
                                 label = r.pending.pop(headers.get("cseq", ""), "?")
                                 ok = " 200 " in first
                                 if label == "M1" and ok:
-                                    r.request("GET_PARAMETER", "rtsp://localhost/wfd1.0", "M3",
-                                              body="wfd_content_protection\r\nwfd_video_formats\r\nwfd_audio_codecs\r\nwfd_client_rtp_ports\r\nwfd_uibc_capability\r\n")
+                                    r.m1_ok = True
+                                    send_m3(r)
                                 elif label == "M3" and ok:
                                     sink_params = parse_params(body)
                                     ports = sink_params.get("wfd_client_rtp_ports", "RTP/AVP/UDP;unicast 1028 0 mode=play")
@@ -307,6 +320,8 @@ class Session:
                             cseq = headers.get("cseq", "0")
                             if method == "OPTIONS":
                                 r.respond(cseq, extra="Public: org.wfa.wfd1.0, SETUP, TEARDOWN, PLAY, PAUSE, GET_PARAMETER, SET_PARAMETER\r\n")
+                                r.m2_done = True
+                                send_m3(r)
                             elif method == "SETUP":
                                 port = None
                                 for tok in headers.get("transport", "").split(";"):
