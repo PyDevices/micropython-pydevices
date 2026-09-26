@@ -1,12 +1,15 @@
-# castfast.py -- cast with the castif C task (Phase 1).
+# castfast.py -- cast with the castif C task (Phases 1 and 2).
 #
 # Same MICE + RTSP session as micecast, but on PLAY the streaming loop is the
 # castif FreeRTOS task on core 0 instead of a Python pump: the Python side only
-# answers RTSP keepalives and forwards keyframe requests. Video only for now
-# (Phase 1); sound is Phase 2.
+# answers RTSP keepalives, forwards keyframe requests, steps an optional scene
+# and keeps the sound moving. Sound (Phase 2): a PumpFeed keeps the audio
+# pump's stream topped up from a block source and hands the cast the same
+# 10 ms blocks; the task muxes them as LPCM on the video's clock.
 #
 #   import castfast
-#   castfast.cast(fb, "192.168.1.129", 720, 720, seconds=60)   # to a Roku
+#   castfast.cast(fb, "192.168.1.129", 720, 720, seconds=60)   # to a Roku, silent
+#   castfast.cast(fb, "192.168.1.129", 720, 720, audio=feed)   # feed = castfast.PumpFeed(source)
 #
 # The sink is chosen the same way as roku_cast: session_request=0 for the Roku,
 # None for Windows.
@@ -17,15 +20,81 @@ from micecast import Session
 import castif
 
 
+BLOCK_BYTES = 1920          # 10 ms of 48 kHz stereo s16
+
+
+class PumpFeed:
+    """The one producer for both listeners: the P4's speaker (the pump) and the cast.
+
+    ``source()`` returns the next 10 ms block, 1920 bytes of 48 kHz stereo
+    16-bit *big-endian* PCM (what LPCM over Miracast wants; the pump stream
+    takes the same bytes). ``pump()`` writes blocks into the pump's stream
+    while it has room, so production is paced by the I2S clock, and feeds each
+    block to the cast as it goes. Blocks the cast could not take (its ring
+    full) are counted in ``full``.
+    """
+
+    def __init__(self, source, stream=None, log=print):
+        self.source = source
+        self.stream = stream
+        self.cast = None
+        self.fed = 0
+        self.full = 0
+        self.log = log
+        if stream is None:
+            try:
+                from audiodev import pump, AudioFormat
+                self.stream = pump.attach_stream(AudioFormat(48000, 2, 16), capacity=32)
+                log("pumpfeed: pump stream attached (%d bytes free)" % self.stream.space())
+            except Exception as e:
+                log("pumpfeed: no pump stream (%r); the cast gets the audio, the speaker does not" % (e,))
+                self.stream = None
+
+    def pump(self, limit=12):
+        s = self.stream
+        c = self.cast
+        n = 0
+        if s is None:
+            # no speaker: pace on the cast ring instead (keep ~40 blocks queued)
+            while c is not None and n < limit and c.stats()["audio_level"] < 40:
+                if not c.feed_audio(self.source()):
+                    self.full += 1
+                    break
+                self.fed += 1
+                n += 1
+            return n
+        while n < limit and s.space() >= BLOCK_BYTES:
+            b = self.source()
+            s.write(b)
+            if c is not None:
+                if c.feed_audio(b):
+                    self.fed += 1
+                else:
+                    self.full += 1
+            n += 1
+        return n
+
+    def close(self):
+        if self.stream is not None:
+            try:
+                self.stream.deinit()
+            except Exception:
+                pass
+            self.stream = None
+
+
 class CastifStreamer:
     """Adapts the castif task to the micecast streamer interface (pump/done/
     force_idr/close) so micecast.Session drives it unchanged."""
 
-    def __init__(self, cast, fb, dst_ip, dst_port, server_port, seconds, log, scene=None):
+    def __init__(self, cast, fb, dst_ip, dst_port, server_port, seconds, log, scene=None, audio=None):
         self.cast = cast
         self.log = log
         self.seconds = seconds
         self.scene = scene          # stepped from pump(): input polling and drawing stay in Python
+        self.audio = audio          # a PumpFeed, or None for a silent cast
+        if audio is not None:
+            audio.cast = cast
         self.t0 = time.ticks_ms()
         self.done = False
         self.idle_poll = True   # the C task streams; the Session loop can block, not spin
@@ -35,15 +104,22 @@ class CastifStreamer:
     def pump(self, budget_us):
         # the C task does the streaming; here we step the scene (if any), enforce
         # the duration and surface a stats line every few seconds
+        if self.audio is not None:
+            self.audio.pump()
         if self.scene:
             self.scene.step()
         now = time.ticks_ms()
         if now - getattr(self, "_beat", 0) > 3000:
             self._beat = now
             s = self.cast.stats()
-            self.log("castif: %d frames, %.1f fps, %d sent, %d stalls, enc %d us, ppa %d us, mux %d us, %d B/f" % (
+            line = "castif: %d frames, %.1f fps, %d sent, %d stalls, enc %d us, ppa %d us, mux %d us, %d B/f" % (
                 s["frames"], s["fps"] / 1000.0, s["sent"], s["stalls"],
-                s["enc_us"], s["ppa_us"], s["mux_us"], s["length"]))
+                s["enc_us"], s["ppa_us"], s["mux_us"], s["length"])
+            if self.audio is not None and "audio_fed" in s:
+                line += " | audio fed %d muxed %d level %d underruns %d drift %d ms ins %d drop %d ringfull %d" % (
+                    s["audio_fed"], s["audio_muxed"], s["audio_level"], s["audio_underruns"],
+                    s["audio_drift_ms"], s["audio_inserted"], s["audio_dropped"], self.audio.full)
+            self.log(line)
         if self.seconds and time.ticks_diff(now, self.t0) > self.seconds * 1000:
             self.done = True
 
@@ -57,17 +133,20 @@ class CastifStreamer:
             s["frames"], s["fps"] / 1000.0, s["sent"], s["stalls"]))
 
 
-def make_caster(w, h, canvas=(1280, 720), fps=30, bitrate=3_000_000):
-    """A reusable castif.Cast (the encoder + PPA are set up once)."""
+def make_caster(w, h, canvas=(1280, 720), fps=30, bitrate=3_000_000, audio=False):
+    """A reusable castif.Cast (the encoder + PPA are set up once); audio=True adds the LPCM ring."""
+    if audio:
+        return castif.Cast(w, h, canvas_w=canvas[0], canvas_h=canvas[1], fps=fps, bitrate=bitrate, audio=True)
     return castif.Cast(w, h, canvas_w=canvas[0], canvas_h=canvas[1], fps=fps, bitrate=bitrate)
 
 
 def cast(fb, sink_ip, w, h, canvas=(1280, 720), fps=30, bitrate=3_000_000,
-         seconds=60, session_request=0, name="PyDevices P4", log=print, cast_obj=None):
-    c = cast_obj or make_caster(w, h, canvas=canvas, fps=fps, bitrate=bitrate)
+         seconds=60, session_request=0, name="PyDevices P4", log=print, cast_obj=None,
+         scene=None, audio=None):
+    c = cast_obj or make_caster(w, h, canvas=canvas, fps=fps, bitrate=bitrate, audio=audio is not None)
 
     def make(dst_ip, dst_port, server_port):
-        return CastifStreamer(c, fb, dst_ip, dst_port, server_port, seconds, log)
+        return CastifStreamer(c, fb, dst_ip, dst_port, server_port, seconds, log, scene=scene, audio=audio)
 
     s = Session(sink_ip, name=name, log=log)
     s.session_request = session_request
