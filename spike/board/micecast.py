@@ -86,11 +86,19 @@ class Rtsp:
         self.send_raw(msg + "\r\n" + body)
 
 
+GENERIC_IE = {0: "touch_down", 1: "touch_up", 2: "touch_move", 3: "key_down", 4: "key_up", 5: "zoom", 6: "vscroll", 7: "hscroll", 8: "rotate"}
+HID_TYPES = {0: "keyboard", 1: "mouse", 2: "single_touch", 3: "multi_touch", 4: "joystick", 5: "camera", 6: "gesture", 7: "remote"}
+
+
 class Session:
     def __init__(self, sink_ip, name="PyDevices P4", source_id=b"PyDevicesP4cast!", rtsp_port=7236,
                  server_port=15550, video_m4="28 00 01 01 00000020 00000000 00000000 00 0000 0000 11 none none",
-                 audio_m4="LPCM 00000002 00", log=print):
+                 audio_m4="LPCM 00000002 00", log=print, uibc_port=7239, on_input=None):
         self.sink = sink_ip
+        self.uibc_port = uibc_port
+        self.on_input = on_input
+        self.uibc_packets = 0
+        self.sink_uibc = None
         self.name = name
         self.source_id = source_id
         self.rtsp_port = rtsp_port
@@ -100,6 +108,56 @@ class Session:
         self.log = log
         self.idr_requests = 0
         self.streamer = None
+
+    def _uibc_packet(self, p):
+        """One UIBC packet: header (version/timestamp flag, category, length), then
+        either generic input events or an HID report. Logs the first packets raw."""
+        self.uibc_packets += 1
+        if self.uibc_packets <= 12:
+            self.log("UIBC raw:", p.hex())
+        cat = p[1] & 0x0F
+        off = 4
+        if p[0] & 0x10:
+            off += 2   # timestamp present
+        body = p[off:]
+        if cat == 0:
+            i = 0
+            while i + 3 <= len(body):
+                ie = body[i]
+                n = (body[i + 1] << 8) | body[i + 2]
+                d = body[i + 3:i + 3 + n]
+                i += 3 + n
+                kind = GENERIC_IE.get(ie, "ie%d" % ie)
+                if ie in (0, 1, 2) and len(d) >= 6:
+                    pts = []
+                    for k in range(d[0]):
+                        o = 1 + k * 5
+                        if o + 5 <= len(d):
+                            pts.append((d[o], (d[o + 1] << 8) | d[o + 2], (d[o + 3] << 8) | d[o + 4]))
+                    self._input(kind, pts)
+                elif ie in (3, 4) and len(d) >= 5:
+                    self._input(kind, ((d[1] << 8) | d[2], (d[3] << 8) | d[4]))
+                else:
+                    self._input(kind, d)
+        elif cat == 1 and len(body) >= 5:
+            # input path (1 = USB), HID type, report type, length, then the report.
+            # Windows sends the report descriptors first (report type 1), then reports.
+            hid_type = HID_TYPES.get(body[1], "hid%d" % body[1])
+            report_type = body[2]
+            n = (body[3] << 8) | body[4]
+            report = body[5:5 + n]
+            self._input("hid_" + hid_type + ("_descriptor" if report_type == 1 else ""), report)
+        else:
+            self._input("uibc_cat%d" % cat, body)
+
+    def _input(self, kind, data):
+        if self.uibc_packets <= 40 or self.uibc_packets % 200 == 0:
+            self.log("UIBC %d: %s %s" % (self.uibc_packets, kind, data if not isinstance(data, (bytes, bytearray)) else data.hex()))
+        if self.on_input:
+            try:
+                self.on_input(kind, data)
+            except Exception as e:
+                self.log("on_input:", repr(e))
 
     def run(self, make_streamer, seconds=3600, idle_after_done=3):
         log = self.log
@@ -121,9 +179,16 @@ class Session:
         ready = mice_msg(1, [tlv(0, utf16(self.name)), tlv(2, struct.pack(">H", self.rtsp_port)), tlv(3, self.source_id)])
         mc.write(ready)
         log("MICE >>> Source Ready to", self.sink)
+        uls = socket.socket()
+        uls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        uls.bind(("0.0.0.0", self.uibc_port))
+        uls.listen(1)
+        uconn = None
+        ubuf = b""
         poller = select.poll()
         poller.register(mc, select.POLLIN)
         poller.register(ls, select.POLLIN)
+        poller.register(uls, select.POLLIN)
         r = conn = None
         streamer = None
         sink_params = {}
@@ -166,6 +231,30 @@ class Session:
                         r = Rtsp(conn, log)
                         poller.register(conn, select.POLLIN)
                         r.request("OPTIONS", "*", "M1", extra="Require: org.wfa.wfd1.0\r\n")
+                    elif obj is uls:
+                        uconn, uaddr = uls.accept()
+                        uconn.setblocking(False)
+                        poller.register(uconn, select.POLLIN)
+                        log("UIBC: sink connected from", uaddr)
+                    elif obj is uconn:
+                        try:
+                            d = uconn.recv(512)
+                        except OSError:
+                            d = None
+                        if not d:
+                            log("UIBC: closed")
+                            poller.unregister(uconn)
+                            uconn = None
+                        else:
+                            ubuf += d
+                            while len(ubuf) >= 4:
+                                plen = (ubuf[2] << 8) | ubuf[3]
+                                if plen < 4 or len(ubuf) < plen:
+                                    if plen < 4:
+                                        log("UIBC: bad length", ubuf[:8].hex()); ubuf = b""
+                                    break
+                                self._uibc_packet(ubuf[:plen])
+                                ubuf = ubuf[plen:]
                     elif obj is conn:
                         if not r.feed():
                             log("RTSP closed by sink")
@@ -181,13 +270,23 @@ class Session:
                                 ok = " 200 " in first
                                 if label == "M1" and ok:
                                     r.request("GET_PARAMETER", "rtsp://localhost/wfd1.0", "M3",
-                                              body="wfd_content_protection\r\nwfd_video_formats\r\nwfd_audio_codecs\r\nwfd_client_rtp_ports\r\n")
+                                              body="wfd_content_protection\r\nwfd_video_formats\r\nwfd_audio_codecs\r\nwfd_client_rtp_ports\r\nwfd_uibc_capability\r\n")
                                 elif label == "M3" and ok:
                                     sink_params = parse_params(body)
                                     ports = sink_params.get("wfd_client_rtp_ports", "RTP/AVP/UDP;unicast 1028 0 mode=play")
+                                    self.sink_uibc = sink_params.get("wfd_uibc_capability")
                                     m4 = ("wfd_video_formats: %s\r\n" % self.video_m4 + "wfd_audio_codecs: %s\r\n" % self.audio_m4 +
                                           "wfd_presentation_URL: rtsp://%s/wfd1.0/streamid=0 none\r\n" % my_ip +
                                           "wfd_client_rtp_ports: %s\r\n" % ports)
+                                    if self.sink_uibc and self.sink_uibc != "none":
+                                        # Windows' receiver offers HID reports only (HIDC); take that when
+                                        # it's there, generic events otherwise
+                                        if "HIDC" in self.sink_uibc:
+                                            m4 += ("wfd_uibc_capability: input_category_list=HIDC;generic_cap_list=none;"
+                                                   "hidc_cap_list=Keyboard/USB, Mouse/USB;port=%d\r\n" % self.uibc_port)
+                                        else:
+                                            m4 += ("wfd_uibc_capability: input_category_list=GENERIC;generic_cap_list=Mouse, Keyboard, SingleTouch;"
+                                                   "hidc_cap_list=none;port=%d\r\n" % self.uibc_port)
                                     r.request("SET_PARAMETER", "rtsp://localhost/wfd1.0", "M4", body=m4)
                                 elif label == "M4" and ok:
                                     r.request("SET_PARAMETER", "rtsp://localhost/wfd1.0", "M5", body="wfd_trigger_method: SETUP\r\n")
@@ -215,6 +314,9 @@ class Session:
                                     streamer = make_streamer(addr[0], r.client_port, self.server_port)
                                     self.streamer = streamer
                                     last_keepalive = time.ticks_ms()
+                                if self.sink_uibc and self.sink_uibc != "none":
+                                    r.request("SET_PARAMETER", "rtsp://localhost/wfd1.0", "M14", extra="Session: %s\r\n" % r.session,
+                                              body="wfd_uibc_setting: enable\r\n")
                             elif method == "TEARDOWN":
                                 r.respond(cseq, extra="Session: %s\r\n" % r.session)
                                 log("sink tore down")
@@ -245,9 +347,10 @@ class Session:
                 log("stop:", e)
             if streamer:
                 streamer.close()
-            for s in (conn, mc, ls):
+            for s in (conn, mc, ls, uls, uconn):
                 try:
-                    s.close()
+                    if s:
+                        s.close()
                 except Exception:
                     pass
             log("session closed, %d IDR requests" % self.idr_requests)
