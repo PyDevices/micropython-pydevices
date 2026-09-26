@@ -97,6 +97,8 @@ class Session:
         self.sink = sink_ip
         self.uibc_port = uibc_port
         self.on_input = on_input
+        self.hidc_caps = "Keyboard/USB, Mouse/USB"
+        self.session_request = None   # None, or a Security Options byte to send a Session Request first
         self.uibc_packets = 0
         self.sink_uibc = None
         self.name = name
@@ -176,7 +178,14 @@ class Session:
         mc.settimeout(10)
         mc.connect((self.sink, MICE_PORT))
         mc.setblocking(False)
-        ready = mice_msg(1, [tlv(0, utf16(self.name)), tlv(2, struct.pack(">H", self.rtsp_port)), tlv(3, self.source_id)])
+        if self.session_request is not None:
+            sreq = mice_msg(4, [tlv(0, utf16(self.name)), tlv(3, self.source_id), tlv(5, bytes([self.session_request]))])
+            mc.write(sreq)
+            log("MICE >>> Session Request (security options %d) to %s" % (self.session_request, self.sink))
+            time.sleep_ms(500)
+            ready = mice_msg(1, [tlv(2, struct.pack(">H", self.rtsp_port)), tlv(3, self.source_id)])
+        else:
+            ready = mice_msg(1, [tlv(0, utf16(self.name)), tlv(2, struct.pack(">H", self.rtsp_port)), tlv(3, self.source_id)])
         mc.write(ready)
         log("MICE >>> Source Ready to", self.sink)
         uls = socket.socket()
@@ -283,7 +292,7 @@ class Session:
                                         # it's there, generic events otherwise
                                         if "HIDC" in self.sink_uibc:
                                             m4 += ("wfd_uibc_capability: input_category_list=HIDC;generic_cap_list=none;"
-                                                   "hidc_cap_list=Keyboard/USB, Mouse/USB;port=%d\r\n" % self.uibc_port)
+                                                   "hidc_cap_list=%s;port=%d\r\n" % (self.hidc_caps, self.uibc_port))
                                         else:
                                             m4 += ("wfd_uibc_capability: input_category_list=GENERIC;generic_cap_list=Mouse, Keyboard, SingleTouch;"
                                                    "hidc_cap_list=none;port=%d\r\n" % self.uibc_port)
