@@ -228,8 +228,10 @@ class RtpOut:
             try:
                 self.sock.sendto(self.mv[:end], self.addr)
                 break
-            except OSError:
+            except OSError as e:
                 self.stalls += 1
+                if self.stalls <= 3 or self.stalls % 1000 == 0:
+                    print("rtp send stall", self.stalls, e)
                 if self.stalls > 100000:
                     raise
                 try:

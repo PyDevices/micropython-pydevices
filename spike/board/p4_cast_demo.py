@@ -23,6 +23,10 @@ def log(*a):
 
 env_set("SPECTRUM_SOURCE", "fake")
 import spectrum
+# The meter's timer ticks land between the cast loop's bytecodes; at its full
+# rate they starve the Python packetizer (3 ms became 10 s a frame). Until the
+# cast runs as a C task, the meter gets 10 fps here.
+spectrum.FRAME_MS = 100
 spectrum.start()          # half the bands, bottom half of the panel, fake music
 log("spectrum meter started")
 gc.collect()

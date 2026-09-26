@@ -133,11 +133,20 @@ class Session:
         try:
             while time.ticks_diff(deadline, time.ticks_ms()) > 0:
                 if streamer and not streamer.done:
+                    tp = time.ticks_ms()
                     streamer.pump(4000)
+                    dp = time.ticks_diff(time.ticks_ms(), tp)
+                    if dp > 500:
+                        log("slow pump: %d ms" % dp)
                     timeout = 0
                 else:
                     timeout = 200
-                for obj, ev in poller.poll(timeout):
+                tq = time.ticks_ms()
+                events = poller.poll(timeout)
+                dq = time.ticks_diff(time.ticks_ms(), tq)
+                if dq > 500:
+                    log("slow poll: %d ms (timeout %d)" % (dq, timeout))
+                for obj, ev in events:
                     if obj is mc:
                         try:
                             d = mc.recv(256)

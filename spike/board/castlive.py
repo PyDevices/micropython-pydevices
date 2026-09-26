@@ -36,7 +36,11 @@ class LiveStreamer:
         log("live: %dx%d in %dx%d at %d fps, %d bps, to %s:%d from %d" % (fb.width, fb.height, cw, ch, fps, bitrate, dst_ip, dst_port, server_port))
 
     def pump(self, budget_us):
+        self.pumps = getattr(self, "pumps", 0) + 1
         now = time.ticks_diff(time.ticks_us(), self.t0)
+        if now - getattr(self, "last_beat", 0) > 3000000:
+            self.last_beat = now
+            self.log("beat: %d pumps, %d frames, next in %d us, %d stalls" % (self.pumps, self.frames, self.next_us - now, self.rtp.stalls))
         if now >= self.end_us:
             self.done = True
             self.report(now)
@@ -52,6 +56,8 @@ class LiveStreamer:
         t1 = time.ticks_us()
         n = self.enc.encode(self.fb, self.out)
         t2 = time.ticks_us()
+        if self.frames == 0:
+            self.log("first frame: %d bytes, type %d, convert %d us, encode %d us" % (n, self.enc.frame_type, self.enc.ppa_us, self.enc.us))
         pts = 90000 + now * 9 // 100
         key = self.enc.frame_type == 0
         if key:
@@ -60,6 +66,8 @@ class LiveStreamer:
         self.rtp.ts90 = pts - PCR_LEAD
         self.rtp.flush()
         t3 = time.ticks_us()
+        if self.frames < 6:
+            self.log("frame %d steps: draw %d, encode %d (convert %d), mux+send %d us" % (self.frames, time.ticks_diff(t1, t), time.ticks_diff(t2, t1), self.enc.ppa_us, time.ticks_diff(t3, t2)))
         self.frames += 1
         self.draw_us += time.ticks_diff(t1, t)
         e = time.ticks_diff(t2, t1)
@@ -69,7 +77,7 @@ class LiveStreamer:
             self.max_enc = e
         self.mux_us += time.ticks_diff(t3, t2)
         self.bytes += n
-        if self.frames % 150 == 0:
+        if self.frames % 60 == 0:
             self.report(now)
 
     def report(self, now):
