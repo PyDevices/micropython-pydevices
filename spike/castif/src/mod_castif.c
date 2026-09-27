@@ -568,6 +568,7 @@ static mp_obj_t castif_make_new(const mp_obj_type_t *type, size_t n_args, size_t
     self->sock = -1;
     self->w = w; self->h = h; self->cw = cw; self->ch = ch;
     self->new_bitrate = -1;
+    self->max_skip_us = 500000;   // static UIs: >=2 fps floor; set_skip(0) turns it off
     self->frame_us = 1000000 / args[ARG_fps].u_int;
     self->in_len = (uint32_t)cw * ch * 3 / 2;
 
@@ -654,7 +655,6 @@ static mp_obj_t castif_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
     self->next_audio_us = 0;
     self->audio_fed = self->audio_muxed = self->audio_underruns = 0;
     self->audio_inserted = self->audio_dropped = 0;
-    if (self->max_skip_us == 0) self->max_skip_us = 500000;   // static UIs: >=2 fps floor
     // pin the framebuffer object so the GC does not move/free it while the task reads it
     // (a bytearray/Display buffer is long-lived; we also keep fb_obj referenced).
     xTaskCreatePinnedToCore(cast_task, "cast", 6144, self, 18, &self->task, 0);
