@@ -14,4 +14,5 @@ applies one; `--check` verifies applicability without touching the tree.
 | `esp32-audio` | 0010 | |
 | `esp32-webrepl` | 0011 | |
 | `esp32-tinyusb` | 0014 | |
+| `esp32-timer` | 0016 | |
 | `vst3-engine` | 0002 | |

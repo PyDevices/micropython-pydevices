@@ -46,6 +46,9 @@
   },
   "0015-micropython-windows-timing-module-and-idle-console.patch": {
    "sha256": "77ce5f8b4a0745bf4764e3b47255b023a335209c649c60400f335ec2f11ae30a"
+  },
+  "0016-micropython-esp32-machine-timer-fire-during-reinit.patch": {
+   "sha256": "f47080be47249c3e5076aab89c57073b57a437fe0bf77f96e8a8bfe52cc86780"
   }
  }
 }
