@@ -26,6 +26,7 @@ try:
     w = network.WLAN(network.STA_IF)
     if not w.isconnected():
         wifi.connect_from_secrets()
+    w.config(pm=network.WLAN.PM_NONE)      # as micecast does for a session: no power-save latency
     log("Wi-Fi", w.ifconfig()[0], "rssi", w.status("rssi"))
 except Exception as e:
     log("wifi error", e)
