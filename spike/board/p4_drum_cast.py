@@ -9,7 +9,7 @@
 #
 # The drum machine's module runs its app loop at import, so the cast is
 # started first (a thread) and the app then owns the main thread.
-import sys, time
+import gc, sys, time
 sys.path.insert(0, "/cast")
 sys.path.insert(0, "/lib/examples")
 
@@ -76,16 +76,22 @@ else:
                 if el // 5000 > beat:
                     beat = el // 5000
                     s = cast.stats()
-                    log("castif: %d f %.1f fps | fed %d muxed %d level %d under %d drift %d ins %d drop %d rejoin %d | tap %d lapped %d full %d | py gap %d ms" % (
+                    log("castif: %d f %.1f fps | fed %d muxed %d level %d under %d drift %d ins %d drop %d rejoin %d | tap %d lapped %d full %d | py gap %d ms heap %d/%d" % (
                         s["frames"], s["fps"] / 1000.0, s["audio_fed"], s["audio_muxed"],
                         s["audio_level"], s["audio_underruns"], s["audio_drift_ms"], s["audio_inserted"],
                         s["audio_dropped"], s.get("audio_rejoins", -1), s.get("tap_bytes", feed.in_bytes),
-                        s.get("tap_lapped", feed.lapped), s.get("tap_full", feed.full), worst))
+                        s.get("tap_lapped", feed.lapped), s.get("tap_full", feed.full), worst,
+                        gc.mem_alloc(), gc.mem_free()))
                     worst = 0
                     if beat % 12 == 0:
                         log("rssi", w.status("rssi"))
                 time.sleep_ms(25)
         finally:
+            # one collection timed with the app still loaded: the size of the pause
+            # every automatic collection imposes on everything Python does
+            a0 = gc.mem_alloc(); t = time.ticks_us(); gc.collect()
+            log("gc.collect with the app loaded: %d ms, alloc %d -> %d, free %d, threshold %s" % (
+                time.ticks_diff(time.ticks_us(), t) // 1000, a0, gc.mem_alloc(), gc.mem_free(), gc.threshold()))
             s = cast.stats()
             cast.stop()
             log("done: %d frames, fed %d muxed %d under %d ins %d drop %d rejoin %d tap %d lapped %d full %d" % (
