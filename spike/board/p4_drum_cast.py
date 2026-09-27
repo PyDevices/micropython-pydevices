@@ -76,11 +76,12 @@ else:
                 if el // 5000 > beat:
                     beat = el // 5000
                     s = cast.stats()
-                    log("castif: %d f %.1f fps | fed %d muxed %d level %d under %d drift %d ins %d drop %d rejoin %d | tap %d lapped %d full %d | py gap %d ms heap %d/%d" % (
+                    log("castif: %d f %.1f fps | fed %d muxed %d level %d under %d drift %d ins %d drop %d rejoin %d | tap %d lapped %d full %d | %d Hz stack %d | py gap %d ms heap %d/%d" % (
                         s["frames"], s["fps"] / 1000.0, s["audio_fed"], s["audio_muxed"],
                         s["audio_level"], s["audio_underruns"], s["audio_drift_ms"], s["audio_inserted"],
                         s["audio_dropped"], s.get("audio_rejoins", -1), s.get("tap_bytes", feed.in_bytes),
-                        s.get("tap_lapped", feed.lapped), s.get("tap_full", feed.full), worst,
+                        s.get("tap_lapped", feed.lapped), s.get("tap_full", feed.full), s.get("tap_hz", 0),
+                        s.get("stack_free", -1), worst,
                         gc.mem_alloc(), gc.mem_free()))
                     worst = 0
                     if beat % 12 == 0:
