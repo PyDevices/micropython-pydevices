@@ -390,7 +390,19 @@ static const uint8_t SILENCE[A_BLOCK] = {0};
 static void drain_audio(castif_obj_t *c, uint32_t pts) {
     while (c->a_tail != c->a_head) {
         uint32_t i = c->a_tail % A_BLOCKS;
-        if (c->apts == 0) { c->apts = pts; c->drift = 0; c->drift_ref_set = false; }
+        if (c->apts == 0) {
+            // The track starts so that the NEWEST waiting block carries the
+            // clock time it was fed: a feeder that runs a few blocks ahead
+            // (a burst at start, a lead after) then labels each block with
+            // its production time, and a sound the app makes at T plays
+            // beside the frame captured at T. Starting at the tick's PTS
+            // instead put the audio a lead behind the picture (measured
+            // +110 ms, 2026-09-27).
+            uint32_t count = c->a_head - c->a_tail;
+            uint32_t newest = c->a_stamp[(c->a_head - 1) % A_BLOCKS];
+            c->apts = newest - 900 * (count - 1);
+            c->drift = 0; c->drift_ref_set = false;
+        }
         int32_t d = (int32_t)(c->a_stamp[i] - c->apts);   // + : the track sits behind the clock
         c->drift += (d - c->drift) / 64;
         if (!c->drift_ref_set) {
