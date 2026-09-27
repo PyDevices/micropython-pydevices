@@ -31,7 +31,8 @@ def pts_of(b, off):
 def analyse(path):
     first_ns = None
     seq_prev = None
-    seq_gaps = 0
+    seq_gaps = 0          # datagrams missing (forward jumps)
+    seq_reorder = 0       # datagrams that arrived after a later one
     pkts = 0
     pcr_samples = []      # (wall_s, pcr_s)
     video_pts = []        # (wall_s, pts_s)
@@ -46,8 +47,13 @@ def analyse(path):
         if len(dg) < 12 or (dg[0] >> 6) != 2:
             continue
         seq = (dg[2] << 8) | dg[3]
-        if seq_prev is not None and ((seq - seq_prev) & 0xFFFF) != 1:
-            seq_gaps += ((seq - seq_prev) & 0xFFFF) - 1
+        if seq_prev is not None:
+            d = (seq - seq_prev) & 0xFFFF
+            if d == 0 or d > 32768:
+                seq_reorder += 1          # late or duplicate: do not move the expectation
+                continue
+            if d != 1:
+                seq_gaps += d - 1
         seq_prev = seq
         pkts += 1
         body = dg[12:]
@@ -83,8 +89,21 @@ def analyse(path):
                     pes_buf[pid][0] += payload
     for pid, prev in pes_buf.items():
         finish(pid, prev, video_pts, audio_pts)
-    return dict(pkts=pkts, seq_gaps=seq_gaps, cc_errors=cc_errors, pcr=pcr_samples,
+    return dict(pkts=pkts, seq_gaps=seq_gaps, seq_reorder=seq_reorder, cc_errors=cc_errors, pcr=pcr_samples,
                 video=video_pts, audio=audio_pts, wall_end=wall)
+
+
+def slope(pairs):
+    """Least-squares slope of y against x over (x, y) pairs: a rate that jitter
+    at the two ends cannot fake, unlike last-minus-first."""
+    n = len(pairs)
+    if n < 3:
+        return 0.0
+    mx = sum(x for x, _ in pairs) / n
+    my = sum(y for _, y in pairs) / n
+    sxx = sum((x - mx) ** 2 for x, _ in pairs)
+    sxy = sum((x - mx) * (y - my) for x, y in pairs)
+    return sxy / sxx if sxx else 0.0
 
 
 def finish(pid, entry, video_pts, audio_pts):
@@ -102,7 +121,7 @@ def finish(pid, entry, video_pts, audio_pts):
 
 
 def report(r):
-    print("RTP datagrams %d, sequence gaps %d (lost datagrams), continuity errors %d" % (r["pkts"], r["seq_gaps"], r["cc_errors"]))
+    print("RTP datagrams %d, lost %d, reordered %d, TS continuity errors %d" % (r["pkts"], r["seq_gaps"], r["seq_reorder"], r["cc_errors"]))
     v, a, pcr = r["video"], r["audio"], r["pcr"]
     print("video frames %d, audio blocks %d, capture %.1f s" % (len(v), len(a), r["wall_end"]))
     if not a or not v:
@@ -122,15 +141,16 @@ def report(r):
     if span > 5:
         total = sum(n for _, _, n in a)
         print("audio bytes/wall-s %.0f (192000 is real time): %.4f x" % (total / span, total / span / 192000.0))
-        # PTS advance vs wall advance
-        print("audio PTS advance / wall advance: %.5f" % ((a[-1][1] - a[0][1]) / span))
+        # the audio clock against the PC's clock: a regression over every block
+        k = slope([(w, p) for w, p, _ in a])
+        print("audio PTS rate vs wall clock (regression): %.6f  (%+.0f ppm; jitter at the ends cannot fake this)" % (k, (k - 1) * 1e6))
     # PCR vs arrival
     if len(pcr) > 10:
         offs = [w - p for w, p in pcr]
-        base = offs[0]
-        drift = offs[-1] - base
+        base = min(offs)                      # the earliest-arriving sample: the least delayed path
+        kp = slope(pcr)                       # PCR advance per wall second
         jit = max(offs) - min(offs)
-        print("PCR: %d samples, arrival-minus-PCR drift over capture %+.1f ms, spread %.0f ms" % (len(pcr), drift * 1000, jit * 1000))
+        print("PCR: %d samples, PCR rate vs wall clock %.6f (%+.0f ppm), arrival delay spread %.0f ms" % (len(pcr), kp, (kp - 1) * 1e6, jit * 1000))
         # worst late arrival vs a 400 ms presentation lead (the sink's buffer)
         late = [o - base for o in offs]
         print("  worst late arrival %+.0f ms (a sink with a 400 ms lead starves past +400)" % (max(late) * 1000))

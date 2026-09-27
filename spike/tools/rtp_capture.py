@@ -11,7 +11,11 @@ out = sys.argv[1]
 port = int(sys.argv[2]) if len(sys.argv) > 2 else 5004
 seconds = float(sys.argv[3]) if len(sys.argv) > 3 else 120
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+# a deep receive buffer: the stream arrives in bursts and a default 64 KB
+# socket buffer drops datagrams here, which would read as link loss
+s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8 * 1024 * 1024)
 s.bind(("0.0.0.0", port))
+print("receive buffer", s.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF), flush=True)
 s.settimeout(1.0)
 n = 0
 first = None
