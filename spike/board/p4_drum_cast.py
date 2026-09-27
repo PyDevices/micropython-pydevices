@@ -14,6 +14,10 @@ sys.path.insert(0, "/cast")
 sys.path.insert(0, "/lib/examples")
 
 MODE = "tv"
+try:                       # /cast/drum_mode.txt overrides: "tv" or "capture"
+    MODE = open("/cast/drum_mode.txt").read().strip() or MODE
+except OSError:
+    pass
 TV = "192.168.1.129"
 PC = "192.168.1.143"
 SECONDS = 150 if MODE == "tv" else 630
@@ -78,6 +82,27 @@ else:
             LOG.flush()
 
     _thread.start_new_thread(pumper, ())
+
+# In capture mode nobody is at the panel, so PLAY is pressed for the run:
+# a thread waits for the app object, then schedules the press onto the main
+# thread (LVGL is not thread-safe).
+if MODE == "capture":
+    import _thread, micropython
+
+    def press_play(_):
+        import lvgl as lv
+        dm = sys.modules["drum_machine"].machine
+        dm.play_btn.add_state(lv.STATE.CHECKED)
+        dm._on_play(None)
+        log("PLAY pressed")
+
+    def autoplay():
+        while getattr(sys.modules.get("drum_machine"), "machine", None) is None:
+            time.sleep_ms(200)
+        time.sleep_ms(3000)
+        micropython.schedule(press_play, None)
+
+    _thread.start_new_thread(autoplay, ())
 
 log("starting the drum machine")
 import drum_machine    # noqa: E402  runs app.run(): the LVGL app owns the main thread from here
