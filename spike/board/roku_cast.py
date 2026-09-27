@@ -121,7 +121,9 @@ class RokuScreen:
             c.set_skip(skip_ms)          # 0: every frame, for a UI whose small changes the sampled hash misses
         feed = None
         if want_audio:
-            feed = audio if isinstance(audio, castfast.PumpFeed) else castfast.PumpFeed(audio, log=self.log)
+            # a feed (PumpFeed, TapFeed: anything with pump()) is used as is; a
+            # bare block source gets a PumpFeed around it
+            feed = audio if hasattr(audio, "pump") else castfast.PumpFeed(audio, log=self.log)
 
         def make(dst_ip, dst_port, server_port):
             return castfast.CastifStreamer(c, fb, dst_ip, dst_port, server_port, seconds, self.log,
@@ -144,6 +146,12 @@ class RokuScreen:
         import _thread
         self._stop = False
         self._casting = True
+        # the default thread stack is small: a session that opens the pump's
+        # driver from here hit "maximum recursion depth exceeded" (2026-09-27)
+        try:
+            _thread.stack_size(32 * 1024)
+        except Exception:
+            pass
 
         def run():
             try:
