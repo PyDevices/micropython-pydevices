@@ -30,6 +30,7 @@ def pts_of(b, off):
 
 def analyse(path):
     first_ns = None
+    wall = 0.0
     seq_prev = None
     seq_gaps = 0          # datagrams missing (forward jumps)
     seq_reorder = 0       # datagrams that arrived after a later one
@@ -121,6 +122,9 @@ def finish(pid, entry, video_pts, audio_pts):
 
 
 def report(r):
+    if not r["pkts"]:
+        print("empty capture: no RTP datagrams arrived")
+        return
     print("RTP datagrams %d, lost %d, reordered %d, TS continuity errors %d" % (r["pkts"], r["seq_gaps"], r["seq_reorder"], r["cc_errors"]))
     v, a, pcr = r["video"], r["audio"], r["pcr"]
     print("video frames %d, audio blocks %d, capture %.1f s" % (len(v), len(a), r["wall_end"]))
