@@ -127,6 +127,7 @@ typedef struct _castif_obj_t {
     uint32_t rs_nominal;                  // the step at the tap's nominal rate
     int64_t rs_t0, rs_last;               // the measurement window, and the last data seen
     uint64_t rs_frames;                   // input frames in the window
+    int64_t rs_i;                         // the integral trim, in step units (1/2^24)
     volatile uint32_t tap_rate_x256;      // measured input rate, Hz * 256
     uint32_t since_anchor;                // blocks muxed since the track was (re)anchored
     volatile uint32_t audio_rejoins;
@@ -495,8 +496,10 @@ static inline void acc_frame(castif_obj_t *c, int32_t l, int32_t r, int64_t t_us
 
 // The input rate, measured against esp_timer over a window that restarts
 // after any gap, sets the step; the drift the pacer sees (stamp vs track)
-// trims it by 0.1 % per 10 ms, so the track stays on the clock without
-// padding. Clamped to 1 % of nominal.
+// trims it, proportionally (0.1 % per 10 ms) and by an integral that grows
+// 0.01 %/s per 10 ms, so a bias in the measured rate settles to zero drift
+// rather than to a standing offset (a proportional trim alone crept to the
+// 20 ms pad limit in 80 s, 2026-09-27). Clamped to 1 % of nominal.
 static void rs_update(castif_obj_t *c, uint32_t frames, int64_t now) {
     if (c->rs_t0 == 0 || now - c->rs_last > 200000) {
         c->rs_t0 = now; c->rs_frames = 0;
@@ -513,7 +516,11 @@ static void rs_update(castif_obj_t *c, uint32_t frames, int64_t now) {
     int64_t st = (int64_t)step;
     if (c->drift_ref_set) {
         int32_t off = c->drift - c->drift_ref;          // 90 kHz ticks; + = the track is behind
-        st -= st * off / 900000;
+        int64_t lim = (int64_t)c->rs_nominal / 200;     // the integral holds at most 0.5 %
+        c->rs_i -= st * off / 900000000;                // once per poll, ~100 polls a second
+        if (c->rs_i > lim) c->rs_i = lim;
+        if (c->rs_i < -lim) c->rs_i = -lim;
+        st += c->rs_i - st * off / 900000;
     }
     int64_t lo = (int64_t)c->rs_nominal * 99 / 100, hi = (int64_t)c->rs_nominal * 101 / 100;
     if (st < lo) st = lo;
@@ -787,7 +794,7 @@ static mp_obj_t castif_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
     self->since_anchor = 0; self->audio_rejoins = 0;
     self->tap_bytes = self->tap_lapped = self->tap_full = 0;
     self->acc_n = 0; self->tap_prev_l = self->tap_prev_r = 0;
-    self->rs_phase = 0; self->rs_t0 = 0; self->rs_step = self->rs_nominal;
+    self->rs_phase = 0; self->rs_t0 = 0; self->rs_step = self->rs_nominal; self->rs_i = 0;
     if (self->tap != MP_OBJ_NULL) self->tap_cursor = audiopump_tap_position(self->tap);
     // pin the framebuffer object so the GC does not move/free it while the task reads it
     // (a bytearray/Display buffer is long-lived; we also keep fb_obj referenced).
@@ -883,7 +890,7 @@ static mp_obj_t castif_set_tap(size_t n_args, const mp_obj_t *args) {
     __sync_synchronize();
     self->tap_rate = rate; self->tap_ch = ch; self->tap_frame = ch * 2;
     self->rs_nominal = self->rs_step = (uint32_t)(((uint64_t)rate << 24) / 48000);
-    self->rs_phase = 0; self->rs_t0 = 0;
+    self->rs_phase = 0; self->rs_t0 = 0; self->rs_i = 0;
     self->acc_n = 0; self->tap_prev_l = self->tap_prev_r = 0;
     self->tap_cursor = audiopump_tap_position(args[1]);
     __sync_synchronize();
@@ -937,6 +944,7 @@ static mp_obj_t castif_stats(mp_obj_t self_in) {
     PUT(MP_QSTR_tap_lapped, self->tap_lapped);
     PUT(MP_QSTR_tap_full, self->tap_full);
     PUT(MP_QSTR_tap_hz, self->tap_rate_x256 / 256);
+    PUT(MP_QSTR_trim_ppm, self->rs_nominal ? (int)(self->rs_i * 1000000 / self->rs_nominal) : 0);
     PUT(MP_QSTR_stack_free, self->task ? (int)uxTaskGetStackHighWaterMark(self->task) : -1);
     // how far the audio track has moved against the wall clock since it settled, ms (+ = early)
     PUT(MP_QSTR_audio_drift_ms, self->drift_ref_set ? (self->drift - self->drift_ref) / 90 : 0);
