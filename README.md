@@ -12,17 +12,19 @@ model, preset selection, and upstream-boundary rules.
 ## Layout
 
 - `UPSTREAM` — the upstream MicroPython release this series applies to.
-- `patches/` — the ordered mailbox series (`0001-…` to `0014-…`): Windows
+- `patches/` — the ordered mailbox series (`0001-…` to `0016-…`): Windows
   networking/sockets/select/SSL, Windows FFI, desktop scheduler depth, the
   WebAssembly set (Asyncify, node hooks, soft reinitialization, jsffi across
   reinit, lexer EOF), the esp32s3 `SPIRAM_OCT_DEBUG` variant, esp32
   `machine.I2S` MCLK (`mck=`), esp32 WebREPL Ctrl-C in loops that
   never wait, a variant-settable default GC heap for the desktop ports,
-  piped stdin for the Windows REPL (`micropython.exe -i`), and TinyUSB 0.21
-  for the esp32 port.
+  piped stdin for the Windows REPL (`micropython.exe -i`), TinyUSB 0.21
+  for the esp32 port, the Windows `_timing` module, and an esp32
+  `machine.Timer` that no longer calls NULL when it fires while `init()`
+  re-arms it.
 - `profiles/` — named subsets: `windows-networked`, `windows-full`,
   `desktop-pydevices`, `webassembly-pydevices`, `esp32-s3-debug`,
-  `esp32-audio`, `esp32-webrepl`, `esp32-tinyusb`, and `vst3-engine` (`*.series` = ordered
+  `esp32-audio`, `esp32-webrepl`, `esp32-tinyusb`, `esp32-timer`, and `vst3-engine` (`*.series` = ordered
   patch numbers).
   They matter only when you call `apply.sh` yourself:
   `tools/prepare-micropython.sh` applies every patch regardless.

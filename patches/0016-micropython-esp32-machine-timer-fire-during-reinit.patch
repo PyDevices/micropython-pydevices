@@ -1,0 +1,127 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sun, 27 Sep 2026 00:00:00 -0500
+Subject: [PATCH] esp32: a machine.Timer that fires while it is re-initialised
+ must not call NULL.
+
+Re-arming a one-shot machine.Timer(-1) from Python, over and over, reboots
+an ESP32-P4 within seconds: "Guru Meditation Error: Core 0 panic'ed
+(Instruction access fault)", MEPC 0x00000000, with machine_timer_isr_virtual
+on the stack. It also crashed an ESP32-S3 (micropython-pydevices#14).
+
+A virtual timer's callback runs on the esp_timer task, pinned to core 0,
+while the interpreter runs on core 1. esp_timer drops its list lock before
+it calls a callback (components/esp_timer/src/esp_timer.c:434-435 in
+ESP-IDF v5.5.4), so esp_timer_stop() returns while a callback that has
+already been dispatched is still to run. Timer.init() on a running timer
+calls machine_timer_deinit(), which stops the timer and sets self->handler
+to NULL, and only sets the handler again after the arguments are parsed.
+A dispatched callback that reads self->handler in that gap calls NULL. The
+hardware ISR has the same unchecked call, and deinit() has the same gap
+for handler_ctx (a handler read before deinit, a callback read after it).
+
+Three changes:
+
+- Both callbacks read the handler once and return when it is NULL, and the
+  scheduling handler returns when handler_ctx is NULL. A fire in flight
+  during deinit() is dropped, as it would have been had it come a moment
+  later.
+- init() on a running timer stops it instead of deinitialising it, so the
+  handler is never NULL on the way to being replaced. configure() already
+  tolerates an enabled gptimer and a virtual timer already on the list.
+- init() sets handler_ctx before the handler.
+
+A fire that was dispatched just before init() may still deliver the old
+callback once. That is the same thing that happens when the fire comes just
+before init() is called, and it is a Python call, not a crash.
+
+Proven on an ESP32-P4 (Waveshare ESP32-P4-WIFI6-Touch-LCD-4B, pre-rev-3):
+a loop that re-inits a one-shot Timer(-1) with period=1 every 0.7-1.3 ms
+panics in under 2 s without this patch and runs 60 s (32693 fires) with it;
+a timing library re-arming one timer from timer callbacks and the main loop
+panics within a second without it and runs 10 minutes (288667 wakes) with
+it.
+
+Based-on: micropython 0fd6c573e (tag v1.29.0)
+---
+diff --git a/ports/esp32/machine_timer.c b/ports/esp32/machine_timer.c
+index a41f006..a6ff4b9 100644
+--- a/ports/esp32/machine_timer.c
++++ b/ports/esp32/machine_timer.c
+@@ -60,19 +60,33 @@ uint32_t machine_timer_freq_hz(machine_timer_obj_t *self) {
+     return 1000000;
+ }
+ 
++// A fire can be in flight while the timer is being deinitialised: a virtual
++// timer's callback runs on the esp_timer task, on the other core from the
++// interpreter, and esp_timer_stop() does not wait for a callback that has
++// already been dispatched; a hardware alarm can already be pending. So the
++// callbacks read the handler once and do nothing when it is NULL.
++
+ static bool machine_timer_isr_hardware(gptimer_handle_t timer, const gptimer_alarm_event_data_t *event_data, void *self_in) {
+     machine_timer_obj_t *self = self_in;
+-    return self->handler(self);
++    bool (*handler)(machine_timer_obj_t *) = self->handler;
++    if (handler == NULL) {
++        return false;
++    }
++    return handler(self);
+ }
+ 
+ static void machine_timer_isr_virtual(void *self_in) {
+     machine_timer_obj_t *self = self_in;
++    bool (*handler)(machine_timer_obj_t *) = self->handler;
++    if (handler == NULL) {
++        return;
++    }
+     if (self->repeat) {
+         self->virtual_started = esp_timer_get_time();
+     } else {
+         self->virtual_stopped = esp_timer_get_time();
+     }
+-    if (self->handler(self)) {
++    if (handler(self)) {
+         #if CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD
+         esp_timer_isr_dispatch_need_yield();
+         #endif
+@@ -80,7 +94,11 @@ static void machine_timer_isr_virtual(void *self_in) {
+ }
+ 
+ static bool machine_timer_handler(machine_timer_obj_t *self) {
+-    mp_sched_schedule(self->handler_ctx, self);
++    mp_obj_t callback = self->handler_ctx;
++    if (callback == MP_OBJ_NULL) {
++        return false;
++    }
++    mp_sched_schedule(callback, self);
+     mp_hal_wake_main_task_from_isr();
+     // Above function already yields, thus we return false
+     // so the timer ISR doesn't needlessly yield again
+@@ -267,10 +285,12 @@ static mp_obj_t machine_timer_init_helper(machine_timer_obj_t *self, mp_uint_t n
+         { MP_QSTR_hard,         MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
+     };
+ 
+-    // If previously initialized, indicated by a handler being set, first deinitialize
+-    // (Deiniting is always safe, but needlessly prints an error if already deinited)
++    // If previously initialized, indicated by a handler being set, first stop it.
++    // Not a full deinit: that clears the handler, and a fire already in flight
++    // would find it NULL. The handler and callback are replaced below, before
++    // the timer is started again.
+     if (self->handler != NULL) {
+-        machine_timer_deinit(self);
++        machine_timer_stop(self);
+     }
+ 
+     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+@@ -295,8 +315,10 @@ static mp_obj_t machine_timer_init_helper(machine_timer_obj_t *self, mp_uint_t n
+ 
+     self->repeat = args[ARG_mode].u_int;
+ 
+-    self->handler = machine_timer_handler;
++    // The callback before the handler, so a fire that sees the handler also
++    // sees a callback.
+     self->handler_ctx = args[ARG_callback].u_obj;
++    self->handler = machine_timer_handler;
+ 
+     machine_timer_configure(self);
+     machine_timer_start(self);
