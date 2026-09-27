@@ -116,6 +116,71 @@ class PumpFeed:
             self.stream = None
 
 
+class TapFeed:
+    """The cast's audio from the pump's OUTPUT: whatever the P4 plays, the
+    cast gets, an app's pulled graph included (the drum machine).
+
+    ``audiopump.Tap`` is a lossy window of the last bytes the pump produced;
+    reading it as a stream means asking for exactly the bytes written since
+    the last read (``stats()[0]`` is the write counter), so nothing repeats.
+    The tap is sized for the session loop's 50 ms cadence with room to spare.
+    The pump's own clock paces production, so no lead and no time pacing
+    here; each block is stamped when read (at most one poll late).
+    """
+
+    def __init__(self, frames=16384, log=print):
+        from audiodev import pump
+        mod = pump.module()
+        self.tap = mod.Tap(frames=frames, channel_count=2)
+        mod.tap(self.tap)
+        self.cap = self.tap.stats()[4]
+        self.cursor = self.tap.stats()[0]
+        self.buf = bytearray(self.cap)
+        self.mv = memoryview(self.buf)
+        self.carry = bytearray()          # a partial block between polls
+        self.cast = None
+        self.fed = 0
+        self.full = 0
+        self.lapped = 0                   # times the pump overwrote unread audio
+        self.log = log
+        log("tapfeed: pump tap of %d bytes" % self.cap)
+
+    def pump(self, limit=64):
+        w = self.tap.stats()[0]
+        new = (w - self.cursor) & 0xFFFFFFFF
+        if new == 0:
+            return 0
+        if new > self.cap:
+            self.lapped += 1
+            new = self.cap - (self.cap % 4)
+        new -= new % 4
+        got = self.tap.readinto(self.mv[:new])
+        self.cursor = w
+        if not got:
+            return 0
+        data = self.carry + self.mv[:got] if self.carry else self.mv[:got]
+        n = 0
+        pos = 0
+        c = self.cast
+        while pos + BLOCK_BYTES <= len(data) and n < limit:
+            if c is not None:
+                if c.feed_audio(data[pos:pos + BLOCK_BYTES]):
+                    self.fed += 1
+                else:
+                    self.full += 1
+            pos += BLOCK_BYTES
+            n += 1
+        self.carry = bytearray(data[pos:])
+        return n
+
+    def close(self):
+        try:
+            from audiodev import pump
+            pump.module().tap(None)
+        except Exception:
+            pass
+
+
 class CastifStreamer:
     """Adapts the castif task to the micecast streamer interface (pump/done/
     force_idr/close) so micecast.Session drives it unchanged."""
@@ -152,7 +217,10 @@ class CastifStreamer:
                 line += " | audio fed %d muxed %d level %d underruns %d drift %d ms ins %d drop %d ringfull %d" % (
                     s["audio_fed"], s["audio_muxed"], s["audio_level"], s["audio_underruns"],
                     s["audio_drift_ms"], s["audio_inserted"], s["audio_dropped"], self.audio.full)
-                line += " skipped %d" % self.audio.skipped
+                if hasattr(self.audio, "skipped"):
+                    line += " skipped %d" % self.audio.skipped
+                if hasattr(self.audio, "lapped"):
+                    line += " lapped %d" % self.audio.lapped
             self.log(line)
         if self.seconds and time.ticks_diff(now, self.t0) > self.seconds * 1000:
             self.done = True
