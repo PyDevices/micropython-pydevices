@@ -82,7 +82,7 @@ class RokuScreen:
 
     # --- cast (Miracast over Infrastructure) ---
     def cast(self, fb, scene=None, seconds=60, fps=30, bitrate=3_000_000, audio=None, stop=None,
-             engine="castif", size=(720, 720)):
+             engine="castif", size=(720, 720), skip_ms=None):
         """Mirror `fb` to the TV until `seconds` elapse or `stop()` returns True.
         Blocks until the cast ends.
 
@@ -93,7 +93,7 @@ class RokuScreen:
         a tone amplitude, (amplitude, hz), or a callable returning big-endian
         LPCM blocks."""
         if engine == "castif":
-            return self._cast_castif(fb, scene, seconds, fps, bitrate, audio, stop, size)
+            return self._cast_castif(fb, scene, seconds, fps, bitrate, audio, stop, size, skip_ms)
 
         def make(dst_ip, dst_port, server_port):
             return LiveStreamer(dst_ip, dst_port, server_port, fb, fps=fps,
@@ -105,7 +105,7 @@ class RokuScreen:
         self._session = s
         return s.run(make, seconds=seconds, idle_after_done=2, stop=stop)
 
-    def _cast_castif(self, fb, scene, seconds, fps, bitrate, audio, stop, size):
+    def _cast_castif(self, fb, scene, seconds, fps, bitrate, audio, stop, size, skip_ms=None):
         import castfast
         w, h = size
         want_audio = audio is not None
@@ -117,6 +117,8 @@ class RokuScreen:
                 c.close()
             c = self._caster = castfast.make_caster(w, h, fps=fps, bitrate=bitrate, audio=want_audio)
             self._caster_audio = want_audio
+        if skip_ms is not None:
+            c.set_skip(skip_ms)          # 0: every frame, for a UI whose small changes the sampled hash misses
         feed = None
         if want_audio:
             feed = audio if isinstance(audio, castfast.PumpFeed) else castfast.PumpFeed(audio, log=self.log)
@@ -135,7 +137,7 @@ class RokuScreen:
                 feed.close()
 
     # --- non-blocking cast, for a long-running app: start it, stop it later ---
-    def start_cast(self, fb, scene=None, seconds=3600, fps=30, bitrate=3_000_000, audio=None, engine="castif"):
+    def start_cast(self, fb, scene=None, seconds=3600, fps=30, bitrate=3_000_000, audio=None, engine="castif", skip_ms=None):
         """Cast in a background thread. Returns False if one is already running."""
         if getattr(self, "_casting", False):
             return False
@@ -146,7 +148,7 @@ class RokuScreen:
         def run():
             try:
                 self.cast(fb, scene=scene, seconds=seconds, fps=fps,
-                          bitrate=bitrate, audio=audio, stop=lambda: self._stop, engine=engine)
+                          bitrate=bitrate, audio=audio, stop=lambda: self._stop, engine=engine, skip_ms=skip_ms)
             except Exception as e:
                 self.log("cast thread:", repr(e))
             finally:
