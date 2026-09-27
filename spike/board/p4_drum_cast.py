@@ -21,13 +21,23 @@ except OSError:
 TV = "192.168.1.129"
 PC = "192.168.1.143"
 SECONDS = 150 if MODE == "tv" else 630
-LOG = open("/cast/drum_cast.log", "w")
 T0 = time.ticks_ms()
+# The log stays in RAM until the run ends: a flash write parks core 0 (cache
+# off on both cores), and each littlefs block erase every ~2 minutes cost the
+# cast 2.5 s of audio, then crashed the board once castif read the tap from
+# core 0 (2026-09-27). Nothing touches flash while the cast runs.
+LINES = []
 
 
 def log(*a):
     line = "[%6d] " % time.ticks_diff(time.ticks_ms(), T0) + " ".join(str(x) for x in a)
-    print(line); LOG.write(line + "\n"); LOG.flush()
+    print(line); LINES.append(line)
+
+
+def save_log():
+    with open("/cast/drum_cast.log", "w") as f:
+        for line in LINES:
+            f.write(line + "\n")
 
 
 try:
@@ -99,7 +109,7 @@ else:
                 s["frames"], s["audio_fed"], s["audio_muxed"], s["audio_underruns"], s["audio_inserted"],
                 s["audio_dropped"], s.get("audio_rejoins", -1), s.get("tap_bytes", feed.in_bytes),
                 s.get("tap_lapped", feed.lapped), s.get("tap_full", feed.full)))
-            LOG.flush()
+            save_log()
 
     _thread.start_new_thread(pumper, ())
 
