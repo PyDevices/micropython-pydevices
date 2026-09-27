@@ -66,24 +66,32 @@ else:
 
     def pumper():
         t0 = time.ticks_ms(); beat = 0
+        last = time.ticks_ms(); worst = 0     # the longest the interpreter held this thread off
         try:
             while time.ticks_diff(time.ticks_ms(), t0) < SECONDS * 1000:
                 feed.pump()
-                el = time.ticks_diff(time.ticks_ms(), t0)
+                now = time.ticks_ms()
+                worst = max(worst, time.ticks_diff(now, last)); last = now
+                el = time.ticks_diff(now, t0)
                 if el // 5000 > beat:
                     beat = el // 5000
                     s = cast.stats()
-                    log("castif: %d f %.1f fps %d sent %d stalls | fed %d muxed %d level %d under %d drift %d ins %d drop %d lapped %d ringfull %d in %d rssi %s" % (
-                        s["frames"], s["fps"] / 1000.0, s["sent"], s["stalls"], s["audio_fed"], s["audio_muxed"],
+                    log("castif: %d f %.1f fps | fed %d muxed %d level %d under %d drift %d ins %d drop %d rejoin %d | tap %d lapped %d full %d | py gap %d ms" % (
+                        s["frames"], s["fps"] / 1000.0, s["audio_fed"], s["audio_muxed"],
                         s["audio_level"], s["audio_underruns"], s["audio_drift_ms"], s["audio_inserted"],
-                        s["audio_dropped"], feed.lapped, feed.full, feed.in_bytes, w.status("rssi")))
+                        s["audio_dropped"], s.get("audio_rejoins", -1), s.get("tap_bytes", feed.in_bytes),
+                        s.get("tap_lapped", feed.lapped), s.get("tap_full", feed.full), worst))
+                    worst = 0
+                    if beat % 12 == 0:
+                        log("rssi", w.status("rssi"))
                 time.sleep_ms(25)
         finally:
             s = cast.stats()
             cast.stop()
-            log("done: %d frames, fed %d muxed %d under %d ins %d drop %d lapped %d" % (
+            log("done: %d frames, fed %d muxed %d under %d ins %d drop %d rejoin %d tap %d lapped %d full %d" % (
                 s["frames"], s["audio_fed"], s["audio_muxed"], s["audio_underruns"], s["audio_inserted"],
-                s["audio_dropped"], feed.lapped))
+                s["audio_dropped"], s.get("audio_rejoins", -1), s.get("tap_bytes", feed.in_bytes),
+                s.get("tap_lapped", feed.lapped), s.get("tap_full", feed.full)))
             LOG.flush()
 
     _thread.start_new_thread(pumper, ())

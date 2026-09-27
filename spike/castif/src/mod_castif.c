@@ -37,6 +37,15 @@
 #define AU_MAX    (256 * 1024)    // encoder output cap when out_size not given
 #define A_BLOCK   1920            // one 10 ms LPCM block: 480 frames * 4 bytes (48 kHz stereo s16)
 #define A_BLOCKS  64              // ring depth: 640 ms of audio
+#define TAP_CHUNK 4096            // bytes read from the pump's tap per call (85 ms of 24 kHz mono)
+#define REJOIN    9000            // a gap past 100 ms re-anchors the track rather than padding it
+
+// audiodsp's audiopump.Tap, read as a stream from this task (set_tap). The
+// firmware carries audiodsp; these are its C entry points (audiopump_tap.h).
+extern uint32_t audiopump_tap_position(mp_obj_t tap);
+extern uint32_t audiopump_tap_frame_bytes(mp_obj_t tap);
+extern uint32_t audiopump_tap_read_since(mp_obj_t tap, uint32_t *cursor,
+    uint8_t *dst, uint32_t max, bool *lapped);
 
 typedef struct _castif_obj_t {
     mp_obj_base_t base;
@@ -101,6 +110,18 @@ typedef struct _castif_obj_t {
     uint32_t sync_limit;                  // drop/insert past this (90 kHz ticks); 0 = measure only
     int64_t next_audio_us;                // when the next 10 ms block goes out (the pacer)
     volatile uint32_t audio_fed, audio_muxed, audio_underruns, audio_inserted, audio_dropped;
+    // the pump's output tap, read here in C (set_tap): no interpreter in the
+    // audio path, so a garbage collection that holds Python for seconds
+    // cannot starve the cast (it did, every ~3 minutes, 2026-09-27)
+    volatile mp_obj_t tap;
+    uint32_t tap_rate, tap_ch, tap_frame, tap_cursor;
+    int32_t tap_prev_l, tap_prev_r;
+    uint8_t *tap_in;                      // TAP_CHUNK bytes, SPIRAM
+    int16_t acc[A_BLOCK / 2];             // a 48 kHz stereo block being filled
+    uint32_t acc_n;                       // samples in acc
+    volatile uint32_t tap_bytes, tap_lapped, tap_full;
+    uint32_t since_anchor;                // blocks muxed since the track was (re)anchored
+    volatile uint32_t audio_rejoins;
     volatile uint32_t enc_us, ppa_us, mux_us, send_us;
     volatile uint32_t last_len;
     volatile int last_type;
@@ -402,12 +423,23 @@ static int drain_one(castif_obj_t *c) {
         uint32_t count = c->a_head - c->a_tail;
         uint32_t newest = c->a_stamp[(c->a_head - 1) % A_BLOCKS];
         c->apts = newest - 900 * (count - 1);
-        c->drift = 0; c->drift_ref_set = false;
+        c->drift = 0; c->drift_ref_set = false; c->since_anchor = 0;
     }
     int32_t d = (int32_t)(c->a_stamp[i] - c->apts);   // + : the track sits behind the clock
+    // A gap (the producer stopped, or the ring ran dry) leaves the track
+    // behind the clock by the gap's length. Padding that back 10 ms at a
+    // time at real-time pace never catches up, and the ring overflows
+    // meanwhile (measured: three 2.5 s gaps left the audio 5.6 s behind the
+    // picture for good). Past REJOIN, re-anchor on this block's stamp: the
+    // sink hears a gap, then audio beside its picture again.
+    if (d - (c->drift_ref_set ? c->drift_ref : 0) > REJOIN) {
+        c->apts = c->a_stamp[i];
+        d = 0; c->drift = 0; c->drift_ref_set = false; c->since_anchor = 0;
+        c->audio_rejoins++;
+    }
     c->drift += (d - c->drift) / 64;
     if (!c->drift_ref_set) {
-        if (c->audio_muxed >= 300) { c->drift_ref = c->drift; c->drift_ref_set = true; }
+        if (c->since_anchor >= 300) { c->drift_ref = c->drift; c->drift_ref_set = true; }
     } else if (c->sync_limit) {
         int32_t off = c->drift - c->drift_ref;
         if (off > (int32_t)c->sync_limit) {          // audio would play early: pad
@@ -421,8 +453,60 @@ static int drain_one(castif_obj_t *c) {
         }
     }
     mux_lpcm(c, c->audio_ring + i * A_BLOCK, c->apts);
-    c->a_tail++; c->apts += 900; c->audio_muxed++;
+    c->a_tail++; c->apts += 900; c->audio_muxed++; c->since_anchor++;
     return 1;
+}
+
+// One 48 kHz stereo block into the ring, stamped with the wall-clock time
+// (90 kHz) its first sample was produced.
+static void push_block(castif_obj_t *c, const uint8_t *blk, uint32_t stamp) {
+    if (c->a_head - c->a_tail >= A_BLOCKS) { c->tap_full++; return; }
+    uint32_t i = c->a_head % A_BLOCKS;
+    memcpy(c->audio_ring + i * A_BLOCK, blk, A_BLOCK);
+    c->a_stamp[i] = stamp;
+    __sync_synchronize();
+    c->a_head++;
+    c->audio_fed++;
+}
+
+static inline void acc_frame(castif_obj_t *c, int32_t l, int32_t r, int64_t t_us) {
+    c->acc[c->acc_n++] = (int16_t)l;
+    c->acc[c->acc_n++] = (int16_t)r;
+    if (c->acc_n == A_BLOCK / 2) {
+        c->acc_n = 0;
+        // t_us is when this, the block's LAST frame, was produced
+        uint32_t stamp = 90000 + (uint32_t)(((t_us - c->t0) * 9) / 100) - 900;
+        push_block(c, (const uint8_t *)c->acc, stamp);
+    }
+}
+
+// Everything the pump has played since the last call, as 48 kHz stereo
+// blocks. The newest byte in the tap went out about now; each earlier frame
+// is dated back from it at the tap's rate. 24 kHz is doubled with a midpoint.
+static void tap_poll(castif_obj_t *c, int64_t now) {
+    mp_obj_t tap = c->tap;
+    if (tap == MP_OBJ_NULL) return;
+    for (int round = 0; round < 8; round++) {
+        bool lapped = false;
+        uint32_t n = audiopump_tap_read_since(tap, &c->tap_cursor, c->tap_in, TAP_CHUNK, &lapped);
+        if (lapped) c->tap_lapped++;
+        if (n == 0) return;
+        c->tap_bytes += n;
+        uint32_t frames = n / c->tap_frame;
+        const int16_t *src = (const int16_t *)c->tap_in;
+        int64_t behind = (int64_t)(audiopump_tap_position(tap) - c->tap_cursor) / c->tap_frame;
+        for (uint32_t k = 0; k < frames; k++) {
+            int32_t l, r;
+            if (c->tap_ch == 1) { l = r = src[k]; } else { l = src[2 * k]; r = src[2 * k + 1]; }
+            int64_t t = now - ((int64_t)(frames - 1 - k) + behind) * 1000000 / c->tap_rate;
+            if (c->tap_rate == 24000) {
+                acc_frame(c, (c->tap_prev_l + l) >> 1, (c->tap_prev_r + r) >> 1, t - 1000000 / 48000);
+            }
+            acc_frame(c, l, r, t);
+            c->tap_prev_l = l; c->tap_prev_r = r;
+        }
+        if (n < TAP_CHUNK) return;
+    }
 }
 
 // The pacer: one block per 10 ms of wall clock, whatever the picture is
@@ -431,6 +515,7 @@ static int drain_one(castif_obj_t *c) {
 // PES packets rather than in bursts once per video tick (up to 60 ms at a
 // time at 16 fps), which is what a sink's clock recovery expects.
 static void pace_audio(castif_obj_t *c, int64_t now) {
+    tap_poll(c, now);
     if (c->a_tail == c->a_head) return;
     if (c->next_audio_us == 0) c->next_audio_us = now + 60000;
     if (now - c->next_audio_us > 300000) c->next_audio_us = now;   // a long gap: don't burst-chase
@@ -655,6 +740,10 @@ static mp_obj_t castif_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
     self->next_audio_us = 0;
     self->audio_fed = self->audio_muxed = self->audio_underruns = 0;
     self->audio_inserted = self->audio_dropped = 0;
+    self->since_anchor = 0; self->audio_rejoins = 0;
+    self->tap_bytes = self->tap_lapped = self->tap_full = 0;
+    self->acc_n = 0; self->tap_prev_l = self->tap_prev_r = 0;
+    if (self->tap != MP_OBJ_NULL) self->tap_cursor = audiopump_tap_position(self->tap);
     // pin the framebuffer object so the GC does not move/free it while the task reads it
     // (a bytearray/Display buffer is long-lived; we also keep fb_obj referenced).
     xTaskCreatePinnedToCore(cast_task, "cast", 6144, self, 18, &self->task, 0);
@@ -698,7 +787,7 @@ static mp_obj_t castif_feed_audio(mp_obj_t self_in, mp_obj_t block) {
     // one 10 ms block of 48 kHz stereo 16-bit little-endian PCM (the pump's own bytes) into the ring;
     // False when the ring is full (the caller is ahead of real time)
     castif_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (!self->audio_on) return mp_const_false;
+    if (!self->audio_on || self->tap != MP_OBJ_NULL) return mp_const_false;   // one producer per ring
     mp_buffer_info_t b;
     mp_get_buffer_raise(block, &b, MP_BUFFER_READ);
     if (b.len < A_BLOCK) mp_raise_ValueError(MP_ERROR_TEXT("audio block is 1920 bytes"));
@@ -719,6 +808,40 @@ static mp_obj_t castif_set_sync(mp_obj_t self_in, mp_obj_t ms) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(castif_set_sync_obj, castif_set_sync);
+
+// set_tap(tap, rate, channels): the audio track comes from an audiopump.Tap,
+// read by the cast task itself; set_tap(None) goes back to feed_audio().
+static mp_obj_t castif_set_tap(size_t n_args, const mp_obj_t *args) {
+    castif_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+    if (!self->audio_on) mp_raise_ValueError(MP_ERROR_TEXT("castif: made without audio=True"));
+    if (args[1] == mp_const_none) {
+        if (self->running) mp_raise_ValueError(MP_ERROR_TEXT("castif: stop() before removing the tap"));
+        self->tap = MP_OBJ_NULL;
+        return mp_const_none;
+    }
+    uint32_t rate = n_args > 2 ? (uint32_t)mp_obj_get_int(args[2]) : 48000;
+    uint32_t ch = n_args > 3 ? (uint32_t)mp_obj_get_int(args[3]) : 2;
+    if ((rate != 24000 && rate != 48000) || (ch != 1 && ch != 2)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("castif: tap must be 24 or 48 kHz, mono or stereo"));
+    }
+    if (audiopump_tap_frame_bytes(args[1]) != ch * 2) {
+        mp_raise_ValueError(MP_ERROR_TEXT("castif: tap channel_count differs"));
+    }
+    if (!self->tap_in) {
+        uint32_t got = 0;
+        self->tap_in = esp_h264_aligned_calloc(16, 1, TAP_CHUNK, &got, ESP_H264_MEM_SPIRAM);
+        if (!self->tap_in) mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("castif: tap buffer"));
+    }
+    self->tap = MP_OBJ_NULL;
+    __sync_synchronize();
+    self->tap_rate = rate; self->tap_ch = ch; self->tap_frame = ch * 2;
+    self->acc_n = 0; self->tap_prev_l = self->tap_prev_r = 0;
+    self->tap_cursor = audiopump_tap_position(args[1]);
+    __sync_synchronize();
+    self->tap = args[1];
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(castif_set_tap_obj, 2, 4, castif_set_tap);
 
 static mp_obj_t castif_mark_dirty(mp_obj_t self_in) {
     castif_obj_t *self = MP_OBJ_TO_PTR(self_in);
@@ -760,6 +883,10 @@ static mp_obj_t castif_stats(mp_obj_t self_in) {
     PUT(MP_QSTR_audio_level, self->a_head - self->a_tail);
     PUT(MP_QSTR_audio_inserted, self->audio_inserted);
     PUT(MP_QSTR_audio_dropped, self->audio_dropped);
+    PUT(MP_QSTR_audio_rejoins, self->audio_rejoins);
+    PUT(MP_QSTR_tap_bytes, self->tap_bytes);
+    PUT(MP_QSTR_tap_lapped, self->tap_lapped);
+    PUT(MP_QSTR_tap_full, self->tap_full);
     // how far the audio track has moved against the wall clock since it settled, ms (+ = early)
     PUT(MP_QSTR_audio_drift_ms, self->drift_ref_set ? (self->drift - self->drift_ref) / 90 : 0);
     PUT(MP_QSTR_enc_us, self->enc_us);
@@ -781,6 +908,8 @@ static mp_obj_t castif_close(mp_obj_t self_in) {
     if (self->yuv) { esp_h264_free(self->yuv); self->yuv = NULL; }
     if (self->out_buf) { esp_h264_free(self->out_buf); self->out_buf = NULL; }
     if (self->audio_ring) { esp_h264_free(self->audio_ring); self->audio_ring = NULL; }
+    if (self->tap_in) { esp_h264_free(self->tap_in); self->tap_in = NULL; }
+    self->tap = MP_OBJ_NULL;
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(castif_close_obj, castif_close);
@@ -795,6 +924,7 @@ static const mp_rom_map_elem_t castif_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_mark_dirty), MP_ROM_PTR(&castif_mark_dirty_obj) },
     { MP_ROM_QSTR(MP_QSTR_feed_audio), MP_ROM_PTR(&castif_feed_audio_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_sync), MP_ROM_PTR(&castif_set_sync_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_tap), MP_ROM_PTR(&castif_set_tap_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&castif_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&castif_close_obj) },
     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&castif_close_obj) },

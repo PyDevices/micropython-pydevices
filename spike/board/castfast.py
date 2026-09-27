@@ -208,6 +208,7 @@ class TapFeed:
         self.full = 0
         self.in_bytes = 0
         self.lapped = 0                   # times the pump overwrote unread audio
+        self.c_path = False
         self.log = log
         log("tapfeed: pump tap of %d bytes, %d Hz x%d in, 48000 Hz x2 out" % (self.cap, rate, channels))
 
@@ -224,6 +225,15 @@ class TapFeed:
         return memoryview(self.out)[:got * self.grow]
 
     def pump(self, limit=64):
+        c = self.cast
+        if self.c_path:
+            return 0                      # the cast task reads the tap itself
+        if c is not None and hasattr(c, "set_tap"):
+            # castif reads the tap in C: no interpreter in the audio path
+            c.set_tap(self.tap, self.rate, self.channels)
+            self.c_path = True
+            self.log("tapfeed: castif reads the tap in C")
+            return 0
         w = self.tap.stats()[0]
         new = (w - self.cursor) & 0xFFFFFFFF
         if new == 0:
