@@ -13,6 +13,7 @@
 #
 # The sink is chosen the same way as roku_cast: session_request=0 for the Roku,
 # None for Windows.
+import micropython
 import sys, time
 
 sys.path.insert(0, "/cast")
@@ -116,6 +117,56 @@ class PumpFeed:
             self.stream = None
 
 
+# Rate/channel conversion for TapFeed, in viper: 10 ms of 24 kHz mono is
+# 240 samples, too many for a bytecode loop on every poll. ptr16 reads come
+# back unsigned, so each sample is sign-extended before the midpoint.
+@micropython.viper
+def _up_mono24(src: ptr16, n: int, dst: ptr16, prev: int) -> int:
+    p = prev
+    for i in range(n):
+        s = int(src[i])
+        if s > 32767:
+            s -= 65536
+        m = (p + s) >> 1
+        j = i * 4
+        dst[j] = m
+        dst[j + 1] = m
+        dst[j + 2] = s
+        dst[j + 3] = s
+        p = s
+    return p
+
+
+@micropython.viper
+def _up_stereo24(src: ptr16, frames: int, dst: ptr16, prev: int) -> int:
+    # prev packs the last frame: left in the low 16 bits, right above
+    pl = (prev << 16) >> 16
+    pr = prev >> 16
+    for i in range(frames):
+        l = int(src[2 * i])
+        r = int(src[2 * i + 1])
+        if l > 32767:
+            l -= 65536
+        if r > 32767:
+            r -= 65536
+        j = i * 4
+        dst[j] = (pl + l) >> 1
+        dst[j + 1] = (pr + r) >> 1
+        dst[j + 2] = l
+        dst[j + 3] = r
+        pl = l
+        pr = r
+    return (pl & 0xFFFF) | (pr << 16)
+
+
+@micropython.viper
+def _spread_mono(src: ptr16, n: int, dst: ptr16):
+    for i in range(n):
+        s = src[i]
+        dst[2 * i] = s
+        dst[2 * i + 1] = s
+
+
 class TapFeed:
     """The cast's audio from the pump's OUTPUT: whatever the P4 plays, the
     cast gets, an app's pulled graph included (the drum machine).
@@ -126,24 +177,51 @@ class TapFeed:
     The tap is sized for the session loop's 50 ms cadence with room to spare.
     The pump's own clock paces production, so no lead and no time pacing
     here; each block is stamped when read (at most one poll late).
+
+    The cast carries 48 kHz stereo (the only LPCM a sink takes), and the
+    pump runs at whatever the app opened: the drum machine's low-latency
+    output on the P4 is 24 kHz MONO. Pass the pump's ``rate`` and
+    ``channels``; mono is spread to both sides and 24 kHz is doubled with a
+    midpoint between samples. ``in_bytes`` counts what the tap produced, so
+    a wrong format shows in the log as a byte rate that is not rate*ch*2.
     """
 
-    def __init__(self, frames=16384, log=print):
+    def __init__(self, frames=16384, rate=48000, channels=2, log=print):
         from audiodev import pump
+        if rate not in (24000, 48000) or channels not in (1, 2):
+            raise ValueError("TapFeed takes 24 or 48 kHz, mono or stereo")
+        self.rate, self.channels = rate, channels
+        self.frame = 2 * channels
+        self.grow = (48000 // rate) * (2 // channels)   # output bytes per input byte
         mod = pump.module()
-        self.tap = mod.Tap(frames=frames, channel_count=2)
+        self.tap = mod.Tap(frames=frames, channel_count=channels)
         mod.tap(self.tap)
         self.cap = self.tap.stats()[4]
         self.cursor = self.tap.stats()[0]
         self.buf = bytearray(self.cap)
         self.mv = memoryview(self.buf)
+        self.out = bytearray(self.cap * self.grow) if self.grow > 1 else None
+        self.prev = 0                     # last input sample, for the midpoint
         self.carry = bytearray()          # a partial block between polls
         self.cast = None
         self.fed = 0
         self.full = 0
+        self.in_bytes = 0
         self.lapped = 0                   # times the pump overwrote unread audio
         self.log = log
-        log("tapfeed: pump tap of %d bytes" % self.cap)
+        log("tapfeed: pump tap of %d bytes, %d Hz x%d in, 48000 Hz x2 out" % (self.cap, rate, channels))
+
+    def _convert(self, got):
+        if self.grow == 1:
+            return self.mv[:got]
+        n = got // 2                       # input samples
+        if self.rate == 24000 and self.channels == 1:
+            self.prev = _up_mono24(self.buf, n, self.out, self.prev)
+        elif self.rate == 24000:
+            self.prev = _up_stereo24(self.buf, n // 2, self.out, self.prev)
+        else:
+            _spread_mono(self.buf, n, self.out)
+        return memoryview(self.out)[:got * self.grow]
 
     def pump(self, limit=64):
         w = self.tap.stats()[0]
@@ -152,13 +230,15 @@ class TapFeed:
             return 0
         if new > self.cap:
             self.lapped += 1
-            new = self.cap - (self.cap % 4)
-        new -= new % 4
+            new = self.cap
+        new -= new % self.frame
         got = self.tap.readinto(self.mv[:new])
         self.cursor = w
         if not got:
             return 0
-        data = self.carry + self.mv[:got] if self.carry else self.mv[:got]
+        self.in_bytes += got
+        conv = self._convert(got)
+        data = self.carry + conv if self.carry else conv
         n = 0
         pos = 0
         c = self.cast

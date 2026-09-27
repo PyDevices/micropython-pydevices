@@ -43,7 +43,9 @@ except Exception as e:
 from board_config import fb
 import castfast
 
-feed = castfast.TapFeed(log=log)
+# the drum machine opens board_peripherals.audio_out(latency="low"), which on
+# the P4 is 24 kHz mono; the feed converts it to the cast's 48 kHz stereo
+feed = castfast.TapFeed(rate=24000, channels=1, log=log)
 
 if MODE == "tv":
     from roku_cast import RokuScreen
@@ -53,10 +55,13 @@ if MODE == "tv":
     log("cast thread started:", ok)
 else:
     import _thread
+    # a scheduled LVGL callback (the touch read) can run on whichever thread
+    # is sleeping, and the default 5 KB thread stack overflows in it
+    _thread.stack_size(32 * 1024)
     cast = castfast.make_caster(720, 720, fps=30, bitrate=3_000_000, audio=True)
-    cast.set_skip(0)
     feed.cast = cast
     cast.start(fb, PC, 5004, 15550)
+    cast.set_skip(0)       # after start(): start() puts the 500 ms floor back
     log("castif -> %s:5004 with the pump tap, %d s" % (PC, SECONDS))
 
     def pumper():
@@ -68,10 +73,10 @@ else:
                 if el // 5000 > beat:
                     beat = el // 5000
                     s = cast.stats()
-                    log("castif: %d f %.1f fps %d sent %d stalls | fed %d muxed %d level %d under %d drift %d ins %d drop %d lapped %d ringfull %d rssi %s" % (
+                    log("castif: %d f %.1f fps %d sent %d stalls | fed %d muxed %d level %d under %d drift %d ins %d drop %d lapped %d ringfull %d in %d rssi %s" % (
                         s["frames"], s["fps"] / 1000.0, s["sent"], s["stalls"], s["audio_fed"], s["audio_muxed"],
                         s["audio_level"], s["audio_underruns"], s["audio_drift_ms"], s["audio_inserted"],
-                        s["audio_dropped"], feed.lapped, feed.full, w.status("rssi")))
+                        s["audio_dropped"], feed.lapped, feed.full, feed.in_bytes, w.status("rssi")))
                 time.sleep_ms(25)
         finally:
             s = cast.stats()
@@ -91,13 +96,13 @@ if MODE == "capture":
 
     def press_play(_):
         import lvgl as lv
-        dm = sys.modules["drum_machine"].machine
+        dm = sys.modules["drum_machine.drum_machine"].machine
         dm.play_btn.add_state(lv.STATE.CHECKED)
         dm._on_play(None)
         log("PLAY pressed")
 
     def autoplay():
-        while getattr(sys.modules.get("drum_machine"), "machine", None) is None:
+        while getattr(sys.modules.get("drum_machine.drum_machine"), "machine", None) is None:
             time.sleep_ms(200)
         time.sleep_ms(3000)
         micropython.schedule(press_play, None)
