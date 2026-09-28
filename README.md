@@ -51,6 +51,11 @@ model, preset selection, and upstream-boundary rules.
 - `usermods/wasmbridge/` — the `_wasm_bridge` user C module the WebAssembly
   `pydevices` variant builds in: browser framebuffers, input, timers, audio,
   and HTTP.
+- `usermods/castif/` — `castif`, the ESP32-P4 board's cast: the panel (and
+  its sound) streamed to a Wi-Fi Display sink by a C task on core 0, with the
+  hardware H.264 encoder (`espressif/esp_h264`, fetched by the component
+  manager). The P4 board's default manifest builds it in; the Python side is
+  pydevices-examples' `cast` example.
 - `variants/webassembly/` — the external WebAssembly variant tree
   (including the Fetch-backed `requests`).
 - `provenance.json` — patch checksums and migration provenance.

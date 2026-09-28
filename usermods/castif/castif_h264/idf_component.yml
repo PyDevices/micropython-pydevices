@@ -1,0 +1,6 @@
+dependencies:
+  espressif/esp_h264:
+    version: "1.4.1"
+    require: public
+    rules:
+      - if: "target == esp32p4"

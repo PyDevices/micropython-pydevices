@@ -22,3 +22,14 @@ This board also has variants available to select the Wireless CoProcessor (if an
   "C5 WiFi/BLE" variants.
 * If your board has an external ESP32-C6 coprocessor for WiFi and BLE then choose the
   "C6 WiFi/BLE" variants.
+
+### PyDevices: casting the panel
+
+With its default manifest this board also carries `castif`, which casts the
+panel (and its sound) to a Wi-Fi Display sink: a Windows laptop's Wireless
+Display app or a Roku TV. It runs the ESP32-P4's hardware H.264 encoder on
+core 0. The encoder comes from Espressif's component registry
+(`espressif/esp_h264` 1.4.1), fetched on the first build. The Python side (the
+session, the TV control and the demos) is in pydevices-examples'
+`lib/examples/cast/`. Reading the audio pump's output in C (`Cast.set_tap`)
+needs audiodsp 0.6.2 or later in the firmware.
