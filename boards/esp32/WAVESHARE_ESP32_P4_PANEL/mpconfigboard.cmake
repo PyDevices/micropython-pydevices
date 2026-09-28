@@ -24,3 +24,9 @@ if(MICROPY_USER_FROZEN_MANIFEST)
 else()
     set(MICROPY_FROZEN_MANIFEST ${MICROPY_BOARD_DIR}/manifest.py)
 endif()
+
+# castif's hardware H.264 encoder: a sourceless component whose
+# idf_component.yml asks the component manager for espressif/esp_h264. ESP-IDF's
+# project() reads EXTRA_COMPONENT_DIRS as a plain variable, and this file is
+# included before project() runs, so a board directory can add a component.
+list(APPEND EXTRA_COMPONENT_DIRS ${CMAKE_CURRENT_LIST_DIR}/../../../usermods/castif/castif_h264)
