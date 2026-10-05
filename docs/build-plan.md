@@ -45,7 +45,7 @@ micropython-pydevices/
 │   ├── unix/  windows/      pydevices/, vst3-engine/ (as today)
 │   ├── webassembly/         pydevices/, and wasmbridge moves in here from usermods/
 │   └── esp32/<BOARD>/<VARIANT>/   a board's delta: an sdkconfig fragment, maybe a partition table
-├── build_dirs/              ignored: <port>/<board>/<variant>/, the generated board dir inside
+├── builds/              ignored: <port>/<board>/<variant>/, the generated board dir inside
 ├── scripts/                 maintainer scripts
 ├── docs/
 └── .devcontainer/
@@ -84,7 +84,7 @@ last partition, so a board flashed with the new layout comes up with an empty
 filesystem (cmods#30). Dev boards hold nothing we keep, so this is on by
 default; `--no-autosize` refuses instead and prints the table that would fit.
 
-Output lands in `build_dirs/<port>/<board>/<variant>/`, with a record of what
+Output lands in `builds/<port>/<board>/<variant>/`, with a record of what
 went in: each module's path and commit. Build the same target with a
 different module set and it wipes that dir and rebuilds, and says so. One dir
 per target, never a stale cache (idf.py keeps `-D` values between runs), and
@@ -141,7 +141,7 @@ goes away, `all` can't grab it by accident, and the wasm manifest still gets it.
 ## Traps we already know
 
 **Never pass `BUILD=` to an esp32 make.** The mpy-cross sub-make inherits it
-and the link breaks (micropython#19667, still open). So `build_dirs/` needs
+and the link breaks (micropython#19667, still open). So `builds/` needs
 either a one-line overlay patch that clears `BUILD=` for mpy-cross, the way
 upstream already clears `USER_C_MODULES=`, or for esp32 we call `idf.py -B`
 directly. The patch is smaller.
