@@ -1,0 +1,16 @@
+# Module pins: name, git URL, commit. build_mp.py clones a module at its commit
+# only when modules/<name> is missing; in the workspace modules/<name> is a
+# symlink to the sibling checkout and wins. castif is not here: it lives in
+# modules/castif, tracked in this repository.
+audiocomponents   https://github.com/PyDevices/audiocomponents.git    1217a839b472
+audiodsp          https://github.com/PyDevices/audiodsp.git           5afe010b61b1
+audioif           https://github.com/PyDevices/audioif.git            71c78419c719
+cameraif          https://github.com/PyDevices/cameraif.git           8c0244fed64d
+displayif         https://github.com/PyDevices/displayif.git          6ea4d30e5562
+lvgl-micropython  https://github.com/PyDevices/lvgl-micropython.git   7beb480f1053
+palettes          https://github.com/PyDevices/palettes.git           bc3343a8e4d5
+pdwidgets         https://github.com/PyDevices/pdwidgets.git          306c1e20e0c3
+pydevices         https://github.com/PyDevices/pydevices.git          ada226c14f7e
+pygraphics        https://github.com/PyDevices/pygraphics.git         b4d4c49cc2a2
+ulab              https://github.com/v923z/micropython-ulab.git       1d3ddd8f5228
+usbif             https://github.com/PyDevices/usbif.git              4c01722e9e04

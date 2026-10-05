@@ -1,0 +1,8 @@
+# Toolchain pins: name, URL, version. A build fetches and checks only the one
+# its port uses: esp-idf for esp32, emsdk for webassembly, SDL2 for windows
+# when displayif is selected. In the workspace deps/<name> is a symlink to the
+# anchor's checkout, and a build refuses if it isn't the version below.
+# The ESP-IDF version is our choice, not upstream's recommendation.
+esp-idf   https://github.com/espressif/esp-idf.git                                                           v5.5.4
+emsdk     https://github.com/emscripten-core/emsdk.git                                                       6.0.1
+SDL2      https://github.com/libsdl-org/SDL/releases/download/release-2.30.10/SDL2-devel-2.30.10-mingw.tar.gz  2.30.10
