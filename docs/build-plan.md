@@ -31,13 +31,13 @@ micropython-pydevices/
 ├── deps/                    ignored: esp-idf/, emsdk/, SDL2/, symlinked or fetched on demand
 ├── modules/
 │   ├── manifest.py          tracked: reads the module list build_mp.py sets, includes each, raises on a missing one
-│   ├── all/manifest.py      tracked: every sibling with a root manifest.py, minus the ones it skips
+│   ├── all/manifest.py      tracked: every sibling with a root manifest.py; all means all
 │   ├── castif/              tracked: lives only here (moves from usermods/); ESP32-P4 only
 │   ├── audiodsp -> ../../audiodsp          ignored symlinks in the workspace,
 │   ├── audioif  -> ../../audioif           clones at the modules.lock commit anywhere else
-│   ├── cameraif, displayif, lvgl-micropython, palettes, pdwidgets,
-│   ├── pydevices, pygraphics, ulab, usbif
-│   └── jpegio, audiocomponents   later: see "Open"
+│   ├── audiocomponents, cameraif, displayif, lvgl-micropython, palettes,
+│   ├── pdwidgets, pydevices, pygraphics, ulab, usbif
+│   └── jpegio                later: see "Open"
 ├── patches/
 │   ├── apply_patches.py     the overlay and the modules' own patches, applied once as one local commit
 │   └── micropython/         0001-…patch to 0016-…patch, as today
@@ -98,18 +98,22 @@ castif is the one module whose only home is this repo, so `modules/castif/` is
 tracked here rather than linked. It's ESP32-P4 only: its H.264 encoder is an
 ESP-IDF component that has to be added before `project()` runs, so the
 generated board dir adds `castif/castif_h264` to `EXTRA_COMPONENT_DIRS`
-whenever castif is selected, and `all` takes castif only on a P4.
+whenever castif is selected. Its own glue skips every other port and chip,
+the way audioif's skips non-esp32 ports, so `all` needs no exception for it.
 
-## pydevices, frozen or not
+## Python-only modules, frozen or not
 
-You choose per build. `--modules pydevices` freezes it; leave it out and the
-board installs it with mip as today. `all` skips it, because `pydevices/lib`
-moves too fast to freeze by default. The wasm variant's manifest does freeze
-it, since that's where it pays: pages load without fetching it.
+pydevices, palettes, pdwidgets and audiocomponents are Python only. You
+choose per build: name one in `--modules` and it's frozen; leave it out and
+the board installs it with mip as today. `all` takes them, because all means
+all. Today that's what the wasm build wants, since pages load without fetching
+anything. For MCU builds `pydevices/lib` moves too fast to freeze as a habit,
+so name what you want rather than reaching for `all`.
 
-Later, once our own package library exists, we'd rather say
-`require("pydevices", library=<ours>)`. Then the `modules/pydevices` symlink
-goes away, `all` can't grab it by accident, and the wasm manifest still gets it.
+Later, once the PyDevices/mip repo is retooled into our own package library,
+these come in with `require("<name>", library=<ours>)` instead. Their
+symlinks then leave `modules/`, so `all` no longer takes them, and a manifest
+that wants one (the wasm one) requires it by name.
 
 ## Order of work
 
@@ -118,7 +122,8 @@ goes away, `all` can't grab it by accident, and the wasm manifest still gets it.
    (replacing `apply.sh` and `tools/prepare-micropython.sh`, still applying
    usbif's and cameraif's patches) and the `.gitignore`. `manifests/` goes:
    the kitchen sink becomes `modules/all`, and the presets turn into
-   `--modules` lists. `usermods/castif` moves to `modules/castif`.
+   `--modules` lists. `usermods/castif` moves to `modules/castif`, and
+   audiocomponents gets the root `manifest.py` it lacks.
 2. **Write `build_mp.py`**, with the generated esp32 board dir, `--flash`,
    and autosize, ported from cmods' `build_mp.sh`.
 3. **Prove the modules on stock upstream builds.** That means unix and
@@ -128,7 +133,8 @@ goes away, `all` can't grab it by accident, and the wasm manifest still gets it.
    The gate is that for the same module set, each build's module list matches
    today's, and the S3 and the DEV-KIT boot and import what they carry.
 4. **Repoint what calls the old way:** the anchor's `build_interpreters.sh`,
-   mpvst's engine build (`--modules all,<mpvst>/vstaudio,<mpvst>/vstui`),
+   mpvst's engine build (its modules listed by name plus
+   `<mpvst>/vstaudio,<mpvst>/vstui`; not `all`, which now freezes pydevices),
    wokwi's stage script, earful's build, the README and `newcomers.md`.
 5. **Retire `boards/`.** Each board's delta (the T-Embed, the panel, the
    S3 Touch 4.3, the LCD-7) moves into `variants/esp32/<BOARD>/<VARIANT>/`,
