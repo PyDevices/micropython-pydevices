@@ -135,7 +135,8 @@ castif is the one module whose only home is this repo, so `modules/castif/` is
 tracked here rather than linked. It's ESP32-P4 only: its H.264 encoder is an
 ESP-IDF component that has to be added before `project()` runs, so the
 generated board dir adds `castif/castif_h264` to `EXTRA_COMPONENT_DIRS`
-whenever castif is selected. Its own glue skips every other port and chip,
+whenever castif is selected: any selected module's `components/<name>/` is
+added that way, by convention. Its own glue skips every other port and chip,
 the way audioif's skips non-esp32 ports, so `all` needs no exception for it.
 
 ## Python-only modules, frozen or not
@@ -187,11 +188,11 @@ that wants one (the wasm one) requires it by name.
 
 ## Traps we already know
 
-**Never pass `BUILD=` to an esp32 make.** The mpy-cross sub-make inherits it
-and the link breaks (micropython#19667, still open). So `builds/` needs
-either a one-line overlay patch that clears `BUILD=` for mpy-cross, the way
-upstream already clears `USER_C_MODULES=`, or for esp32 we call `idf.py -B`
-directly. The patch is smaller.
+**`BUILD=` and the mpy-cross sub-make.** Passed on its own, `BUILD=` reaches
+the mpy-cross sub-make and breaks an esp32 link (micropython#19667, still
+open). Both build systems skip that sub-make when `MICROPY_MPYCROSS` names a
+built mpy-cross (`py/mkenv.mk`, `py/mkrules.cmake`), so `build_mp.py` builds
+mpy-cross on its own first and exports its path. No patch needed.
 
 **Upstream's generic esp32 boards give the app 1.94 MB** (`partitions-4MiBplus.csv`),
 and the kitchen sink is about 3.4 MB. Autosize handles that, but only if the
