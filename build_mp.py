@@ -269,7 +269,11 @@ def record(dirs):
     for d in dirs:
         real = d.resolve()
         rev = git_out(real, "describe", "--always", "--dirty", "--abbrev=12") or "(not a git checkout)"
-        rows[d.name] = {"path": str(real), "revision": rev}
+        # The commit and whether anything was uncommitted: what a consumer
+        # needs to tell later whether the code that went in has moved.
+        commit = git_out(real, "rev-parse", "HEAD") or None
+        dirty = bool(git_out(real, "status", "--porcelain", "--untracked-files=no")) if commit else None
+        rows[d.name] = {"path": str(real), "revision": rev, "commit": commit, "dirty": dirty}
     return rows
 
 
