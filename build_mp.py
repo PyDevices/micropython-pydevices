@@ -450,7 +450,14 @@ def main():
         if {k: had.get(k) for k in want} != want:
             shutil.rmtree(build)
             say(f"{build} was built with {had.get('modules')!r} (flash {had.get('flash')}); wiped, building {spec!r}")
+    elif build.exists() and any(build.iterdir()):
+        # Something built here without a record: nobody can say with what.
+        shutil.rmtree(build)
+        say(f"{build} has no build record; wiped")
     build.mkdir(parents=True, exist_ok=True)
+    # Written before the build, so a build that fails still says what it was
+    # built with, and the next one with a different set wipes it.
+    rec_path.write_text(json.dumps(dict(want, complete=False), indent=1) + "\n")
 
     env = dict(os.environ)
     for leak in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "BOARD_DIR", "VARIANT_DIR"):
@@ -555,7 +562,7 @@ def main():
 
     if rc != 0:
         die(f"the build failed (make exit {rc})")
-    rec = dict(want)
+    rec = dict(want, complete=True)
     rec["micropython"] = git_out(mp, "describe", "--always", "--abbrev=12")
     rec["module_revisions"] = record(module_dirs)
     rec_path.write_text(json.dumps(rec, indent=1) + "\n")
