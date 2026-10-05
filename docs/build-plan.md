@@ -5,7 +5,7 @@
 You build PyDevices firmware with one command:
 
 ```bash
-./build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --modules audiodsp,displayif,/home/you/earful
+./build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB --modules audiodsp,displayif,/home/you/earful
 ```
 
 Leave out `--port`, `--board` or `--variant` and it asks you, the way the old
@@ -15,8 +15,9 @@ no recipe files: what goes into a build is what you typed. Anything it doesn't
 recognise goes straight to `make`.
 
 Boards come from upstream. You don't write a board definition for a new board;
-you pick upstream's generic one and, where a board really differs, a small
-variant on top of it.
+you pick upstream's generic one, tell it the flash size, and, only where a
+board really differs, add a small variant on top. If the image outgrows the
+app partition, the build grows the partition and builds again.
 
 ## The layout
 
@@ -42,8 +43,8 @@ micropython-pydevices/
 ├── variants/                only where a board truly differs from upstream
 │   ├── unix/  windows/      pydevices/, vst3-engine/ (as today)
 │   ├── webassembly/         pydevices/, and wasmbridge moves in here from usermods/
-│   └── esp32/<BOARD>/<VARIANT>/   after the VARIANT_DIR spike, below
-├── build_dirs/              ignored: <port>/<board>/<variant>/
+│   └── esp32/<BOARD>/<VARIANT>/   a board's delta: an sdkconfig fragment, maybe a partition table
+├── build_dirs/              ignored: <port>/<board>/<variant>/, the generated board dir inside
 ├── scripts/                 maintainer scripts
 ├── docs/
 └── .devcontainer/
@@ -63,6 +64,24 @@ never shows as modified.
 puts your module list in an environment variable that `modules/manifest.py`
 reads, and calls the port's own `make` with `FROZEN_MANIFEST=modules/manifest.py`
 and, where you asked for one of ours, `VARIANT_DIR`.
+
+On esp32 it also writes a thin board dir into the build dir, the way cmods'
+`build_mp.sh` did. That dir includes upstream's board and variant unchanged,
+links the rest of the board's files through, and appends our sdkconfig
+**last**: the flash size, the partition table, and any delta from
+`variants/esp32/`. Last matters, because kconfgen takes the last assignment,
+and a fragment listed earlier is silently overridden (cmods#29). `make` gets
+it as `BOARD_DIR=`. Upstream's tree is never edited, so the ports need no
+patch for this.
+
+If the app doesn't fit its partition, the build reads the size out of the
+error, grows the app partition to the image rounded up to 64 KB plus 256 KB
+of headroom, moves every partition after it, and builds once more against
+that table, which lives only in the build dir. It then prints the new layout
+and warns that the filesystem moved. This port puts the filesystem after the
+last partition, so a board flashed with the new layout comes up with an empty
+filesystem (cmods#30). Dev boards hold nothing we keep, so this is on by
+default; `--no-autosize` refuses instead and prints the table that would fit.
 
 Output lands in `build_dirs/<port>/<board>/<variant>/`, with a record of what
 went in: each module's path and commit. Build the same target with a
@@ -93,20 +112,24 @@ goes away, `all` can't grab it by accident, and the wasm manifest still gets it.
    usbif's and cameraif's patches) and the `.gitignore`. `manifests/` goes:
    the kitchen sink becomes `modules/all`, and the presets turn into
    `--modules` lists.
-2. **Write `build_mp.py`.**
+2. **Write `build_mp.py`**, with the generated esp32 board dir, `--flash`,
+   and autosize, ported from cmods' `build_mp.sh`.
 3. **Prove the modules on stock upstream builds.** That means unix and
    windows (stock variants), webassembly (our variant), `ESP32_GENERIC_S3`
    `SPIRAM_OCT`, and `ESP32_GENERIC_P4` in both `C6_WIFI` (your DEV-KIT) and
-   `PRE_REV3_C6_WIFI` (the panel). The gate is that for the same module set,
-   each build's module list matches today's, and the S3 and the DEV-KIT boot
-   and import what they carry.
+   `PRE_REV3_C6_WIFI` (the panel), with no delta but `--flash` and autosize.
+   The gate is that for the same module set, each build's module list matches
+   today's, and the S3 and the DEV-KIT boot and import what they carry.
 4. **Repoint what calls the old way:** the anchor's `build_interpreters.sh`,
    mpvst's engine build (`--modules all,<mpvst>/vstaudio,<mpvst>/vstui`),
    wokwi's stage script, earful's build, the README and `newcomers.md`.
-5. **The VARIANT_DIR spike.** Teach the esp32 and rp2 ports to take a variant
-   from outside the board dir, in our overlay first. When it works, `boards/`
-   retires into `variants/esp32/<BOARD>/<VARIANT>/`, and an upstream PR is
-   your call.
+5. **Retire `boards/`.** Each board's delta (the T-Embed, the panel, the
+   S3 Touch 4.3, the LCD-7) moves into `variants/esp32/<BOARD>/<VARIANT>/`,
+   and the generated board dir carries it.
+6. **Optional: the VARIANT_DIR spike.** Teaching the esp32 and rp2 ports to
+   take a variant from outside the board dir would make the generated dir
+   tidier, not possible; it already works without it. Whether it becomes an
+   upstream PR is your call.
 
 ## Traps we already know
 
@@ -117,9 +140,19 @@ upstream already clears `USER_C_MODULES=`, or for esp32 we call `idf.py -B`
 directly. The patch is smaller.
 
 **Upstream's generic esp32 boards give the app 1.94 MB** (`partitions-4MiBplus.csv`),
-and the kitchen sink is about 3.4 MB. Stock-board proofs in step 3 use module
-sets that fit, and the full set waits for a variant with our partition table
-(step 5).
+and the kitchen sink is about 3.4 MB. Autosize handles that, but only if the
+flash size is right: gen_esp32part refuses a table larger than the configured
+flash. Hence `--flash`.
+
+**A saved `sdkconfig` beats the defaults.** The IDF treats one left in the
+build dir as your configuration, so one failed run can pin the wrong
+partition table for every run after it. The build deletes it first, and
+afterwards checks that the configured table is the one we chose, failing
+loudly if it isn't (cmods#29).
+
+**`make clean` on esp32 is `idf.py fullclean`**, which deletes the whole
+port's `managed_components/`. Never run it against a build dir that doesn't
+exist yet.
 
 **Two esp32 builds at once in one port race** on `managed_components/`, so
 `build_mp.py` builds esp32 one at a time.
@@ -138,9 +171,8 @@ These are raised, not decided:
 - **A CI leg that builds the union** on one desktop port, so building only
   what you ask for doesn't lose the cross-port check that caught usbif's
   breaks in September.
-- **Per-chip P4 settings and `--flash`.** Most of the P4 sdkconfig fragment
-  is PyDevices-on-a-P4, not board-specific, and flash size could be an option
-  rather than a variant.
+- **Per-chip settings.** Most of the P4 sdkconfig fragment is
+  PyDevices-on-a-P4, not board-specific, and could apply to every P4 build.
 - **The new repos** (castif and jpegio out of their current homes, mp3 out of
   the workspace), and whether esp-vision's sensor and H.264 replace cameraif.
 - **CircuitPython.** It doesn't read our manifests, and none of this reaches
