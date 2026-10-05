@@ -210,10 +210,7 @@ def boards(port):
 
 
 def board_dir(port, board):
-    """A path names a board dir of its own; else ours while boards/ lasts (it
-    retires in step 5 of the plan), else upstream's."""
-    if "/" in board or os.sep in board:
-        return Path(board).expanduser().resolve()
+    """Ours while boards/ lasts (it retires in step 5 of the plan), else upstream's."""
     ours = REPO / "boards" / port / board
     return ours if ours.is_dir() else MP / "ports" / port / "boards" / board
 
@@ -221,7 +218,7 @@ def board_dir(port, board):
 def variants(port, board):
     if board:
         found = set()
-        for f in board_dir(port, board).glob("mpconfigvariant_*.*"):  # board may be a path
+        for f in board_dir(port, board).glob("mpconfigvariant_*.*"):
             found.add(f.stem[len("mpconfigvariant_"):])
         return sorted(found)
     found = {p.name for p in (MP / "ports" / port / "variants").iterdir() if p.is_dir()}
@@ -429,10 +426,7 @@ def main():
     board = args.board
     if is_board_port(port):
         board = board or choose("Board:", boards(port))
-        if "/" in board or os.sep in board:
-            if not (board_dir(port, board) / "mpconfigboard.cmake").exists() and not (board_dir(port, board) / "mpconfigboard.mk").exists():
-                die(f"not a board dir: {board}")
-        elif board not in boards(port):
+        if board not in boards(port):
             die(f"no board '{board}' for {port}")
     elif board:
         die(f"{port} has no boards; leave out --board")
@@ -455,8 +449,6 @@ def main():
         spec = input('Which (comma list; full paths for others; "all"; empty for none)? ').strip()
     spec, module_dirs = resolve_modules(spec)
 
-    board_path = board
-    board = board_dir(port, board).name if board else None
     build = OUT_DIR / port / (board or "") / (variant or DEFAULT_VARIANT.get(port, "default"))
     build = Path(os.path.normpath(build))
     rec_path = build / "pydevices-build.json"
@@ -496,8 +488,6 @@ def main():
     make.append(f"FROZEN_MANIFEST={manifest}")
     if board:
         make.append(f"BOARD={board}")
-        if board_path != board and port != "esp32":
-            make.append(f"BOARD_DIR={board_dir(port, board_path)}")
         if variant:
             make.append(f"BOARD_VARIANT={variant}")
     elif ours:
@@ -531,7 +521,7 @@ def main():
     rc = 0
     try:
         if port == "esp32":
-            base = board_dir(port, board_path)
+            base = board_dir(port, board)
             chip = esp32_chip(base)
             gen = build / board
             frag = build / "sdkconfig.pydevices"
