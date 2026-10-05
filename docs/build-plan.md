@@ -125,6 +125,12 @@ no pile of experiment dirs.
 lives in its own manifest, which we can change without touching the build
 script.
 
+A module never brings another module. ulab is a module like any other,
+pinned only by `modules.lock`; audiodsp, which never used it, no longer names
+its own copy, so nothing is compiled twice. Nothing checks dependencies
+either: audiocomponents' instruments import ulab, so name ulab with them, or
+use `all`.
+
 castif is the one module whose only home is this repo, so `modules/castif/` is
 tracked here rather than linked. It's ESP32-P4 only: its H.264 encoder is an
 ESP-IDF component that has to be added before `project()` runs, so the
