@@ -120,7 +120,9 @@ that wants one (the wasm one) requires it by name.
 1. **Reorganise this repo**, on a branch in its own worktree. That covers the
    tree above, `modules.lock`, the two module manifests, `apply_patches.py`
    (replacing `apply.sh` and `tools/prepare-micropython.sh`, still applying
-   usbif's and cameraif's patches) and the `.gitignore`. `manifests/` goes:
+   usbif's and cameraif's patches) and the `.gitignore`. The patch profiles
+   go: every build applies the whole series, and CI checks that the series
+   applies clean to the pin. `manifests/` goes:
    the kitchen sink becomes `modules/all`, and the presets turn into
    `--modules` lists. `usermods/castif` moves to `modules/castif`, and
    audiocomponents gets the root `manifest.py` it lacks.
@@ -172,20 +174,18 @@ exist yet.
 
 ## Open
 
-These are raised, not decided:
+Two questions the build script can't be written without:
 
-- **The version scheme.** `1.29.261004` drops upstream's patch number;
-  `1.29.1.261004` keeps it.
-- **What a release carries**, and how "a release every time a module releases"
-  is triggered.
 - **Where `deps/` takes its pins**, ESP-IDF's version in particular.
-- **Whether the patch profiles survive.** Preparing applies every patch
-  anyway; the profiles now only feed CI's applicability check.
+- **Per-chip settings.** Most of what our esp32 board fragments carry isn't
+  about the board: it's PyDevices on a P4 or an S3, or it belongs to a module.
+
+Deferred, because the build script doesn't need them:
+
+- **The version scheme** and **what a release carries.**
 - **A CI leg that builds the union** on one desktop port, so building only
   what you ask for doesn't lose the cross-port check that caught usbif's
   breaks in September.
-- **Per-chip settings.** Most of the P4 sdkconfig fragment is
-  PyDevices-on-a-P4, not board-specific, and could apply to every P4 build.
 - **jpegio** out of displayif into its own repo, and whether esp-vision's
   sensor and H.264 replace cameraif (and castif's encoder).
 - **CircuitPython.** It doesn't read our manifests, and none of this reaches
