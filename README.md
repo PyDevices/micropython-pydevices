@@ -29,7 +29,7 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
 - `modules/` — `manifest.py` (the manifest every build freezes), `all/`
   (every module), `castif/` (the ESP32-P4 cast, which lives only here), and
   the modules themselves, linked or cloned.
-- `patches/micropython/` — our patch series (`0001-…` to `0016-…`), each
+- `patches/micropython/` — our patch series (`0001-…` to `0017-…`), each
   justified in its own header; `patches/apply_patches.py` applies it, plus
   each module's own MicroPython patches, once, as one local commit.
 - `variants/` — our variants: `unix/` and `windows/` (`pydevices`,
