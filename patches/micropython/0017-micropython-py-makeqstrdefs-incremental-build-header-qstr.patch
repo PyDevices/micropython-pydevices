@@ -1,0 +1,42 @@
+From 463057adf79a4dfe2b7e197cba516f934ccf5118 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <bbarnett@gmail.com>
+Date: Mon, 5 Oct 2026 16:10:43 -0500
+Subject: [PATCH] py/makeqstrdefs.py: attribute output before the first source
+ marker to that source.
+
+An incremental build preprocesses only the changed files, and its output
+can begin with a qstr from a header the first file includes (a static
+inline function using MP_QSTR_...) before any "# n \"file.c\"" marker. That
+output had no file yet, and write_out(None, ...) raised AttributeError:
+'NoneType' object has no attribute 'replace', failing the build. A full
+build hid it, because some earlier source's name was still current.
+
+Seen on unix with a user C module whose header has such a function
+(audiodsp's audiocore/__init__.h), after touching any of its sources.
+Unchanged on upstream master as of 2026-10-05.
+---
+ py/makeqstrdefs.py | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/py/makeqstrdefs.py b/py/makeqstrdefs.py
+index e1046fa2b..628fbe631 100644
+--- a/py/makeqstrdefs.py
++++ b/py/makeqstrdefs.py
+@@ -138,8 +138,12 @@ def process_file(f):
+             if not is_c_source(fname) and not is_cxx_source(fname):
+                 continue
+             if fname != last_fname:
+-                write_out(last_fname, output)
+-                output = []
++                # What came before the first C source marker -- a static
++                # inline function in a header the source includes first --
++                # belongs to that source, not to no file at all.
++                if last_fname is not None:
++                    write_out(last_fname, output)
++                    output = []
+                 last_fname = fname
+             continue
+         for match in re_match.findall(line):
+-- 
+2.43.0
+

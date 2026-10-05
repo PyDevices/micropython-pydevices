@@ -8,7 +8,6 @@ override MICROPY_PY_SOCKET = 0
 override MICROPY_PY_SSL = 0
 override MICROPY_PY_FFI = 0
 export SDL2_DEV ?= $(abspath $(VARIANT_DIR)/../../../../SDL2)
-FROZEN_MANIFEST ?= $(VARIANT_DIR)/manifest.py
 
 # The executable's icon. The port compiles its own micropython.rc (MicroPython's
 # logo) into $(BUILD)/micropython.res through a pattern rule; an explicit rule

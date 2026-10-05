@@ -7,4 +7,3 @@ PROG ?= mpvst-engine
 override MICROPY_PY_SOCKET = 0
 override MICROPY_PY_SSL = 0
 override MICROPY_PY_FFI = 0
-FROZEN_MANIFEST ?= $(VARIANT_DIR)/manifest.py

@@ -1,64 +1,72 @@
 # Newcomer's guide to micropython-pydevices
 
-`micropython-pydevices` is PyDevices' versioned MicroPython runtime overlay. It holds the patch queue, user-module manifests, board directories, and build variants applied to one pinned upstream MicroPython release. It is not a fork and it does not publish a Python package.
+This repository builds MicroPython firmware with PyDevices modules in it. It
+holds our patches to one pinned MicroPython release, our variants, and the
+build command. It is not a fork, and it publishes no Python package.
 
-## Start by preparing a checkout
+## Build something
 
-`tools/prepare-micropython.sh` is the documented path, and it takes no profile. It checks out the pinned tag in a `micropython` clone beside this repository, applies the `windows-full`, `webassembly-pydevices`, `esp32-s3-debug`, `esp32-audio`, `esp32-webrepl`, `esp32-tinyusb` and `esp32-timer` profiles (together, all sixteen patches) plus the usbif and cameraif module patches, and records the result as one local commit.
-
-After that you choose what to build with paths passed to upstream's `make`:
-
-- A `manifest` selects the sibling PyDevices repositories frozen into a build.
-- A `board` supplies ESP32 board-specific sdkconfig, partitions, and defaults.
-- A `variant` supplies Unix, Windows, or WebAssembly build configuration.
-
-Profiles matter only when you call `apply.sh <profile> <micropython-dir>` directly. `apply.sh <profile> <micropython-dir> --check` tests whether that profile's patches apply cumulatively to the checkout's HEAD, in a scratch worktree, without touching the checkout. Run it against a clean checkout at the pinned tag: on a checkout prepare has already patched, it reports DOES NOT APPLY.
-
-The root [README](../README.md) is the source of truth for these categories.
-
-## The mental model
-
-```text
-pinned upstream MicroPython tag
-             |
-             v
-tools/prepare-micropython.sh: all eleven patches
-+ usbif and cameraif patches, one local commit
-             |
-     +-------+--------+
-     |                |
-manifest         board or variant
-     |                |
-     +-------+--------+
-             v
-       upstream build command
+```bash
+./build_mp.py --port unix --variant pydevices --modules displayif,pygraphics
+./build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB --modules all
+./build_mp.py          # asks for port, board, variant and modules
 ```
 
-After preparation, builds use upstream's normal tools; PyDevices-specific choices are expressed by the manifest, board, and variant paths.
+The first run fetches what it needs. In the PyDevices workspace it links the
+sibling checkouts instead.
 
-## Repository map
+## The model
 
-| Path | Purpose |
+```text
+pinned MicroPython tag (UPSTREAM)
+   + patches/micropython/ and each module's own patches, one local commit
+             |
+   upstream board (esp32, rp2)    or    upstream / our variant (unix, windows, webassembly)
+   + on esp32: our sdkconfig, appended last (flash size, grown partition table, fragments)
+             |
+   modules/manifest.py: the port's own content, then the modules you named
+             |
+   the port's own make  ->  builds/<port>/[<board>/]<variant>/
+```
+
+Three choices make a build: the board (or not, on the desktop ports), the
+variant (always optional, as with upstream's `make`), and the modules. A
+module is a directory with a `manifest.py`, or a C module with its glue,
+like ulab. A module never brings another; nothing checks dependencies, so
+name ulab when you name audiocomponents, or use `all`.
+
+On esp32 the build may grow the app partition to fit the image. That moves
+the filesystem, so a board flashed with that image comes up with an empty
+one. `--no-autosize` refuses instead.
+
+## Where things are
+
+| Path | What it is |
 |---|---|
-| `UPSTREAM` | Exact upstream MicroPython release the overlay applies to. |
-| `patches/` | Ordered mailbox patches with individual provenance. |
-| `profiles/` | Named ordered subsets of patch numbers. |
-| `manifests/` | Frozen-module presets that include sibling repositories. |
-| `boards/esp32/` | Out-of-tree ESP32 boards, sdkconfig, partitions, and defaults. |
-| `variants/` | Out-of-tree Unix, Windows, and WebAssembly variants. |
-| `usermods/wasmbridge/` | The `_wasm_bridge` C module the WebAssembly `pydevices` variant builds in: browser framebuffers, input events, timers, audio, and HTTP. |
-| `tools/prepare-micropython.sh` | Pinned-checkout preparation tool. |
-| `apply.sh` | Apply or verify a profile against a checkout. |
-| `provenance.json` | Patch checksums and migration records. |
+| `build_mp.py` | The build command. |
+| `UPSTREAM` | The MicroPython release the patches apply to. |
+| `modules.lock`, `deps.lock` | What gets fetched when it's missing. |
+| `modules/` | The module manifest, `all/`, `castif/`, and the modules. |
+| `patches/` | The patch series and `apply_patches.py`. |
+| `variants/` | Our unix, windows and webassembly variants. |
+| `boards/esp32/` | Board dirs from before the reorg, until step 5 of the plan. |
 
-## Important boundaries
+## Boundaries
 
-The upstream tag is a compatibility boundary. Moving `UPSTREAM` requires revalidating every patch and changing the overlay release identity. Do not hand-edit an already patched MicroPython checkout; change the overlay source and regenerate the affected patch.
+The upstream tag is a compatibility boundary: moving `UPSTREAM` means
+re-validating every patch. Never hand-edit a patched checkout; change the
+patch and prepare again (`patches/apply_patches.py`).
 
-The `vst3-engine` variants are deliberately narrow. They set `MICROPY_PY_SOCKET`, `MICROPY_PY_SSL` and `MICROPY_PY_FFI` to 0 so untrusted plugin content cannot reach the network or native libraries. That is the enforcement: a prepared checkout carries the Windows networking and FFI patches (0001, 0003) anyway, and the `vst3-engine` profile, which leaves them out, only matters when you apply it by hand. On windows the variant's `mpconfigvariant.h` has to say it too: the port header turns sockets and FFI on unless a variant has already defined them, and a make-level 0 never reaches the compiler (that is how the 0.3.0 and 0.3.1 engines kept `socket`). mpvst's `mpvst_engine_capabilities` ctest runs each engine and fails if any of them imports. Do not replace the variant with a broader desktop one merely because it builds.
-
-A manifest names modules from sibling repositories. It controls what is built into firmware (frozen Python and C modules), not what gets installed later with MIP. Consult [the manifests guide](../manifests/README.md) before adding a repository or duplicating a preset.
+The `vst3-engine` variants are deliberately narrow. They set
+`MICROPY_PY_SOCKET`, `MICROPY_PY_SSL` and `MICROPY_PY_FFI` to 0, in the
+variant's header as well as its makefile, so plugin content can't reach the
+network or native libraries. A prepared tree carries the Windows networking
+and FFI patches regardless; the variant is the guard. mpvst's
+`mpvst_engine_capabilities` test fails if an engine can import any of them.
+Don't swap it for a broader desktop variant because that one builds.
 
 ## Safe first contributions
 
-Start with documentation, provenance, or a narrowly scoped profile/manifest correction. Validate a profile with `apply.sh --check` against a clean checkout at the pinned tag before changing patches. Board and variant work should preserve the split between upstream configuration and PyDevices-owned overlay files.
+Documentation, provenance, or a narrowly scoped variant or module fix. Check
+a patch change with `patches/apply_patches.py --check` before you commit it.
+The [build plan](build-plan.md) is the source of truth for the layout.

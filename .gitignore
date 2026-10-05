@@ -1,0 +1,12 @@
+# Filled on demand by build_mp.py: symlinks in the workspace, clones elsewhere.
+/micropython
+/deps/
+/builds/
+# modules/ holds symlinks or clones, except what this repository tracks.
+/modules/*
+!/modules/manifest.py
+!/modules/all/
+!/modules/castif/
+/.worktrees/
+__pycache__/
+/.micropython-build.lock

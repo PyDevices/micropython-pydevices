@@ -29,4 +29,4 @@ endif()
 # idf_component.yml asks the component manager for espressif/esp_h264. ESP-IDF's
 # project() reads EXTRA_COMPONENT_DIRS as a plain variable, and this file is
 # included before project() runs, so a board directory can add a component.
-list(APPEND EXTRA_COMPONENT_DIRS ${CMAKE_CURRENT_LIST_DIR}/../../../usermods/castif/castif_h264)
+list(APPEND EXTRA_COMPONENT_DIRS ${CMAKE_CURRENT_LIST_DIR}/../../../modules/castif/components/castif_h264)

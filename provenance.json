@@ -49,6 +49,9 @@
   },
   "0016-micropython-esp32-machine-timer-fire-during-reinit.patch": {
    "sha256": "f47080be47249c3e5076aab89c57073b57a437fe0bf77f96e8a8bfe52cc86780"
+  },
+  "0017-micropython-py-makeqstrdefs-incremental-build-header-qstr.patch": {
+   "sha256": "8ef3dee1fde56ca4dffd230e09df323e0eea050cc3d96a542eb56bf4e99c2de5"
   }
  }
 }
