@@ -1,5 +1,5 @@
 # castif: the cast as a FreeRTOS task on core 0 (PPA + esp_h264 + MPEG-TS mux
-# + RTP), ESP32-P4 only. The board adds castif_h264/ to EXTRA_COMPONENT_DIRS;
+# + RTP), ESP32-P4 only. build_mp.py adds components/castif_h264 to EXTRA_COMPONENT_DIRS;
 # that component's idf_component.yml has the component manager fetch
 # Espressif's esp_h264, which then exists as espressif__esp_h264. The usermod
 # sources are also compiled in the executable's own target, which sees only

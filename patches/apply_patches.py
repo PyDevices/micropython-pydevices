@@ -80,9 +80,17 @@ def check(mp, upstream, patches):
     print(f"the series applies clean to {upstream}")
 
 
-def prepare(mp, upstream, patches):
+def prepare(mp, upstream, patches, refresh=False):
+    """Apply the series once. With refresh, a tree carrying an older overlay
+    is moved back to the tag and prepared again instead of refused."""
     mark = f"The PyDevices overlay applied to {upstream} (a local record, never pushed)"
     sid = series_id(patches)
+    if git(mp, "log", "-1", "--format=%s", capture=True) == mark and refresh and sid not in git(
+        mp, "log", "-1", "--format=%b", capture=True
+    ).splitlines():
+        print(f"{mp} carries an older overlay; moving it back to {upstream} and preparing again")
+        git(mp, "checkout", "--quiet", "--", "ports/esp32/lockfiles", check=False)
+        git(mp, "checkout", "--quiet", upstream)
     if git(mp, "log", "-1", "--format=%s", capture=True) == mark:
         if sid not in git(mp, "log", "-1", "--format=%b", capture=True).splitlines():
             sys.exit(
