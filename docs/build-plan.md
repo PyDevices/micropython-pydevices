@@ -59,8 +59,10 @@ In the workspace, the real checkouts stay where they are, as siblings under
 Anywhere else, `build_mp.py` clones what's missing: modules at their
 `modules.lock` commit, MicroPython at the `UPSTREAM` tag, and the toolchains
 at their `deps.lock` version. In the workspace `deps/` links to the anchor's
-`esp-idf/`, `emsdk/` and `SDL2/`, and the build refuses if what it finds
-there isn't the locked version. Nothing is a git
+`esp-idf/`, `emsdk/` and `SDL2/`. A build fetches and checks only the toolchain
+its port uses: ESP-IDF for esp32, emsdk for webassembly, SDL2 for windows when
+displayif is selected, nothing for unix or rp2. If that one isn't the locked
+version, the build refuses. Nothing is a git
 submodule, so a module commit never dirties this repo and the overlay commit
 never shows as modified.
 
