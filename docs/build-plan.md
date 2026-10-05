@@ -131,6 +131,12 @@ its own copy, so nothing is compiled twice. Nothing checks dependencies
 either: audiocomponents' instruments import ulab, so name ulab with them, or
 use `all`.
 
+Our desktop and browser variants (`unix`, `windows` and `webassembly`
+`pydevices`) freeze the universal desktop board config themselves, from
+`modules/pydevices/board_configs/desktop`, so `--variant pydevices` is a
+complete desktop runtime and `all` stays all. Board images never carry a board
+config, and neither does mpvst's `vst3-engine`, which has its own.
+
 castif is the one module whose only home is this repo, so `modules/castif/` is
 tracked here rather than linked. It's ESP32-P4 only: its H.264 encoder is an
 ESP-IDF component that has to be added before `project()` runs, so the
