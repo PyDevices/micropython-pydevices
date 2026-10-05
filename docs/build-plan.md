@@ -32,11 +32,12 @@ micropython-pydevices/
 ├── modules/
 │   ├── manifest.py          tracked: reads the module list build_mp.py sets, includes each, raises on a missing one
 │   ├── all/manifest.py      tracked: every sibling with a root manifest.py, minus the ones it skips
+│   ├── castif/              tracked: lives only here (moves from usermods/); ESP32-P4 only
 │   ├── audiodsp -> ../../audiodsp          ignored symlinks in the workspace,
 │   ├── audioif  -> ../../audioif           clones at the modules.lock commit anywhere else
 │   ├── cameraif, displayif, lvgl-micropython, palettes, pdwidgets,
 │   ├── pydevices, pygraphics, ulab, usbif
-│   └── castif, jpegio, mp3, audiocomponents   later: see "Open"
+│   └── jpegio, audiocomponents   later: see "Open"
 ├── patches/
 │   ├── apply_patches.py     the overlay and the modules' own patches, applied once as one local commit
 │   └── micropython/         0001-…patch to 0016-…patch, as today
@@ -93,6 +94,12 @@ no pile of experiment dirs.
 lives in its own manifest, which we can change without touching the build
 script.
 
+castif is the one module whose only home is this repo, so `modules/castif/` is
+tracked here rather than linked. It's ESP32-P4 only: its H.264 encoder is an
+ESP-IDF component that has to be added before `project()` runs, so the
+generated board dir adds `castif/castif_h264` to `EXTRA_COMPONENT_DIRS`
+whenever castif is selected, and `all` takes castif only on a P4.
+
 ## pydevices, frozen or not
 
 You choose per build. `--modules pydevices` freezes it; leave it out and the
@@ -111,7 +118,7 @@ goes away, `all` can't grab it by accident, and the wasm manifest still gets it.
    (replacing `apply.sh` and `tools/prepare-micropython.sh`, still applying
    usbif's and cameraif's patches) and the `.gitignore`. `manifests/` goes:
    the kitchen sink becomes `modules/all`, and the presets turn into
-   `--modules` lists.
+   `--modules` lists. `usermods/castif` moves to `modules/castif`.
 2. **Write `build_mp.py`**, with the generated esp32 board dir, `--flash`,
    and autosize, ported from cmods' `build_mp.sh`.
 3. **Prove the modules on stock upstream builds.** That means unix and
@@ -173,7 +180,7 @@ These are raised, not decided:
   breaks in September.
 - **Per-chip settings.** Most of the P4 sdkconfig fragment is
   PyDevices-on-a-P4, not board-specific, and could apply to every P4 build.
-- **The new repos** (castif and jpegio out of their current homes, mp3 out of
-  the workspace), and whether esp-vision's sensor and H.264 replace cameraif.
+- **jpegio** out of displayif into its own repo, and whether esp-vision's
+  sensor and H.264 replace cameraif (and castif's encoder).
 - **CircuitPython.** It doesn't read our manifests, and none of this reaches
   it yet.
