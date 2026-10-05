@@ -27,6 +27,7 @@ micropython-pydevices/
 ├── VERSION                  our version (scheme still open, below)
 ├── build_mp.py              the one command; Python so it runs anywhere
 ├── modules.lock             one line per module: name, git URL, commit
+├── deps.lock                one line per dependency: name, URL, version (ESP-IDF v5.5.4, emsdk 6.0.1, SDL2 2.30.10)
 ├── micropython/             ignored: symlink to the workspace's checkout, or a clone of UPSTREAM
 ├── deps/                    ignored: esp-idf/, emsdk/, SDL2/, symlinked or fetched on demand
 ├── modules/
@@ -44,7 +45,9 @@ micropython-pydevices/
 ├── variants/                only where a board truly differs from upstream
 │   ├── unix/  windows/      pydevices/, vst3-engine/ (as today)
 │   ├── webassembly/         pydevices/, and wasmbridge moves in here from usermods/
-│   └── esp32/<BOARD>/<VARIANT>/   a board's delta: an sdkconfig fragment, maybe a partition table
+│   └── esp32/
+│       ├── sdkconfig, sdkconfig.<chip>   every esp32 build, then every build for that chip
+│       └── <BOARD>/<VARIANT>/            a board's own delta, only where one is left
 ├── builds/                  ignored: <port>/<board>/<variant>/, the generated board dir inside
 ├── scripts/                 maintainer scripts
 ├── docs/
@@ -54,7 +57,10 @@ micropython-pydevices/
 In the workspace, the real checkouts stay where they are, as siblings under
 `~/gh/pydevices/`, and `modules/<name>` and `micropython/` are symlinks to them.
 Anywhere else, `build_mp.py` clones what's missing: modules at their
-`modules.lock` commit, MicroPython at the `UPSTREAM` tag. Nothing is a git
+`modules.lock` commit, MicroPython at the `UPSTREAM` tag, and the toolchains
+at their `deps.lock` version. In the workspace `deps/` links to the anchor's
+`esp-idf/`, `emsdk/` and `SDL2/`, and the build refuses if what it finds
+there isn't the locked version. Nothing is a git
 submodule, so a module commit never dirties this repo and the overlay commit
 never shows as modified.
 
@@ -69,9 +75,27 @@ and, where you asked for one of ours, `VARIANT_DIR`.
 On esp32 it also writes a thin board dir into the build dir, the way cmods'
 `build_mp.sh` did. That dir includes upstream's board and variant unchanged,
 links the rest of the board's files through, and appends our sdkconfig
-**last**: the flash size, the partition table, and any delta from
-`variants/esp32/`. Last matters, because kconfgen takes the last assignment,
-and a fragment listed earlier is silently overridden (cmods#29). `make` gets
+**last**: the flash size and partition table, then the fragments below.
+Last matters, because kconfgen takes the last assignment, and a fragment
+listed earlier is silently overridden (cmods#29).
+
+The fragments are found by convention, and each is applied only if it
+exists. Every place that can carry them uses the same two names: `sdkconfig`
+for every esp32 build, `sdkconfig.<chip>` (the chip read from the board's
+`board.json`, such as `esp32p4`) for one chip. They stack in this order:
+
+1. `variants/esp32/`: PyDevices on any esp32, then on that chip. The S3's
+   Wi-Fi, lwIP and PSRAM settings and the P4's NimBLE-over-C6 and
+   cache-writeback settings live here.
+2. Each selected module's root, in the order you listed them: what that
+   module needs. usbif's USB host settings and cameraif's OV5647 driver live
+   in their own repos.
+3. `variants/esp32/<BOARD>/<VARIANT>/`: what's left that really is the board,
+   such as the LCD-7's cache tuning.
+
+Nothing in `build_mp.py` names a version or a setting. A pin moves by editing
+a lock file and a setting by editing a fragment, and the script never changes
+for either. `make` gets
 it as `BOARD_DIR=`. Upstream's tree is never edited, so the ports need no
 patch for this.
 
@@ -118,7 +142,7 @@ that wants one (the wasm one) requires it by name.
 ## Order of work
 
 1. **Reorganise this repo**, on a branch in its own worktree. That covers the
-   tree above, `modules.lock`, the two module manifests, `apply_patches.py`
+   tree above, `modules.lock`, `deps.lock`, the two module manifests, `apply_patches.py`
    (replacing `apply.sh` and `tools/prepare-micropython.sh`, still applying
    usbif's and cameraif's patches) and the `.gitignore`. The patch profiles
    go: every build applies the whole series, and CI checks that the series
@@ -138,9 +162,11 @@ that wants one (the wasm one) requires it by name.
    mpvst's engine build (its modules listed by name plus
    `<mpvst>/vstaudio,<mpvst>/vstui`; not `all`, which now freezes pydevices),
    wokwi's stage script, earful's build, the README and `newcomers.md`.
-5. **Retire `boards/`.** Each board's delta (the T-Embed, the panel, the
-   S3 Touch 4.3, the LCD-7) moves into `variants/esp32/<BOARD>/<VARIANT>/`,
-   and the generated board dir carries it.
+5. **Retire `boards/`.** The four boards' sdkconfig lines sort into the
+   three homes above: chip settings into `variants/esp32/`, usbif's and
+   cameraif's into their repos, and only the LCD-7's tuning into a board
+   variant. The partition tables go, since `--flash` and autosize replace
+   them.
 6. **Optional: the VARIANT_DIR spike.** Teaching the esp32 and rp2 ports to
    take a variant from outside the board dir would make the generated dir
    tidier, not possible; it already works without it. Whether it becomes an
@@ -173,12 +199,6 @@ exist yet.
 `build_mp.py` builds esp32 one at a time.
 
 ## Open
-
-Two questions the build script can't be written without:
-
-- **Where `deps/` takes its pins**, ESP-IDF's version in particular.
-- **Per-chip settings.** Most of what our esp32 board fragments carry isn't
-  about the board: it's PyDevices on a P4 or an S3, or it belongs to a module.
 
 Deferred, because the build script doesn't need them:
 
