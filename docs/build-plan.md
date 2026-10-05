@@ -8,8 +8,10 @@ You build PyDevices firmware with one command:
 ./build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB --modules audiodsp,displayif,/home/you/earful
 ```
 
-Leave out `--port`, `--board` or `--variant` and it asks you, the way the old
-`build_mp.sh` did. Leave out `--modules` and it lists what's in `modules/` and
+Leave out `--port` and it walks you through port, board and variant, the way
+the old `build_mp.sh` did; leave out `--board` on a port that has boards
+(esp32, rp2) and it asks for that. `--variant` is always optional, as with
+upstream's `make`, and unix, windows and webassembly take no `--board`. Leave out `--modules` and it lists what's in `modules/` and
 asks. Our modules go by short name, anything else by full path, and there are
 no recipe files: what goes into a build is what you typed. Anything it doesn't
 recognise goes straight to `make`.
@@ -48,7 +50,7 @@ micropython-pydevices/
 │   └── esp32/
 │       ├── sdkconfig, sdkconfig.<chip>   every esp32 build, then every build for that chip
 │       └── <BOARD>/<VARIANT>/            a board's own delta, only where one is left
-├── builds/                  ignored: <port>/<board>/<variant>/, the generated board dir inside
+├── builds/                  ignored: <port>/[<board>/]<variant>/, the generated board dir inside
 ├── scripts/                 maintainer scripts
 ├── docs/
 └── .devcontainer/
@@ -110,7 +112,10 @@ last partition, so a board flashed with the new layout comes up with an empty
 filesystem (cmods#30). Dev boards hold nothing we keep, so this is on by
 default; `--no-autosize` refuses instead and prints the table that would fit.
 
-Output lands in `builds/<port>/<board>/<variant>/`, with a record of what
+Output lands in `builds/<port>/[<board>/]<variant>/`. The last level is always
+there, so one build never nests inside another: with no `--variant` it's the
+name upstream's `make` uses, `standard` on unix, windows and webassembly and
+`default` for a board. Each dir holds a record of what
 went in: each module's path and commit. Build the same target with a
 different module set and it wipes that dir and rebuilds, and says so. One dir
 per target, never a stale cache (idf.py keeps `-D` values between runs), and
