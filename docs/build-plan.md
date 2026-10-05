@@ -45,7 +45,7 @@ micropython-pydevices/
 │   ├── unix/  windows/      pydevices/, vst3-engine/ (as today)
 │   ├── webassembly/         pydevices/, and wasmbridge moves in here from usermods/
 │   └── esp32/<BOARD>/<VARIANT>/   a board's delta: an sdkconfig fragment, maybe a partition table
-├── builds/              ignored: <port>/<board>/<variant>/, the generated board dir inside
+├── builds/                  ignored: <port>/<board>/<variant>/, the generated board dir inside
 ├── scripts/                 maintainer scripts
 ├── docs/
 └── .devcontainer/
