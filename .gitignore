@@ -9,3 +9,4 @@
 !/modules/castif/
 /.worktrees/
 __pycache__/
+/.micropython-build.lock
