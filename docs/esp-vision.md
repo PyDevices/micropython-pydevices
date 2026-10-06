@@ -69,9 +69,9 @@ flash) and about 3.1 MB on the P4 (`firmware.bin` 4.53 MB to 7.68 MB of
   cameraif, which already drives the OV5647. That is a decision, not glue.
 - **`display`**. esp-vision's display code also needs Board Manager, and
   displayif already does displays here.
-- **One `esp_h264`.** castif pins 1.4.1 and `vision` takes the same;
+- **One `esp_h264`.** h264enc pins 1.4.1 and `vision` takes the same;
   esp-vision uses 1.3.0. `sensor` would bring `esp_video`, which requires
-  1.3.*, so a firmware with castif and a camera via `esp_video` doesn't
+  1.3.*, so a firmware with h264enc and a camera via `esp_video` doesn't
   resolve as things stand.
 
 ## Traps

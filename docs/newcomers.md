@@ -105,7 +105,7 @@ way autosize grows the app partition when the image doesn't fit.
 | `build_mp.py` | The build command. |
 | `UPSTREAM` | The MicroPython release the patches apply to. |
 | `modules.lock`, `deps.lock` | What gets fetched when it's missing. |
-| `modules/` | The module manifest, `all/`, the modules that live only here (`castif/`, `jpegio/`, and `tflite/` and `vision/`, [esp-vision's](esp-vision.md)), and the rest, linked or cloned. |
+| `modules/` | The module manifest, `all/`, the modules that live only here (`castif/`, `h264enc/`, `jpegio/`, and `tflite/` and `vision/`, [esp-vision's](esp-vision.md)), and the rest, linked or cloned. |
 | `patches/` | The patch series and `apply_patches.py`. |
 | `variants/` | Our unix, windows and webassembly variants, and the esp32 settings and board variants. |
 

@@ -1,7 +1,7 @@
 # esp_new_jpeg provides esp_jpeg_dec.h/esp_jpeg_enc.h for esp-vision's
 # platform/jpeg.c; esp-dl serves espdl; esp_media_protocols and
 # media_lib_sal serve rtsp. Versions are esp-vision's, except esp_h264:
-# castif's 1.4.1 (esp-vision uses 1.3.0), since one firmware takes one version.
+# h264enc's 1.4.1 (esp-vision uses 1.3.0), since one firmware takes one version.
 dependencies:
   espressif/esp_new_jpeg:
     version: "1.0.2"
