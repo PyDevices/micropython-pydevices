@@ -1,0 +1,14 @@
+# esp_new_jpeg provides esp_jpeg_dec.h/esp_jpeg_enc.h for esp-vision's
+# platform/jpeg.c. esp_h264 at castif's version (esp-vision uses 1.3.0):
+# one firmware takes one version.
+dependencies:
+  espressif/esp_new_jpeg:
+    version: "1.0.2"
+    require: public
+    rules:
+      - if: "target in [esp32p4, esp32s3]"
+  espressif/esp_h264:
+    version: "1.4.1"
+    require: public
+    rules:
+      - if: "target == esp32p4"

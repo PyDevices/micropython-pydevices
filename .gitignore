@@ -8,6 +8,7 @@
 !/modules/all/
 !/modules/castif/
 !/modules/tflite/
+!/modules/vision/
 !/modules/.esp-vision/
 /modules/.esp-vision/src
 /.worktrees/
