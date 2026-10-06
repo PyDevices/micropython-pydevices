@@ -111,7 +111,7 @@ def ensure_micropython(ws):
     else:
         upstream = (REPO / "UPSTREAM").read_text().strip()
         say(f"cloning MicroPython {upstream}")
-        run(["git", "clone", "-q", "--branch", upstream, "https://github.com/micropython/micropython", str(MP)])
+        run(["git", "clone", "-q", "--depth", "1", "--branch", upstream, "https://github.com/micropython/micropython", str(MP)])
 
 
 def ensure_modules(ws):
