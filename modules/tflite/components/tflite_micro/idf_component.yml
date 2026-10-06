@@ -1,0 +1,8 @@
+# The version esp-vision pins (overlay/component_yml/release5.5/idf_component.yml
+# at modules/.esp-vision's commit).
+dependencies:
+  espressif/esp-tflite-micro:
+    version: "1.3.7"
+    require: public
+    rules:
+      - if: "target in [esp32p4, esp32s3]"
