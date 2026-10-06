@@ -264,7 +264,8 @@ def resolve_modules(spec):
             dirs.append(path)
         elif item == "all":
             names.append("all")
-            dirs += [MODULES_DIR / n for n in module_choices() if n != "all"]
+            # modules/all/manifest.py's rule: every module but the opt-in ones.
+            dirs += [MODULES_DIR / n for n in module_choices() if n != "all" and not (MODULES_DIR / n / "OPT_IN").is_file()]
         else:
             if not (MODULES_DIR / item).is_dir():
                 die(f"no module '{item}' in {MODULES_DIR} (have: {', '.join(module_choices())})")
@@ -511,7 +512,13 @@ def main():
     build = OUT_DIR / port / (board or "") / (variant or DEFAULT_VARIANT.get(port, "default"))
     build = Path(os.path.normpath(build))
     rec_path = build / "pydevices-build.json"
-    want = {"port": port, "board": board, "variant": variant, "flash": flash, "modules": spec}
+    # The set --modules resolved to, not just its spelling: "all" grows when a
+    # module is added, and a build dir from before would otherwise be reused,
+    # its frozen content generated against a qstr pool the new module has
+    # since changed (frozen_content.c then redeclares MP_QSTR_Image, ...).
+    module_set = sorted(d.name if d.parent == MODULES_DIR else str(d) for d in module_dirs)
+    want = {"port": port, "board": board, "variant": variant, "flash": flash, "modules": spec,
+            "module_set": module_set}
     if args.clean and build.exists():
         shutil.rmtree(build)
         say(f"--clean: removed {build}")
@@ -519,7 +526,8 @@ def main():
         had = json.loads(rec_path.read_text())
         if {k: had.get(k) for k in want} != want:
             shutil.rmtree(build)
-            say(f"{build} was built with {had.get('modules')!r} (flash {had.get('flash')}); wiped, building {spec!r}")
+            say(f"{build} was built with {had.get('modules')!r} {had.get('module_set') or ''} (flash {had.get('flash')}); "
+                f"wiped, building {spec!r} {module_set}")
     elif build.exists() and any(build.iterdir()):
         # Something built here without a record: nobody can say with what.
         shutil.rmtree(build)

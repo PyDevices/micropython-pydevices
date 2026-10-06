@@ -1,0 +1,5 @@
+# esp-vision (espressif/esp-vision, Apache-2.0): the source of our tflite
+# module and, later, its image stack. Pinned by full commit; fetch.sh puts it
+# at modules/.esp-vision/src. Its files are compiled as they are: our glue
+# lives in the module directories that use it (modules/tflite).
+esp-vision  https://github.com/espressif/esp-vision.git  ecda8004b95e1df275ac2a1f9cdf487d03defc63

@@ -1,5 +1,6 @@
-# Every module beside this one: all means all. A module leaves "all" only by
-# leaving modules/.
+# Every module beside this one, except those that say they are opt-in: a
+# module with an OPT_IN file (its text says why) is built only when named.
+# Otherwise all means all, and a module leaves "all" only by leaving modules/.
 #
 # This can't hand the list back to ../manifest.py, because a build already
 # runs that file and the manifest tool includes a file only once, so it
@@ -12,7 +13,7 @@ for _name in sorted(os.listdir(_root)):
     if _name.startswith(".") or _name == "all":
         continue
     _dir = os.path.realpath(os.path.join(_root, _name))
-    if not os.path.isdir(_dir):
+    if not os.path.isdir(_dir) or os.path.isfile(os.path.join(_dir, "OPT_IN")):
         continue
     if os.path.isfile(os.path.join(_dir, "manifest.py")):
         include(_dir)
