@@ -460,6 +460,9 @@ def main():
     if args.flash and args.flash.upper() not in FLASH_SIZES:
         die(f"--flash takes one of {', '.join(FLASH_SIZES)}")
     flash = args.flash.upper() if args.flash else None
+    if port == "esp32" and flash is None and not args.port:
+        # Upstream's generic tables assume 4 MB, which most module sets outgrow.
+        flash = choose("Flash size (none keeps the board's own):", list(FLASH_SIZES), allow_none=True)
 
     spec = args.modules
     if spec is None:
