@@ -3,7 +3,8 @@
 # pedestrian model, checked against the boxes ESP-DL's README lists for it.
 #
 #   mpftp put pedestrian.jpg /pedestrian.jpg
-#   mpftp put .../esp-vision/models/pedestrian_detect/pedestrian_detect_pico.espdl /pedestrian.espdl
+#   mpftp put pedestrian_detect_pico.espdl /pedestrian.espdl
+#     (esp-vision's models/pedestrian_detect/)
 #   mpftp run espdl_pedestrian_test.py
 #
 # esp-vision decodes the JPEG to RGB565 where ESP-DL's example uses RGB888,
@@ -14,7 +15,11 @@ import espdl
 import image
 
 # ESP-DL's README: [score, x1, y1, x2, y2]
-GOLDEN = [(0.884, 143, 189, 251, 462), (0.884, 282, 195, 370, 461), (0.805, 412, 224, 486, 394)]
+GOLDEN = [
+    (0.884, 143, 189, 251, 462),
+    (0.884, 282, 195, 370, 461),
+    (0.805, 412, 224, 486, 394),
+]
 
 
 def iou(a, b):

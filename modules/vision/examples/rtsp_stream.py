@@ -28,7 +28,8 @@ try:
     while time.ticks_diff(t_end, time.ticks_ms()) > 0:
         t0 = time.ticks_ms()
         img.clear()
-        img.draw_rectangle((n * 4) % (W - 40), 100, 40, 40, color=(255, 0, 0), fill=True)
+        x = (n * 4) % (W - 40)
+        img.draw_rectangle(x, 100, 40, 40, color=(255, 0, 0), fill=True)
         img.draw_string(8, 8, "frame %d" % n, color=(255, 255, 255), scale=2)
         srv.send(enc.encode(img))
         n += 1
