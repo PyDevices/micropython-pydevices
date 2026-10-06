@@ -47,7 +47,7 @@ FRAMES = HERE + "/frames"
 REFERENCE = FRAMES + "/reference.json"
 GOLDEN = FRAMES + "/golden_tjpgd.json"
 SCALES = (0, 1, 2, 3)
-RECORD = "--record" in sys.argv[1:]
+RECORD = "--record" in getattr(sys, "argv", [])[1:]
 
 # --- fidelity tolerance ------------------------------------------------------
 #

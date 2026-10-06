@@ -300,8 +300,11 @@ static mp_obj_t jpegio_jpegdecoder_decode(size_t n_args, const mp_obj_t *pos_arg
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_target, MP_ARG_OBJ | MP_ARG_REQUIRED, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_scale, MP_ARG_INT, {.u_int = 0} },
-        { MP_QSTR_x, MP_ARG_INT, {.u_int = 0} },
-        { MP_QSTR_y, MP_ARG_INT, {.u_int = 0} },
+        // Objects, not MP_ARG_INT: an int too big for a machine word must be
+        // the same "0..65535" ValueError on a 32-bit board as on 64-bit unix,
+        // not an OverflowError from the argument parser.
+        { MP_QSTR_x, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_INT(0)} },
+        { MP_QSTR_y, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_INT(0)} },
         { MP_QSTR_stride, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
@@ -314,10 +317,22 @@ static mp_obj_t jpegio_jpegdecoder_decode(size_t n_args, const mp_obj_t *pos_arg
     if (scale < 0 || scale > 3) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("%q must be 0..3, not %d"), MP_QSTR_scale, (int)scale);
     }
-    mp_int_t x = args[ARG_x].u_int;
-    mp_int_t y = args[ARG_y].u_int;
+    mp_obj_t x_obj = args[ARG_x].u_obj;
+    mp_obj_t y_obj = args[ARG_y].u_obj;
+    if (!mp_obj_is_int(x_obj) || !mp_obj_is_int(y_obj)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("x, y must be int"));
+    }
+    // Any coordinate that isn't a small int is far beyond 65535.
+    mp_int_t x = mp_obj_is_small_int(x_obj) ? MP_OBJ_SMALL_INT_VALUE(x_obj) : -1;
+    mp_int_t y = mp_obj_is_small_int(y_obj) ? MP_OBJ_SMALL_INT_VALUE(y_obj) : -1;
     if (x < 0 || x > JPEGIO_MAX_COORD || y < 0 || y > JPEGIO_MAX_COORD) {
-        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("x, y must be 0..%d, not (%ld, %ld)"), JPEGIO_MAX_COORD, (long)x, (long)y);
+        vstr_t vstr;
+        mp_print_t print;
+        vstr_init_print(&vstr, 32, &print);
+        mp_obj_print_helper(&print, x_obj, PRINT_REPR);
+        mp_print_str(&print, ", ");
+        mp_obj_print_helper(&print, y_obj, PRINT_REPR);
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("x, y must be 0..%d, not (%s)"), JPEGIO_MAX_COORD, vstr_null_terminated_str(&vstr));
     }
     size_t dw = self->width >> scale;
     size_t dh = self->height >> scale;
