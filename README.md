@@ -8,7 +8,9 @@ one command:
     --flash 16MB --modules displayif,pygraphics,/home/you/earful
 ```
 
-Boards are upstream's own generic ones. You name the modules you want: ours
+Boards are upstream's own generic ones; the
+[newcomer's guide](docs/newcomers.md#boards-we-build-for) has the command
+for each board we use. You name the modules you want: ours
 by short name, anything else by its path, or `all`. Leave out `--port` and it
 asks you for port, board and variant. Output lands in
 `builds/<port>/[<board>/]<variant>/`, beside a record of every module's
@@ -34,9 +36,9 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   each module's own MicroPython patches, once, as one local commit.
 - `variants/` — our variants: `unix/` and `windows/` (`pydevices`,
   `vst3-engine`), and `webassembly/` (`pydevices`, with the `wasmbridge`
-  module and a Fetch-backed `requests`).
-- `boards/esp32/` — four board dirs from before the reorg, still used until
-  their settings move into `variants/esp32/` (step 5 of the plan).
+  module and a Fetch-backed `requests`), and `esp32/`: the sdkconfig
+  fragments and partition table every esp32 or every chip gets, and the few
+  board variants of ours (`ESP32_GENERIC_S3` `LCD_7` and `T_EMBED`).
 - `provenance.json` — the patches' checksums and migration record.
 
 ## Rules

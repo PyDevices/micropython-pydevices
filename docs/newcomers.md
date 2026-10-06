@@ -15,6 +15,25 @@ build command. It is not a fork, and it publishes no Python package.
 The first run fetches what it needs. In the PyDevices workspace it links the
 sibling checkouts instead.
 
+## Boards we build for
+
+Every board here is one of upstream's, with at most a small variant of ours
+on top. Add `--modules` to any of these:
+
+| Board | Command |
+|---|---|
+| Waveshare ESP32-P4-WIFI6-DEV-KIT | `--port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB` |
+| Waveshare ESP32-P4-WIFI6-Touch-LCD-4B | `--port esp32 --board ESP32_GENERIC_P4 --variant PRE_REV3_C6_WIFI --flash 32MB` |
+| Waveshare ESP32-S3-Touch-LCD-7 | `--port esp32 --board ESP32_GENERIC_S3 --variant LCD_7 --flash 8MB` |
+| Waveshare ESP32-S3-Touch-LCD-4.3 | `--port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB` |
+| LilyGO T-Embed S3 | `--port esp32 --board ESP32_GENERIC_S3 --variant T_EMBED --flash 16MB` |
+| WT32-SC01 Plus | `--port esp32 --board ESP32_GENERIC_S3 --flash 16MB` |
+
+A new board usually needs no file at all: pick the upstream board and
+variant that match its chip and PSRAM, and give `--flash` its flash size. Make
+a variant of ours only for settings that really are that board's, like the
+LCD-7's cache sizes; see [esp32 settings](#esp32-settings) below.
+
 ## The model
 
 ```text
@@ -39,6 +58,29 @@ On esp32 the build may grow the app partition to fit the image. That moves
 the filesystem, so a board flashed with that image comes up with an empty
 one. `--no-autosize` refuses instead.
 
+## esp32 settings
+
+On esp32, `build_mp.py` appends our ESP-IDF settings after the board's, so
+ours win. They come from files it finds by name, each used only if it exists,
+in this order:
+
+1. `variants/esp32/sdkconfig`, then `variants/esp32/sdkconfig.<chip>`
+   (`esp32s3`, `esp32p4`): what every build, or every build for that chip,
+   wants. The S3's PSRAM, Wi-Fi and lwIP tuning and the P4's BLE-over-C6
+   settings are here.
+2. The same two names at the root of each module you selected: what that
+   module needs. usbif's USB host settings and cameraif's OV5647 driver live
+   in their own repos.
+3. `variants/esp32/<BOARD>/<VARIANT>/sdkconfig`: what's left that is one
+   board's alone. A variant dir of ours also holds an `mpconfigvariant.cmake`
+   that includes the upstream variant it builds on, which is how `LCD_7`
+   and `T_EMBED` become variants of `ESP32_GENERIC_S3`.
+
+The partition table is found the same way, the most specific
+`partitions.csv` winning (`variants/esp32/partitions.esp32s3.csv` adds a
+coredump partition on the S3); without one, the board's own is used. Either
+way autosize grows the app partition when the image doesn't fit.
+
 ## Where things are
 
 | Path | What it is |
@@ -48,8 +90,7 @@ one. `--no-autosize` refuses instead.
 | `modules.lock`, `deps.lock` | What gets fetched when it's missing. |
 | `modules/` | The module manifest, `all/`, `castif/`, and the modules. |
 | `patches/` | The patch series and `apply_patches.py`. |
-| `variants/` | Our unix, windows and webassembly variants. |
-| `boards/esp32/` | Board dirs from before the reorg, until step 5 of the plan. |
+| `variants/` | Our unix, windows and webassembly variants, and the esp32 settings and board variants. |
 
 ## Boundaries
 
