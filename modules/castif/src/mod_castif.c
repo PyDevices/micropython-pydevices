@@ -28,29 +28,7 @@
 #include "esp_heap_caps.h"
 #endif
 
-// h264enc encodes: its C API (modules/h264enc/src/h264enc.h), declared here
-// rather than included, and weak, so castif builds and links without h264enc
-// in the firmware; Cast() then says what is missing.
-typedef struct h264enc_session h264enc_session_t;
-extern const char *h264enc_open(h264enc_session_t **out, int width, int height, int canvas_w, int canvas_h,
-    int fps, int gop, int bitrate, int qp_min, int qp_max, uint32_t out_size) __attribute__((weak));
-extern int h264enc_encode(h264enc_session_t *s, const uint8_t *rgb565, const uint8_t **data, uint32_t *len, bool *idr) __attribute__((weak));
-extern void h264enc_force_idr(h264enc_session_t *s) __attribute__((weak));
-extern void h264enc_set_bitrate(h264enc_session_t *s, uint32_t bps) __attribute__((weak));
-extern void h264enc_timing(h264enc_session_t *s, uint32_t *ppa_us, uint32_t *enc_us) __attribute__((weak));
-extern void h264enc_close(h264enc_session_t *s) __attribute__((weak));
-
-// tsmux writes the MPEG-TS (modules/tsmux/src/tsmux_core.h), the same way:
-// declared here, weak, and held by pointer.
-typedef struct tsmux tsmux_t;
-typedef void tsmux_out_fn(void *ctx, const uint8_t *pkt);
-extern tsmux_t *tsmux_new(int lpcm, tsmux_out_fn *out, void *ctx) __attribute__((weak));
-extern void tsmux_free(tsmux_t *m) __attribute__((weak));
-extern void tsmux_reset(tsmux_t *m) __attribute__((weak));
-extern void tsmux_tables(tsmux_t *m) __attribute__((weak));
-extern void tsmux_video(tsmux_t *m, const uint8_t *au, uint32_t len, uint32_t pts, int key) __attribute__((weak));
-extern void tsmux_lpcm(tsmux_t *m, const uint8_t *pcm, uint32_t len, uint32_t pts) __attribute__((weak));
-extern void tsmux_pcr(tsmux_t *m, uint32_t pcr) __attribute__((weak));
+#include "castif_ext.h"
 
 // SPIRAM, 16-byte aligned (what esp_h264's allocator gave castif before).
 static void *castif_spiram(size_t n) {
@@ -744,9 +722,12 @@ MP_DEFINE_CONST_OBJ_TYPE(
     castif_cast_type, MP_QSTR_Cast, MP_TYPE_FLAG_NONE,
     make_new, castif_make_new, locals_dict, &castif_locals_dict);
 
+extern const mp_obj_type_t castif_hls_type;     // castif_hls.c: live HLS from a framebuffer
+
 static const mp_rom_map_elem_t castif_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_castif) },
     { MP_ROM_QSTR(MP_QSTR_Cast), MP_ROM_PTR(&castif_cast_type) },
+    { MP_ROM_QSTR(MP_QSTR_Hls), MP_ROM_PTR(&castif_hls_type) },
 };
 static MP_DEFINE_CONST_DICT(castif_module_globals, castif_module_globals_table);
 
