@@ -36,6 +36,7 @@ micropython-pydevices/
 │   ├── manifest.py          tracked: reads the module list build_mp.py sets, includes each, raises on a missing one
 │   ├── all/manifest.py      tracked: every sibling with a root manifest.py, except opt-in ones
 │   ├── castif/              tracked: lives only here (moves from usermods/); ESP32-P4 only
+│   ├── jpegio/              tracked: lives only here (moved from displayif, 2026-10-06); every port
 │   ├── audiodsp -> ../../audiodsp          ignored symlinks in the workspace,
 │   ├── audioif  -> ../../audioif           clones at the modules.lock commit anywhere else
 │   ├── audiocomponents, cameraif, displayif, lvgl-micropython, palettes,
@@ -242,8 +243,9 @@ Deferred, because the build script doesn't need them:
 - **A CI leg that builds the union** on one desktop port, so building only
   what you ask for doesn't lose the cross-port check that caught usbif's
   breaks in September.
-- **jpegio** out of displayif into its own repo, and whether esp-vision's
-  sensor and H.264 replace cameraif (and castif's encoder). esp-vision's
+- **jpegio** left displayif on 2026-10-06 for `modules/jpegio` here (the
+  anchor's media modules roadmap), not a repo of its own. Whether esp-vision's
+  sensor and H.264 replace cameraif (and castif's encoder) stays open. esp-vision's
   `tflite` and image stack are in as modules; where `sensor` stands is in
   [esp-vision.md](esp-vision.md).
 - **CircuitPython.** It doesn't read our manifests, and none of this reaches
