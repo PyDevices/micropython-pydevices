@@ -33,6 +33,8 @@ on top. Add `--modules` to any of these:
 | Waveshare ESP32-S3-Touch-LCD-4.3 | `--port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB` |
 | LilyGO T-Embed S3 | `--port esp32 --board ESP32_GENERIC_S3 --variant T_EMBED --flash 16MB` |
 | WT32-SC01 Plus | `--port esp32 --board ESP32_GENERIC_S3 --flash 16MB` |
+| Raspberry Pi Pico (RP2040) | `--port rp2 --board RPI_PICO` |
+| Raspberry Pi Pico 2 (RP2350) | `--port rp2 --board RPI_PICO2` |
 
 A new board usually needs no file at all: pick the upstream board and
 variant that match its chip and PSRAM, and give `--flash` its flash size. Make
@@ -59,9 +61,12 @@ module is a directory with a `manifest.py`, or a C module with its glue,
 like ulab. A module never brings another; nothing checks dependencies, so
 name ulab when you name audiocomponents, or use `all`.
 
-On esp32 the build may grow the app partition to fit the image. That moves
-the filesystem, so a board flashed with that image comes up with an empty
-one. `--no-autosize` refuses instead.
+On esp32 and rp2 the build may grow the firmware's share of flash to fit the
+image (on esp32 the app partition, on rp2 the region before the filesystem),
+leaving 1/32 of the flash as headroom, 64 KB to 256 KB. That moves the
+filesystem, so a board flashed with that image comes up with an empty one.
+`--no-autosize` refuses instead. On a Pico, `all` is far too big either way;
+name what your project uses.
 
 ## esp32 settings
 
