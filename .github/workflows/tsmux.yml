@@ -1,0 +1,53 @@
+# tsmux from a bare clone, the way a user builds it, on the unix port: the
+# canned-stream test, ffmpeg decoding what it muxed, and the check that tsmux
+# writes castif's stream byte for byte.
+name: tsmux
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/tsmux/**'
+      - 'build_mp.py'
+      - '.github/workflows/tsmux.yml'
+  pull_request:
+    paths:
+      - 'modules/tsmux/**'
+      - 'build_mp.py'
+      - '.github/workflows/tsmux.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0     # extract_castif_ref.py reads castif's muxer from history
+
+      - name: Install the unix port's build dependencies and ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev pkg-config ffmpeg
+
+      - name: tsmux writes castif's stream byte for byte
+        working-directory: modules/tsmux/tests
+        run: |
+          python3 extract_castif_ref.py
+          git diff --exit-code castif_ref.inc
+          cc -O2 -Wall -Wno-unused-function -I../src -o compare_castif compare_castif.c
+          ./compare_castif
+          ! ./compare_castif --plant
+
+      - name: Build the unix port with tsmux
+        run: python3 build_mp.py --port unix --modules tsmux
+
+      - name: Mux the canned stream into TS and HLS
+        run: ./builds/unix/standard/micropython modules/tsmux/tests/test_tsmux.py --out tsout
+
+      - name: ffmpeg decodes the stream, each segment and the playlist
+        run: python3 modules/tsmux/tests/check_tsmux_ffmpeg.py tsout
