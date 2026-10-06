@@ -285,7 +285,13 @@ static mp_obj_t h264enc_encoder_encode(mp_obj_t self_in, mp_obj_t frame) {
     const uint8_t *data;
     uint32_t len;
     bool idr;
+    // The PPA and the encoder are hardware waits: let other threads run, so
+    // an encoder on a background thread (an HLS display, say) doesn't stall
+    // the app drawing in the foreground. The frame is read as it stands,
+    // which is how castif reads a panel too.
+    MP_THREAD_GIL_EXIT();
     int err = h264enc_encode(s, buf.buf, &data, &len, &idr);
+    MP_THREAD_GIL_ENTER();
     if (err != 0) {
         self->errors++;
         mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("h264enc: encode failed (%d)"), err);

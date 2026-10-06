@@ -1,7 +1,7 @@
 // castif: the cast as a FreeRTOS task on core 0 of the ESP32-P4.
 //
-// PPA convert and hardware H.264 encode (h264enc's C API), MPEG-TS mux and RTP
-// send run on core 0, off the interpreter, so the app keeps its frame rate on
+// PPA convert and hardware H.264 encode (h264enc's C API), MPEG-TS mux
+// (tsmux's) and RTP send run on core 0, off the interpreter, so the app keeps its frame rate on
 // core 1 and a sink fed a steady stream foregrounds at once. The Wi-Fi Display session (MICE +
 // RTSP) stays in Python and is idle after PLAY.
 //
@@ -40,13 +40,23 @@ extern void h264enc_set_bitrate(h264enc_session_t *s, uint32_t bps) __attribute_
 extern void h264enc_timing(h264enc_session_t *s, uint32_t *ppa_us, uint32_t *enc_us) __attribute__((weak));
 extern void h264enc_close(h264enc_session_t *s) __attribute__((weak));
 
+// tsmux writes the MPEG-TS (modules/tsmux/src/tsmux_core.h), the same way:
+// declared here, weak, and held by pointer.
+typedef struct tsmux tsmux_t;
+typedef void tsmux_out_fn(void *ctx, const uint8_t *pkt);
+extern tsmux_t *tsmux_new(int lpcm, tsmux_out_fn *out, void *ctx) __attribute__((weak));
+extern void tsmux_free(tsmux_t *m) __attribute__((weak));
+extern void tsmux_reset(tsmux_t *m) __attribute__((weak));
+extern void tsmux_tables(tsmux_t *m) __attribute__((weak));
+extern void tsmux_video(tsmux_t *m, const uint8_t *au, uint32_t len, uint32_t pts, int key) __attribute__((weak));
+extern void tsmux_lpcm(tsmux_t *m, const uint8_t *pcm, uint32_t len, uint32_t pts) __attribute__((weak));
+extern void tsmux_pcr(tsmux_t *m, uint32_t pcr) __attribute__((weak));
+
 // SPIRAM, 16-byte aligned (what esp_h264's allocator gave castif before).
 static void *castif_spiram(size_t n) {
     return heap_caps_aligned_calloc(16, 1, n, MALLOC_CAP_SPIRAM);
 }
 
-#define PID_PMT   0x1000
-#define PID_VIDEO 0x100
 #define PCR_LEAD  36000           // 400 ms in 90 kHz ticks
 #define A_BLOCK   1920            // one 10 ms LPCM block: 480 frames * 4 bytes (48 kHz stereo s16)
 #define A_BLOCKS  64              // ring depth: 640 ms of audio
@@ -71,12 +81,7 @@ typedef struct _castif_obj_t {
     const uint8_t *fb;
     uint32_t fb_len;
     // TS mux
-    uint8_t cc_pat, cc_pmt, cc_video;
-    uint8_t pat[188];
-    uint8_t pmt[188];
-    uint32_t pmt_len;
-    uint8_t pkt[188];
-    uint8_t pes_head[20];         // video PES header + access-unit delimiter
+    tsmux_t *mux;                 // the TS (tsmux), its packets out through rtp_push
     // RTP
     int sock;
     struct sockaddr_in dst;
@@ -106,8 +111,6 @@ typedef struct _castif_obj_t {
     bool audio_on;
     uint8_t *audio_ring;                 // A_BLOCKS * A_BLOCK, in SPIRAM
     volatile uint32_t a_head, a_tail;    // block write / read indices
-    uint8_t cc_audio;
-    uint8_t apes[18];
     uint32_t apts;                        // audio PTS, 90 kHz
     int64_t t0;                           // esp_timer at start(): the wall clock both PTS come from
     uint32_t a_stamp[A_BLOCKS];           // wall-clock (90 kHz) when each block was fed
@@ -143,90 +146,6 @@ typedef struct _castif_obj_t {
     volatile uint32_t mfps;       // measured fps * 1000
 } castif_obj_t;
 
-// ---- MPEG-TS section building (PAT/PMT) ----------------------------------
-
-static uint32_t crc32_mpeg(const uint8_t *data, size_t len) {
-    uint32_t c = 0xFFFFFFFFu;
-    for (size_t i = 0; i < len; i++) {
-        c ^= (uint32_t)data[i] << 24;
-        for (int k = 0; k < 8; k++) {
-            c = (c & 0x80000000u) ? ((c << 1) ^ 0x04C11DB7u) : (c << 1);
-        }
-    }
-    return c;
-}
-
-// table_id, 0xB000|length, ident, 0xC1, 0, 0, body..., CRC32. Returns section length.
-static uint32_t build_section(uint8_t *dst, uint8_t table_id, uint16_t ident,
-                              const uint8_t *body, uint32_t body_len) {
-    uint32_t length = 5 + body_len + 4;   // counts everything after the length field
-    uint32_t n = 0;
-    dst[n++] = table_id;
-    dst[n++] = (0xB0 | ((length >> 8) & 0x0F));
-    dst[n++] = length & 0xFF;
-    dst[n++] = ident >> 8;
-    dst[n++] = ident & 0xFF;
-    dst[n++] = 0xC1;
-    dst[n++] = 0;
-    dst[n++] = 0;
-    memcpy(dst + n, body, body_len);
-    n += body_len;
-    uint32_t crc = crc32_mpeg(dst, n);
-    dst[n++] = crc >> 24;
-    dst[n++] = (crc >> 16) & 0xFF;
-    dst[n++] = (crc >> 8) & 0xFF;
-    dst[n++] = crc & 0xFF;
-    return n;
-}
-
-static void build_tables(castif_obj_t *c) {
-    // PAT: program 1 -> PMT PID
-    uint8_t pat_body[4];
-    pat_body[0] = 0; pat_body[1] = 1;                       // program_number 1
-    pat_body[2] = 0xE0 | (PID_PMT >> 8); pat_body[3] = PID_PMT & 0xFF;
-    uint32_t pat_sec = build_section(c->pat + 5, 0x00, 1, pat_body, 4);
-    c->pat[4] = 0;                                          // pointer field
-    // PMT: PCR PID = video, one video stream (0x1B)
-    uint8_t pmt_body[9];
-    pmt_body[0] = 0xE0 | (PID_VIDEO >> 8); pmt_body[1] = PID_VIDEO & 0xFF;  // PCR PID
-    pmt_body[2] = 0xF0; pmt_body[3] = 0x00;                 // program_info_length 0
-    pmt_body[4] = 0x1B;                                     // stream_type H.264
-    pmt_body[5] = 0xE0 | (PID_VIDEO >> 8); pmt_body[6] = PID_VIDEO & 0xFF;
-    pmt_body[7] = 0xF0; pmt_body[8] = 0x00;                 // ES_info_length 0
-    uint8_t pmt_a[9 + 5 + 6];
-    memcpy(pmt_a, pmt_body, 9);
-    uint32_t pmt_n = 9;
-    if (c->audio_on) {
-        pmt_a[pmt_n++] = 0x83;                             // HDMV LPCM
-        pmt_a[pmt_n++] = 0xE0 | (0x101 >> 8); pmt_a[pmt_n++] = 0x101 & 0xFF;
-        pmt_a[pmt_n++] = 0xF0; pmt_a[pmt_n++] = 0x04;      // ES_info_length 4
-        pmt_a[pmt_n++] = 0x83; pmt_a[pmt_n++] = 0x02; pmt_a[pmt_n++] = 0x46; pmt_a[pmt_n++] = 0x2f;
-    }
-    c->pmt_len = build_section(c->pmt + 5, 0x02, 1, pmt_a, pmt_n);
-    c->pmt[4] = 0;
-    // pad both to 188
-    for (uint32_t i = 5 + pat_sec; i < 188; i++) c->pat[i] = 0xFF;
-    for (uint32_t i = 5 + c->pmt_len; i < 188; i++) c->pmt[i] = 0xFF;
-}
-
-// ---- TS packet header ----------------------------------------------------
-
-static void ts_header(uint8_t *pkt, uint16_t pid, uint8_t *cc, int pusi, int afc) {
-    pkt[0] = 0x47;
-    pkt[1] = (pusi ? 0x40 : 0) | (pid >> 8);
-    pkt[2] = pid & 0xFF;
-    pkt[3] = (afc << 4) | (*cc & 15);
-    *cc = (*cc + 1) & 15;
-}
-
-static void pts_field(uint8_t *buf, int off, uint32_t pts) {
-    buf[off] = 0x21 | ((pts >> 29) & 0x0E);
-    buf[off + 1] = (pts >> 22) & 0xFF;
-    buf[off + 2] = 0x01 | ((pts >> 14) & 0xFE);
-    buf[off + 3] = (pts >> 7) & 0xFF;
-    buf[off + 4] = 0x01 | ((pts << 1) & 0xFE);
-}
-
 // ---- RTP (7 TS packets per RTP, payload type 33) -------------------------
 
 static void rtp_flush(castif_obj_t *c) {
@@ -258,134 +177,12 @@ static void rtp_push(castif_obj_t *c, const uint8_t *pkt) {
     if (c->rtp_n == 7) rtp_flush(c);
 }
 
-// ---- video PES -> TS packets (port of tsmux._pes for the video PID) -------
-
-static void mux_video(castif_obj_t *c, const uint8_t *au, uint32_t au_len,
-                      uint32_t pts, int key) {
-    uint8_t *pkt = c->pkt;
-    uint8_t *head = c->pes_head;        // 20 bytes: PES header + AUD
-    pts_field(head, 9, pts);
-    uint32_t hlen = 20;
-    uint32_t total = hlen + au_len;
-    uint32_t pos = 0;
-    uint32_t pcr = pts - PCR_LEAD;
-    int first = 1;
-    while (pos < total) {
-        uint32_t room = 184;
-        uint32_t body = 4;
-        if (first) {
-            ts_header(pkt, PID_VIDEO, &c->cc_video, 1, 3);
-            pkt[4] = 7;
-            pkt[5] = key ? 0x50 : 0x10;     // random_access_indicator + PCR flag
-            pkt[6] = (pcr >> 25) & 0xFF;
-            pkt[7] = (pcr >> 17) & 0xFF;
-            pkt[8] = (pcr >> 9) & 0xFF;
-            pkt[9] = (pcr >> 1) & 0xFF;
-            pkt[10] = ((pcr & 1) << 7) | 0x7E;
-            pkt[11] = 0;
-            body = 12;
-            room = 176;
-        }
-        uint32_t remaining = total - pos;
-        if (remaining < room) {
-            uint32_t pad = room - remaining;
-            if (!first) {
-                ts_header(pkt, PID_VIDEO, &c->cc_video, 0, 3);
-                pkt[4] = pad - 1;
-                if (pad >= 2) {
-                    pkt[5] = 0;
-                    for (uint32_t i = 6; i < 4 + pad; i++) pkt[i] = 0xFF;
-                }
-                body = 4 + pad;
-            } else {
-                // extend the PCR adaptation field
-                pkt[4] = 7 + pad;
-                for (uint32_t i = 12; i < 12 + pad; i++) pkt[i] = 0xFF;
-                body = 12 + pad;
-            }
-            room = remaining;
-        } else if (!first) {
-            ts_header(pkt, PID_VIDEO, &c->cc_video, 0, 1);
-        }
-        uint32_t n = room;
-        uint32_t dst = body;
-        if (pos < hlen) {
-            uint32_t hh = (hlen - pos < n) ? (hlen - pos) : n;
-            memcpy(pkt + dst, head + pos, hh);
-            dst += hh; pos += hh; n -= hh;
-        }
-        if (n) {
-            memcpy(pkt + dst, au + (pos - hlen), n);
-            pos += n;
-        }
-        rtp_push(c, pkt);
-        first = 0;
-    }
-}
-
-static void mux_lpcm(castif_obj_t *c, const uint8_t *pcm, uint32_t pts) {
-    uint8_t *pkt = c->pkt;
-    uint8_t *head = c->apes;               // 18 bytes
-    uint32_t n = A_BLOCK + 4;
-    head[0]=0;head[1]=0;head[2]=1;head[3]=0xbd;
-    head[4]=((n+8)>>8)&0xFF; head[5]=(n+8)&0xFF;
-    head[6]=0x80; head[7]=0x80; head[8]=0x05;
-    pts_field(head, 9, pts);
-    head[14]=0xA0; head[15]=6; head[16]=0; head[17]=0x11;
-    uint32_t hlen = 18, total = hlen + A_BLOCK, pos = 0;
-    int first = 1;
-    while (pos < total) {
-        uint32_t room = 184, body = 4;
-        uint32_t remaining = total - pos;
-        if (remaining < room) {
-            uint32_t pad = room - remaining;
-            ts_header(pkt, 0x101, &c->cc_audio, first, 3);
-            pkt[4] = pad - 1;
-            if (pad >= 2) { pkt[5] = 0; for (uint32_t i = 6; i < 4 + pad; i++) pkt[i] = 0xFF; }
-            body = 4 + pad; room = remaining;
-        } else {
-            ts_header(pkt, 0x101, &c->cc_audio, first, 1);
-        }
-        uint32_t k = room, dst = body;
-        if (pos < hlen) { uint32_t hh = (hlen - pos < k) ? (hlen - pos) : k; memcpy(pkt+dst, head+pos, hh); dst+=hh; pos+=hh; k-=hh; }
-        if (k) {
-            // the ring holds the pump's native little-endian PCM; LPCM on the
-            // wire is big-endian, so swap as we copy (offsets are even: the
-            // 18-byte header and 184-byte payloads keep samples whole)
-            uint32_t off = pos - hlen;
-            for (uint32_t i = 0; i < k; i++) pkt[dst + i] = pcm[(off + i) ^ 1];
-            pos += k;
-        }
-        rtp_push(c, pkt);
-        first = 0;
-    }
-}
-
-static void emit_tables(castif_obj_t *c) {
-    c->pat[3] = (1 << 4) | (c->cc_pat & 15); c->cc_pat = (c->cc_pat + 1) & 15;
-    c->pat[0] = 0x47; c->pat[1] = 0x40; c->pat[2] = 0x00;
-    rtp_push(c, c->pat);
-    c->pmt[3] = (1 << 4) | (c->cc_pmt & 15); c->cc_pmt = (c->cc_pmt + 1) & 15;
-    c->pmt[0] = 0x47; c->pmt[1] = 0x40 | (PID_PMT >> 8); c->pmt[2] = PID_PMT & 0xFF;
-    rtp_push(c, c->pmt);
+// tsmux's output: every TS packet into the RTP batch.
+static void castif_ts_out(void *ctx, const uint8_t *pkt) {
+    rtp_push((castif_obj_t *)ctx, pkt);
 }
 
 // ---- the streaming task (core 0) -----------------------------------------
-
-static void mux_pcr_only(castif_obj_t *c, uint32_t pcr) {
-    // a PCR with no payload on the video PID, for ticks whose frame was skipped:
-    // the sink's clock keeps running while the picture is static and audio plays
-    uint8_t *pkt = c->pkt;
-    pkt[0] = 0x47; pkt[1] = PID_VIDEO >> 8; pkt[2] = PID_VIDEO & 0xFF;
-    pkt[3] = (2 << 4) | ((c->cc_video - 1) & 15);   // adaptation field only: cc does not advance
-    pkt[4] = 183;
-    pkt[5] = 0x10;
-    pkt[6] = (pcr >> 25) & 0xFF; pkt[7] = (pcr >> 17) & 0xFF;
-    pkt[8] = (pcr >> 9) & 0xFF; pkt[9] = (pcr >> 1) & 0xFF;
-    pkt[10] = ((pcr & 1) << 7) | 0x7E; pkt[11] = 0;
-    memset(pkt + 12, 0xFF, 176);
-    rtp_push(c, pkt);
-}
 
 // ---- audio (Phase 2) ------------------------------------------------------
 //
@@ -433,7 +230,7 @@ static int drain_one(castif_obj_t *c) {
     } else if (c->sync_limit) {
         int32_t off = c->drift - c->drift_ref;
         if (off > (int32_t)c->sync_limit) {          // audio would play early: pad
-            mux_lpcm(c, SILENCE, c->apts);
+            tsmux_lpcm(c->mux, SILENCE, A_BLOCK, c->apts);
             c->apts += 900; c->audio_inserted++; c->drift -= 900;
             return 1;
         }
@@ -442,7 +239,7 @@ static int drain_one(castif_obj_t *c) {
             return 0;
         }
     }
-    mux_lpcm(c, c->audio_ring + i * A_BLOCK, c->apts);
+    tsmux_lpcm(c->mux, c->audio_ring + i * A_BLOCK, A_BLOCK, c->apts);
     c->a_tail++; c->apts += 900; c->audio_muxed++; c->since_anchor++;
     return 1;
 }
@@ -618,14 +415,14 @@ static void cast_task(void *arg) {
                 c->last_len = au_len;
                 c->last_type = key ? 0 : 2;     // esp_h264's frame types: 0 IDR, 2 P
                 m0 = esp_timer_get_time();
-                if (key) emit_tables(c);
-                mux_video(c, au, au_len, pts, key);
+                if (key) tsmux_tables(c->mux);
+                tsmux_video(c->mux, au, au_len, pts, key);
                 c->frames++;
                 win_frames++;
             }
         }
         if (c->audio_on) {
-            if (skip) mux_pcr_only(c, pts - PCR_LEAD);
+            if (skip) tsmux_pcr(c->mux, pts - PCR_LEAD);
             pace_audio(c, esp_timer_get_time());
             // the producer has stopped: the track is more than 200 ms behind the picture
             if (c->apts && (int32_t)(pts - c->apts) > 18000) c->audio_underruns++;
@@ -677,6 +474,9 @@ static mp_obj_t castif_make_new(const mp_obj_type_t *type, size_t n_args, size_t
     self->new_bitrate = -1;
     self->max_skip_us = 500000;   // static UIs: >=2 fps floor; set_skip(0) turns it off
     self->frame_us = 1000000 / args[ARG_fps].u_int;
+    if (tsmux_new == NULL) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("castif: needs the tsmux module in this firmware"));
+    }
     if (h264enc_open == NULL) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("castif: needs the h264enc module in this firmware"));
     }
@@ -688,9 +488,6 @@ static mp_obj_t castif_make_new(const mp_obj_type_t *type, size_t n_args, size_t
         }
         mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("castif: %s"), why);
     }
-    // PES header + access-unit delimiter, fixed
-    static const uint8_t H[20] = {0,0,1,0xe0,0,0,0x80,0x80,5,0,0,0,0,0,0,0,0,1,9,0xf0};
-    memcpy(self->pes_head, H, 20);
     self->ssrc = 0x50344341;
     self->seq = 1;
     self->audio_on = args[ARG_audio].u_bool;
@@ -699,7 +496,8 @@ static mp_obj_t castif_make_new(const mp_obj_type_t *type, size_t n_args, size_t
         self->audio_ring = castif_spiram(A_BLOCKS * A_BLOCK);
         if (!self->audio_ring) mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("castif: audio ring"));
     }
-    build_tables(self);
+    self->mux = tsmux_new(self->audio_on, castif_ts_out, self);
+    if (self->mux == NULL) mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("castif: muxer"));
     return MP_OBJ_FROM_PTR(self);
 }
 
@@ -734,13 +532,13 @@ static mp_obj_t castif_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
     self->dst.sin_port = htons(dst_port);
     self->dst.sin_addr.s_addr = inet_addr(ip);
     self->rtp_n = 0;
-    self->cc_pat = self->cc_pmt = self->cc_video = 0;
+    tsmux_reset(self->mux);
     self->frames = self->packets = self->sent = self->stalls = self->idr_reqs = 0;
     self->running = true;
     self->want_idr = true;   // start with a keyframe
     self->last_hash = 0; self->last_real_us = 0; self->skipped = 0;
     self->t0 = esp_timer_get_time();
-    self->a_head = self->a_tail = 0; self->apts = 0; self->cc_audio = 0;
+    self->a_head = self->a_tail = 0; self->apts = 0;
     self->drift = self->drift_ref = 0; self->drift_ref_set = false;
     self->next_audio_us = 0;
     self->audio_fed = self->audio_muxed = self->audio_underruns = 0;
@@ -917,6 +715,7 @@ static mp_obj_t castif_close(mp_obj_t self_in) {
     castif_obj_t *self = MP_OBJ_TO_PTR(self_in);
     castif_stop(self_in);
     if (self->enc) { h264enc_close(self->enc); self->enc = NULL; }
+    if (self->mux) { tsmux_free(self->mux); self->mux = NULL; }
     if (self->audio_ring) { heap_caps_free(self->audio_ring); self->audio_ring = NULL; }
     if (self->tap_in) { heap_caps_free(self->tap_in); self->tap_in = NULL; }
     self->tap = MP_OBJ_NULL;
