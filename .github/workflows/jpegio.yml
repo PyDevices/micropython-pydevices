@@ -1,0 +1,87 @@
+# jpegio from a bare clone, the way a user builds it: build_mp.py fetches
+# MicroPython and the pinned modules itself. Its golden corpus without LVGL,
+# then beside lvgl-micropython as LVGL's JPEG decoder. (These checks moved
+# here with jpegio from displayif's clean-build workflow, 2026-10-06.)
+name: jpegio
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/jpegio/**'
+      - 'build_mp.py'
+      - 'modules.lock'
+      - 'patches/**'
+      - '.github/workflows/jpegio.yml'
+  pull_request:
+    paths:
+      - 'modules/jpegio/**'
+      - 'build_mp.py'
+      - 'modules.lock'
+      - 'patches/**'
+      - '.github/workflows/jpegio.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the unix port's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev pkg-config
+
+      - name: Build the unix port with jpegio
+        run: python3 build_mp.py --port unix --modules jpegio
+
+      - name: The golden corpus (no Pillow needed)
+        run: ./builds/unix/standard/micropython modules/jpegio/tests/test_jpegio.py
+
+      - name: The LVGL-less contract (must print SKIP)
+        # register_lvgl_decoder() and lvgl_decoders() are module attributes on
+        # every build, the first raising RuntimeError here, the second
+        # returning () (modules/jpegio/README.md).
+        run: |
+          ./builds/unix/standard/micropython modules/jpegio/tests/test_jpegio_lvgl.py | tee lvgl.out
+          grep -q 'register_lvgl_decoder() -> RuntimeError' lvgl.out
+          grep -q 'lvgl_decoders() == ()' lvgl.out
+          grep -q '^SKIP' lvgl.out
+
+  unix-lvgl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the unix port's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev pkg-config
+
+      - name: Build the unix port with jpegio and lvgl-micropython
+        run: python3 build_mp.py --port unix --modules jpegio,lvgl-micropython
+
+      - name: One TJpgDec in the firmware, and it is jpegio's
+        # LVGL's own tjpgd.o compiles empty (LV_USE_TJPGD 0 in lvgl-bindings),
+        # so exactly one object defines jd_prepare, and jpegio's two objects
+        # call into it.
+        working-directory: builds/unix/standard
+        run: |
+          find . -name '*.o' -exec nm -A {} + 2>/dev/null | grep ' T jd_prepare$' > jd.txt
+          cat jd.txt
+          test "$(wc -l < jd.txt)" = 1
+          grep -q '^./jpegio/src/tjpgd/tjpgd.o:' jd.txt
+          nm jpegio/src/jpegio.o | grep -q ' U jd_prepare$'
+          nm jpegio/src/lvgl_decoder.o | grep -q ' U jd_decomp$'
+
+      - name: The golden corpus, unchanged beside LVGL
+        run: ./builds/unix/standard/micropython modules/jpegio/tests/test_jpegio.py
+
+      - name: JPEGs through lv.image
+        run: ./builds/unix/standard/micropython modules/jpegio/tests/test_jpegio_lvgl.py
