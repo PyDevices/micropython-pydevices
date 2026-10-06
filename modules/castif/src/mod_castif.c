@@ -1,8 +1,8 @@
 // castif: the cast as a FreeRTOS task on core 0 of the ESP32-P4.
 //
-// PPA convert, hardware H.264 encode, MPEG-TS mux and RTP send run on core 0,
-// off the interpreter, so the app keeps its frame rate on core 1 and a sink
-// fed a steady stream foregrounds at once. The Wi-Fi Display session (MICE +
+// PPA convert and hardware H.264 encode (h264enc's C API), MPEG-TS mux and RTP
+// send run on core 0, off the interpreter, so the app keeps its frame rate on
+// core 1 and a sink fed a steady stream foregrounds at once. The Wi-Fi Display session (MICE +
 // RTSP) stays in Python and is idle after PLAY.
 //
 // Sound (audio=True): 10 ms LPCM blocks on the same wall clock as the video.
@@ -25,15 +25,29 @@
 #include "freertos/idf_additions.h"   // xTaskCreatePinnedToCore: FreeRTOS.h adds it only under ESP_PLATFORM
 #include "esp_timer.h"
 #include "lwip/sockets.h"
-#include "esp_h264_enc_single_hw.h"
-#include "esp_h264_alloc.h"
-#include "driver/ppa.h"
+#include "esp_heap_caps.h"
 #endif
+
+// h264enc encodes: its C API (modules/h264enc/src/h264enc.h), declared here
+// rather than included, and weak, so castif builds and links without h264enc
+// in the firmware; Cast() then says what is missing.
+typedef struct h264enc_session h264enc_session_t;
+extern const char *h264enc_open(h264enc_session_t **out, int width, int height, int canvas_w, int canvas_h,
+    int fps, int gop, int bitrate, int qp_min, int qp_max, uint32_t out_size) __attribute__((weak));
+extern int h264enc_encode(h264enc_session_t *s, const uint8_t *rgb565, const uint8_t **data, uint32_t *len, bool *idr) __attribute__((weak));
+extern void h264enc_force_idr(h264enc_session_t *s) __attribute__((weak));
+extern void h264enc_set_bitrate(h264enc_session_t *s, uint32_t bps) __attribute__((weak));
+extern void h264enc_timing(h264enc_session_t *s, uint32_t *ppa_us, uint32_t *enc_us) __attribute__((weak));
+extern void h264enc_close(h264enc_session_t *s) __attribute__((weak));
+
+// SPIRAM, 16-byte aligned (what esp_h264's allocator gave castif before).
+static void *castif_spiram(size_t n) {
+    return heap_caps_aligned_calloc(16, 1, n, MALLOC_CAP_SPIRAM);
+}
 
 #define PID_PMT   0x1000
 #define PID_VIDEO 0x100
 #define PCR_LEAD  36000           // 400 ms in 90 kHz ticks
-#define AU_MAX    (256 * 1024)    // encoder output cap when out_size not given
 #define A_BLOCK   1920            // one 10 ms LPCM block: 480 frames * 4 bytes (48 kHz stereo s16)
 #define A_BLOCKS  64              // ring depth: 640 ms of audio
 #define TAP_CHUNK 4096            // bytes read from the pump's tap per call (85 ms of 24 kHz mono)
@@ -49,17 +63,9 @@ extern uint32_t audiopump_tap_read_since(mp_obj_t tap, uint32_t *cursor,
 
 typedef struct _castif_obj_t {
     mp_obj_base_t base;
-    // encoder + PPA (as h264enc)
-    esp_h264_enc_handle_t enc;
-    esp_h264_enc_param_hw_handle_t param;
-    ppa_client_handle_t ppa;
-    uint8_t *yuv;
-    uint32_t yuv_len;
-    uint32_t in_len;              // packed YUV420 canvas the encoder reads
-    uint8_t *out_buf;
-    uint32_t out_cap;
+    // the encoder session (h264enc: PPA + esp_h264)
+    h264enc_session_t *enc;
     uint16_t w, h, cw, ch;
-    bool open;
     // source framebuffer (RGB565), pinned by start()
     mp_obj_t fb_obj;
     const uint8_t *fb;
@@ -366,31 +372,6 @@ static void emit_tables(castif_obj_t *c) {
 
 // ---- the streaming task (core 0) -----------------------------------------
 
-static int ppa_convert(castif_obj_t *c) {
-    int64_t p0 = esp_timer_get_time();
-    ppa_srm_oper_config_t op = {0};
-    op.in.buffer = (void *)c->fb;
-    op.in.pic_w = c->w; op.in.pic_h = c->h;
-    op.in.block_w = c->w; op.in.block_h = c->h;
-    op.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
-    op.in.yuv_range = PPA_COLOR_RANGE_LIMIT;
-    op.in.yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601;
-    op.out.buffer = c->yuv;
-    op.out.buffer_size = c->yuv_len;
-    op.out.pic_w = c->cw; op.out.pic_h = c->ch;
-    op.out.block_offset_x = ((c->cw - c->w) / 2) & ~1u;
-    op.out.block_offset_y = ((c->ch - c->h) / 2) & ~1u;
-    op.out.srm_cm = PPA_SRM_COLOR_MODE_YUV420;
-    op.out.yuv_range = PPA_COLOR_RANGE_LIMIT;
-    op.out.yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601;
-    op.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
-    op.scale_x = 1.0f; op.scale_y = 1.0f;
-    op.mode = PPA_TRANS_MODE_BLOCKING;
-    esp_err_t err = ppa_do_scale_rotate_mirror(c->ppa, &op);
-    c->ppa_us = (uint32_t)(esp_timer_get_time() - p0);
-    return err == ESP_OK ? 0 : -1;
-}
-
 static void mux_pcr_only(castif_obj_t *c, uint32_t pcr) {
     // a PCR with no payload on the video PID, for ticks whose frame was skipped:
     // the sink's clock keeps running while the picture is static and audio plays
@@ -595,12 +576,12 @@ static void cast_task(void *arg) {
         if (now - next > 200000) next = now;        // don't chase a big backlog
         // controls
         if (c->new_bitrate > 0) {
-            esp_h264_enc_set_bitrate((esp_h264_enc_param_handle_t)c->param, c->new_bitrate);
+            h264enc_set_bitrate(c->enc, (uint32_t)c->new_bitrate);
             c->new_bitrate = -1;
         }
         int idr = c->want_idr;
         if (idr) {
-            esp_h264_enc_force_idr((esp_h264_enc_param_handle_t)c->param);
+            h264enc_force_idr(c->enc);
             c->want_idr = false;
         }
         // one wall clock for both tracks: this tick's PTS in 90 kHz ticks
@@ -622,27 +603,23 @@ static void cast_task(void *arg) {
         }
         int64_t m0 = now;
         c->ts90 = pts - PCR_LEAD;
-        if (!skip && ppa_convert(c) != 0) skip = 1;
         if (!skip) {
-            esp_h264_enc_in_frame_t inf = {0};
-            inf.raw_data.buffer = c->yuv;
-            inf.raw_data.len = c->in_len;
-            inf.pts = (uint32_t)((uint64_t)c->frames * c->frame_us / 1000);
-            esp_h264_enc_out_frame_t outf = {0};
-            outf.raw_data.buffer = c->out_buf;
-            outf.raw_data.len = c->out_cap;
-            int64_t e0 = esp_timer_get_time();
-            esp_h264_err_t err = esp_h264_enc_process(c->enc, &inf, &outf);
-            c->enc_us = (uint32_t)(esp_timer_get_time() - e0);
-            if (err != ESP_H264_ERR_OK) {
+            const uint8_t *au;
+            uint32_t au_len;
+            bool key;
+            int err = h264enc_encode(c->enc, c->fb, &au, &au_len, &key);
+            uint32_t ppa_us, enc_us;
+            h264enc_timing(c->enc, &ppa_us, &enc_us);
+            c->ppa_us = ppa_us;
+            c->enc_us = enc_us;
+            if (err != 0) {
                 skip = 1;
             } else {
-                c->last_len = outf.length;
-                c->last_type = outf.frame_type;
-                int key = (outf.frame_type == 0);
+                c->last_len = au_len;
+                c->last_type = key ? 0 : 2;     // esp_h264's frame types: 0 IDR, 2 P
                 m0 = esp_timer_get_time();
                 if (key) emit_tables(c);
-                mux_video(c, c->out_buf, outf.length, pts, key);
+                mux_video(c, au, au_len, pts, key);
                 c->frames++;
                 win_frames++;
             }
@@ -666,12 +643,6 @@ static void cast_task(void *arg) {
 }
 
 // ---- Python API ----------------------------------------------------------
-
-static void castif_check(esp_h264_err_t err, const char *what) {
-    if (err != ESP_H264_ERR_OK) {
-        mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("%s: esp_h264 error %d"), what, (int)err);
-    }
-}
 
 static mp_obj_t castif_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
     enum { ARG_width, ARG_height, ARG_canvas_w, ARG_canvas_h, ARG_fps, ARG_gop, ARG_bitrate, ARG_qp_min, ARG_qp_max, ARG_out_size, ARG_audio };
@@ -706,33 +677,17 @@ static mp_obj_t castif_make_new(const mp_obj_type_t *type, size_t n_args, size_t
     self->new_bitrate = -1;
     self->max_skip_us = 500000;   // static UIs: >=2 fps floor; set_skip(0) turns it off
     self->frame_us = 1000000 / args[ARG_fps].u_int;
-    self->in_len = (uint32_t)cw * ch * 3 / 2;
-
-    ppa_client_config_t pcfg = { .oper_type = PPA_OPERATION_SRM, .max_pending_trans_num = 1 };
-    if (ppa_register_client(&pcfg, &self->ppa) != ESP_OK) {
-        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("castif: PPA client"));
+    if (h264enc_open == NULL) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("castif: needs the h264enc module in this firmware"));
     }
-    uint32_t want_yuv = ((uint32_t)cw * ch * 3 / 2 + 127) & ~127u;
-    self->yuv = esp_h264_aligned_calloc(128, 1, want_yuv, &self->yuv_len, ESP_H264_MEM_SPIRAM);
-    if (!self->yuv) mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("castif: YUV buffer"));
-    for (uint32_t i = 0; i + 2 < self->in_len; i += 3) {   // limited-range black
-        self->yuv[i] = 0x80; self->yuv[i + 1] = 0x10; self->yuv[i + 2] = 0x10;
+    const char *why = h264enc_open(&self->enc, w, h, cw, ch, args[ARG_fps].u_int, args[ARG_gop].u_int,
+        args[ARG_bitrate].u_int, args[ARG_qp_min].u_int, args[ARG_qp_max].u_int, (uint32_t)args[ARG_out_size].u_int);
+    if (why != NULL) {
+        if (strcmp(why, "busy") == 0) {
+            mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("castif: the H.264 encoder is busy (an h264enc.Encoder or another Cast has it)"));
+        }
+        mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("castif: %s"), why);
     }
-    esp_h264_enc_cfg_hw_t cfg = {0};
-    cfg.pic_type = ESP_H264_RAW_FMT_O_UYY_E_VYY;
-    cfg.gop = args[ARG_gop].u_int;
-    cfg.fps = args[ARG_fps].u_int;
-    cfg.res.width = cw; cfg.res.height = ch;
-    cfg.rc.bitrate = args[ARG_bitrate].u_int;
-    cfg.rc.qp_min = args[ARG_qp_min].u_int;
-    cfg.rc.qp_max = args[ARG_qp_max].u_int;
-    castif_check(esp_h264_enc_hw_new(&cfg, &self->enc), "enc_hw_new");
-    castif_check(esp_h264_enc_open(self->enc), "enc_open");
-    self->open = true;
-    castif_check(esp_h264_enc_hw_get_param_hd(self->enc, &self->param), "get_param");
-    uint32_t want = args[ARG_out_size].u_int ? (uint32_t)args[ARG_out_size].u_int : AU_MAX;
-    self->out_buf = esp_h264_aligned_calloc(16, 1, want, &self->out_cap, ESP_H264_MEM_SPIRAM);
-    if (!self->out_buf) mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("castif: output buffer"));
     // PES header + access-unit delimiter, fixed
     static const uint8_t H[20] = {0,0,1,0xe0,0,0,0x80,0x80,5,0,0,0,0,0,0,0,0,1,9,0xf0};
     memcpy(self->pes_head, H, 20);
@@ -741,8 +696,7 @@ static mp_obj_t castif_make_new(const mp_obj_type_t *type, size_t n_args, size_t
     self->audio_on = args[ARG_audio].u_bool;
     self->sync_limit = 20 * 90;
     if (self->audio_on) {
-        uint32_t got = 0;
-        self->audio_ring = esp_h264_aligned_calloc(16, 1, A_BLOCKS * A_BLOCK, &got, ESP_H264_MEM_SPIRAM);
+        self->audio_ring = castif_spiram(A_BLOCKS * A_BLOCK);
         if (!self->audio_ring) mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("castif: audio ring"));
     }
     build_tables(self);
@@ -883,8 +837,7 @@ static mp_obj_t castif_set_tap(size_t n_args, const mp_obj_t *args) {
         mp_raise_ValueError(MP_ERROR_TEXT("castif: tap channel_count differs"));
     }
     if (!self->tap_in) {
-        uint32_t got = 0;
-        self->tap_in = esp_h264_aligned_calloc(16, 1, TAP_CHUNK, &got, ESP_H264_MEM_SPIRAM);
+        self->tap_in = castif_spiram(TAP_CHUNK);
         if (!self->tap_in) mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("castif: tap buffer"));
     }
     self->tap = MP_OBJ_NULL;
@@ -963,12 +916,9 @@ static MP_DEFINE_CONST_FUN_OBJ_1(castif_stats_obj, castif_stats);
 static mp_obj_t castif_close(mp_obj_t self_in) {
     castif_obj_t *self = MP_OBJ_TO_PTR(self_in);
     castif_stop(self_in);
-    if (self->open) { esp_h264_enc_close(self->enc); esp_h264_enc_del(self->enc); self->open = false; }
-    if (self->ppa) { ppa_unregister_client(self->ppa); self->ppa = NULL; }
-    if (self->yuv) { esp_h264_free(self->yuv); self->yuv = NULL; }
-    if (self->out_buf) { esp_h264_free(self->out_buf); self->out_buf = NULL; }
-    if (self->audio_ring) { esp_h264_free(self->audio_ring); self->audio_ring = NULL; }
-    if (self->tap_in) { esp_h264_free(self->tap_in); self->tap_in = NULL; }
+    if (self->enc) { h264enc_close(self->enc); self->enc = NULL; }
+    if (self->audio_ring) { heap_caps_free(self->audio_ring); self->audio_ring = NULL; }
+    if (self->tap_in) { heap_caps_free(self->tap_in); self->tap_in = NULL; }
     self->tap = MP_OBJ_NULL;
     return mp_const_none;
 }

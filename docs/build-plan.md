@@ -151,11 +151,12 @@ complete desktop runtime and `all` stays all. Board images never carry a board
 config, and neither does mpvst's `vst3-engine`, which has its own.
 
 castif is the one module whose only home is this repo, so `modules/castif/` is
-tracked here rather than linked. It's ESP32-P4 only: its H.264 encoder is an
-ESP-IDF component that has to be added before `project()` runs, so the
-generated board dir adds `castif/castif_h264` to `EXTRA_COMPONENT_DIRS`
-whenever castif is selected: any selected module's `components/<name>/` is
-added that way, by convention. Its own glue skips every other port and chip,
+tracked here rather than linked. It's ESP32-P4 only. Its H.264 encoder moved
+into `modules/h264enc/` (the media roadmap's Phase 3), an ESP-IDF component
+that has to be added before `project()` runs, so the generated board dir adds
+`h264enc/components/h264enc_esp_h264` to `EXTRA_COMPONENT_DIRS` whenever
+h264enc is selected: any selected module's `components/<name>/` is added that
+way, by convention. Its own glue skips every other port and chip,
 the way audioif's skips non-esp32 ports, so `all` needs no exception for it.
 
 ## Python-only modules, frozen or not
