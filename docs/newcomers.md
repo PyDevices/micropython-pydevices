@@ -64,7 +64,7 @@ Three choices make a build: the board (or not, on the desktop ports), the
 variant (always optional, as with upstream's `make`), and the modules. A
 module is a directory with a `manifest.py`, or a C module with its glue,
 like ulab. A module never brings another; nothing checks dependencies, so
-name ulab when you name audiocomponents, or use `all`.
+name ulab when you name audiocomponents, tflite or vision, or use `all`.
 
 On esp32 and rp2 the build may grow the firmware's share of flash to fit the
 image (on esp32 the app partition, on rp2 the region before the filesystem),
@@ -103,7 +103,7 @@ way autosize grows the app partition when the image doesn't fit.
 | `build_mp.py` | The build command. |
 | `UPSTREAM` | The MicroPython release the patches apply to. |
 | `modules.lock`, `deps.lock` | What gets fetched when it's missing. |
-| `modules/` | The module manifest, `all/`, `castif/`, and the modules. |
+| `modules/` | The module manifest, `all/`, `castif/`, `tflite/` and `vision/` ([esp-vision's](esp-vision.md)), and the modules. |
 | `patches/` | The patch series and `apply_patches.py`. |
 | `variants/` | Our unix, windows and webassembly variants, and the esp32 settings and board variants. |
 

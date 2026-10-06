@@ -36,8 +36,10 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   fetches when a module or a toolchain isn't there. In the PyDevices
   workspace both are links to the sibling checkouts instead.
 - `modules/` — `manifest.py` (the manifest every build freezes), `all/`
-  (every module), `castif/` (the ESP32-P4 cast, which lives only here), and
-  the modules themselves, linked or cloned.
+  (every module), `castif/` (the ESP32-P4 cast, which lives only here),
+  `tflite/` and `vision/` (esp-vision's modules, from the pin in `.esp-vision/`;
+  see [docs/esp-vision.md](docs/esp-vision.md)), and the modules themselves,
+  linked or cloned.
 - `patches/micropython/` — our patch series (`0001-…` to `0018-…`), each
   justified in its own header; `patches/apply_patches.py` applies it, plus
   each module's own MicroPython patches, once, as one local commit.

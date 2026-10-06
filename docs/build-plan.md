@@ -138,8 +138,8 @@ script.
 A module never brings another module. ulab is a module like any other,
 pinned only by `modules.lock`; audiodsp, which never used it, no longer names
 its own copy, so nothing is compiled twice. Nothing checks dependencies
-either: audiocomponents' instruments import ulab, so name ulab with them, or
-use `all`.
+either: audiocomponents' instruments import ulab, and tflite and vision
+compile against it, so name ulab with them, or use `all`.
 
 Our desktop and browser variants (`unix`, `windows` and `webassembly`
 `pydevices`) freeze the universal desktop board config themselves, from
@@ -241,6 +241,8 @@ Deferred, because the build script doesn't need them:
   what you ask for doesn't lose the cross-port check that caught usbif's
   breaks in September.
 - **jpegio** out of displayif into its own repo, and whether esp-vision's
-  sensor and H.264 replace cameraif (and castif's encoder).
+  sensor and H.264 replace cameraif (and castif's encoder). esp-vision's
+  `tflite` and image stack are in as modules; where `sensor` stands is in
+  [esp-vision.md](esp-vision.md).
 - **CircuitPython.** It doesn't read our manifests, and none of this reaches
   it yet.
