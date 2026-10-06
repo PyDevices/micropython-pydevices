@@ -34,7 +34,7 @@ micropython-pydevices/
 ├── deps/                    ignored: esp-idf/, emsdk/, SDL2/, symlinked or fetched on demand
 ├── modules/
 │   ├── manifest.py          tracked: reads the module list build_mp.py sets, includes each, raises on a missing one
-│   ├── all/manifest.py      tracked: every sibling with a root manifest.py; all means all
+│   ├── all/manifest.py      tracked: every sibling with a root manifest.py, except opt-in ones
 │   ├── castif/              tracked: lives only here (moves from usermods/); ESP32-P4 only
 │   ├── audiodsp -> ../../audiodsp          ignored symlinks in the workspace,
 │   ├── audioif  -> ../../audioif           clones at the modules.lock commit anywhere else
@@ -133,7 +133,9 @@ no pile of experiment dirs.
 
 `all` is a module like any other, `modules/all/`, so the logic of "everything"
 lives in its own manifest, which we can change without touching the build
-script.
+script. A module with an `OPT_IN` file is the one exception: `all` leaves it
+out, and it's built only when named. tflite and vision are opt-in, for their
+size (docs/esp-vision.md).
 
 A module never brings another module. ulab is a module like any other,
 pinned only by `modules.lock`; audiodsp, which never used it, no longer names

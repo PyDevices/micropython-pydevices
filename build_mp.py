@@ -264,7 +264,8 @@ def resolve_modules(spec):
             dirs.append(path)
         elif item == "all":
             names.append("all")
-            dirs += [MODULES_DIR / n for n in module_choices() if n != "all"]
+            # modules/all/manifest.py's rule: every module but the opt-in ones.
+            dirs += [MODULES_DIR / n for n in module_choices() if n != "all" and not (MODULES_DIR / n / "OPT_IN").is_file()]
         else:
             if not (MODULES_DIR / item).is_dir():
                 die(f"no module '{item}' in {MODULES_DIR} (have: {', '.join(module_choices())})")

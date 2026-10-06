@@ -2,7 +2,8 @@
 
 Two modules come from [espressif/esp-vision](https://github.com/espressif/esp-vision)
 (Apache-2.0; its imlib is OpenMV's, MIT), compiled from esp-vision's own files
-without changes. Both are ESP32-P4 and ESP32-S3 only, and both need ulab:
+without changes. Both are ESP32-P4 and ESP32-S3 only, both need ulab, and both
+are opt-in: `--modules all` leaves them out, so name them:
 
 ```bash
 ./build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB --modules ulab,tflite,vision
@@ -53,11 +54,11 @@ the pedestrian test with one person blacked out.
 
 ## What it costs
 
-Both are in `all`, which means all. On 2026-10-06 they added about 2.1 MB to
-the S3's `all` image (the LCD-7's app partition grew from 0x440000 to
-0x6b0000, leaving about 1.2 MB of filesystem on 8 MB of flash) and about 3.1 MB
-to the P4's (`firmware.bin` 4.53 MB to 7.68 MB of 16 MB). Most of it is
-ESP-DL. The desktop ports skip both.
+Which is why they're opt-in (Brad, 2026-10-06). Built into an `all` image on
+2026-10-06 they added about 2.1 MB on the S3 (the LCD-7's app partition grew
+from 0x440000 to 0x6b0000, leaving about 1.2 MB of filesystem on 8 MB of
+flash) and about 3.1 MB on the P4 (`firmware.bin` 4.53 MB to 7.68 MB of
+16 MB). Most of it is ESP-DL. The desktop ports skip both.
 
 ## Not in yet
 

@@ -65,6 +65,8 @@ variant (always optional, as with upstream's `make`), and the modules. A
 module is a directory with a `manifest.py`, or a C module with its glue,
 like ulab. A module never brings another; nothing checks dependencies, so
 name ulab when you name audiocomponents, tflite or vision, or use `all`.
+`all` is every module except the opt-in ones (an `OPT_IN` file says why):
+tflite and vision are built only when named.
 
 On esp32 and rp2 the build may grow the firmware's share of flash to fit the
 image (on esp32 the app partition, on rp2 the region before the filesystem),

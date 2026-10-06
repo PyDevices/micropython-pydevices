@@ -1,0 +1,2 @@
+Opt-in (Brad, 2026-10-06): name tflite to build it; --modules all leaves it out.
+It adds TensorFlow Lite Micro to the image, which only a project doing inference wants.
