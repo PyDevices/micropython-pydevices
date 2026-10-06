@@ -59,12 +59,44 @@ if(ESP_PLATFORM AND (IDF_TARGET STREQUAL "esp32p4" OR IDF_TARGET STREQUAL "esp32
         list(APPEND _libs idf::espressif__esp_h264)
     endif()
 
+    # espdl: ESP-DL inference, with the model classes esp-vision ships.
+    idf_component_get_property(_dl espressif__esp-dl COMPONENT_DIR)
+    list(APPEND _src ${EV}/modules/py_espdl.cpp)
+    foreach(_d dl dl/tool/include dl/tensor/include dl/base dl/base/isa dl/math/include
+            dl/model/include dl/module/include fbs_loader/include vision/detect vision/image
+            vision/image/isa vision/recognition vision/classification audio/common
+            audio/speech_features)
+        list(APPEND _inc ${_dl}/${_d})
+    endforeach()
+    if(IDF_TARGET STREQUAL "esp32p4")
+        list(APPEND _inc ${_dl}/dl/base/isa/esp32p4)
+    else()
+        list(APPEND _inc ${_dl}/dl/base/isa/tie728 ${_dl}/dl/base/isa/xtensa)
+    endif()
+    list(APPEND _libs idf::espressif__esp-dl)
+
+    # rtsp (P4): an RTSP server for h264's output.
+    if(IDF_TARGET STREQUAL "esp32p4")
+        idf_component_get_property(_mp espressif__esp_media_protocols COMPONENT_DIR)
+        idf_component_get_property(_sal espressif__media_lib_sal COMPONENT_DIR)
+        list(APPEND _src ${EV}/modules/py_rtsp.c)
+        list(APPEND _inc ${_mp}/include ${_sal}/include ${_sal}/include/port)
+        list(APPEND _libs idf::espressif__esp_media_protocols idf::espressif__media_lib_sal)
+        # The prebuilt RTSP library calls ESP_ERROR_CHECK's handler, which
+        # nothing else references with MicroPython's assertions off, so the
+        # linker has passed esp_system's archive before it's asked for (the
+        # port does the same for abort_).
+        list(APPEND _libs "-u _esp_error_check_failed")
+    endif()
+
     add_library(usermod_vision INTERFACE)
     target_sources(usermod_vision INTERFACE ${_src})
     target_include_directories(usermod_vision INTERFACE ${_inc})
     target_compile_definitions(usermod_vision INTERFACE CMSIS_MCU_H="cmsis_compiler.h" OMV_NO_GPL=1)
     # ...and the QSTR scan takes definitions only from this list.
     list(APPEND MICROPY_CPP_DEF_EXTRA "CMSIS_MCU_H=\"cmsis_compiler.h\"" OMV_NO_GPL=1)
+    # ESP-DL's headers are C++20 (requires-clauses): esp-vision's own setting.
+    target_compile_options(usermod_vision INTERFACE $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++2b>)
     target_link_libraries(usermod_vision INTERFACE ${_libs})
     target_link_libraries(usermod INTERFACE usermod_vision)
     # image's feature-flagged names (esp-vision's own list).
