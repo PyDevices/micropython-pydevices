@@ -15,9 +15,10 @@ build command. It is not a fork, and it publishes no Python package.
 The first run fetches what it needs. In the PyDevices workspace it links the
 sibling checkouts instead.
 
-The desktop `pydevices` variants freeze a board config that imports the
-pydevices package, so name `pydevices` (or use `all`) with them; without it
-`import board_config` fails.
+The desktop `pydevices` variants freeze a board config that imports
+`displaydev`, which is frozen only when `--modules` names `pydevices` (the
+repository whose `lib/` holds it) or `all`; without it `import board_config`
+fails.
 
 ## Boards we build for
 
