@@ -16,8 +16,8 @@ asks you for port, board and variant. Output lands in
 `builds/<port>/[<board>/]<variant>/`, beside a record of every module's
 commit.
 
-Don't have it yet? This clones it into `~/micropython-pydevices` and checks
-your tools (Linux or WSL):
+Don't have it yet? This clones it into `micropython-pydevices` in the current
+directory and checks your tools (Linux or WSL):
 
 ```bash
 curl -fsSL https://pydevices.github.io/install.sh | sh
