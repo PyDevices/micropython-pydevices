@@ -7,7 +7,8 @@ build command. It is not a fork, and it publishes no Python package.
 ## Build something
 
 Get it, if you haven't: `curl -fsSL https://pydevices.github.io/install.sh | sh`
-clones this repository into `~/micropython-pydevices` and checks your tools.
+clones this repository into `micropython-pydevices` in the current directory
+and checks your tools.
 Then, from the clone:
 
 ```bash
