@@ -150,6 +150,7 @@ typedef struct _tsmux_segmenter_obj_t {
     uint32_t cur_start;         // its first PTS
     uint32_t next_seq;          // the number cur will have
     uint32_t target;            // segment length to aim for, 90 kHz ticks
+    uint32_t target_s;          // #EXT-X-TARGETDURATION: fixed, only ever raised
     uint8_t keep;               // finished segments kept
     uint8_t count;              // finished segments held
     uint32_t first_seq;         // the oldest held segment's number
@@ -177,6 +178,16 @@ static mp_obj_t tsmux_segmenter_make_new(const mp_obj_type_t *type, size_t n_arg
     tsmux_init(&self->m, 0, tsmux_to_vstr, &self->cur);
     self->keep = (uint8_t)keep;
     self->target = (uint32_t)target * 90;
+    // HLS forbids the target duration to change while a stream plays (players
+    // drop a playlist whose value flips), and each segment's duration, rounded
+    // to the nearest second, must not exceed it. Players reload the playlist
+    // about once per target duration, so it is kept as low as that allows: the
+    // target rounded, raised only if a segment ever rounds above it (one
+    // second too high, and VLC played 3 s of every 6).
+    self->target_s = ((uint32_t)target + 500) / 1000;
+    if (self->target_s < 1) {
+        self->target_s = 1;
+    }
     return MP_OBJ_FROM_PTR(self);
 }
 
@@ -191,6 +202,10 @@ static void tsmux_segmenter_finish(tsmux_segmenter_obj_t *self, uint32_t end_pts
         self->first_seq = self->next_seq;
     }
     self->dur[self->count] = end_pts - self->cur_start;
+    uint32_t secs = (self->dur[self->count] + 45000) / 90000;
+    if (secs > self->target_s) {
+        self->target_s = secs;
+    }
     self->seg[self->count] = mp_obj_new_bytes_from_vstr(&self->cur);
     self->count++;
     self->next_seq++;
@@ -230,15 +245,11 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(tsmux_segmenter_add_obj, 4, 4, tsmux_
 static mp_obj_t tsmux_segmenter_playlist(size_t n_args, const mp_obj_t *args) {
     tsmux_segmenter_obj_t *self = MP_OBJ_TO_PTR(args[0]);
     const char *prefix = n_args > 1 ? mp_obj_str_get_str(args[1]) : "seg";
-    uint32_t longest = 0;
-    for (int i = 0; i < self->count; i++) {
-        longest = self->dur[i] > longest ? self->dur[i] : longest;
-    }
     vstr_t vstr;
     mp_print_t print;
     vstr_init_print(&vstr, 256, &print);
     mp_printf(&print, "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:%u\n#EXT-X-MEDIA-SEQUENCE:%u\n",
-        (unsigned)((longest + 89999) / 90000), (unsigned)self->first_seq);
+        (unsigned)self->target_s, (unsigned)self->first_seq);
     for (int i = 0; i < self->count; i++) {
         uint32_t ms = self->dur[i] / 90;
         mp_printf(&print, "#EXTINF:%u.%03u,\n%s%u.ts\n", (unsigned)(ms / 1000), (unsigned)(ms % 1000),

@@ -105,10 +105,20 @@ def main():
     with open(OUT + "/stream.m3u8", "w") as f:
         f.write(pl)
 
-    # keep only 3: after more keyframes the oldest go
+    # keep only 3: after more keyframes the oldest go. And the target duration
+    # never changes while the stream plays (HLS forbids it; a Roku and VLC
+    # dropped a playlist whose value flipped between 1 and 2)
+    # The second round's frames come 10 % slow, so its segments last 1.1 s:
+    # a target taken from the segments held would flip 1 -> 2 -> 1 here.
+    targets = set()
+    pts = 90000 + 90 * 3000
     for r in range(1, 4):
         for i, au in enumerate(aus):
-            seg.add(au, 90000 + (r * 90 + i) * 3000, i in keys)
+            pts += 3300 if r == 2 else 3000
+            if seg.add(au, pts, i in keys):
+                line = [ln for ln in seg.playlist().split("\n") if ln.startswith("#EXT-X-TARGETDURATION:")]
+                targets.add(line[0])
+    assert len(targets) == 1, targets
     print("after 12 s: first %d, count %d" % (seg.first, seg.count))
     assert seg.count == 3 and seg.first == 8 and seg.segment(7) is None and seg.segment(10) is not None
     assert "#EXT-X-MEDIA-SEQUENCE:8\n" in seg.playlist()
