@@ -7,13 +7,17 @@ build command. It is not a fork, and it publishes no Python package.
 ## Build something
 
 ```bash
-./build_mp.py --port unix --variant pydevices --modules displayif,pygraphics
+./build_mp.py --port unix --variant pydevices --modules pydevices,displayif,pygraphics
 ./build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB --modules all
-./build_mp.py          # asks for port, board, variant and modules
+./build_mp.py          # asks for port, board, variant, flash size and modules
 ```
 
 The first run fetches what it needs. In the PyDevices workspace it links the
 sibling checkouts instead.
+
+The desktop `pydevices` variants freeze a board config that imports the
+pydevices package, so name `pydevices` (or use `all`) with them; without it
+`import board_config` fails.
 
 ## Boards we build for
 

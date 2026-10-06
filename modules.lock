@@ -1,16 +1,17 @@
 # Module pins: name, git URL, commit. build_mp.py clones a module at its commit
 # only when modules/<name> is missing; in the workspace modules/<name> is a
 # symlink to the sibling checkout and wins. castif is not here: it lives in
-# modules/castif, tracked in this repository.
-audiocomponents   https://github.com/PyDevices/audiocomponents.git    1217a839b472
-audiodsp          https://github.com/PyDevices/audiodsp.git           5afe010b61b1
-audioif           https://github.com/PyDevices/audioif.git            71c78419c719
-cameraif          https://github.com/PyDevices/cameraif.git           77b20b128800
-displayif         https://github.com/PyDevices/displayif.git          7b955e50216e
-lvgl-micropython  https://github.com/PyDevices/lvgl-micropython.git   7beb480f1053
-palettes          https://github.com/PyDevices/palettes.git           bc3343a8e4d5
-pdwidgets         https://github.com/PyDevices/pdwidgets.git          306c1e20e0c3
-pydevices         https://github.com/PyDevices/pydevices.git          c55aa1e7da1c
-pygraphics        https://github.com/PyDevices/pygraphics.git         b4d4c49cc2a2
-ulab              https://github.com/v923z/micropython-ulab.git       1d3ddd8f5228
-usbif             https://github.com/PyDevices/usbif.git              2b9397a27ffe
+# modules/castif, tracked in this repository. Commits are full SHAs: GitHub
+# serves a fetch by commit only for the whole 40 characters.
+audiocomponents   https://github.com/PyDevices/audiocomponents.git    1217a839b472ca961135a44385cfe9e2c00bf5dd
+audiodsp          https://github.com/PyDevices/audiodsp.git           5afe010b61b1b9e628534bc90895b005f7df6d6d
+audioif           https://github.com/PyDevices/audioif.git            71c78419c7199258933ea555591ed4e6f20c0e89
+cameraif          https://github.com/PyDevices/cameraif.git           77b20b128800d5e1e23aab4c131e58f46b12cad2
+displayif         https://github.com/PyDevices/displayif.git          7b955e50216e954db12fef9e4c278f41cbedf73a
+lvgl-micropython  https://github.com/PyDevices/lvgl-micropython.git   7beb480f10537f49fe64be6b015d0aa5302b68de
+palettes          https://github.com/PyDevices/palettes.git           bc3343a8e4d52e3aba99bc58f76e6ec922f046f2
+pdwidgets         https://github.com/PyDevices/pdwidgets.git          306c1e20e0c3c63066dab6d10155fcf165a6ba13
+pydevices         https://github.com/PyDevices/pydevices.git          c55aa1e7da1c7db8e50536bf939dd38f27f588f5
+pygraphics        https://github.com/PyDevices/pygraphics.git         b4d4c49cc2a22cdd2632f2eea2593b4cc4df4db1
+ulab              https://github.com/v923z/micropython-ulab.git       1d3ddd8f5228e2c7335dac71f4846e6abb0ec9f9
+usbif             https://github.com/PyDevices/usbif.git              2b9397a27ffee21ef0962f291ccdebfcad5b583e
