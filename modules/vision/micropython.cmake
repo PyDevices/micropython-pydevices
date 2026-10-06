@@ -99,6 +99,8 @@ if(ESP_PLATFORM AND (IDF_TARGET STREQUAL "esp32p4" OR IDF_TARGET STREQUAL "esp32
     target_compile_options(usermod_vision INTERFACE $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++2b>)
     target_link_libraries(usermod_vision INTERFACE ${_libs})
     target_link_libraries(usermod INTERFACE usermod_vision)
-    # image's feature-flagged names (esp-vision's own list).
-    list(APPEND MICROPY_QSTRDEFS_PORT ${EV}/modules/qstrdefs_esp_vision.h)
+    # Not esp-vision's qstrdefs_esp_vision.h: our QSTR scan reads the board
+    # config headers, so it finds image's feature-flagged names itself, and
+    # adding them again as port qstrs redeclares every one that frozen Python
+    # also uses (Image, PNG, crop...) in frozen_content.c, under --modules all.
 endif()
