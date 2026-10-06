@@ -6,6 +6,10 @@ build command. It is not a fork, and it publishes no Python package.
 
 ## Build something
 
+Get it, if you haven't: `curl -fsSL https://pydevices.github.io/install.sh | sh`
+clones this repository into `~/micropython-pydevices` and checks your tools.
+Then, from the clone:
+
 ```bash
 ./build_mp.py --port unix --variant pydevices --modules pydevices,displayif,pygraphics
 ./build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB --modules all

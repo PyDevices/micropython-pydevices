@@ -16,6 +16,13 @@ asks you for port, board and variant. Output lands in
 `builds/<port>/[<board>/]<variant>/`, beside a record of every module's
 commit.
 
+Don't have it yet? This clones it into `~/micropython-pydevices` and checks
+your tools (Linux or WSL):
+
+```bash
+curl -fsSL https://pydevices.github.io/install.sh | sh
+```
+
 New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
 [build plan](docs/build-plan.md) has the layout, the rules and the traps.
 
