@@ -1,4 +1,5 @@
-# Waveshare ESP32-S3-Touch-LCD-7, on top of the 4.3" board's sdkconfig.board.
+# Waveshare ESP32-S3-Touch-LCD-7: the tuning that is this board's alone, on
+# top of every S3's (variants/esp32/sdkconfig.esp32s3).
 # Measured 2026-09-25 with an LVGL remote-control UI on the panel and a
 # Spotify Connect speaker streaming into a USB sound card hosted on the
 # native port.

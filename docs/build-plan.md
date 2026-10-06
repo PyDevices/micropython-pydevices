@@ -95,7 +95,12 @@ for every esp32 build, `sdkconfig.<chip>` (the chip read from the board's
    module needs. usbif's USB host settings and cameraif's OV5647 driver live
    in their own repos.
 3. `variants/esp32/<BOARD>/<VARIANT>/`: what's left that really is the board,
-   such as the LCD-7's cache tuning.
+   such as the LCD-7's cache tuning. A variant of ours there carries an
+   `mpconfigvariant.cmake` that includes the upstream variant it builds on.
+
+A `partitions.csv` is found the same way, the most specific winning
+(`<BOARD>/<VARIANT>/partitions.csv`, then `partitions.<chip>.csv`, then
+`partitions.csv`); without one, the board's own table is used.
 
 Nothing in `build_mp.py` names a version or a setting. A pin moves by editing
 a lock file and a setting by editing a fragment, and the script never changes
@@ -182,11 +187,15 @@ that wants one (the wasm one) requires it by name.
    mpvst's engine build (its modules listed by name plus
    `<mpvst>/vstaudio,<mpvst>/vstui`; not `all`, which now freezes pydevices),
    wokwi's stage script, earful's build, the README and `newcomers.md`.
-5. **Retire `boards/`.** The four boards' sdkconfig lines sort into the
-   three homes above: chip settings into `variants/esp32/`, usbif's and
-   cameraif's into their repos, and only the LCD-7's tuning into a board
-   variant. The partition tables go, since `--flash` and autosize replace
-   them.
+5. **Retire `boards/`.** Done 2026-10-05. The four boards' sdkconfig lines
+   sorted into the three homes above: chip settings into `variants/esp32/`,
+   usbif's and cameraif's into their repos (usbif's board-header lines became
+   compile definitions in its own CMake), and two board variants of
+   `ESP32_GENERIC_S3`, not one: the LCD-7's cache tuning, and the T-Embed's
+   flash auto-suspend, which IDF supports only on particular flash chips. The
+   partition tables went; the S3 keeps a coredump partition through
+   `variants/esp32/partitions.esp32s3.csv`, found by the same convention as
+   the fragments.
 6. **Optional: the VARIANT_DIR spike.** Teaching the esp32 and rp2 ports to
    take a variant from outside the board dir would make the generated dir
    tidier, not possible; it already works without it. Whether it becomes an
