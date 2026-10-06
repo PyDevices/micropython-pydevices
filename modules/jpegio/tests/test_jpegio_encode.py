@@ -23,7 +23,7 @@ synthetic frames carry only the exactness checks.
      what it refuses TJpgDec decodes; a second thread encoding at the same
      time gets the same bytes as the first;
   9. ms per 720x720 frame, software and engine (reported, not gated);
-  8. 20 encodes do not trend gc.mem_free() down;
+  8. 100 more encodes do not trend gc.mem_free() down;
 
 and every encoded file is written to tests/encoded/ (or --out DIR) for
 check_encode_pil.py, which decodes each with Pillow on the host.
@@ -385,15 +385,21 @@ def main():
         save({"software": "sw", "engine": "hw"}.get(label, "hw_fast") + "_720x720.jpg", data)
     big = None
 
-    print("== 8. memory over 20 encodes")
-    gc.collect()
-    f0 = gc.mem_free()
+    print("== 8. memory: 20 encodes, then 100 more")
+    # After against after, as test_jpegio.py's section 9 does: the first
+    # reading after gc.collect() wobbles by a few KB on the S3 (a conservative
+    # collector keeps whatever a stale stack word points at), so a leak shows
+    # as a trend between two collected readings, not as before-vs-after.
     for _ in range(20):
         sw80.encode(src, 64, 48)
     gc.collect()
     f1 = gc.mem_free()
-    print("mem_free before %d, after 20 encodes collected %d" % (f0, f1))
-    assert f1 >= f0 - 1024
+    for _ in range(100):
+        sw80.encode(src, 64, 48)
+    gc.collect()
+    f2 = gc.mem_free()
+    print("mem_free after 20 encodes %d, after 100 more %d" % (f1, f2))
+    assert f2 >= f1 - 1024, "mem_free trends down across encodes"
 
     print("jpegio encode tests passed, engine %s, %.2f s" % ("yes" if engine else "no", time.time() - t0))
 
