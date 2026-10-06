@@ -1,4 +1,4 @@
-# jpegio — baseline JPEG decoder (CircuitPython API, TJpgDec R0.03)
+# jpegio — baseline JPEG decoder (CircuitPython API, TJpgDec R0.03) and encoder
 
 `import jpegio` gives MicroPython the same `JpegDecoder` CircuitPython ships
 natively, so one script decodes on both — CircuitPython uses its own, a
@@ -32,13 +32,22 @@ display_drv.blit_rect(buf, 0, 0, width, height)
 # camera: hand each MCU block straight to the display, no frame buffer
 width, height = decoder.open(frame)     # bytes/bytearray/memoryview of one MJPEG frame
 decoder.decode(lambda x, y, w, h, mv: display_drv.blit_rect(mv, x, y, w, h), 1)
+
+# and back: any RGB565 buffer to JPEG bytes
+data = jpegio.JpegEncoder(quality=80).encode(buf, width, height)
 ```
+
+`JpegEncoder` encodes on every port, in software, and on the ESP32-P4 it uses
+the chip's JPEG engine instead. The P4 can decode on its engine too, when you
+ask: `JpegDecoder(hardware=True)`. See [Encoding](#encoding) and
+[Hardware decode](#hardware-decode-esp32-p4).
 
 ## API
 
-### `jpegio.JpegDecoder()`
+### `jpegio.JpegDecoder(*, hardware=False)`
 
-No arguments. Holds TJpgDec's decoder state and its `TJPGD_WORKSPACE_SIZE`
+No positional arguments (`hardware=` is below, under
+[Hardware decode](#hardware-decode-esp32-p4)). Holds TJpgDec's decoder state and its `TJPGD_WORKSPACE_SIZE`
 (3500-byte, CircuitPython's number) work area inside the object, allocated
 once — create one decoder and reuse it, as CP's docs advise.
 
@@ -130,6 +139,76 @@ targets `0xF800` red is the bytes `00 F8`). Displays that want big-endian
 RGB565 get it from `display_drv`, which byte-swaps itself; CP's
 `RGB565_SWAPPED` output is CP's convention, not this module's.
 
+## Encoding
+
+### `jpegio.JpegEncoder(quality=80, subsampling=420, *, hardware=None, exact=True)`
+
+`quality` is 1..100. `subsampling` is `420` (chroma at half resolution each
+way, what cameras and the web use) or `444` (full colour resolution, larger).
+`hardware=None` uses the chip's JPEG engine where there is one (the ESP32-P4)
+and software everywhere else, `False` always uses software, and `True` insists
+on the engine, raising `OSError` here on a chip without one.
+
+`exact=False` matters only on the P4's engine. That engine widens RGB565 by
+zero-filling, so full red reads as 248 rather than 255, and every colour sits
+at the bottom of its step. By default jpegio widens each pixel the way a
+display does before the engine sees it, which makes the engine's JPEG as
+faithful as the software one. With `exact=False` the engine reads the buffer
+itself: no copy, and on a 720x720 frame about 10 ms instead of 57. In return,
+red and blue run up to 7 levels dark. That's the right trade for a camera
+stream; it's what cameraif's `capture_jpeg()` uses.
+
+### `encode(buffer, width, height, *, format=jpegio.RGB565, stride=None, swap=False) -> bytes`
+
+`buffer` holds `height` rows of `width` pixels, each row starting `stride`
+bytes after the last (default: rows are tight). `format` is `jpegio.RGB565`
+(native byte order, what `decode()` writes; `swap=True` for the byte-swapped
+order many SPI displays keep) or `jpegio.GRAY` (one byte per pixel). Returns a
+baseline JFIF JPEG that any decoder reads, Pillow and browsers included.
+After a call, the encoder's `hardware` attribute says whether the engine did it.
+
+The software encoder is stb_image_write's JPEG writer (see
+[NOTICE](#notice--stb_image_write)), reading the buffer in place. Measured at
+quality 80, 4:2:0:
+
+| 720x720 frame | ms |
+|---|---|
+| ESP32-P4 engine, `exact=False` | 10 |
+| ESP32-P4 engine (default) | 57–77 |
+| ESP32-P4 software | 262 |
+| desktop (unix port) software | 11 |
+
+The engine's input copy and output buffer are kept for the next call, and
+given back when a much smaller image comes along.
+
+The software and hardware encoders write different bytes for the same image
+(different quantisation and rounding); both decode to the source within the
+same quality threshold (the test, `tests/test_jpegio_encode.py`, holds both
+to it).
+
+Other C modules can encode through `jpegio_encode()` in `src/jpegio.h`;
+cameraif's `capture_jpeg()` does.
+
+### Hardware decode (ESP32-P4)
+
+`JpegDecoder(hardware=True)` decodes on the P4's JPEG engine when it can, two
+to three times faster than TJpgDec (320x240: 13–16 ms against 29–57 ms): a
+whole baseline image into a buffer at `scale=0`, with
+`x`, `y` and `stride` as usual. Everything else (a callable target, a nonzero
+scale, a JPEG the engine refuses) quietly goes to TJpgDec as before. After a
+call, the decoder's `hardware` attribute says which one ran. A path or stream
+source is read whole at `open()`, because the engine wants the entire JPEG in
+one go.
+
+It is not the default because its pixels are the engine's, not TJpgDec's: 40
+to 44 dB from each other on the corpus, not bit-identical, and the TJpgDec
+output is what the golden corpus pins. On any other chip `hardware=True` raises
+`OSError`.
+
+(The engine's own RGB output uses studio-range BT.601, which crushes JPEG's
+blacks and clips its whites, so jpegio asks it for YUV and converts with
+JPEG's full-range matrix itself. That conversion is most of the 13–16 ms.)
+
 ## Errors
 
 TJpgDec's `JRESULT` codes map to exceptions whose message starts with the
@@ -169,7 +248,14 @@ to byte-swap for `RGB565_SWAPPED`); see above. And errors are typed
 
 ## Build
 
-- `jpegio.c` — the module (`MP_REGISTER_MODULE(MP_QSTR_jpegio, ...)`).
+- `jpegio.c` — the module (`MP_REGISTER_MODULE(MP_QSTR_jpegio, ...)`) and
+  `JpegDecoder`.
+- `jpegio_enc.c`, `jpegio.h` — `JpegEncoder` and the C API.
+- `jpegenc/` — the software encoder, generated from stb_image_write by
+  `tools/make_jpegenc.py` (rerun it to take a newer stb).
+- `jpegio_hw.c`, `jpegio_hw.h` — the ESP32-P4's JPEG engine
+  (`esp_driver_jpeg`), compiled in when `micropython.cmake` sees an esp32p4
+  target; two stubs everywhere else.
 - `tjpgd/` — vendored TJpgDec: `tjpgd.c`, `tjpgd.h`, `tjpgdcnf.h`. The
   firmware's only TJpgDec, always compiled.
 - `lvgl_decoder.c` / `lvgl_decoder.h` — the LVGL image decoder on that
@@ -194,6 +280,13 @@ forces the decision. Without lvgl-micropython nothing links against LVGL
 (this module's CI builds it both ways), but the module still exports
 `register_lvgl_decoder()` and `lvgl_decoders()`; see *Why these two names
 are unconditional* below.
+
+## NOTICE — stb_image_write
+
+`jpegenc/jpegenc.c` is the JPEG writer from Sean Barrett's
+[stb_image_write](https://github.com/nothings/stb) v1.16, itself Jon Olick's
+public-domain jo_jpeg. Its licence (MIT or public domain, your choice) is
+at the top of that file.
 
 ## NOTICE — TJpgDec
 

@@ -43,6 +43,14 @@ jobs:
       - name: The golden corpus (no Pillow needed)
         run: ./builds/unix/standard/micropython modules/jpegio/tests/test_jpegio.py
 
+      - name: The encoder round trip (Phase 2's thresholds)
+        run: ./builds/unix/standard/micropython -X heapsize=16M modules/jpegio/tests/test_jpegio_encode.py --out encoded
+
+      - name: Pillow reads every encoded file back as its source
+        run: |
+          python3 -m pip install --quiet pillow
+          python3 modules/jpegio/tests/check_encode_pil.py ./builds/unix/standard/micropython encoded
+
       - name: The LVGL-less contract (must print SKIP)
         # register_lvgl_decoder() and lvgl_decoders() are module attributes on
         # every build, the first raising RuntimeError here, the second

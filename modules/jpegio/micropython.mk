@@ -14,9 +14,13 @@ JPEGIO_DIR := $(JPEGIO_MOD_DIR)/src
 CFLAGS_USERMOD += -I$(JPEGIO_DIR)/tjpgd
 
 SRC_USERMOD_C += $(JPEGIO_DIR)/jpegio.c
+SRC_USERMOD_C += $(JPEGIO_DIR)/jpegio_enc.c
 
-# Library source: no qstrs, so it stays out of the QSTR scan.
+# Library source: no qstrs, so it stays out of the QSTR scan. jpegio_hw.c is
+# the P4's JPEG engine on the CMake port; on these ports it is two stubs.
 SRC_USERMOD_LIB_C += $(JPEGIO_DIR)/tjpgd/tjpgd.c
+SRC_USERMOD_LIB_C += $(JPEGIO_DIR)/jpegio_hw.c
+SRC_USERMOD_LIB_C += $(JPEGIO_DIR)/jpegenc/jpegenc.c
 
 # lvgl-micropython is in this build if USER_C_MODULES names it -- either as a
 # module directory itself (MicroPython 1.29 c_module()) or as a parent
