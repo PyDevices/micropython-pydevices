@@ -9,10 +9,22 @@ target_include_directories(usermod_jpegio INTERFACE
 target_link_libraries(usermod INTERFACE usermod_jpegio)
 
 # The vendored TJpgDec is the firmware's only one (LVGL's is off by config).
+# jpegenc/ is the software encoder every port gets; jpegio_hw.c is the P4's
+# JPEG engine, and two stubs everywhere else.
 target_sources(usermod_jpegio INTERFACE
     ${JPEGIO_DIR}/jpegio.c
+    ${JPEGIO_DIR}/jpegio_enc.c
+    ${JPEGIO_DIR}/jpegio_hw.c
+    ${JPEGIO_DIR}/jpegenc/jpegenc.c
     ${JPEGIO_DIR}/tjpgd/tjpgd.c
 )
+
+# The ESP32-P4 encodes and decodes on its JPEG engine (esp_driver_jpeg, which
+# main does not require on its own, so it is named here).
+if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32p4")
+    target_compile_definitions(usermod_jpegio INTERFACE JPEGIO_HW=1)
+    target_link_libraries(usermod_jpegio INTERFACE idf::esp_driver_jpeg)
+endif()
 
 # The LVGL image decoder (lvgl_decoder.c) is built only when lvgl-micropython is
 # in this build, decided from USER_C_MODULES the way micropython.mk decides it:

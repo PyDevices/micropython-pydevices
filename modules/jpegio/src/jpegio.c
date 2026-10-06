@@ -18,6 +18,8 @@
 #include "py/mperrno.h"
 
 #include "tjpgd.h"
+#include "jpegio.h"
+#include "jpegio_hw.h"
 
 #if JD_FORMAT != 1
 #error "jpegio needs TJpgDec built with JD_FORMAT 1 (RGB565) -- see tjpgd/tjpgdcnf.h"
@@ -46,6 +48,10 @@ typedef struct _jpegio_jpegdecoder_obj_t {
     mp_obj_t source;            // MP_OBJ_NULL once closed
     mp_buffer_info_t bufinfo;   // unread remainder of a buffer source
     bool owns_source;           // opened from a str path by us: close it when done
+    bool hardware;              // decode on the chip's JPEG engine (JpegDecoder(hardware=True))
+    bool used_hw;               // the last decode() ran on the engine
+    const uint8_t *data;        // the whole JPEG, for the engine (a buffer source's start)
+    size_t data_len;
     bool ready;                 // jd_prepare succeeded and decode() has not consumed it
     uint16_t width, height;     // of the last successfully opened image; 0 after a failed open()
     // Target of the decode() in progress. Exactly one of callback / pixels is live.
@@ -101,6 +107,8 @@ static void jpegio_close(jpegio_jpegdecoder_obj_t *self) {
     self->source = MP_OBJ_NULL;
     self->ready = false;
     memset(&self->bufinfo, 0, sizeof(self->bufinfo));
+    self->data = NULL;
+    self->data_len = 0;
 }
 
 // TJpgDec input function for a buffer-protocol source: hand out the next
@@ -202,9 +210,23 @@ static void jpegio_decode_done(jpegio_jpegdecoder_obj_t *self) {
 // --- JpegDecoder ------------------------------------------------------------
 
 static mp_obj_t jpegio_jpegdecoder_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
-    (void)all_args;
-    mp_arg_check_num(n_args, n_kw, 0, 0, false);
+    // hardware=True decodes on the chip's JPEG engine (the ESP32-P4's) when it
+    // can: much faster, but its pixels are the engine's, not TJpgDec's, so it
+    // is asked for rather than the default.
+    enum { ARG_hardware };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_hardware, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+    if (!JPEGIO_HW && args[ARG_hardware].u_bool) {   // a constant, not #if: see jpegio_hw.h
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("no hardware JPEG decoder on this chip"));
+    }
     jpegio_jpegdecoder_obj_t *self = mp_obj_malloc(jpegio_jpegdecoder_obj_t, type);
+    self->hardware = args[ARG_hardware].u_bool;
+    self->used_hw = false;
+    self->data = NULL;
+    self->data_len = 0;
     memset(&self->decoder, 0, sizeof(self->decoder));
     self->source = MP_OBJ_NULL;
     memset(&self->bufinfo, 0, sizeof(self->bufinfo));
@@ -246,8 +268,22 @@ static mp_obj_t jpegio_jpegdecoder_open(mp_obj_t self_in, mp_obj_t source) {
         owns = true;
     }
 
+    // The engine takes the whole JPEG at once: read a stream to its end.
+    if (self->hardware && !mp_get_buffer(source, &self->bufinfo, MP_BUFFER_READ)) {
+        mp_obj_t read[2];
+        mp_load_method(source, MP_QSTR_read, read);
+        mp_obj_t whole = mp_call_method_n_kw(0, 0, read);
+        if (owns) {
+            mp_stream_close(source);
+            owns = false;
+        }
+        source = whole;
+    }
+
     size_t (*infunc)(JDEC *, uint8_t *, size_t);
     if (mp_get_buffer(source, &self->bufinfo, MP_BUFFER_READ)) {
+        self->data = self->bufinfo.buf;
+        self->data_len = self->bufinfo.len;
         infunc = jpegio_buffer_input;
     } else {
         // Not mp_get_stream(): that reads the type's protocol slot unguarded,
@@ -410,6 +446,19 @@ static mp_obj_t jpegio_jpegdecoder_decode(size_t n_args, const mp_obj_t *pos_arg
     self->x = x;
     self->y = y;
 
+    // The engine takes a whole image into a buffer at scale 0; anything else,
+    // and any JPEG it refuses, is TJpgDec's. TJpgDec's place in the stream is
+    // untouched by the engine, so it can still take over.
+    self->used_hw = false;
+    if (JPEGIO_HW && self->hardware && self->pixels != NULL && scale == 0) {
+        if (jpegio_hw_decode(self->data, self->data_len, self->width, self->height,
+            self->pixels, self->stride, (int)x, (int)y) == NULL) {
+            self->used_hw = true;
+            jpegio_decode_done(self);
+            return mp_const_none;
+        }
+    }
+
     // One-shot, like CircuitPython: the stream is consumed, so open() again
     // before the next decode().
     self->ready = false;
@@ -442,6 +491,12 @@ static void jpegio_jpegdecoder_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest)
             mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("%q needs a successful %q()"), attr, MP_QSTR_open);
         }
         dest[0] = MP_OBJ_NEW_SMALL_INT(attr == MP_QSTR_width ? self->width : self->height);
+        return;
+    }
+    if (attr == MP_QSTR_hardware) {
+        // Whether the last decode() ran on the JPEG engine.
+        jpegio_jpegdecoder_obj_t *self = MP_OBJ_TO_PTR(self_in);
+        dest[0] = mp_obj_new_bool(self->used_hw);
         return;
     }
     dest[1] = MP_OBJ_SENTINEL; // continue the lookup in locals_dict (open, decode)
@@ -535,9 +590,14 @@ static MP_DEFINE_CONST_FUN_OBJ_0(jpegio___init___obj, jpegio___init__);
 
 // --- module -----------------------------------------------------------------
 
+extern const mp_obj_type_t jpegio_jpegencoder_type;     // jpegio_enc.c
+
 static const mp_rom_map_elem_t jpegio_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_jpegio) },
     { MP_ROM_QSTR(MP_QSTR_JpegDecoder), MP_ROM_PTR(&jpegio_jpegdecoder_type) },
+    { MP_ROM_QSTR(MP_QSTR_JpegEncoder), MP_ROM_PTR(&jpegio_jpegencoder_type) },
+    { MP_ROM_QSTR(MP_QSTR_RGB565), MP_ROM_INT(JPEGIO_FORMAT_RGB565) },
+    { MP_ROM_QSTR(MP_QSTR_GRAY), MP_ROM_INT(JPEGIO_FORMAT_GRAY) },
     #if JPEGIO_LVGL_DECODER
     { MP_ROM_QSTR(MP_QSTR___init__), MP_ROM_PTR(&jpegio___init___obj) },
     #endif
