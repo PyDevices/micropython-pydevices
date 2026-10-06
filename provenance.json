@@ -52,6 +52,9 @@
   },
   "0017-micropython-py-makeqstrdefs-incremental-build-header-qstr.patch": {
    "sha256": "8ef3dee1fde56ca4dffd230e09df323e0eea050cc3d96a542eb56bf4e99c2de5"
+  },
+  "0018-micropython-esp32-drop-missing-usermod-include-dirs.patch": {
+   "sha256": "ed968c8c24147056cad48642612fe9eed9a8fff051b64705ee587c548a8144b9"
   }
  }
 }

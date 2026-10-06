@@ -1,0 +1,51 @@
+From 73627d589c66fec1fd6063f634f4b0793d0f41a5 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <bbarnett@gmail.com>
+Date: Tue, 6 Oct 2026 01:33:21 -0500
+Subject: [PATCH] esp32: drop user-module include directories that don't exist.
+
+A user C module that links an ESP-IDF component (idf::esp_driver_cam,
+idf::esp_lcd, ...) brings that component's include directories into
+MICROPY_INC_USERMOD, through usermod.cmake's transitive gather, and
+idf_component_register() refuses any that don't exist. ESP-IDF itself
+tolerates them: v5.5.4's esp_hw_support declares
+mspi_timing_tuning/port/esp32s3/include, which holds no tracked files, so a
+fresh clone never creates it, and every ESP32-S3 build with such a module
+failed at configure with "Include directory ... is not a directory". A
+checkout that had once been at an older tag kept the empty directory and
+hid it.
+
+Seen building ESP32_GENERIC_S3 with cameraif and displayif against a fresh
+ESP-IDF v5.5.4 clone (micropython-pydevices' cloud exercise, 2026-10-06).
+Unchanged on upstream master as of 2026-10-06.
+---
+ ports/esp32/esp32_common.cmake | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/ports/esp32/esp32_common.cmake b/ports/esp32/esp32_common.cmake
+index fee776f..5076feb 100644
+--- a/ports/esp32/esp32_common.cmake
++++ b/ports/esp32/esp32_common.cmake
+@@ -220,6 +220,20 @@ if (UPDATE_SUBMODULES)
+     unset(MICROPY_INC_CORE)
+ endif()
+ 
++# A user C module that links an ESP-IDF component (for example
++# idf::esp_driver_cam) brings that component's include directories into
++# MICROPY_INC_USERMOD, and idf_component_register() below refuses any that
++# don't exist. ESP-IDF itself tolerates such directories: v5.5.4 declares
++# esp_hw_support/mspi_timing_tuning/port/esp32s3/include, which holds no files,
++# so a fresh clone never creates it. Drop the ones that aren't there.
++set(_micropy_inc_usermod)
++foreach(_dir IN LISTS MICROPY_INC_USERMOD)
++    if(_dir MATCHES "^\\$<" OR EXISTS "${_dir}")
++        list(APPEND _micropy_inc_usermod "${_dir}")
++    endif()
++endforeach()
++set(MICROPY_INC_USERMOD ${_micropy_inc_usermod})
++
+ # Register the main IDF component.
+ idf_component_register(
+     SRCS
+-- 
+2.43.0
+
