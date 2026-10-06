@@ -1,6 +1,6 @@
 # The build plan
 
-**Status:** draft for Brad's review, 2026-10-05. Nothing here is built yet.
+**Status:** built, 2026-10-05. Steps 1 to 5 are done and step 6 was dropped (see "Order of work"); this page now records how the build works and why.
 
 You build PyDevices firmware with one command:
 
@@ -109,13 +109,18 @@ it as `BOARD_DIR=`. Upstream's tree is never edited, so the ports need no
 patch for this.
 
 If the app doesn't fit its partition, the build reads the size out of the
-error, grows the app partition to the image rounded up to 64 KB plus 256 KB
-of headroom, moves every partition after it, and builds once more against
+error, grows the app partition to the image plus headroom (1/32 of the flash,
+64 KB to 256 KB), rounded up to 64 KB, moves every partition after it, and builds once more against
 that table, which lives only in the build dir. It then prints the new layout
 and warns that the filesystem moved. This port puts the filesystem after the
 last partition, so a board flashed with the new layout comes up with an empty
 filesystem (cmods#30). Dev boards hold nothing we keep, so this is on by
 default; `--no-autosize` refuses instead and prints the table that would fit.
+
+rp2 gets the same treatment. When the link overflows the `FLASH` region, the
+build reads the linker's memory table, gives the firmware the image plus the
+same headroom, and builds once more with the rest as the filesystem
+(`MICROPY_HW_FLASH_STORAGE_BYTES`, recorded in the build record).
 
 Output lands in `builds/<port>/[<board>/]<variant>/`. The last level is always
 there, so one build never nests inside another: with no `--variant` it's the
@@ -196,7 +201,7 @@ that wants one (the wasm one) requires it by name.
    partition tables went; the S3 keeps a coredump partition through
    `variants/esp32/partitions.esp32s3.csv`, found by the same convention as
    the fragments.
-6. **Optional: the VARIANT_DIR spike.** Teaching the esp32 and rp2 ports to
+6. **Dropped (Brad, 2026-10-05): the VARIANT_DIR spike.** Teaching the esp32 and rp2 ports to
    take a variant from outside the board dir would make the generated dir
    tidier, not possible; it already works without it. Whether it becomes an
    upstream PR is your call.

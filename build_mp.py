@@ -364,6 +364,12 @@ def esp32_board_dir(gen, base, board, variant, fragment_path, module_dirs):
     (gen / vfile).write_text("\n".join(vlines) + "\n")
 
 
+def autosize_headroom(flash_bytes):
+    """Room left above an image that autosize grew to fit, so a few KB of growth
+    doesn't move the filesystem again: 1/32 of the flash, 64 KB to 256 KB."""
+    return max(0x10000, min(0x40000, (flash_bytes // 32) & ~0xFFFF))
+
+
 def esp32_autosize(log_text, build, port_dir, dest):
     """The table this build used, with its app partition grown to fit."""
     m = re.search(r"app partition is too small for binary \S+ size (0x[0-9a-fA-F]+)", log_text)
@@ -394,7 +400,8 @@ def esp32_autosize(log_text, build, port_dir, dest):
         mult = 1024 if v.endswith("k") else 1024 * 1024 if v.endswith("m") else 1
         return int(v.rstrip("km"), 0) * mult
 
-    align, headroom = 0x10000, 0x40000
+    flash = re.search(r'^CONFIG_ESPTOOLPY_FLASHSIZE="(\d+)MB"$', sdk, re.M)
+    align, headroom = 0x10000, autosize_headroom(int(flash.group(1)) * 1024 * 1024 if flash else 0x400000)
     image = int(m.group(1), 16)
     size = (image + align - 1) & ~(align - 1)
     size = (size + headroom + align - 1) & ~(align - 1)
@@ -409,6 +416,26 @@ def esp32_autosize(log_text, build, port_dir, dest):
     body += [", ".join(r).rstrip(", ") for r in rows]
     dest.write_text("\n".join(body) + "\n")
     return dest
+
+
+def rp2_autosize(log_text):
+    """MICROPY_HW_FLASH_STORAGE_BYTES that leaves the firmware room to fit, from
+    the linker's memory table; None if the log isn't a FLASH overflow."""
+    if not re.search(r"region `FLASH' overflowed", log_text):
+        return None
+    units = {"B": 1, "KB": 1024, "MB": 1024 ** 2, "GB": 1024 ** 3}
+    regions = {}
+    for name, used, uu, size, su in re.findall(
+            r"^\s*(FLASH\w*):\s+(\d+(?:\.\d+)?) (B|KB|MB|GB)\s+(\d+(?:\.\d+)?) (B|KB|MB|GB)", log_text, re.M):
+        regions[name] = (int(float(used) * units[uu]), int(float(size) * units[su]))
+    if "FLASH" not in regions or "FLASH_FS" not in regions:
+        return None
+    used = regions["FLASH"][0]
+    total = regions["FLASH"][1] + regions["FLASH_FS"][1]  # FLASH_ROMFS keeps its own size
+    align, headroom = 0x10000, autosize_headroom(total)
+    firmware = (used + headroom + align - 1) & ~(align - 1)
+    storage = total - firmware
+    return storage if storage >= align else None
 
 
 # ---- the build -------------------------------------------------------------
@@ -582,6 +609,30 @@ def main():
                 if not got or Path(got.group(1)) != table:
                     die(f"the build used {got.group(1) if got else 'no'} partition table, not {table} (cmods#29)")
                 say("partition layout in this image:\n" + "\n".join("  " + l for l in table.read_text().splitlines() if l and not l.startswith("#")))
+        elif port == "rp2":
+            shell(make + ["submodules"])
+            storage = None
+            for attempt in (1, 2):
+                extra = [f"MICROPY_HW_FLASH_STORAGE_BYTES={storage}"] if storage else []
+                rc, out = shell(make + extra, log=True)
+                if rc == 0 or attempt == 2:
+                    break
+                storage = rp2_autosize(out)
+                if not storage:
+                    break
+                if args.no_autosize:
+                    say(f"\nThe firmware doesn't fit. MICROPY_HW_FLASH_STORAGE_BYTES={storage} would fit it.")
+                    say("(--no-autosize, so nothing was rebuilt.)")
+                    break
+                say(f"\nautosize: the firmware didn't fit; building once more with a {storage // 1024} KB filesystem.")
+                say("  Shrinking the filesystem moves it: a board flashed with this image comes")
+                say("  up with an empty filesystem (cmods#30).\n")
+                # The port runs CMake only when the build has no Makefile yet.
+                (build / "Makefile").unlink(missing_ok=True)
+            # What the image was built with, grown now or on an earlier run (CMake caches it).
+            cache = build / "CMakeCache.txt"
+            got = re.search(r"^MICROPY_HW_FLASH_STORAGE_BYTES:\w+=(\d+)$", cache.read_text(), re.M) if cache.exists() else None
+            rp2_storage = int(got.group(1)) if rc == 0 and got else None
         else:
             shell(make + ["submodules"])
             rc = shell(make)
@@ -593,6 +644,8 @@ def main():
     if rc != 0:
         die(f"the build failed (make exit {rc})")
     rec = dict(want, complete=True)
+    if port == "rp2" and rp2_storage:
+        rec["rp2_storage_bytes"] = rp2_storage
     rec["micropython"] = git_out(mp, "describe", "--always", "--abbrev=12")
     rec["module_revisions"] = record(module_dirs)
     rec_path.write_text(json.dumps(rec, indent=1) + "\n")

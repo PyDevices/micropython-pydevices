@@ -8,7 +8,8 @@
 # Clones micropython-pydevices into a fresh directory outside any PyDevices
 # workspace, so build_mp.py has to fetch MicroPython, every module and each
 # toolchain itself. It checks the failure paths, builds every desktop port and
-# two esp32 boards with --modules all, and writes a report. What should match
+# two esp32 boards with --modules all, two Picos with the module sets a
+# display project uses, and writes a report. What should match
 # on any machine: module commits, the frozen and built-in module lists, and an
 # esp32 build's sdkconfig and partition layout. What won't: sizes and SHAs,
 # which carry the build date and absolute paths. It needs no board, and a few
@@ -16,7 +17,8 @@
 #
 # Environment:
 #   WORK       where to clone and build (default ./exercise); must not exist
-#   TARGETS    space-separated subset of: unix wasm windows s3 p4 (default all)
+#   TARGETS    space-separated subset of: unix wasm windows s3 p4 pico pico2
+#              (default all)
 #   DEPS_FROM  a directory holding esp-idf/, emsdk/ and SDL2/ to link instead
 #              of fetching
 #
@@ -49,16 +51,18 @@ for name, m in sorted(d.get("module_revisions", {}).items()):
 EOF
     rb_fz=$(find "$rb_dir" -name frozen_content.c -not -path "*/managed_components/*" | head -1)
     if [ -n "$rb_fz" ]; then
-        awk '/const char mp_frozen_names\[\]/,/^};/' "$rb_fz" | grep -o '"[^"]*\\0"' | sort > "$rb_dir/frozen-names.txt"
+        awk '/const char mp_frozen_names\[\]/,/^};/' "$rb_fz" | grep -o '"[^"]*\\0"' | LC_ALL=C sort > "$rb_dir/frozen-names.txt"
         say "frozen    $(wc -l < "$rb_dir/frozen-names.txt") files, list sha $(sha "$rb_dir/frozen-names.txt")"
     fi
     rb_md=$(find "$rb_dir" -name moduledefs.h -path "*genhdr*" | head -1)
     if [ -n "$rb_md" ]; then
-        grep -o 'MODULE_DEF_[A-Za-z0-9_]*' "$rb_md" | sort -u > "$rb_dir/builtin-modules.txt"
+        grep -o 'MODULE_DEF_[A-Za-z0-9_]*' "$rb_md" | LC_ALL=C sort -u > "$rb_dir/builtin-modules.txt"
         say "builtin   $(wc -l < "$rb_dir/builtin-modules.txt") modules, list sha $(sha "$rb_dir/builtin-modules.txt")"
     fi
     if [ -f "$rb_dir/sdkconfig" ]; then
-        grep '^CONFIG_' "$rb_dir/sdkconfig" | sort > "$rb_dir/sdkconfig.sorted"
+        # The partition table's path names the build dir: hash it as <build>.
+        rb_abs=$(cd "$rb_dir" && pwd)
+        grep '^CONFIG_' "$rb_dir/sdkconfig" | sed "s|$rb_abs|<build>|g" | LC_ALL=C sort > "$rb_dir/sdkconfig.sorted"
         say "sdkconfig $(wc -l < "$rb_dir/sdkconfig.sorted") settings, sha $(sha "$rb_dir/sdkconfig.sorted")"
         for rb_k in ESPTOOLPY_FLASHSIZE FREERTOS_HZ SPI_FLASH_AUTO_SUSPEND ESP_COREDUMP_ENABLE_TO_FLASH \
                     USB_HOST_HUBS_SUPPORTED USB_HOST_HW_BUFFER_BIAS_IN CAMERA_OV5647 BT_NIMBLE_HS_FLOW_CTRL \
@@ -70,7 +74,7 @@ EOF
         say "partitions (autosize grew the app):"
         grep -v '^#' "$rb_dir/partitions.csv" | grep . | sed 's/^/  /' | tee -a "$REPORT"
     fi
-    for rb_f in micropython micropython.exe micropython.mjs micropython.wasm micropython.bin firmware.bin; do
+    for rb_f in micropython micropython.exe micropython.mjs micropython.wasm micropython.bin firmware.bin firmware.uf2; do
         [ -f "$rb_dir/$rb_f" ] && say "output    $rb_f $(stat -c %s "$rb_dir/$rb_f") bytes, sha $(sha "$rb_dir/$rb_f")"
     done
     return 0
@@ -121,7 +125,7 @@ main() {
 
     REF=${1:-main}
     WORK=${WORK:-$PWD/exercise}
-    TARGETS=${TARGETS:-unix wasm windows s3 p4}
+    TARGETS=${TARGETS:-unix wasm windows s3 p4 pico pico2}
     # The desktop board config opens an SDL window; a headless machine has no display.
     SDL_VIDEODRIVER=${SDL_VIDEODRIVER:-dummy}
     export SDL_VIDEODRIVER
@@ -144,6 +148,7 @@ main() {
     say "python3   $(python3 --version 2>&1)"
     say "mingw     $(x86_64-w64-mingw32-gcc --version 2>/dev/null | head -1 || echo missing)"
     say "node      $(node --version 2>/dev/null || echo missing)"
+    say "arm       $(arm-none-eabi-gcc --version 2>/dev/null | head -1 || echo missing)"
 
     section "clone"
     git clone -q --branch "$REF" "$URL" "$WORK/micropython-pydevices" < /dev/null || { say "clone failed"; return 1; }
@@ -207,6 +212,18 @@ print('RUN', sys.implementation._machine, np.sum(np.array([1, 2, 3])), board_con
     if want p4; then
         build p4-devkit --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB --modules all
     fi
+
+    # rp2: what a display project on a Pico carries, not all (which doesn't fit).
+    for m_t in pico pico2; do
+        want $m_t || continue
+        if ! command -v arm-none-eabi-gcc > /dev/null; then
+            section "build $m_t: SKIPPED, arm-none-eabi-gcc is missing (apt-get install gcc-arm-none-eabi libnewlib-arm-none-eabi)"
+        elif [ $m_t = pico ]; then
+            build pico --port rp2 --board RPI_PICO --modules displayif,pygraphics,palettes,pdwidgets
+        else
+            build pico2 --port rp2 --board RPI_PICO2 --modules displayif,lvgl-micropython
+        fi
+    done
 
     section "done"
     say "report: $REPORT"
