@@ -1,0 +1,38 @@
+# Every ESP32-P4 build. Both P4s we build for reach the radio through a C6
+# companion over ESP-Hosted.
+
+# BLE through the C6 companion (ESP-Hosted VHCI). Upstream's
+# sdkconfig.p4_wifi_common turns NimBLE on but, unlike sdkconfig.ble (which the
+# P4's hosted variants don't include), leaves two of its settings at IDF's
+# defaults:
+#
+# - STATIC_TO_DYNAMIC defaults to y in IDF 5.5, which moves NimBLE's host
+#   globals into a context struct allocated by nimble_port_init().
+#   MicroPython's bindings zero ble_hs_max_attrs before that call, so
+#   bluetooth.BLE().active(True) panics with a store access fault at 0x2.
+# - NimBLE's host task defaults to core 0; MicroPython runs on core 1 on the
+#   P4, and its ring buffer and scheduler expect the host on the same core.
+CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC=n
+CONFIG_BT_NIMBLE_PINNED_TO_CORE_0=n
+CONFIG_BT_NIMBLE_PINNED_TO_CORE_1=y
+CONFIG_BT_NIMBLE_PINNED_TO_CORE=1
+
+# BLE flow control from the controller to the host. The P4's NimBLE host gets
+# its ACL packets over ESP-Hosted, and ESP-Hosted's receive path
+# (host/drivers/bt/vhci_drv.c) drops a packet when NimBLE's ACL pool is empty
+# ("Rx: alloc_acl_from_ll failed"). The pool empties whenever the NimBLE host
+# task waits on Python, which it does for every event because the esp32 port
+# runs BLE events synchronously. On a chip with its own radio, IDF's transport
+# waits for a buffer instead, and the controller holds the link back. Host flow
+# control gets the same result over the hosted link: the host tells the C6's
+# controller how many buffers it has, and the controller sends no more than
+# that until the host reports them free (pydevices#79, #87).
+CONFIG_BT_NIMBLE_HS_FLOW_CTRL=y
+
+# A cache writeback (esp_cache_msync) runs with interrupts off. A display
+# syncing hundreds of KB a frame held the USB interrupt off long enough to lose
+# sound-card packets (98.7-99.4 % delivered while drawing). Sliced into 8 KB
+# pieces, drawing costs nothing measurable (99.75-99.88 % against a 99.77-99.86 %
+# baseline).
+CONFIG_ESP_MM_CACHE_MSYNC_C2M_CHUNKED_OPS=y
+CONFIG_ESP_MM_CACHE_MSYNC_C2M_CHUNKED_OPS_MAX_LEN=0x2000

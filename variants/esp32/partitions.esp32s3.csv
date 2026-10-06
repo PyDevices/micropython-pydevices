@@ -1,0 +1,9 @@
+# Name, Type, SubType, Offset, Size, Flags
+# Every ESP32-S3 build: upstream's partitions-4MiBplus.csv plus a 64 KB
+# coredump partition for sdkconfig.esp32s3's flash core dump. Autosize grows
+# the factory partition and slides the coredump after it; the filesystem
+# takes whatever flash is left after the last partition.
+nvs,      data, nvs,      0x9000,   0x6000,
+phy_init, data, phy,      0xf000,   0x1000,
+factory,  app,  factory,  0x10000,  0x1F0000,
+coredump, data, coredump, 0x200000, 0x10000,

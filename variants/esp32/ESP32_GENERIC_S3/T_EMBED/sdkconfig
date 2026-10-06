@@ -1,0 +1,6 @@
+# LilyGO T-Embed S3: flash auto-suspend, which cuts what a flash write costs
+# the audio pump from ~45 ms to ~12 ms (cmods#32). It is a board setting, not a
+# chip one: IDF supports it only on particular flash chips ("READ DOCS FIRST",
+# components/spi_flash/Kconfig), and this board's flash is one we've proven.
+CONFIG_SPI_FLASH_AUTO_SUSPEND=y
+CONFIG_SPI_FLASH_AUTO_CHECK_SUSPEND_STATUS=y
