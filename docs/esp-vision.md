@@ -51,6 +51,14 @@ never a linked component's); and two pieces of our own:
 Each test fails when it should: the hello-world test with its inputs offset,
 the pedestrian test with one person blacked out.
 
+## What it costs
+
+Both are in `all`, which means all. On 2026-10-06 they added about 2.1 MB to
+the S3's `all` image (the LCD-7's app partition grew from 0x440000 to
+0x6b0000, leaving about 1.2 MB of filesystem on 8 MB of flash) and about 3.1 MB
+to the P4's (`firmware.bin` 4.53 MB to 7.68 MB of 16 MB). Most of it is
+ESP-DL. The desktop ports skip both.
+
 ## Not in yet
 
 - **`sensor`** (the camera). esp-vision's camera code is per board, and every
