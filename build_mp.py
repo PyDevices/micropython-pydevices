@@ -97,8 +97,10 @@ def clone_at(url, ref, dest, recursive=False):
     say(f"cloning {url} at {ref} into {dest.relative_to(REPO)}")
     run(["git", "init", "-q", str(dest)])
     run(["git", "-C", str(dest), "remote", "add", "origin", url])
-    run(["git", "-C", str(dest), "fetch", "-q", "--depth", "1", "origin", ref])
-    run(["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"])
+    # A tag is fetched as a tag, so the checkout can still say which one it is.
+    spec = ref if re.fullmatch(r"[0-9a-f]{40}", ref) else f"refs/tags/{ref}:refs/tags/{ref}"
+    run(["git", "-C", str(dest), "fetch", "-q", "--depth", "1", "origin", spec])
+    run(["git", "-C", str(dest), "checkout", "-q", ref if spec != ref else "FETCH_HEAD"])
     if recursive:
         run(["git", "-C", str(dest), "submodule", "update", "--init", "--recursive", "--depth", "1", "-q"])
 
@@ -128,6 +130,11 @@ def ensure_modules(ws):
 def dep_version(name, path):
     """The version a toolchain checkout actually is, read the way it records it."""
     if name == "esp-idf":
+        # ESP-IDF's own record of its version, which needs no git tags.
+        f = path / "tools" / "cmake" / "version.cmake"
+        nums = dict(re.findall(r"set\(IDF_VERSION_(MAJOR|MINOR|PATCH) (\d+)\)", f.read_text())) if f.exists() else {}
+        if len(nums) == 3:
+            return "v{MAJOR}.{MINOR}.{PATCH}".format(**nums)
         return git_out(path, "describe", "--tags", "--exact-match")
     if name == "emsdk":
         f = path / "upstream" / "emscripten" / "emscripten-version.txt"
