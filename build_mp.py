@@ -231,8 +231,10 @@ def variants(port, board):
 
 
 def our_variant_dir(port, variant):
+    if not variant:
+        return None
     d = VARIANTS_DIR / port / variant
-    return d if variant and d.is_dir() else None
+    return d if d.is_dir() else None
 
 
 def module_choices():

@@ -39,6 +39,9 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   module and a Fetch-backed `requests`), and `esp32/`: the sdkconfig
   fragments and partition table every esp32 or every chip gets, and the few
   board variants of ours (`ESP32_GENERIC_S3` `LCD_7` and `T_EMBED`).
+- `scripts/exercise_build.sh` — builds every desktop port and two esp32
+  boards from a bare clone, checks the failure paths, and writes a report of
+  what should match on any machine. Needs no board.
 - `provenance.json` — the patches' checksums and migration record.
 
 ## Rules

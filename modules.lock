@@ -3,13 +3,13 @@
 # symlink to the sibling checkout and wins. castif is not here: it lives in
 # modules/castif, tracked in this repository. Commits are full SHAs: GitHub
 # serves a fetch by commit only for the whole 40 characters.
-audiocomponents   https://github.com/PyDevices/audiocomponents.git    1217a839b472ca961135a44385cfe9e2c00bf5dd
-audiodsp          https://github.com/PyDevices/audiodsp.git           5afe010b61b1b9e628534bc90895b005f7df6d6d
-audioif           https://github.com/PyDevices/audioif.git            71c78419c7199258933ea555591ed4e6f20c0e89
+audiocomponents   https://github.com/PyDevices/audiocomponents.git    883d591784c4560bf6073a1d2d10096cc7f2122f
+audiodsp          https://github.com/PyDevices/audiodsp.git           79616bae165b63069ccecc6d335c00ca334b193c
+audioif           https://github.com/PyDevices/audioif.git            b6b35a48a0cd23ddc549f8c0643d77ffe778da28
 cameraif          https://github.com/PyDevices/cameraif.git           77b20b128800d5e1e23aab4c131e58f46b12cad2
 displayif         https://github.com/PyDevices/displayif.git          7b955e50216e954db12fef9e4c278f41cbedf73a
-lvgl-micropython  https://github.com/PyDevices/lvgl-micropython.git   7beb480f10537f49fe64be6b015d0aa5302b68de
-palettes          https://github.com/PyDevices/palettes.git           bc3343a8e4d52e3aba99bc58f76e6ec922f046f2
+lvgl-micropython  https://github.com/PyDevices/lvgl-micropython.git   821fc459e6210cf0ee441fc9a65a13a223ab8d84
+palettes          https://github.com/PyDevices/palettes.git           6f0870f0c8a0b48c56d2150b3f800bbbee7761e1
 pdwidgets         https://github.com/PyDevices/pdwidgets.git          306c1e20e0c3c63066dab6d10155fcf165a6ba13
 pydevices         https://github.com/PyDevices/pydevices.git          c55aa1e7da1c7db8e50536bf939dd38f27f588f5
 pygraphics        https://github.com/PyDevices/pygraphics.git         b4d4c49cc2a22cdd2632f2eea2593b4cc4df4db1
