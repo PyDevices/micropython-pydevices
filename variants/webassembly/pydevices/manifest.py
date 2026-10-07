@@ -17,6 +17,7 @@ freeze("$(MPY_LIB_DIR)/micropython/mip-cmdline", ("mip/__main__.py",), opt=3)
 # Fetch-backed one above, and frozen lookup keeps the first match.
 include("../../../modules", base=False)
 # And the universal desktop board config, frozen: AutoDisplay picks the
-# browser canvas, and a page sets the panel size with env_set before the
-# import. A board_config.py the page writes beside the script still wins.
+# browser canvas, and a page sets the panel size with boarddev.env_set
+# before the import. A board_config.py the page writes beside the script
+# still wins.
 include("../../../modules/pydevices/board_configs/desktop")
