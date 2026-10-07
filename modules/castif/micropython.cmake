@@ -6,7 +6,10 @@
 # here: there is no micropython.mk.
 if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32p4")
     add_library(usermod_castif INTERFACE)
-    target_sources(usermod_castif INTERFACE ${CMAKE_CURRENT_LIST_DIR}/src/mod_castif.c)
+    target_sources(usermod_castif INTERFACE
+        ${CMAKE_CURRENT_LIST_DIR}/src/mod_castif.c
+        ${CMAKE_CURRENT_LIST_DIR}/src/castif_hls.c
+    )
     target_include_directories(usermod_castif INTERFACE ${CMAKE_CURRENT_LIST_DIR}/src)
     target_link_libraries(usermod_castif INTERFACE idf::freertos idf::esp_timer idf::lwip)
     target_link_libraries(usermod INTERFACE usermod_castif)
