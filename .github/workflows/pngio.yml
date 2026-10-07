@@ -1,0 +1,45 @@
+# pngio from a bare clone on the unix port: the round-trip test, and Pillow
+# both ways (it reads what pngio wrote; pngio reads what it wrote).
+name: pngio
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/pngio/**'
+      - 'build_mp.py'
+      - '.github/workflows/pngio.yml'
+  pull_request:
+    paths:
+      - 'modules/pngio/**'
+      - 'build_mp.py'
+      - '.github/workflows/pngio.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the unix port's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev pkg-config
+
+      - name: Build the unix port with pngio
+        run: python3 build_mp.py --port unix --modules pngio
+
+      - name: Round trips, formats, sizes and errors
+        run: |
+          mkdir -p pngout
+          ./builds/unix/standard/micropython modules/pngio/tests/test_pngio.py --out pngout
+
+      - name: Pillow reads pngio's files, and pngio reads Pillow's
+        run: |
+          python3 -m pip install numpy pillow
+          python3 modules/pngio/tests/check_pngio_pillow.py ./builds/unix/standard/micropython pngout
