@@ -4,7 +4,7 @@
 # modules/castif, tracked in this repository. Commits are full SHAs: GitHub
 # serves a fetch by commit only for the whole 40 characters.
 audiocomponents   https://github.com/PyDevices/audiocomponents.git    883d591784c4560bf6073a1d2d10096cc7f2122f
-audiodsp          https://github.com/PyDevices/audiodsp.git           7da36f7bf016236c8df02505a653ea35dc62d600
+audiodsp          https://github.com/PyDevices/audiodsp.git           eaec6810c4970e00d2ec25d8b91bbc09fa3d2735
 audioif           https://github.com/PyDevices/audioif.git            b6b35a48a0cd23ddc549f8c0643d77ffe778da28
 cameraif          https://github.com/PyDevices/cameraif.git           fdb65caaa587cf46677d275fd0e4aab2fb0a6491
 displayif         https://github.com/PyDevices/displayif.git          17b3750828d5bfc7dc33a6f068e98a17ec3389d6
@@ -14,4 +14,4 @@ pdwidgets         https://github.com/PyDevices/pdwidgets.git          306c1e20e0
 pydevices         https://github.com/PyDevices/pydevices.git          36cba5f9da32a9d9005e7fe725ce8bd70aa21921
 pygraphics        https://github.com/PyDevices/pygraphics.git         b4d4c49cc2a22cdd2632f2eea2593b4cc4df4db1
 ulab              https://github.com/v923z/micropython-ulab.git       1d3ddd8f5228e2c7335dac71f4846e6abb0ec9f9
-usbif             https://github.com/PyDevices/usbif.git              2b9397a27ffee21ef0962f291ccdebfcad5b583e
+usbif             https://github.com/PyDevices/usbif.git              95bcb3b29933009299abdf59d6b81cf742e95778
