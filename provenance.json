@@ -9,7 +9,7 @@
    "sha256": "b3827e1dea6b189d401c58d9addbda62389c94edc2043a38d8347abcbcaa0818"
   },
   "0003-micropython-windows-enable-ffi-modffi-libffi.patch": {
-   "sha256": "b3e3c34aa84dc24a622dc1448d7ff08ec5f387693308a0412542f41f6d988d1f"
+   "sha256": "7fe6e6bedf604b86161473bc98eb5feeb899803ab0211fae1ad93ad278779118"
   },
   "0004-micropython-webassembly-allow-Asyncify-in-runPythonAsync.patch": {
    "sha256": "563e85fcd9f2c6762f8d78a6d2caae091ad3c3a130d041f5854629a4e99320f0"
@@ -55,6 +55,18 @@
   },
   "0018-micropython-esp32-drop-missing-usermod-include-dirs.patch": {
    "sha256": "ed968c8c24147056cad48642612fe9eed9a8fff051b64705ee587c548a8144b9"
+  },
+  "0019-micropython-tools-makemanifest-c-modules-forward-slashes.patch": {
+   "sha256": "0d0cc9dfad8d3d07b762337cd7eb95ef43eee12d8c380f7cb405d480b2723956"
+  },
+  "0020-micropython-py-mkrules-qstr-response-file-on-windows.patch": {
+   "sha256": "04d2f0f01cd14ed67481066681c08002ec6baa8d7f40508bec0b27bf4c1d928f"
+  },
+  "0021-micropython-tools-makemanifest-mpy-tool-response-file-on-windows.patch": {
+   "sha256": "72d976eaeac044a053139f5a41c06b4e7f75f5defbc738635e3599e9bbbab207"
+  },
+  "0022-micropython-py-mkrules-link-response-file-on-windows.patch": {
+   "sha256": "b4d522a23779986dae282a4ad54f9e7f2984c49727c84dfbae484fb1d4fe4816"
   }
  }
 }

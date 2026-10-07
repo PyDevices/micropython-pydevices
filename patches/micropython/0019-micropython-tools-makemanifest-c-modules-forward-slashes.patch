@@ -1,0 +1,37 @@
+From 12478b29ebf389a7a913c505f9c5dbea17c19911 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Tue, 6 Oct 2026 22:53:01 -0500
+Subject: [PATCH] tools/makemanifest.py: list C modules with forward slashes.
+
+--list-c-modules prints each c_module() path as manifestfile resolved it,
+with os.path.abspath, so on Windows it carries backslashes. py/manifest.mk
+reads that list into USER_C_MODULES, and a module's micropython.mk that
+runs a script from $(USERMOD_DIR) through the shell gets the path with its
+backslashes dropped (C:\Users\... becomes C:Users...). Python and make both
+take forward slashes on Windows, and the list is unchanged elsewhere.
+
+Seen on a native Windows (MSYS2 MinGW) build of ports/windows with
+audiodsp, whose micropython.mk runs $(USERMOD_DIR)/scripts/fetch_deps.sh.
+Unchanged on upstream v1.29.0.
+---
+ tools/makemanifest.py | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/tools/makemanifest.py b/tools/makemanifest.py
+index a149755..5f7903d 100644
+--- a/tools/makemanifest.py
++++ b/tools/makemanifest.py
+@@ -176,7 +176,9 @@ def main():
+         if c_modules:
+             # Output one path per line to handle paths with spaces
+             for module in c_modules:
+-                print(module)
++                # Forward slashes: make hands these to sh, which drops a
++                # Windows path's backslashes.
++                print(module.replace(os.sep, "/"))
+         sys.exit(0)
+ 
+     # Get paths to tools
+-- 
+2.54.0.windows.1
+

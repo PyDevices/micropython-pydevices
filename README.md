@@ -17,11 +17,16 @@ asks you for port, board and variant. Output lands in
 commit.
 
 Don't have it yet? This clones it into `micropython-pydevices` in the current
-directory and checks your tools (Linux or WSL):
+directory and checks your tools (Linux, WSL, or Git Bash on Windows):
 
 ```bash
 curl -fsSL https://pydevices.github.io/install.sh | sh
 ```
+
+On Windows you can build the windows port natively from PowerShell, with
+`python build_mp.py --port windows --variant pydevices --modules all`, once
+MSYS2 is installed: [On Windows](docs/newcomers.md#on-windows) has the
+steps. Everything else builds from WSL.
 
 New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
 [build plan](docs/build-plan.md) has the layout, the rules and the traps.
@@ -41,7 +46,7 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   `tflite/` and `vision/` (esp-vision's modules, from the pin in `.esp-vision/`;
   see [docs/esp-vision.md](docs/esp-vision.md)), and the modules themselves,
   linked or cloned.
-- `patches/micropython/` — our patch series (`0001-…` to `0018-…`), each
+- `patches/micropython/` — our patch series (`0001-…` to `0022-…`), each
   justified in its own header; `patches/apply_patches.py` applies it, plus
   each module's own MicroPython patches, once, as one local commit.
 - `variants/` — our variants: `unix/` and `windows/` (`pydevices`,

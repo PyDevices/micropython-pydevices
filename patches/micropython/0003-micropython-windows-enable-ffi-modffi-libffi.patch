@@ -5,6 +5,12 @@ Subject: [PATCH] windows: enable ffi (modffi, libffi) on Windows (MinGW)
 
 Build libffi for the windows port and enable modffi, matching the unix port.
 
+The libffi rules chain their steps with && rather than the unix port's ;,
+so a step that fails stops the rule. With ;, a cd into the build dir that
+failed (a Windows path whose backslashes the shell dropped) ran libffi's
+configure in ports/windows instead, which overwrote the port's tracked
+Makefile and left configure's output in the tree.
+
 Based-on: micropython 0fd6c573e (tag v1.29.0)
 ---
  ports/unix/modffi.c           | 76 +++++++++++++++++++++++++++++++----
@@ -160,7 +166,7 @@ index c16d40ad3..c60c681e6 100644
      mp_obj_ffimod_t *o = mp_obj_malloc(mp_obj_ffimod_t, type);
      o->handle = mod;
 diff --git a/ports/windows/Makefile b/ports/windows/Makefile
-index e22ea225d..4b6b18270 100644
+index e22ea225d..c6a8ec8b3 100644
 --- a/ports/windows/Makefile
 +++ b/ports/windows/Makefile
 @@ -96,6 +96,21 @@ endif
@@ -206,12 +212,12 @@ index e22ea225d..4b6b18270 100644
 +libffi: $(BUILD)/lib/libffi/include/ffi.h
 +
 +$(TOP)/lib/libffi/configure: $(TOP)/lib/libffi/autogen.sh
-+	cd $(TOP)/lib/libffi; ./autogen.sh
++	cd $(TOP)/lib/libffi && ./autogen.sh
 +
 +$(BUILD)/lib/libffi/include/ffi.h: $(TOP)/lib/libffi/configure
-+	mkdir -p $(BUILD)/lib/libffi; cd $(BUILD)/lib/libffi; \
-+	$(abspath $(TOP))/lib/libffi/configure $(CROSS_COMPILE_HOST) --prefix=$$PWD/out --disable-shared --disable-structs CC="$(CC)" CXX="$(CXX)" LD="$(LD)" CFLAGS="-Os -fomit-frame-pointer -fstrict-aliasing -ffast-math -fno-exceptions"; \
-+	$(MAKE) install-exec-recursive; $(MAKE) -C include install-data-am
++	mkdir -p $(BUILD)/lib/libffi && cd $(BUILD)/lib/libffi && \
++	$(abspath $(TOP))/lib/libffi/configure $(CROSS_COMPILE_HOST) --prefix=$$PWD/out --disable-shared --disable-structs CC="$(CC)" CXX="$(CXX)" LD="$(LD)" CFLAGS="-Os -fomit-frame-pointer -fstrict-aliasing -ffast-math -fno-exceptions" && \
++	$(MAKE) install-exec-recursive && $(MAKE) -C include install-data-am
 +
  # Note for recent gcc versions like 13.2:
  # - mingw64-x86_64 gcc builds will pass the math_domain_special test

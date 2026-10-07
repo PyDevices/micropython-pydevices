@@ -1,0 +1,84 @@
+From 3807e8cf45e32c0bf7bd79030afcabdd8b7ed3c3 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Tue, 6 Oct 2026 23:01:11 -0500
+Subject: [PATCH] py/mkrules.mk: pass makeqstrdefs.py its file lists in a
+ response file on Windows.
+
+Windows caps a command line at 32767 characters. The qstr pp rule names
+every QSTR source on it, twice on a fresh build ($^ as sources and $? as
+changed_sources), as the absolute paths user C modules give. A windows
+port build with --modules all made a 52058-character command, and make
+failed with "python.exe: Argument list too long".
+
+On Windows ($(OS) is Windows_NT) the rule now writes the sources,
+dependencies and changed_sources lists to genhdr/qstr.i.args with
+$(file) and passes @<that file>; makeqstrdefs.py expands an @file
+argument into its words. The flags stay on the command line, since
+some carry shell quoting a file would not. $(file) needs GNU make 4.0,
+which MSYS2 has; every other host keeps the command line it had, so
+make 3.81 (macOS) is unaffected.
+
+Seen on a native Windows (MSYS2 MinGW) build of ports/windows with
+audiodsp, ulab, displayif and the rest of micropython-pydevices'
+modules. Unchanged on upstream v1.29.0.
+---
+ py/makeqstrdefs.py | 10 ++++++++++
+ py/mkrules.mk      | 13 ++++++++++++-
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/py/makeqstrdefs.py b/py/makeqstrdefs.py
+index 628fbe6..f34eaaa 100644
+--- a/py/makeqstrdefs.py
++++ b/py/makeqstrdefs.py
+@@ -222,7 +222,17 @@ if __name__ == "__main__":
+             ]
+         }
+ 
++        # An @file argument is a response file: its words stand in its place
++        # (py/mkrules.mk passes the source lists that way on Windows).
++        argv = []
+         for arg in sys.argv[1:]:
++            if arg.startswith("@"):
++                with open(arg[1:]) as f:
++                    argv.extend(f.read().split())
++            else:
++                argv.append(arg)
++
++        for arg in argv:
+             if arg in named_args:
+                 current_tok = arg
+             else:
+diff --git a/py/mkrules.mk b/py/mkrules.mk
+index a04cd14..788f1f9 100644
+--- a/py/mkrules.mk
++++ b/py/mkrules.mk
+@@ -139,6 +139,17 @@ $(BUILD)/%.o: $(BUILD)/%.c
+ # to get built before we try to compile any of them.
+ $(OBJ): | $(HEADER_BUILD)/qstrdefs.generated.h $(HEADER_BUILD)/mpversion.h $(OBJ_EXTRA_ORDER_DEPS)
+ 
++# The file lists for makeqstrdefs.py pp. Windows caps a command line at 32767
++# characters, which a build with large user C modules passes (every source is
++# named twice on a fresh build: $^ and $?), so there they go in a response file
++# that makeqstrdefs.py expands. $(file) needs GNU make 4.0; Windows' (MSYS2) has
++# it, and other hosts keep the command line as it was.
++ifeq ($(OS),Windows_NT)
++QSTR_PP_FILES = $(file >$(HEADER_BUILD)/qstr.i.args,sources $^ dependencies $(QSTR_GLOBAL_DEPENDENCIES) changed_sources $?)@$(HEADER_BUILD)/qstr.i.args
++else
++QSTR_PP_FILES = sources $^ dependencies $(QSTR_GLOBAL_DEPENDENCIES) changed_sources $?
++endif
++
+ # The logic for qstr regeneration (applied by makeqstrdefs.py) is:
+ # - if anything in QSTR_GLOBAL_DEPENDENCIES is newer, then process all source files ($^)
+ # - else, if list of newer prerequisites ($?) is not empty, then process just these ($?)
+@@ -146,7 +157,7 @@ $(OBJ): | $(HEADER_BUILD)/qstrdefs.generated.h $(HEADER_BUILD)/mpversion.h $(OBJ
+ # See more information about this process in docs/develop/qstr.rst.
+ $(HEADER_BUILD)/qstr.i.last: $(SRC_QSTR) $(QSTR_GLOBAL_DEPENDENCIES) | $(QSTR_GLOBAL_REQUIREMENTS)
+ 	$(ECHO) "GEN $@"
+-	$(Q)$(PYTHON) $(PY_SRC)/makeqstrdefs.py pp $(CPP) output $(HEADER_BUILD)/qstr.i.last cflags $(QSTR_GEN_CFLAGS) cxxflags $(QSTR_GEN_CXXFLAGS) sources $^ dependencies $(QSTR_GLOBAL_DEPENDENCIES) changed_sources $?
++	$(Q)$(PYTHON) $(PY_SRC)/makeqstrdefs.py pp $(CPP) output $(HEADER_BUILD)/qstr.i.last cflags $(QSTR_GEN_CFLAGS) cxxflags $(QSTR_GEN_CXXFLAGS) $(QSTR_PP_FILES)
+ 
+ $(HEADER_BUILD)/qstr.split: $(HEADER_BUILD)/qstr.i.last
+ 	$(ECHO) "GEN $@"
+-- 
+2.54.0.windows.1
+
