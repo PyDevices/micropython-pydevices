@@ -1,0 +1,57 @@
+From 3f4147195ff73471352363a8eb650f0ba6af3681 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Tue, 6 Oct 2026 23:23:42 -0500
+Subject: [PATCH] py/mkrules.mk: pass the linker its objects in a response file
+ on Windows.
+
+Windows caps a command line at 32767 characters. The program's link rule
+names every object on it, and a windows port build with
+micropython-pydevices' --modules all links 948 objects by absolute path
+(about 100000 characters; LVGL alone is 463), so make failed with
+"gcc: Argument list too long".
+
+On Windows ($(OS) is Windows_NT) the rule now writes the objects to
+$(BUILD)/$(PROG).objs with $(file) and passes @<that file>, which gcc
+reads natively. $(LIBS) and $(LDFLAGS) stay on the command line. $(file)
+needs GNU make 4.0, which MSYS2 has; every other host keeps the command
+line it had, so make 3.81 (macOS) is unaffected.
+
+The same limit as the qstr pp rule's and makemanifest.py's mpy-tool.py
+call, met the same way.
+
+Seen on a native Windows (MSYS2 MinGW) build of ports/windows.
+Unchanged on upstream v1.29.0.
+---
+ py/mkrules.mk | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/py/mkrules.mk b/py/mkrules.mk
+index 788f1f9..19acea6 100644
+--- a/py/mkrules.mk
++++ b/py/mkrules.mk
+@@ -253,11 +253,21 @@ endif
+ 
+ all: $(BUILD)/$(PROG)
+ 
++# The objects for the link. Windows caps a command line at 32767 characters,
++# which the objects of large user C modules pass, so there they go in a
++# response file, which gcc reads as @file. $(file) needs GNU make 4.0;
++# Windows' (MSYS2) has it, and other hosts keep the command line as it was.
++ifeq ($(OS),Windows_NT)
++PROG_OBJ = $(file >$(BUILD)/$(PROG).objs,$^)@$(BUILD)/$(PROG).objs
++else
++PROG_OBJ = $^
++endif
++
+ $(BUILD)/$(PROG): $(OBJ)
+ 	$(ECHO) "LINK $@"
+ # Do not pass COPT here - it's *C* compiler optimizations. For example,
+ # we may want to compile using Thumb, but link with non-Thumb libc.
+-	$(Q)$(CC) -o $@ $^ $(LIBS) $(LDFLAGS)
++	$(Q)$(CC) -o $@ $(PROG_OBJ) $(LIBS) $(LDFLAGS)
+ ifndef DEBUG
+ ifdef STRIP
+ 	$(Q)$(STRIP) $(STRIPFLAGS_EXTRA) $@
+-- 
+2.54.0.windows.1
+

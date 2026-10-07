@@ -1,0 +1,9 @@
+# LF in the index and in every checkout, Windows included. Git for Windows
+# defaults to core.autocrlf=true, which would check the patches out CRLF, and
+# then not one of them applies to MicroPython's LF tree (and the overlay's
+# series id, a hash of the patch bytes, would differ from Linux's).
+* text=auto eol=lf
+*.patch text eol=lf
+*.sh text eol=lf
+*.jpg binary
+*.h264 binary

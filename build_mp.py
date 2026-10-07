@@ -15,11 +15,12 @@ deps.lock and UPSTREAM; esp32 settings live in sdkconfig fragments found by
 convention. See docs/build-plan.md.
 
 Environment: OUT_DIR (default builds/), VARIANTS_DIR (default variants/),
-MODULES_DIR (default modules/), JOBS (default: every core).
+MODULES_DIR (default modules/), JOBS (default: every core), and on Windows
+MSYS2_ROOT (default C:\\msys64), the MSYS2 whose make and MinGW gcc build the
+windows port.
 """
 
 import argparse
-import fcntl
 import json
 import os
 import re
@@ -31,6 +32,12 @@ import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # Windows: msvcrt's byte-range lock stands in for flock
+    fcntl = None
+    import msvcrt
 
 REPO = Path(__file__).resolve().parent
 OUT_DIR = Path(os.environ.get("OUT_DIR", REPO / "builds")).resolve()
@@ -65,6 +72,50 @@ def git_out(path, *args):
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+# ---- native Windows: MSYS2's make, gcc and bash ---------------------------
+
+# The shell make's recipes run under. On Windows it is resolved by
+# windows_toolchain(), never left to PATH: from PowerShell or cmd, a bare
+# "bash" is WSL's launcher in WindowsApps, which would run the build inside
+# Linux against Windows paths.
+BASH = "bash"
+
+MSYS2_STEPS = """install MSYS2 and its MinGW toolchain, from PowerShell:
+    winget install --id MSYS2.MSYS2 -e
+    C:\\msys64\\usr\\bin\\bash.exe -lc "pacman -Syu --noconfirm"
+    C:\\msys64\\usr\\bin\\bash.exe -lc "pacman -S --needed --noconfirm make mingw-w64-x86_64-gcc autoconf automake libtool"
+then run this again. MSYS2 somewhere other than C:\\msys64? Set MSYS2_ROOT."""
+
+
+def windows_toolchain():
+    """On native Windows, put MSYS2's MinGW and tools first on PATH (for this
+    process and every child) and pick its bash, so a plain PowerShell needs no
+    setup. Returns the MSYS2 root, or None if there isn't one."""
+    global BASH
+    root = Path(os.environ.get("MSYS2_ROOT", r"C:\msys64"))
+    if (root / "usr" / "bin" / "bash.exe").is_file():
+        os.environ["PATH"] = os.pathsep.join([str(root / "mingw64" / "bin"), str(root / "usr" / "bin"), os.environ.get("PATH", "")])
+        BASH = str(root / "usr" / "bin" / "bash.exe")
+    else:
+        root = None
+        found = shutil.which("bash")
+        # WindowsApps' and System32's bash.exe are WSL's.
+        if found and not any(part.lower() in ("windowsapps", "system32") for part in Path(found).parts):
+            BASH = found
+        else:
+            BASH = None
+    # libffi's configure guesses its host from uname, which says MSYS (POSIX
+    # emulation) unless MSYSTEM names the MinGW environment.
+    os.environ.setdefault("MSYSTEM", "MINGW64")
+    return root
+
+
+def check_windows_tools():
+    missing = [t for t in ("make", "gcc") if not shutil.which(t)] + ([] if BASH else ["bash (not WSL's)"])
+    if missing:
+        die(f"no {', '.join(missing)} for the windows port; {MSYS2_STEPS}")
+
+
 # ---- the workspace and what fills micropython/, modules/ and deps/ ---------
 
 def workspace():
@@ -96,11 +147,13 @@ def link(dest, target):
 def clone_at(url, ref, dest, recursive=False):
     say(f"cloning {url} at {ref} into {dest.relative_to(REPO)}")
     run(["git", "init", "-q", str(dest)])
+    # Git for Windows defaults core.autocrlf=true: patches checked out CRLF don't apply.
+    run(["git", "-C", str(dest), "config", "core.autocrlf", "false"])
     run(["git", "-C", str(dest), "remote", "add", "origin", url])
     # A tag is fetched as a tag, so the checkout can still say which one it is.
     spec = ref if re.fullmatch(r"[0-9a-f]{40}", ref) else f"refs/tags/{ref}:refs/tags/{ref}"
     run(["git", "-C", str(dest), "fetch", "-q", "--depth", "1", "origin", spec])
-    run(["git", "-C", str(dest), "checkout", "-q", ref if spec != ref else "FETCH_HEAD"])
+    run(["git", "-C", str(dest), "-c", "advice.detachedHead=false", "checkout", "-q", ref if spec != ref else "FETCH_HEAD"])
     if recursive:
         run(["git", "-C", str(dest), "submodule", "update", "--init", "--recursive", "--depth", "1", "-q"])
 
@@ -113,7 +166,7 @@ def ensure_micropython(ws):
     else:
         upstream = (REPO / "UPSTREAM").read_text().strip()
         say(f"cloning MicroPython {upstream}")
-        run(["git", "clone", "-q", "--depth", "1", "--branch", upstream, "https://github.com/micropython/micropython", str(MP)])
+        run(["git", "-c", "advice.detachedHead=false", "clone", "-q", "--depth", "1", "--branch", upstream, "https://github.com/micropython/micropython", str(MP)])
 
 
 def ensure_modules(ws):
@@ -158,10 +211,10 @@ def ensure_dep(name, ws):
             link(dest, ws / name)
         elif name == "esp-idf":
             clone_at(url, version, dest, recursive=True)
-            run(["bash", "-c", f"cd {dest} && ./install.sh all"])
+            run([BASH, "-c", f"cd {dest} && ./install.sh all"])
         elif name == "emsdk":
             run(["git", "clone", "-q", url, str(dest)])
-            run(["bash", "-c", f"cd {dest} && ./emsdk install {version} && ./emsdk activate {version}"])
+            run([BASH, "-c", f"cd {dest} && ./emsdk install {version} && ./emsdk activate {version}"])
         elif name == "SDL2":
             DEPS.mkdir(exist_ok=True)
             with tempfile.TemporaryDirectory() as tmp:
@@ -459,6 +512,9 @@ def main():
     ap.add_argument("--clean", action="store_true", help="delete this target's build dir first")
     args, make_extra = ap.parse_known_args()
 
+    msys2 = windows_toolchain() if os.name == "nt" else None
+    if msys2:
+        say(f"using MSYS2 at {msys2}")
     ws = workspace()
     ensure_micropython(ws)
     ensure_modules(ws)
@@ -469,17 +525,34 @@ def main():
     # other build tools there take (the anchor's .micropython-build.lock).
     # Held until this process exits.
     lock = open(mp.parent / ".micropython-build.lock", "w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        say(f"waiting for another build to release {lock.name}")
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    if fcntl:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            say(f"waiting for another build to release {lock.name}")
+            fcntl.flock(lock, fcntl.LOCK_EX)
+    else:
+        try:
+            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            say(f"waiting for another build to release {lock.name}")
+            while True:
+                try:  # LK_LOCK gives up after ten seconds, so ask again
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    pass
     upstream = (REPO / "UPSTREAM").read_text().strip()
     apply_patches.prepare(mp, upstream, apply_patches.series(), refresh=True)
 
     port = args.port or choose("Port:", ports())
     if port not in ports():
         die(f"no port '{port}' (have: {', '.join(ports())})")
+    if os.name == "nt":
+        if port == "windows":
+            check_windows_tools()
+        else:
+            say(f"note: on native Windows only the windows port is tested; build {port} from WSL")
     board = args.board
     if is_board_port(port):
         board = board or choose("Board:", boards(port))
@@ -541,24 +614,30 @@ def main():
     for leak in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "BOARD_DIR", "VARIANT_DIR"):
         env.pop(leak, None)
     env["PYDEVICES_MODULES"] = spec
+    if os.name == "nt":
+        # Upstream's tools open sources without encoding=; Windows' default is cp1252.
+        env.setdefault("PYTHONUTF8", "1")
     # A prebuilt mpy-cross, named in the environment: neither make nor CMake
     # then runs the mpy-cross sub-make that would inherit BUILD= (micropython#19667).
-    run(["make", "-C", str(mp / "mpy-cross"), "-j", JOBS], env={k: v for k, v in env.items() if k != "PYDEVICES_MODULES"},
+    # Windows has no python3: give make this Python, in a form MSYS sh keeps.
+    winpy = [f"PYTHON={Path(sys.executable).as_posix()}"] if os.name == "nt" else []
+    run(["make", "-C", str(mp / "mpy-cross"), "-j", JOBS, *winpy], env={k: v for k, v in env.items() if k != "PYDEVICES_MODULES"},
         stdout=subprocess.DEVNULL)
-    env["MICROPY_MPYCROSS"] = str(mp / "mpy-cross" / "build" / "mpy-cross")
+    exe = ".exe" if os.name == "nt" else ""
+    env["MICROPY_MPYCROSS"] = (mp / "mpy-cross" / "build" / f"mpy-cross{exe}").as_posix()
 
     port_dir = mp / "ports" / port
-    make = ["make", "-C", str(port_dir), "-j", JOBS, f"BUILD={build}"]
+    make = ["make", "-C", str(port_dir), "-j", JOBS, f"BUILD={build.as_posix()}", *winpy]
     prefix = ""
     ours = our_variant_dir(port, variant) if not board else None
     manifest = ours / "manifest.py" if ours and (ours / "manifest.py").exists() else MODULES_DIR / "manifest.py"
-    make.append(f"FROZEN_MANIFEST={manifest}")
+    make.append(f"FROZEN_MANIFEST={manifest.as_posix()}")
     if board:
         make.append(f"BOARD={board}")
         if variant:
             make.append(f"BOARD_VARIANT={variant}")
     elif ours:
-        make.append(f"VARIANT_DIR={ours}")
+        make.append(f"VARIANT_DIR={ours.as_posix()}")
     elif variant:
         make.append(f"VARIANT={variant}")
 
@@ -569,16 +648,17 @@ def main():
         emsdk = ensure_dep("emsdk", ws)
         prefix = f'. "{emsdk}/emsdk_env.sh" >/dev/null 2>&1 && '
     elif port == "windows":
-        make.append("CROSS_COMPILE=x86_64-w64-mingw32-")
+        if os.name != "nt":  # on Windows, MSYS2's MinGW gcc is the native compiler
+            make.append("CROSS_COMPILE=x86_64-w64-mingw32-")
         if any(d.resolve().name == "displayif" for d in module_dirs):
-            make.append(f"SDL2_DEV={ensure_dep('SDL2', ws)}")
+            make.append(f"SDL2_DEV={ensure_dep('SDL2', ws).as_posix()}")
     make += make_extra
 
     def shell(cmd, log=None):
         line = prefix + shlex.join(cmd)
         if log is None:
-            return subprocess.run(["bash", "-c", line], env=env).returncode
-        p = subprocess.Popen(["bash", "-c", line], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            return subprocess.run([BASH, "-c", line], env=env).returncode
+        p = subprocess.Popen([BASH, "-c", line], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         out = []
         for chunk in p.stdout:
             sys.stdout.write(chunk)

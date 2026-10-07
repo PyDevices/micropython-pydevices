@@ -1,0 +1,72 @@
+From add79c24a6d16b42ada7251c98310b124aeea2b1 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Tue, 6 Oct 2026 23:18:38 -0500
+Subject: [PATCH] tools/makemanifest.py: pass mpy-tool.py its .mpy files in a
+ response file on Windows.
+
+Windows caps a command line at 32767 characters. makemanifest.py hands
+mpy-tool.py every frozen .mpy by path on one command line, and a windows
+port build with micropython-pydevices' --modules all froze 361 of them
+(about 41000 characters of paths), so CreateProcess failed with
+"[WinError 206] The filename or extension is too long".
+
+mpy-tool.py now takes argparse's @file (one argument per line), and on
+Windows makemanifest.py writes the .mpy list to
+<build>/frozen_mpy.args and passes @<that file>. Every other host keeps
+the command line it had.
+
+Seen on a native Windows (MSYS2 MinGW) build of ports/windows.
+Unchanged on upstream v1.29.0.
+---
+ tools/makemanifest.py | 10 +++++++++-
+ tools/mpy-tool.py     |  6 +++++-
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/tools/makemanifest.py b/tools/makemanifest.py
+index 5f7903d..3f05a30 100644
+--- a/tools/makemanifest.py
++++ b/tools/makemanifest.py
+@@ -245,6 +245,14 @@ def main():
+ 
+     # Freeze .mpy files
+     if mpy_files:
++        mpy_args = mpy_files
++        if os.name == "nt":
++            # Windows caps a command line at 32767 characters, which a few hundred
++            # frozen files' paths pass; mpy-tool.py reads them from a file instead.
++            list_file = os.path.join(args.build_dir, "frozen_mpy.args")
++            with open(list_file, "w") as f:
++                f.write("\n".join(mpy_files) + "\n")
++            mpy_args = ["@" + list_file]
+         res, output_mpy = system(
+             [
+                 sys.executable,
+@@ -254,7 +262,7 @@ def main():
+                 args.build_dir + "/genhdr/qstrdefs.preprocessed.h",
+             ]
+             + args.mpy_tool_flags.split()
+-            + mpy_files
++            + mpy_args
+         )
+         if res != 0:
+             print("error freezing mpy {}:".format(mpy_files))
+diff --git a/tools/mpy-tool.py b/tools/mpy-tool.py
+index efe9bfe..811d76d 100755
+--- a/tools/mpy-tool.py
++++ b/tools/mpy-tool.py
+@@ -2088,7 +2088,11 @@ def main(args=None):
+ 
+     import argparse
+ 
+-    cmd_parser = argparse.ArgumentParser(description="A tool to work with MicroPython .mpy files.")
++    cmd_parser = argparse.ArgumentParser(
++        description="A tool to work with MicroPython .mpy files.",
++        # @file names a file of arguments, one per line (makemanifest.py on Windows).
++        fromfile_prefix_chars="@",
++    )
+     cmd_parser.add_argument(
+         "-x", "--hexdump", action="store_true", help="output an annotated hex dump of files"
+     )
+-- 
+2.54.0.windows.1
+

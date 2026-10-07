@@ -63,7 +63,7 @@ def apply(mp, patches):
     for patch in patches:
         if git(mp, "apply", str(patch), check=False) != 0:
             sys.exit(f"apply_patches: {patch.relative_to(REPO)} does not apply")
-        print(f"applied {patch.relative_to(REPO)}")
+        print(f"applied {patch.relative_to(REPO)}", flush=True)
 
 
 def check(mp, upstream, patches):
@@ -77,7 +77,7 @@ def check(mp, upstream, patches):
             apply(tree, patches)
         finally:
             git(mp, "worktree", "remove", "--force", str(tree), check=False)
-    print(f"the series applies clean to {upstream}")
+    print(f"the series applies clean to {upstream}", flush=True)
 
 
 def prepare(mp, upstream, patches, refresh=False):
@@ -88,7 +88,7 @@ def prepare(mp, upstream, patches, refresh=False):
     if git(mp, "log", "-1", "--format=%s", capture=True) == mark and refresh and sid not in git(
         mp, "log", "-1", "--format=%b", capture=True
     ).splitlines():
-        print(f"{mp} carries an older overlay; moving it back to {upstream} and preparing again")
+        print(f"{mp} carries an older overlay; moving it back to {upstream} and preparing again", flush=True)
         git(mp, "checkout", "--quiet", "--", "ports/esp32/lockfiles", check=False)
         git(mp, "checkout", "--quiet", upstream)
     if git(mp, "log", "-1", "--format=%s", capture=True) == mark:
@@ -98,7 +98,7 @@ def prepare(mp, upstream, patches, refresh=False):
                 f"and prepare again:\n  git -C {mp} checkout {upstream} && {sys.argv[0]} {mp}"
             )
         head = git(mp, "log", "-1", "--format=%h", capture=True)
-        print(f"overlay already applied: {head} on {upstream}")
+        print(f"overlay already applied: {head} on {upstream}", flush=True)
     else:
         dirty = [
             line
@@ -116,7 +116,7 @@ def prepare(mp, upstream, patches, refresh=False):
             "commit", "--quiet", "-m", mark, "-m", sid,
         )
         head = git(mp, "log", "-1", "--format=%h", capture=True)
-        print(f"overlay applied: {head} on {upstream}")
+        print(f"overlay applied: {head} on {upstream}", flush=True)
     # Every manifest require()s from micropython-lib, so a clone without it
     # cannot even list its C modules. A port's other submodules come from
     # `make submodules`, the upstream way.

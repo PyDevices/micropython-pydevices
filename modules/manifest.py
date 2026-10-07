@@ -33,7 +33,7 @@ if options.base:
     try:
         include("$(PORT_DIR)/boards/manifest.py")
     except Exception as _e:
-        if "/boards/manifest.py" not in str(_e):
+        if "/boards/manifest.py" not in str(_e).replace("\\", "/"):
             raise
         # Upstream's default variant for the port, which includes the port's
         # own manifest and adds what the default build carries (asyncio on
@@ -46,7 +46,7 @@ if options.base:
                 _included = True
                 break
             except Exception as _e2:
-                if "/variants/" + _default + "/manifest.py" not in str(_e2):
+                if "/variants/" + _default + "/manifest.py" not in str(_e2).replace("\\", "/"):
                     raise
         if not _included:
             include("$(PORT_DIR)/variants/manifest.py")
