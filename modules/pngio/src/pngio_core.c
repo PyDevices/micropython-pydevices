@@ -70,7 +70,8 @@ int pngio_channels(int fmt) {
 // --- deflate: fixed Huffman, hashed LZ77 -------------------------------------
 
 #define WINDOW (32768u)
-#define HASH_BITS (15)
+#define HASH_BITS (13)          // 32 kB of heads: on a board it is PSRAM, and smaller misses less
+#define MAX_INSERT (4)          // a longer match's positions aren't hashed (zlib's fast level)
 #define MIN_MATCH (3)
 #define MAX_MATCH (258)
 
@@ -200,17 +201,22 @@ static void deflate_fixed(bitw_t *w, const uint8_t *src, size_t n, int level, ui
         }
         if (best_len >= MIN_MATCH) {
             put_match(w, best_len, best_dist);
-            // hash the positions the match covers, so later matches can start there
             const size_t stop = i + best_len;
-            for (i++; i < stop; i++) {
-                if (i + MIN_MATCH <= n) {
-                    const uint32_t h = hash3(src + i);
-                    if (prev) {
-                        prev[i & (WINDOW - 1)] = head[h];
+            if (best_len <= MAX_INSERT) {
+                // a short match: hash the positions it covers, so later matches
+                // can start there. A long one (a flat screen's runs) is skipped
+                // whole: hashing every byte of it cost most of a board's encode.
+                for (i++; i < stop; i++) {
+                    if (i + MIN_MATCH <= n) {
+                        const uint32_t h = hash3(src + i);
+                        if (prev) {
+                            prev[i & (WINDOW - 1)] = head[h];
+                        }
+                        head[h] = (uint32_t)i + 1;
                     }
-                    head[h] = (uint32_t)i + 1;
                 }
             }
+            i = stop;
         } else {
             put_litlen(w, src[i]);
             i++;
