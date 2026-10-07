@@ -87,6 +87,9 @@ typedef struct _castif_hls_obj_t {
     int ls;
     hls_client_t *cl;          // HLS_CLIENTS of them, in PSRAM
     uint32_t ips[HLS_IPS], first_fetch[HLS_IPS];
+    // when each of the last 512 segments began (wall clock ms, by seq & 511):
+    // a player's delay is now - (when its first segment began + its position)
+    int64_t began_ring[512];
     char player[96];
     TaskHandle_t task;
     volatile bool running;
@@ -166,6 +169,7 @@ static void hls_frame(castif_hls_obj_t *h, const uint8_t *au, uint32_t len, bool
         s->seq = h->next_seq++;
         s->start_pts = pts;
         s->began_ms = hls_wall_ms();
+        h->began_ring[s->seq & 511] = s->began_ms;
         h->cur = s;
     }
     if (idr) {
@@ -253,15 +257,22 @@ static int hls_stats_json(castif_hls_obj_t *h, char *out, int cap) {
             first = false;
         }
     }
-    k += snprintf(out + k, cap - k, "}, \"first_fetch\": {");
-    first = true;
-    for (int i = 0; i < HLS_IPS; i++) {
-        if (h->ips[i]) {
-            uint32_t ip = h->ips[i];
-            k += snprintf(out + k, cap - k, "%s\"%u.%u.%u.%u\": %u", first ? "" : ", ",
-                (unsigned)(ip & 255), (unsigned)((ip >> 8) & 255), (unsigned)((ip >> 16) & 255), (unsigned)(ip >> 24),
-                (unsigned)h->first_fetch[i]);
-            first = false;
+    // each client's first segment, and when it began
+    for (int pass = 0; pass < 2; pass++) {
+        k += snprintf(out + k, cap - k, pass ? "}, \"first_began\": {" : "}, \"first_fetch\": {");
+        first = true;
+        for (int i = 0; i < HLS_IPS; i++) {
+            if (h->ips[i]) {
+                uint32_t ip = h->ips[i];
+                k += snprintf(out + k, cap - k, "%s\"%u.%u.%u.%u\": ", first ? "" : ", ",
+                    (unsigned)(ip & 255), (unsigned)((ip >> 8) & 255), (unsigned)((ip >> 16) & 255), (unsigned)(ip >> 24));
+                if (pass) {
+                    k += snprintf(out + k, cap - k, "%s", hls_i64(num, h->began_ring[h->first_fetch[i] & 511]));
+                } else {
+                    k += snprintf(out + k, cap - k, "%u", (unsigned)h->first_fetch[i]);
+                }
+                first = false;
+            }
         }
     }
     k += snprintf(out + k, cap - k, "}}");
