@@ -1,0 +1,38 @@
+# ppa's software path from a bare clone, on the unix port: every operation
+# against the test's pure-Python model. The PPA half of the test runs on a P4.
+name: ppa
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/ppa/**'
+      - 'build_mp.py'
+      - '.github/workflows/ppa.yml'
+  pull_request:
+    paths:
+      - 'modules/ppa/**'
+      - 'build_mp.py'
+      - '.github/workflows/ppa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the unix port's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev pkg-config
+
+      - name: Build the unix port with ppa
+        run: python3 build_mp.py --port unix --modules ppa
+
+      - name: The software path matches the model
+        run: ./builds/unix/standard/micropython -X heapsize=16M modules/ppa/tests/test_ppa.py
