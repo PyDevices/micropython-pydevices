@@ -37,7 +37,7 @@ jobs:
       - name: Round trips, formats, sizes and errors
         run: |
           mkdir -p pngout
-          ./builds/unix/standard/micropython modules/pngio/tests/test_pngio.py --out pngout
+          ./builds/unix/standard/micropython -X heapsize=32M modules/pngio/tests/test_pngio.py --out pngout
 
       - name: Pillow reads pngio's files, and pngio reads Pillow's
         run: |

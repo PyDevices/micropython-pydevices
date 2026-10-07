@@ -16,6 +16,7 @@ With --out, the encoded files are written there for check_pngio_pillow.py,
 which decodes them with Pillow on the PC.
 """
 
+import gc
 import sys
 import time
 
@@ -134,6 +135,8 @@ def main():
     print("== 4. a UI frame's size, and the time")
     ui = picture(480, 270, "ui")
     for level in (1, 6):
+        enc = None
+        gc.collect()        # the last encoder's scratch goes before the next one's
         enc = pngio.PngEncoder(level=level)
         enc.encode(ui, 480, 270)
         t = ticks()

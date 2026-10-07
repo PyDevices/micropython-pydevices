@@ -70,6 +70,6 @@ reads every file pngio wrote, and pngio reads Pillow's files in every layout
 it supports, with Pillow's own filters and dynamic Huffman blocks.
 
 ```bash
-builds/unix/standard/micropython modules/pngio/tests/test_pngio.py --out /tmp/png
+builds/unix/standard/micropython -X heapsize=32M modules/pngio/tests/test_pngio.py --out /tmp/png
 python modules/pngio/tests/check_pngio_pillow.py builds/unix/standard/micropython /tmp/png
 ```
