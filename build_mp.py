@@ -521,8 +521,8 @@ def main():
     mp = MP.resolve()
     # One build at a time in a MicroPython checkout: preparing rewrites the
     # tree, and two esp32 builds race on the port's managed_components/. The
-    # lock sits beside the checkout, so in the workspace it is the one the
-    # other build tools there take (the anchor's .micropython-build.lock).
+    # lock sits beside the checkout, so it is the one any other build tool
+    # sharing that checkout takes.
     # Held until this process exits.
     lock = open(mp.parent / ".micropython-build.lock", "w")
     if fcntl:

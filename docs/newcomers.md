@@ -17,8 +17,8 @@ Then, from the clone:
 ./build_mp.py          # asks for port, board, variant, flash size and modules
 ```
 
-The first run fetches what it needs. In the PyDevices workspace it links the
-sibling checkouts instead.
+The first run fetches what it needs. Where the repositories are already
+checked out side by side, it links those sibling checkouts instead.
 
 The desktop `pydevices` variants freeze a board config that imports
 `displaydev`, which is frozen only when `--modules` names `pydevices` (the

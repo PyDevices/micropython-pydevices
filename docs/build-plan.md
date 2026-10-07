@@ -30,14 +30,14 @@ micropython-pydevices/
 ├── build_mp.py              the one command; Python so it runs anywhere
 ├── modules.lock             one line per module: name, git URL, commit
 ├── deps.lock                one line per dependency: name, URL, version (ESP-IDF v5.5.4, emsdk 6.0.1, SDL2 2.30.10)
-├── micropython/             ignored: symlink to the workspace's checkout, or a clone of UPSTREAM
+├── micropython/             ignored: symlink to a sibling checkout, or a clone of UPSTREAM
 ├── deps/                    ignored: esp-idf/, emsdk/, SDL2/, symlinked or fetched on demand
 ├── modules/
 │   ├── manifest.py          tracked: reads the module list build_mp.py sets, includes each, raises on a missing one
 │   ├── all/manifest.py      tracked: every sibling with a root manifest.py, except opt-in ones
 │   ├── castif/              tracked: lives only here (moves from usermods/); ESP32-P4 only
 │   ├── jpegio/              tracked: lives only here (moved from displayif, 2026-10-06); every port
-│   ├── audiodsp -> ../../audiodsp          ignored symlinks in the workspace,
+│   ├── audiodsp -> ../../audiodsp          ignored symlinks to sibling checkouts,
 │   ├── audioif  -> ../../audioif           clones at the modules.lock commit anywhere else
 │   ├── audiocomponents, cameraif, displayif, lvgl-micropython, palettes,
 │   ├── pdwidgets, pydevices, pygraphics, ulab, usbif
@@ -57,12 +57,13 @@ micropython-pydevices/
 └── .devcontainer/
 ```
 
-In the workspace, the real checkouts stay where they are, as siblings under
-`~/gh/pydevices/`, and `modules/<name>` and `micropython/` are symlinks to them.
+When the repositories are already checked out side by side, the real
+checkouts stay where they are, and `modules/<name>` and `micropython/` are
+symlinks to them.
 Anywhere else, `build_mp.py` clones what's missing: modules at their
 `modules.lock` commit, MicroPython at the `UPSTREAM` tag, and the toolchains
-at their `deps.lock` version. In the workspace `deps/` links to the anchor's
-`esp-idf/`, `emsdk/` and `SDL2/`. A build fetches and checks only the toolchain
+at their `deps.lock` version. Beside such checkouts, `deps/` links to the
+sibling `esp-idf/`, `emsdk/` and `SDL2/`. A build fetches and checks only the toolchain
 its port uses: ESP-IDF for esp32, emsdk for webassembly, SDL2 for windows when
 displayif is selected, nothing for unix or rp2. If that one isn't the locked
 version, the build refuses. Nothing is a git
@@ -192,7 +193,7 @@ that wants one (the wasm one) requires it by name.
    `PRE_REV3_C6_WIFI` (the panel), with no delta but `--flash` and autosize.
    The gate is that for the same module set, each build's module list matches
    today's, and the S3 and the DEV-KIT boot and import what they carry.
-4. **Repoint what calls the old way:** the anchor's `build_interpreters.sh`,
+4. **Repoint what calls the old way:** the interpreter build script,
    mpvst's engine build (its modules listed by name plus
    `<mpvst>/vstaudio,<mpvst>/vstui`; not `all`, which now freezes pydevices),
    wokwi's stage script, earful's build, the README and `newcomers.md`.
@@ -205,10 +206,10 @@ that wants one (the wasm one) requires it by name.
    partition tables went; the S3 keeps a coredump partition through
    `variants/esp32/partitions.esp32s3.csv`, found by the same convention as
    the fragments.
-6. **Dropped (Brad, 2026-10-05): the VARIANT_DIR spike.** Teaching the esp32 and rp2 ports to
+6. **Dropped (2026-10-05): the VARIANT_DIR spike.** Teaching the esp32 and rp2 ports to
    take a variant from outside the board dir would make the generated dir
-   tidier, not possible; it already works without it. Whether it becomes an
-   upstream PR is your call.
+   tidier, not possible; it already works without it. It isn't planned as an
+   upstream PR.
 
 ## Traps we already know
 
@@ -244,8 +245,7 @@ Deferred, because the build script doesn't need them:
 - **A CI leg that builds the union** on one desktop port, so building only
   what you ask for doesn't lose the cross-port check that caught usbif's
   breaks in September.
-- **jpegio** left displayif on 2026-10-06 for `modules/jpegio` here (the
-  anchor's media modules roadmap), not a repo of its own. Whether esp-vision's
+- **jpegio** left displayif on 2026-10-06 for `modules/jpegio` here, not a repo of its own. Whether esp-vision's
   sensor and H.264 replace cameraif (and castif's encoder) stays open. esp-vision's
   `tflite` and image stack are in as modules; where `sensor` stands is in
   [esp-vision.md](esp-vision.md).

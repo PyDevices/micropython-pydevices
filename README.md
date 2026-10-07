@@ -38,8 +38,8 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   the port's own `make`.
 - `UPSTREAM` — the MicroPython release everything applies to (v1.29.0).
 - `modules.lock`, `deps.lock` — the commits and versions `build_mp.py`
-  fetches when a module or a toolchain isn't there. In the PyDevices
-  workspace both are links to the sibling checkouts instead.
+  fetches when a module or a toolchain isn't there. Beside sibling
+  checkouts, both are links to those checkouts instead.
 - `modules/` — `manifest.py` (the manifest every build freezes), `all/`
   (every module), `castif/` (the ESP32-P4 cast) and `jpegio/` (the JPEG
   decoder, from displayif), which live only here,
@@ -58,6 +58,8 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   boards from a bare clone, checks the failure paths, and writes a report of
   what should match on any machine. Needs no board.
 - `provenance.json` — the patches' checksums and migration record.
+
+What's planned next is in [ROADMAP.md](ROADMAP.md).
 
 ## Rules
 

@@ -1,9 +1,8 @@
 #!/bin/sh
 # Put esp-vision at its pinned commit in modules/.esp-vision/src, once.
 #
-# In the PyDevices workspace a clone beside the anchor (../esp-vision from the
-# workspace root, i.e. ~/gh/esp-vision) at the pinned commit is linked
-# instead; ESP_VISION_DIR names one anywhere else. Otherwise the pinned commit
+# A clone at the pinned commit beside the sibling checkouts (../esp-vision
+# from their parent folder) is linked instead; ESP_VISION_DIR names one anywhere else. Otherwise the pinned commit
 # alone is fetched, without submodules: our modules use none of them.
 # Prints the directory it settled on. The directory starts with a dot, so
 # build_mp.py never offers it as a module and "all" never includes it.
