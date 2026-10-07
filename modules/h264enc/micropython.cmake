@@ -10,7 +10,7 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32p4")
     add_library(usermod_h264enc INTERFACE)
     target_sources(usermod_h264enc INTERFACE ${CMAKE_CURRENT_LIST_DIR}/src/mod_h264enc.c)
     target_include_directories(usermod_h264enc INTERFACE ${CMAKE_CURRENT_LIST_DIR}/src)
-    target_link_libraries(usermod_h264enc INTERFACE idf::espressif__esp_h264 idf::esp_driver_ppa
+    target_link_libraries(usermod_h264enc INTERFACE idf::espressif__esp_h264
         idf::esp_timer)
     target_link_libraries(usermod INTERFACE usermod_h264enc)
 endif()

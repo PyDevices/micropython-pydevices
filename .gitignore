@@ -9,6 +9,7 @@
 !/modules/castif/
 !/modules/h264enc/
 !/modules/tsmux/
+!/modules/ppa/
 !/modules/jpegio/
 !/modules/tflite/
 !/modules/vision/
