@@ -6,6 +6,8 @@
 
 const char *ppa_sw_srm(const ppa_mod_srm_t *op);
 const char *ppa_sw_check(const ppa_mod_srm_t *op, size_t src_len);
+void ppa_sw_from_565(const uint8_t *src, uint32_t src_stride_px, uint32_t bw, uint32_t bh,
+    const ppa_mod_srm_t *op);
 
 #ifndef PPA_HW
 #define PPA_HW 0

@@ -4,7 +4,7 @@
 //   au = enc.encode(framebuffer)        # bytes: Annex B NAL units
 //   enc.keyframe; enc.force_idr(); enc.set_bitrate(n); enc.stats(); enc.close()
 //
-// The PPA converts each frame to the packed YUV420 the encoder reads (the only
+// ppa's C API (the PPA) converts each frame to the packed YUV420 the encoder reads (the only
 // raw format the pre-revision-3 P4 takes), placed on a canvas that may be
 // larger than the frame; esp_h264 encodes it. Limited-range BT.601, which is
 // what an H.264 decoder assumes when the stream says nothing.
@@ -25,10 +25,34 @@
 #include "esp_timer.h"
 #include "esp_h264_enc_single_hw.h"
 #include "esp_h264_alloc.h"
-#include "driver/ppa.h"
 #endif
 
 #include "h264enc.h"
+
+// The colour conversion is ppa's (modules/ppa/src/ppa_mod.h): declared here,
+// weak, so h264enc builds without ppa and h264enc_open() says it's missing.
+typedef struct ppa_mod_client ppa_mod_client_t;
+typedef struct {
+    const void *src;
+    uint32_t src_w, src_h;
+    int src_fmt;
+    uint32_t sx, sy, sw, sh;
+    void *dst;
+    size_t dst_len;
+    uint32_t dst_w, dst_h;
+    int dst_fmt;
+    uint32_t x, y, w, h;
+    int rotate;
+    bool mirror_x, mirror_y;
+    bool swap;
+    bool yuv_limited;
+    bool approx;
+} ppa_mod_srm_t;
+extern ppa_mod_client_t *ppa_mod_open(int hw) __attribute__((weak));
+extern void ppa_mod_close(ppa_mod_client_t *c) __attribute__((weak));
+extern const char *ppa_mod_srm(ppa_mod_client_t *c, const ppa_mod_srm_t *op) __attribute__((weak));
+#define H264ENC_PPA_RGB565 0
+#define H264ENC_PPA_YUV420 6
 
 #define H264ENC_AU_MAX (256 * 1024)
 
@@ -36,7 +60,7 @@ struct h264enc_session {
     esp_h264_enc_handle_t enc;
     esp_h264_enc_param_hw_handle_t param;
     bool enc_open;
-    ppa_client_handle_t ppa;
+    ppa_mod_client_t *ppa;
     uint8_t *yuv;
     uint32_t yuv_len;
     uint32_t in_len;            // the packed YUV420 canvas the encoder reads
@@ -63,7 +87,7 @@ void h264enc_close(h264enc_session_t *s) {
         esp_h264_enc_del(s->enc);
     }
     if (s->ppa) {
-        ppa_unregister_client(s->ppa);
+        ppa_mod_close(s->ppa);
     }
     if (s->yuv) {
         esp_h264_free(s->yuv);
@@ -105,10 +129,13 @@ const char *h264enc_open(h264enc_session_t **out, int width, int height, int can
     s->in_len = (uint32_t)cw * ch * 3 / 2;
 
     const char *why = NULL;
-    ppa_client_config_t pcfg = { .oper_type = PPA_OPERATION_SRM, .max_pending_trans_num = 1 };
-    if (ppa_register_client(&pcfg, &s->ppa) != ESP_OK) {
-        s->ppa = NULL;
-        why = "no PPA client";
+    if (ppa_mod_open == NULL) {
+        why = "needs the ppa module in this firmware (it converts each frame for the encoder)";
+        goto fail;
+    }
+    s->ppa = ppa_mod_open(1);       // the PPA, never the software path: this is the hot loop
+    if (s->ppa == NULL) {
+        why = "no memory for a ppa client";
         goto fail;
     }
     s->yuv = esp_h264_aligned_calloc(128, 1, (s->in_len + 127) & ~127u, &s->yuv_len, ESP_H264_MEM_SPIRAM);
@@ -161,32 +188,18 @@ fail:
 
 int h264enc_encode(h264enc_session_t *s, const uint8_t *rgb565, const uint8_t **data, uint32_t *len, bool *idr) {
     int64_t t0 = esp_timer_get_time();
-    ppa_srm_oper_config_t op = {0};
-    op.in.buffer = (void *)rgb565;
-    op.in.pic_w = s->w;
-    op.in.pic_h = s->h;
-    op.in.block_w = s->w;
-    op.in.block_h = s->h;
-    op.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
-    op.in.yuv_range = PPA_COLOR_RANGE_LIMIT;
-    op.in.yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601;
-    op.out.buffer = s->yuv;
-    op.out.buffer_size = s->yuv_len;
-    op.out.pic_w = s->cw;
-    op.out.pic_h = s->ch;
-    op.out.block_offset_x = ((s->cw - s->w) / 2) & ~1u;
-    op.out.block_offset_y = ((s->ch - s->h) / 2) & ~1u;
-    op.out.srm_cm = PPA_SRM_COLOR_MODE_YUV420;
-    op.out.yuv_range = PPA_COLOR_RANGE_LIMIT;
-    op.out.yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601;
-    op.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
-    op.scale_x = 1.0f;
-    op.scale_y = 1.0f;
-    op.mode = PPA_TRANS_MODE_BLOCKING;
-    esp_err_t perr = ppa_do_scale_rotate_mirror(s->ppa, &op);
+    // RGB565 to the packed YUV420 the encoder reads, placed centred on the
+    // canvas; studio range, which is what H.264 decoders assume
+    ppa_mod_srm_t op = {
+        .src = rgb565, .src_w = s->w, .src_h = s->h, .src_fmt = H264ENC_PPA_RGB565,
+        .dst = s->yuv, .dst_len = s->yuv_len, .dst_w = s->cw, .dst_h = s->ch, .dst_fmt = H264ENC_PPA_YUV420,
+        .x = ((s->cw - s->w) / 2) & ~1u, .y = ((s->ch - s->h) / 2) & ~1u, .w = s->w, .h = s->h,
+        .yuv_limited = true,
+    };
+    const char *perr = ppa_mod_srm(s->ppa, &op);
     int64_t t1 = esp_timer_get_time();
     s->ppa_us = (uint32_t)(t1 - t0);
-    if (perr != ESP_OK) {
+    if (perr != NULL) {
         return -1;
     }
     esp_h264_enc_in_frame_t inf = {0};

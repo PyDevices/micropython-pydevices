@@ -11,7 +11,9 @@ On the ESP32-P4 (ppa.HARDWARE), the PPA against the software path:
   4. rotate and mirror at the same size, RGB565: identical;
   5. a scale: PSNR >= 30 dB on a smooth picture (the PPA may interpolate);
   6. RGB888 / ARGB8888 / GRAY8 within +-1 a byte; YUY2 / UYVY / YUV420 within
-     +-2 a byte, and their round trip to RGB565 >= 35 dB against software's;
+     +-2 a byte; GRAY8 / YUY2 / UYVY / YUV420's round trip to RGB565 >= 35 dB
+     against software's (software samples 4:2:0 chroma as the PPA does:
+     fitted on the P4);
   7. fill: exact; blend: within one RGB565 step a channel of the formula;
   8. ms per operation at 1280x720 (M5), PPA and software.
 
@@ -90,16 +92,21 @@ def clamp(v):
 
 
 def y_of(r, g, b):
-    return clamp((77 * r + 150 * g + 29 * b + 128) >> 8)
+    return clamp((77 * r + 150 * g + 29 * b) >> 8)
 
 
 def uv_of(r, g, b):
-    return (clamp(((-43 * r - 85 * g + 128 * b + 128) >> 8) + 128),
-            clamp(((128 * r - 107 * g - 21 * b + 128) >> 8) + 128))
+    return (clamp(((-43 * r - 85 * g + 128 * b) >> 8) + 128),
+            clamp(((128 * r - 107 * g - 21 * b) >> 8) + 128))
+
+
+def widen(v):
+    """RGB565 to 8 bits as the PPA does it, zero-filled (31 -> 248)."""
+    return (v >> 11) << 3, ((v >> 5) & 63) << 2, (v & 31) << 3
 
 
 def model_convert(src, w, h, fmt):
-    rgb = [expand(px(src, w, x, y)) for y in range(h) for x in range(w)]
+    rgb = [widen(px(src, w, x, y)) for y in range(h) for x in range(w)]
     if fmt == ppa.RGB888:
         return bytes(c for r, g, b in rgb for c in (b, g, r))
     if fmt == ppa.ARGB8888:
@@ -110,7 +117,8 @@ def model_convert(src, w, h, fmt):
         out = bytearray()
         for i in range(0, w * h, 2):
             a, b2 = rgb[i], rgb[i + 1]
-            u, v = uv_of((a[0] + b2[0]) >> 1, (a[1] + b2[1]) >> 1, (a[2] + b2[2]) >> 1)
+            # the PPA's 4:2:2: U from the pair's left pixel, V from its right
+            u, v = uv_of(*a)[0], uv_of(*b2)[1]
             y0, y1 = y_of(*a), y_of(*b2)
             out += bytes((y0, u, y1, v) if fmt == ppa.YUY2 else (u, y0, v, y1))
         return bytes(out)
@@ -121,7 +129,7 @@ def model_convert(src, w, h, fmt):
             for x in range(0, w, 2):
                 a, b2 = rgb[y * w + x], rgb[y * w + x + 1]
                 c, d = rgb[(y + 1) * w + x], rgb[(y + 1) * w + x + 1]
-                u, v = uv_of(*[(a[k] + b2[k] + c[k] + d[k]) >> 2 for k in range(3)])
+                u, v = uv_of(*a)[0], uv_of(*c)[1]       # the PPA's sampling: U top-left, V bottom-left
                 o = y * line + (x // 2) * 3
                 out[o:o + 3] = bytes((u, y_of(*a), y_of(*b2)))
                 out[o + line:o + line + 3] = bytes((v, y_of(*c), y_of(*d)))
@@ -147,8 +155,9 @@ def expect_raises(exc, fn, needle=""):
 
 
 def aligned(n):
-    """A buffer the PPA can write: a bytearray's data is 16-byte aligned on
-    MicroPython, and the P4's cache line is 64, so take a slice that is."""
+    """A buffer the PPA can write: its address and its length whole 64-byte
+    cache lines (a bytearray's data is only 16-byte aligned on MicroPython)."""
+    n = (n + 63) & ~63
     raw = bytearray(n + 128)
     mv = memoryview(raw)
     addr = 0
@@ -200,7 +209,7 @@ def main():
         p = psnr565(src, back)
         print("%-9s matches the model; back to RGB565 at %.1f dB" % (name, p))
         if fmt in (ppa.RGB888, ppa.ARGB8888):
-            assert back == src, name
+            assert back == src, name     # zero-filled bits narrow back exactly
     sw = bytearray(len(src))
     for i in range(0, len(src), 2):
         sw[i], sw[i + 1] = src[i + 1], src[i]
@@ -208,6 +217,22 @@ def main():
     ppa.convert(sw, W, H, out, ppa.RGB565, ppa.RGB565, swap=True, hardware=False)
     assert out == src
     print("swap=True reads big-endian RGB565")
+    # a scaled RGB565 -> YUY2 / UYVY into a block (a webcam frame) takes a
+    # one-pass path; it must equal scaling first, then converting
+    for fmt in (ppa.YUY2, ppa.UYVY):
+        bw, bh = 18, 10
+        one = bytearray(b"\x55" * (24 * 14 * 2))
+        ppa.srm(src, W, H, one, 24, 14, dst_fmt=fmt, x=2, y=3, w=bw, h=bh, hardware=False)
+        mid = bytearray(bw * bh * 2)
+        ppa.srm(src, W, H, mid, bw, bh, hardware=False)
+        blk = bytearray(bw * bh * 2)
+        ppa.convert(mid, bw, bh, blk, ppa.RGB565, fmt, hardware=False)
+        two = bytearray(b"\x55" * (24 * 14 * 2))
+        for j in range(bh):
+            at = ((3 + j) * 24 + 2) * 2
+            two[at:at + bw * 2] = blk[j * bw * 2:(j + 1) * bw * 2]
+        assert one == two, fmt
+    print("scaled RGB565 to YUY2 / UYVY in one pass equals scale-then-convert")
 
     print("== 3. bad arguments")
     expect_raises(ValueError, lambda: ppa.srm(src, W, H, bytearray(10), W, H), "destination buffer")
@@ -232,8 +257,8 @@ def main():
             sw = bytearray(bw * bh * 2)
             assert ppa.srm(src, big_w, big_h, hw, bw, bh, rotate=rot, mirror_x=mx, mirror_y=my, hardware=True)
             ppa.srm(src, big_w, big_h, sw, bw, bh, rotate=rot, mirror_x=mx, mirror_y=my, hardware=False)
-            same = bytes(hw) == bytes(sw)
-            print("rotate %3d mirror_x %d mirror_y %d: %s" % (rot, mx, my, "identical" if same else "DIFFERENT, %.1f dB" % psnr565(bytes(hw), sw)))
+            same = bytes(hw)[:len(sw)] == bytes(sw)
+            print("rotate %3d mirror_x %d mirror_y %d: %s" % (rot, mx, my, "identical" if same else "DIFFERENT, %.1f dB" % psnr565(bytes(hw)[:len(sw)], sw)))
             assert same
 
     print("== 5. the PPA: a scale, against software")
@@ -243,26 +268,47 @@ def main():
         sw = bytearray(bw * bh * 2)
         ppa.srm(smooth, big_w, big_h, hw, bw, bh, hardware=True)
         ppa.srm(smooth, big_w, big_h, sw, bw, bh, hardware=False)
-        p = psnr565(bytes(hw), sw)
+        p = psnr565(bytes(hw)[:bw * bh * 2], sw)
         print("%dx%d -> %dx%d: %.1f dB (>= 30)" % (big_w, big_h, bw, bh, p))
         assert p >= 30
+    # a ratio the PPA's sixteenths can't make exactly: software by default, a reason when insisted on
+    odd = aligned(213 * 100 * 2)
+    assert ppa.srm(smooth, big_w, big_h, odd, 213, 100) is False
+    expect_raises(OSError, lambda: ppa.srm(smooth, big_w, big_h, odd, 213, 100, hardware=True), "sixteenths")
+    expect_raises(OSError, lambda: ppa.srm(smooth, big_w, big_h, bytearray(160 * 120 * 2 + 16)[16:], 160, 120, hardware=True), "aligned")
+    print("213x100 (not a sixteenth): software by default, refused with a reason when hardware=True; an unaligned buffer likewise")
 
     print("== 6. the PPA: colour conversion, against software")
     for fmt, name in names.items():
         hw = aligned(ppa.size(fmt, big_w, big_h))
         sw = bytearray(len(hw))
-        ppa.convert(smooth, big_w, big_h, hw, ppa.RGB565, fmt, hardware=True)
+        try:
+            ppa.convert(smooth, big_w, big_h, hw, ppa.RGB565, fmt, hardware=True)
+        except OSError as e:
+            # IDF gives the PPA YUV422 and GRAY8 only on revision 3 chips
+            assert "revision 3" in str(e), e
+            print("%-9s not on this P4's PPA (before revision 3): software only" % name)
+            continue
         ppa.convert(smooth, big_w, big_h, sw, ppa.RGB565, fmt, hardware=False)
-        worst = max(abs(a - b) for a, b in zip(bytes(hw), sw))
+        hwb = bytes(hw)[:len(sw)]
+        worst = max(abs(a - b) for a, b in zip(hwb, sw))
         tol = 2 if fmt in (ppa.YUY2, ppa.UYVY, ppa.YUV420) else 1
         line = "%-9s worst byte %d (<= %d)" % (name, worst, tol)
-        if tol == 2:
+        if fmt != ppa.RGB888 and fmt != ppa.ARGB8888:
+            # and the PPA reads it back (GRAY8 too: grey to RGB565 is exact)
             bh_ = aligned(big_w * big_h * 2)
             bs_ = bytearray(big_w * big_h * 2)
-            ppa.convert(hw, big_w, big_h, bh_, fmt, ppa.RGB565, hardware=True)
+            back = "PPA"
+            try:
+                ppa.convert(hwb, big_w, big_h, bh_, fmt, ppa.RGB565, hardware=True)
+            except OSError as e:
+                # before revision 3 the PPA can't read YUV422 back: software decodes it
+                assert "revision 3" in str(e), e
+                ppa.convert(hwb, big_w, big_h, bh_, fmt, ppa.RGB565, hardware=False)
+                back = "CPU"
             ppa.convert(sw, big_w, big_h, bs_, fmt, ppa.RGB565, hardware=False)
-            p = psnr565(bytes(bh_), bs_)
-            line += ", round trip %.1f dB vs software's (>= 35)" % p
+            p = psnr565(bytes(bh_)[:len(bs_)], bs_)
+            line += ", round trip (decoded on the %s) %.1f dB vs software's (>= 35)" % (back, p)
             assert p >= 35, line
         print(line)
         assert worst <= tol, line
@@ -277,7 +323,7 @@ def main():
         for x in range(10, 110):
             i = 2 * (y * big_w + x)
             want[i], want[i + 1] = c & 255, c >> 8
-    assert bytes(hw) == bytes(want)
+    assert bytes(hw)[:len(want)] == bytes(want)
     print("fill: identical to the Python reference")
     fg = picture(big_w, big_h)
     out = aligned(big_w * big_h * 2)

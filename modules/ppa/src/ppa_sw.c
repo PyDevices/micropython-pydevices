@@ -5,7 +5,8 @@
 // Each operation reads its source block into an RGB888 working picture the
 // size of the destination block, nearest-neighbour, then writes that in the
 // destination format: per pixel for RGB and gray, per pixel pair for YUY2
-// and UYVY, per 2x2 block for YUV420 (chroma from the average).
+// and UYVY (U from the left pixel, V from the right, as the PPA samples), per 2x2 block for YUV420
+// (chroma sampled as the PPA samples it).
 
 #include <stdlib.h>
 #include <string.h>
@@ -52,20 +53,22 @@ static void yuv_to_rgb(int y, int u, int v, bool limited, uint8_t *rgb) {
     }
 }
 
+// RGB to YUV truncates, as the PPA does (fitted on a P4, 2026-10-06: its
+// luma and chroma sit about a level below the rounded formula).
 static uint8_t rgb_to_y(const uint8_t *p, bool limited) {
     if (limited) {
-        return clamp8(((66 * p[0] + 129 * p[1] + 25 * p[2] + 128) >> 8) + 16);
+        return clamp8(((66 * p[0] + 129 * p[1] + 25 * p[2]) >> 8) + 16);
     }
-    return clamp8((77 * p[0] + 150 * p[1] + 29 * p[2] + 128) >> 8);
+    return clamp8((77 * p[0] + 150 * p[1] + 29 * p[2]) >> 8);
 }
 
 static void rgb_to_uv(int r, int g, int b, bool limited, uint8_t *u, uint8_t *v) {
     if (limited) {
-        *u = clamp8(((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128);
-        *v = clamp8(((112 * r - 94 * g - 18 * b + 128) >> 8) + 128);
+        *u = clamp8(((-38 * r - 74 * g + 112 * b) >> 8) + 128);
+        *v = clamp8(((112 * r - 94 * g - 18 * b) >> 8) + 128);
     } else {
-        *u = clamp8(((-43 * r - 85 * g + 128 * b + 128) >> 8) + 128);
-        *v = clamp8(((128 * r - 107 * g - 21 * b + 128) >> 8) + 128);
+        *u = clamp8(((-43 * r - 85 * g + 128 * b) >> 8) + 128);
+        *v = clamp8(((128 * r - 107 * g - 21 * b) >> 8) + 128);
     }
 }
 
@@ -76,10 +79,10 @@ static void read_px(const uint8_t *src, int fmt, uint32_t w, uint32_t x, uint32_
         case PPA_MOD_RGB565: {
             const uint8_t *p = src + ((size_t)y * w + x) * 2;
             unsigned v = swap ? ((unsigned)p[0] << 8 | p[1]) : ((unsigned)p[1] << 8 | p[0]);
-            unsigned r = v >> 11, g = (v >> 5) & 63, b = v & 31;
-            rgb[0] = (uint8_t)((r << 3) | (r >> 2));
-            rgb[1] = (uint8_t)((g << 2) | (g >> 4));
-            rgb[2] = (uint8_t)((b << 3) | (b >> 2));
+            // zero-filled, as the PPA widens it (31 -> 248, not 255)
+            rgb[0] = (uint8_t)((v >> 11) << 3);
+            rgb[1] = (uint8_t)(((v >> 5) & 63) << 2);
+            rgb[2] = (uint8_t)((v & 31) << 3);
             return;
         }
         case PPA_MOD_RGB888: {
@@ -169,8 +172,10 @@ static void write_422(const uint8_t *work, uint32_t bw, uint32_t bh, const ppa_m
         const uint8_t *s = work + (size_t)j * bw * 3;
         uint8_t *d = dst + ((size_t)(op->y + j) * op->dst_w + op->x) * 2;
         for (uint32_t i = 0; i + 1 < bw; i += 2, s += 6, d += 4) {
-            uint8_t u, v;
-            rgb_to_uv((s[0] + s[3]) >> 1, (s[1] + s[4]) >> 1, (s[2] + s[5]) >> 1, lim, &u, &v);
+            // as the PPA samples 4:2:2: U from the pair's left pixel, V from its right
+            uint8_t u, v, unused;
+            rgb_to_uv(s[0], s[1], s[2], lim, &u, &unused);
+            rgb_to_uv(s[3], s[4], s[5], lim, &unused, &v);
             uint8_t y0 = rgb_to_y(s, lim), y1 = rgb_to_y(s + 3, lim);
             if (op->dst_fmt == PPA_MOD_YUY2) {
                 d[0] = y0; d[1] = u; d[2] = y1; d[3] = v;
@@ -191,15 +196,52 @@ static void write_420(const uint8_t *work, uint32_t bw, uint32_t bh, const ppa_m
         uint8_t *l0 = dst + (size_t)(op->y + j) * line + (op->x >> 1) * 3;
         uint8_t *l1 = l0 + line;
         for (uint32_t i = 0; i + 1 < bw; i += 2, a += 6, b += 6, l0 += 3, l1 += 3) {
-            uint8_t u, v;
-            rgb_to_uv((a[0] + a[3] + b[0] + b[3]) >> 2, (a[1] + a[4] + b[1] + b[4]) >> 2,
-                (a[2] + a[5] + b[2] + b[5]) >> 2, lim, &u, &v);
+            // as the PPA samples 4:2:0 (fitted on a P4): U from the block's
+            // top-left pixel, V from its bottom-left, no averaging
+            uint8_t u, v, unused;
+            rgb_to_uv(a[0], a[1], a[2], lim, &u, &unused);
+            rgb_to_uv(b[0], b[1], b[2], lim, &unused, &v);
             l0[0] = u;
             l0[1] = rgb_to_y(a, lim);
             l0[2] = rgb_to_y(a + 3, lim);
             l1[0] = v;
             l1[1] = rgb_to_y(b, lim);
             l1[2] = rgb_to_y(b + 3, lim);
+        }
+    }
+}
+
+// RGB565 to YUY2 / UYVY / GRAY8 at the same size, block to block, in one
+// pass: what the hardware path finishes with when the PPA lacks the format
+// (YUV422 and GRAY8 before revision 3) after scaling into RGB565.
+void ppa_sw_from_565(const uint8_t *src, uint32_t src_stride_px, uint32_t bw, uint32_t bh,
+    const ppa_mod_srm_t *op) {
+    bool lim = op->yuv_limited;
+    for (uint32_t j = 0; j < bh; j++) {
+        const uint8_t *s = src + (size_t)j * src_stride_px * 2;
+        if (op->dst_fmt == PPA_MOD_GRAY8) {
+            uint8_t *d = (uint8_t *)op->dst + (size_t)(op->y + j) * op->dst_w + op->x;
+            for (uint32_t i = 0; i < bw; i++, s += 2) {
+                unsigned v = s[0] | (unsigned)s[1] << 8;
+                uint8_t p[3] = { (uint8_t)((v >> 11) << 3), (uint8_t)(((v >> 5) & 63) << 2), (uint8_t)((v & 31) << 3) };
+                d[i] = rgb_to_y(p, false);
+            }
+            continue;
+        }
+        uint8_t *d = (uint8_t *)op->dst + ((size_t)(op->y + j) * op->dst_w + op->x) * 2;
+        for (uint32_t i = 0; i + 1 < bw; i += 2, s += 4, d += 4) {
+            unsigned v0 = s[0] | (unsigned)s[1] << 8, v1 = s[2] | (unsigned)s[3] << 8;
+            uint8_t a[3] = { (uint8_t)((v0 >> 11) << 3), (uint8_t)(((v0 >> 5) & 63) << 2), (uint8_t)((v0 & 31) << 3) };
+            uint8_t b[3] = { (uint8_t)((v1 >> 11) << 3), (uint8_t)(((v1 >> 5) & 63) << 2), (uint8_t)((v1 & 31) << 3) };
+            uint8_t u, vv, unused;
+            rgb_to_uv(a[0], a[1], a[2], lim, &u, &unused);     // U left, V right, as the PPA
+            rgb_to_uv(b[0], b[1], b[2], lim, &unused, &vv);
+            uint8_t y0 = rgb_to_y(a, lim), y1 = rgb_to_y(b, lim);
+            if (op->dst_fmt == PPA_MOD_YUY2) {
+                d[0] = y0; d[1] = u; d[2] = y1; d[3] = vv;
+            } else {
+                d[0] = u; d[1] = y0; d[2] = vv; d[3] = y1;
+            }
         }
     }
 }
@@ -214,11 +256,75 @@ const char *ppa_sw_srm(const ppa_mod_srm_t *op) {
     bool turn = rot == 1 || rot == 3;
     // the scaled picture before rotation: rotating it fills the block
     uint32_t uw = turn ? bh : bw, uh = turn ? bw : bh;
+    // RGB565 to YUY2 / UYVY, unturned and unmirrored (a webcam's frame): one
+    // pass, scale and convert together, no working picture
+    if (rot == 0 && !op->mirror_x && !op->mirror_y && op->src_fmt == PPA_MOD_RGB565 && !op->swap
+        && (op->dst_fmt == PPA_MOD_YUY2 || op->dst_fmt == PPA_MOD_UYVY)) {
+        uint32_t *xmap = malloc(sizeof(uint32_t) * bw);
+        if (xmap == NULL) {
+            return "no memory for the column map";
+        }
+        for (uint32_t ox = 0; ox < bw; ox++) {
+            xmap[ox] = sx + (uint32_t)(((uint64_t)ox * sw) / bw);
+        }
+        bool lim = op->yuv_limited, yuy2 = op->dst_fmt == PPA_MOD_YUY2;
+        for (uint32_t oy = 0; oy < bh; oy++) {
+            const uint8_t *row = (const uint8_t *)op->src + (size_t)(sy + (uint32_t)(((uint64_t)oy * sh) / bh)) * op->src_w * 2;
+            uint8_t *d = (uint8_t *)op->dst + ((size_t)(op->y + oy) * op->dst_w + op->x) * 2;
+            for (uint32_t ox = 0; ox + 1 < bw; ox += 2, d += 4) {
+                const uint8_t *p0 = row + xmap[ox] * 2, *p1 = row + xmap[ox + 1] * 2;
+                unsigned v0 = p0[0] | (unsigned)p0[1] << 8, v1 = p1[0] | (unsigned)p1[1] << 8;
+                uint8_t a[3] = { (uint8_t)((v0 >> 11) << 3), (uint8_t)(((v0 >> 5) & 63) << 2), (uint8_t)((v0 & 31) << 3) };
+                uint8_t b[3] = { (uint8_t)((v1 >> 11) << 3), (uint8_t)(((v1 >> 5) & 63) << 2), (uint8_t)((v1 & 31) << 3) };
+                uint8_t u, v, unused;
+                rgb_to_uv(a[0], a[1], a[2], lim, &u, &unused);     // U left, V right, as the PPA
+                rgb_to_uv(b[0], b[1], b[2], lim, &unused, &v);
+                uint8_t y0 = rgb_to_y(a, lim), y1 = rgb_to_y(b, lim);
+                if (yuy2) {
+                    d[0] = y0; d[1] = u; d[2] = y1; d[3] = v;
+                } else {
+                    d[0] = u; d[1] = y0; d[2] = v; d[3] = y1;
+                }
+            }
+        }
+        free(xmap);
+        return NULL;
+    }
     uint8_t *work = malloc((size_t)bw * bh * 3);
     if (work == NULL) {
         return "no memory for the working picture";
     }
-    for (uint32_t oy = 0; oy < bh; oy++) {
+    // without a quarter turn, each output row reads one source row, and each
+    // column the same source column: map them once, not per pixel
+    uint32_t *xmap = (rot == 0 || rot == 2) ? malloc(sizeof(uint32_t) * bw) : NULL;
+    if (xmap != NULL) {
+        for (uint32_t ox = 0; ox < bw; ox++) {
+            uint32_t mx = op->mirror_x ? bw - 1 - ox : ox;
+            uint32_t ux = rot == 2 ? uw - 1 - mx : mx;
+            xmap[ox] = sx + (uint32_t)(((uint64_t)ux * sw) / uw);
+        }
+        for (uint32_t oy = 0; oy < bh; oy++) {
+            uint32_t my = op->mirror_y ? bh - 1 - oy : oy;
+            uint32_t uy = rot == 2 ? uh - 1 - my : my;
+            uint32_t y = sy + (uint32_t)(((uint64_t)uy * sh) / uh);
+            uint8_t *w = work + (size_t)oy * bw * 3;
+            if (op->src_fmt == PPA_MOD_RGB565 && !op->swap) {
+                const uint8_t *row = (const uint8_t *)op->src + (size_t)y * op->src_w * 2;
+                for (uint32_t ox = 0; ox < bw; ox++, w += 3) {
+                    const uint8_t *p = row + xmap[ox] * 2;
+                    unsigned v = p[0] | (unsigned)p[1] << 8;
+                    w[0] = (uint8_t)((v >> 11) << 3);
+                    w[1] = (uint8_t)(((v >> 5) & 63) << 2);
+                    w[2] = (uint8_t)((v & 31) << 3);
+                }
+            } else {
+                for (uint32_t ox = 0; ox < bw; ox++, w += 3) {
+                    read_px(op->src, op->src_fmt, op->src_w, xmap[ox], y, op->swap, op->yuv_limited, w);
+                }
+            }
+        }
+        free(xmap);
+    } else for (uint32_t oy = 0; oy < bh; oy++) {
         for (uint32_t ox = 0; ox < bw; ox++) {
             // undo the mirror, then the counter-clockwise rotation
             uint32_t mx = op->mirror_x ? bw - 1 - ox : ox;

@@ -58,7 +58,7 @@ static mp_obj_t ppa_py_run(ppa_mod_client_t *c, ppa_mod_srm_t *op, size_t src_le
 //     rotate, mirror_x, mirror_y, swap, limited, hardware) -> bool
 static mp_obj_t ppa_py_srm(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
     enum { A_src, A_src_w, A_src_h, A_dst, A_dst_w, A_dst_h, A_src_fmt, A_dst_fmt, A_src_rect,
-           A_x, A_y, A_w, A_h, A_rotate, A_mirror_x, A_mirror_y, A_swap, A_limited, A_hardware };
+           A_x, A_y, A_w, A_h, A_rotate, A_mirror_x, A_mirror_y, A_swap, A_limited, A_approx, A_hardware };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_src, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_src_w, MP_ARG_REQUIRED | MP_ARG_INT, {.u_int = 0} },
@@ -78,6 +78,7 @@ static mp_obj_t ppa_py_srm(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
         { MP_QSTR_mirror_y, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
         { MP_QSTR_swap, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
         { MP_QSTR_limited, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
+        { MP_QSTR_approx, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
         { MP_QSTR_hardware, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
     };
     mp_arg_val_t a[MP_ARRAY_SIZE(allowed)];
@@ -86,6 +87,7 @@ static mp_obj_t ppa_py_srm(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
     mp_get_buffer_raise(a[A_src].u_obj, &src, MP_BUFFER_READ);
     mp_get_buffer_raise(a[A_dst].u_obj, &dst, MP_BUFFER_WRITE);
     ppa_mod_srm_t op = {
+        .approx = a[A_approx].u_bool,
         .src = src.buf, .src_w = a[A_src_w].u_int, .src_h = a[A_src_h].u_int, .src_fmt = a[A_src_fmt].u_int,
         .dst = dst.buf, .dst_len = dst.len, .dst_w = a[A_dst_w].u_int, .dst_h = a[A_dst_h].u_int,
         .dst_fmt = a[A_dst_fmt].u_int,

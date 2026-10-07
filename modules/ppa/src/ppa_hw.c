@@ -17,6 +17,8 @@
 #ifndef NO_QSTR
 #include "driver/ppa.h"
 #include "esp_cache.h"
+#include "esp_private/esp_cache_private.h"   // esp_cache_get_alignment
+#include "sdkconfig.h"
 #include "esp_heap_caps.h"
 #include "esp_memory_utils.h"
 #endif
@@ -27,6 +29,8 @@ struct ppa_mod_client {
     bool used_hw;
     #if PPA_HW
     ppa_client_handle_t srm, fill, blend;
+    uint8_t *tmp;           // RGB565 scratch for the hybrid path (see hw_srm)
+    size_t tmp_len;
     #endif
 };
 
@@ -52,6 +56,9 @@ void ppa_mod_close(ppa_mod_client_t *c) {
     if (c->blend) {
         ppa_unregister_client(c->blend);
     }
+    if (c->tmp) {
+        heap_caps_free(c->tmp);
+    }
     #endif
     free(c);
 }
@@ -75,10 +82,33 @@ static ppa_srm_color_mode_t hw_srm_cm(int fmt, bool out) {
     return PPA_SRM_COLOR_MODE_RGB565;
 }
 
-static bool hw_dma_ok(const void *p) {
+static size_t hw_align(void) {
     size_t align = 0;
     esp_cache_get_alignment(MALLOC_CAP_SPIRAM, &align);
-    return !align || ((uintptr_t)p % align) == 0;
+    return align ? align : 1;
+}
+
+static bool hw_dma_ok(const void *p) {
+    return ((uintptr_t)p % hw_align()) == 0;
+}
+
+// The driver wants the destination's length a whole number of cache lines;
+// the part of the buffer it may use, or 0 when that doesn't hold the picture.
+static uint32_t hw_dma_len(size_t len, size_t pic) {
+    size_t n = len - len % hw_align();
+    return n >= pic ? (uint32_t)n : 0;
+}
+
+// What the PPA makes of scaling n pixels to want: the driver turns the
+// factor into a whole part and sixteenths (even sixteenths for YUV output),
+// so only some ratios come out at exactly the size asked for.
+static bool hw_scales_exactly(uint32_t n, uint32_t want, bool even_frag) {
+    float sc = (float)want / (float)n;
+    uint32_t i = (uint32_t)sc, f = (uint32_t)(sc * 16) & 15;
+    if (even_frag) {
+        f &= ~1u;
+    }
+    return n * i + n * f / 16 == want;
 }
 
 static ppa_client_handle_t hw_client(ppa_client_handle_t *slot, ppa_operation_t type) {
@@ -92,12 +122,6 @@ static ppa_client_handle_t hw_client(ppa_client_handle_t *slot, ppa_operation_t 
 }
 
 static const char *hw_srm(ppa_mod_client_t *c, const ppa_mod_srm_t *op) {
-    if (!hw_dma_ok(op->dst)) {
-        return "the destination buffer isn't aligned for DMA";
-    }
-    if (hw_client(&c->srm, PPA_OPERATION_SRM) == NULL) {
-        return "no PPA client";
-    }
     static const ppa_srm_rotation_angle_t angles[4] = {
         PPA_SRM_ROTATION_ANGLE_0, PPA_SRM_ROTATION_ANGLE_90,
         PPA_SRM_ROTATION_ANGLE_180, PPA_SRM_ROTATION_ANGLE_270,
@@ -106,6 +130,69 @@ static const char *hw_srm(ppa_mod_client_t *c, const ppa_mod_srm_t *op) {
     bool turn = rot == 1 || rot == 3;
     uint32_t sw = op->sw ? op->sw : op->src_w, sh = op->sh ? op->sh : op->src_h;
     uint32_t bw = op->w ? op->w : op->dst_w, bh = op->h ? op->h : op->dst_h;
+    bool yuv420 = op->dst_fmt == PPA_MOD_YUV420, yuv422 = op->dst_fmt == PPA_MOD_YUY2 || op->dst_fmt == PPA_MOD_UYVY;
+    // Writing GRAY8 is a hybrid on every P4: the PPA scales (and turns) into
+    // RGB565, and one tight pass converts at the final size. The PPA's own
+    // GRAY8 is near the plain mean of R, G and B (pure blue comes out 82 where
+    // BT.601 luma is 28), so ppa keeps grey as luma everywhere. Before
+    // revision 3, IDF gives the PPA no YUV422 or GRAY8 at all: reading them is
+    // software's, and writing YUV422 is the same hybrid.
+    #if CONFIG_ESP_REV_MIN_FULL < 300
+    if (op->src_fmt == PPA_MOD_GRAY8 || op->src_fmt == PPA_MOD_YUY2 || op->src_fmt == PPA_MOD_UYVY) {
+        return "a P4 before revision 3: its PPA has no YUV422 or GRAY8";
+    }
+    bool hybrid = op->dst_fmt == PPA_MOD_GRAY8 || yuv422;
+    #else
+    bool hybrid = op->dst_fmt == PPA_MOD_GRAY8;
+    #endif
+    if (hybrid) {
+        if (op->src_fmt != PPA_MOD_RGB565) {
+            return op->dst_fmt == PPA_MOD_GRAY8 ? "GRAY8 from anything but RGB565 is software's"
+                                                : "a P4 before revision 3: its PPA has no YUV422 or GRAY8";
+        }
+        size_t need = ((size_t)bw * bh * 2 + 63) & ~(size_t)63;
+        if (c->tmp_len < need) {
+            if (c->tmp) {
+                heap_caps_free(c->tmp);
+            }
+            c->tmp = heap_caps_aligned_calloc(64, 1, need, MALLOC_CAP_SPIRAM);
+            c->tmp_len = c->tmp ? need : 0;
+            if (c->tmp == NULL) {
+                return "no memory for the PPA's scratch picture";
+            }
+        }
+        ppa_mod_srm_t mid = *op;
+        mid.dst = c->tmp;
+        mid.dst_len = c->tmp_len;
+        mid.dst_w = bw;
+        mid.dst_h = bh;
+        mid.dst_fmt = PPA_MOD_RGB565;
+        mid.x = mid.y = 0;
+        mid.w = bw;
+        mid.h = bh;
+        const char *why = hw_srm(c, &mid);
+        if (why != NULL) {
+            return why;
+        }
+        // the PPA wrote it by DMA: drop any cached copy before reading
+        esp_cache_msync(c->tmp, need, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+        ppa_sw_from_565(c->tmp, bw, bw, bh, op);
+        return NULL;
+    }
+    // the PPA writes the destination by DMA (the hybrid above writes its own scratch)
+    if (!hw_dma_ok(op->dst)) {
+        return "the destination buffer isn't aligned for DMA (64 bytes)";
+    }
+    uint32_t dma_len = hw_dma_len(op->dst_len, ppa_mod_size(op->dst_fmt, op->dst_w, op->dst_h));
+    if (dma_len == 0) {
+        return "the destination buffer is too short once cut to whole 64-byte cache lines";
+    }
+    if (hw_client(&c->srm, PPA_OPERATION_SRM) == NULL) {
+        return "no PPA client";
+    }
+    if (!op->approx && (!hw_scales_exactly(sw, turn ? bh : bw, yuv420 || yuv422) || !hw_scales_exactly(sh, turn ? bw : bh, yuv420))) {
+        return "the PPA scales in sixteenths, and this ratio isn't one (approx=True takes the nearest)";
+    }
     ppa_color_range_t range = op->yuv_limited ? PPA_COLOR_RANGE_LIMIT : PPA_COLOR_RANGE_FULL;
     ppa_srm_oper_config_t cfg = {
         .in = {
@@ -119,7 +206,7 @@ static const char *hw_srm(ppa_mod_client_t *c, const ppa_mod_srm_t *op) {
         },
         .out = {
             .buffer = op->dst,
-            .buffer_size = (uint32_t)op->dst_len,
+            .buffer_size = dma_len,
             .pic_w = op->dst_w, .pic_h = op->dst_h,
             .block_offset_x = op->x, .block_offset_y = op->y,
             .srm_cm = hw_srm_cm(op->dst_fmt, true),
@@ -155,7 +242,11 @@ static const char *hw_srm(ppa_mod_client_t *c, const ppa_mod_srm_t *op) {
 const char *ppa_hw_fill(ppa_mod_client_t *c, void *dst, size_t dst_len, uint32_t dst_w, uint32_t dst_h,
     int fmt, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t argb) {
     if (!hw_dma_ok(dst)) {
-        return "the buffer isn't aligned for DMA";
+        return "the buffer isn't aligned for DMA (64 bytes)";
+    }
+    uint32_t dma_len = hw_dma_len(dst_len, ppa_mod_size(fmt, dst_w, dst_h));
+    if (dma_len == 0) {
+        return "the buffer is too short once cut to whole 64-byte cache lines";
     }
     if (hw_client(&c->fill, PPA_OPERATION_FILL) == NULL) {
         return "no PPA client";
@@ -164,7 +255,7 @@ const char *ppa_hw_fill(ppa_mod_client_t *c, void *dst, size_t dst_len, uint32_t
         : fmt == PPA_MOD_ARGB8888 ? PPA_FILL_COLOR_MODE_ARGB8888 : PPA_FILL_COLOR_MODE_RGB565;
     ppa_fill_oper_config_t cfg = {
         .out = {
-            .buffer = dst, .buffer_size = (uint32_t)dst_len,
+            .buffer = dst, .buffer_size = dma_len,
             .pic_w = dst_w, .pic_h = dst_h,
             .block_offset_x = x, .block_offset_y = y,
             .fill_cm = cm,
@@ -180,7 +271,11 @@ const char *ppa_hw_fill(ppa_mod_client_t *c, void *dst, size_t dst_len, uint32_t
 const char *ppa_hw_blend(ppa_mod_client_t *c, const void *bg, const void *fg, void *dst, size_t dst_len,
     uint32_t w, uint32_t h, uint8_t fg_alpha) {
     if (!hw_dma_ok(dst)) {
-        return "the destination buffer isn't aligned for DMA";
+        return "the destination buffer isn't aligned for DMA (64 bytes)";
+    }
+    uint32_t dma_len = hw_dma_len(dst_len, (size_t)w * h * 2);
+    if (dma_len == 0) {
+        return "the destination buffer is too short once cut to whole 64-byte cache lines";
     }
     if (hw_client(&c->blend, PPA_OPERATION_BLEND) == NULL) {
         return "no PPA client";
@@ -190,7 +285,7 @@ const char *ppa_hw_blend(ppa_mod_client_t *c, const void *bg, const void *fg, vo
                    .blend_cm = PPA_BLEND_COLOR_MODE_RGB565 },
         .in_fg = { .buffer = fg, .pic_w = w, .pic_h = h, .block_w = w, .block_h = h,
                    .blend_cm = PPA_BLEND_COLOR_MODE_RGB565 },
-        .out = { .buffer = dst, .buffer_size = (uint32_t)dst_len, .pic_w = w, .pic_h = h,
+        .out = { .buffer = dst, .buffer_size = dma_len, .pic_w = w, .pic_h = h,
                  .blend_cm = PPA_BLEND_COLOR_MODE_RGB565 },
         .bg_alpha_update_mode = PPA_ALPHA_FIX_VALUE, .bg_alpha_fix_val = 255,
         .fg_alpha_update_mode = PPA_ALPHA_FIX_VALUE, .fg_alpha_fix_val = fg_alpha,

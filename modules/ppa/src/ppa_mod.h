@@ -14,7 +14,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Pixel formats, as the P4 lays them out in memory.
+// Pixel formats, as the P4 lays them out in memory. RGB565 widens to 8 bits
+// by zero-filling (31 -> 248), as the PPA does it; the software path matches.
 enum {
     PPA_MOD_RGB565 = 0,     // 16-bit, native (little-endian); swap for big-endian input
     PPA_MOD_RGB888 = 1,     // B, G, R bytes
@@ -31,7 +32,8 @@ size_t ppa_mod_size(int fmt, uint32_t w, uint32_t h);
 // One scale-rotate-mirror (and colour convert): the whole source picture, or
 // its block (sx, sy, sw, sh; sw == 0 means all of it), scaled to fill the
 // destination block (x, y, w, h; w == 0 means all of it) of the destination
-// picture, after rotating by rotate (0, 90, 180, 270, clockwise) and mirroring.
+// picture, after rotating by rotate (0, 90, 180 or 270 degrees, counter-
+// clockwise, as the PPA turns) and mirroring.
 typedef struct {
     const void *src;
     uint32_t src_w, src_h;
@@ -46,6 +48,8 @@ typedef struct {
     bool mirror_x, mirror_y;
     bool swap;              // RGB565 source is big-endian
     bool yuv_limited;       // YUV is studio range (16..235) rather than full
+    bool approx;            // the PPA may scale by its nearest sixteenth, filling a
+                            // little less of the block, rather than leave it to software
 } ppa_mod_srm_t;
 
 typedef struct ppa_mod_client ppa_mod_client_t;
