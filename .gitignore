@@ -11,6 +11,7 @@
 !/modules/tsmux/
 !/modules/ppa/
 !/modules/jpegio/
+!/modules/pngio/
 !/modules/tflite/
 !/modules/vision/
 !/modules/.esp-vision/
