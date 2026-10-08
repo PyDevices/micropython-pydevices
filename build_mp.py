@@ -514,6 +514,10 @@ def rp2_autosize(log_text):
 
 CP = DEPS / "circuitpython"
 CP_VENV = DEPS / "circuitpython-venv"
+# Ours, laid onto that checkout before a build: patches to CircuitPython's
+# source, and board definitions CircuitPython doesn't have.
+CP_PATCHES = REPO / "patches" / "circuitpython"
+CP_BOARDS = REPO / "boards" / "circuitpython"
 
 
 def lock_beside(path):
@@ -551,6 +555,32 @@ def ensure_circuitpython():
         run([str(CP_VENV / "bin" / "pip"), "install", "-q", "-r", str(reqs)])
         shutil.copy(reqs, stamp)
     return CP
+
+
+def prepare_circuitpython(cp):
+    """Apply patches/circuitpython/ and link boards/circuitpython/<port>/<board>
+    into the checkout, once each. The checkout is always our own (see
+    ensure_circuitpython), so changing it changes nobody else's tree. Returns
+    the patch names, for the build record."""
+    applied = []
+    for patch in sorted(CP_PATCHES.glob("*.patch")):
+        already = subprocess.run(["git", "-C", str(cp), "apply", "--reverse", "--check", str(patch)],
+                                 capture_output=True).returncode == 0
+        if not already:
+            if subprocess.run(["git", "-C", str(cp), "apply", str(patch)]).returncode != 0:
+                die(f"{patch.relative_to(REPO)} does not apply to deps/circuitpython")
+            say(f"applied {patch.relative_to(REPO)}")
+        applied.append(patch.name)
+    for ours in sorted(p for p in CP_BOARDS.glob("*/*") if (p / "mpconfigboard.mk").is_file()):
+        dest = cp / "ports" / ours.parent.name / "boards" / ours.name
+        if dest.is_symlink():
+            if dest.resolve() == ours.resolve():
+                continue
+            dest.unlink()
+        elif dest.exists():
+            die(f"CircuitPython already has a board called {ours.name}; rename ours")
+        dest.symlink_to(ours, target_is_directory=True)
+    return applied
 
 
 def cp_ports():
@@ -619,6 +649,7 @@ def build_circuitpython(args, make_extra, ws):
     ensure_modules(ws)
     cp = ensure_circuitpython()
     lock = lock_beside(cp)  # noqa: F841 -- held until exit
+    cp_patches = prepare_circuitpython(cp)
 
     port = args.port or choose("CircuitPython port:", cp_ports())
     if port not in cp_ports():
@@ -691,6 +722,7 @@ def build_circuitpython(args, make_extra, ws):
         die(f"the build failed (make exit {rc})")
     rec = dict(want, complete=True)
     rec["circuitpython"] = git_out(cp, "describe", "--tags", "--always", "--dirty")
+    rec["circuitpython_patches"] = cp_patches
     rec["module_revisions"] = record(module_dirs)
     rec_path.write_text(json.dumps(rec, indent=1) + "\n")
     say(f"\nBuilt into {build}")

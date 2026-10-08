@@ -1,0 +1,82 @@
+CircuitPython 11.0 keeps a ROM qstr pool's strings in one blob addressed by
+16-bit offsets, so a pool holds at most 64 KB of names. LVGL's bindings bring
+about 53 KB, and a board's own modules push the pool past the limit
+(makeqstrdata.py: "qstr blob for pool 1 is too large: 69776 bytes" on the
+Feather RP2040). This makes the offset size a setting,
+MICROPY_QSTR_OFFSET_BYTES, 2 by default (no change for any build that doesn't
+ask) or 4, at about two bytes of flash per qstr. lvgl-circuitpython's
+micropython.mk asks for 4.
+
+diff --git a/py/makeqstrdata.py b/py/makeqstrdata.py
+index b8613f2..99ed60a 100644
+--- a/py/makeqstrdata.py
++++ b/py/makeqstrdata.py
+@@ -494,11 +494,16 @@ def print_qstr_data(qcfgs, qstrs, translations):
+         # CIRCUITPY-CHANGE: track total qstr size
+         total_qstr_size += len(qstr)
+ 
+-    # CIRCUITPY-CHANGE: offsets are stored as uint16_t (qstr_offset_t in py/qstr.h),
+-    # including the trailing end-of-blob entry
++    # CIRCUITPY-CHANGE: offsets are stored as qstr_offset_t (py/qstr.h), uint16_t
++    # unless MICROPY_QSTR_OFFSET_BYTES says 4, including the trailing end-of-blob entry
++    blob_max = 1 << (8 * int(qcfgs.get("OFFSET_BYTES", "2")))
+     for pool, total in enumerate(offsets):
+-        if total >= QSTR_BLOB_MAX:
+-            print("qstr blob for pool %d is too large: %d bytes" % (pool, total), file=sys.stderr)
++        if total >= blob_max:
++            print(
++                "qstr blob for pool %d is too large: %d bytes (set MICROPY_QSTR_OFFSET_BYTES to 4)"
++                % (pool, total),
++                file=sys.stderr,
++            )
+             assert False
+ 
+     # CIRCUITPY-CHANGE: translations
+diff --git a/py/mpconfig.h b/py/mpconfig.h
+index 39a8681..15b43bc 100644
+--- a/py/mpconfig.h
++++ b/py/mpconfig.h
+@@ -384,6 +384,13 @@ typedef uint64_t mp_uint_t;
+ #define MICROPY_QSTR_BYTES_IN_LEN (1)
+ #endif
+ 
++// Number of bytes in the offset of a string within a ROM qstr pool's blob.
++// Two bytes cap a pool's strings at 64 KB; a build whose C modules bring more
++// than that (LVGL's bindings alone are about 53 KB) sets 4.
++#ifndef MICROPY_QSTR_OFFSET_BYTES
++#define MICROPY_QSTR_OFFSET_BYTES (2)
++#endif
++
+ // Number of bytes used to store qstr hash
+ #ifndef MICROPY_QSTR_BYTES_IN_HASH
+ #if MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES
+diff --git a/py/qstr.h b/py/qstr.h
+index 6c6e1a1..7c2a2f7 100644
+--- a/py/qstr.h
++++ b/py/qstr.h
+@@ -85,7 +85,13 @@ typedef uint16_t qstr_len_t;
+ #endif
+ 
+ // CIRCUITPY-CHANGE: offset of a string within a ROM pool's blob
++#if MICROPY_QSTR_OFFSET_BYTES == 2
+ typedef uint16_t qstr_offset_t;
++#elif MICROPY_QSTR_OFFSET_BYTES == 4
++typedef uint32_t qstr_offset_t;
++#else
++#error unimplemented qstr offset size
++#endif
+ 
+ typedef struct _qstr_pool_t {
+     const struct _qstr_pool_t *prev;
+diff --git a/py/qstrdefs.h b/py/qstrdefs.h
+index afa57af..d21a2e9 100644
+--- a/py/qstrdefs.h
++++ b/py/qstrdefs.h
+@@ -34,6 +34,7 @@
+ // qstr configuration passed to makeqstrdata.py of the form QCFG(key, value)
+ QCFG(BYTES_IN_LEN, MICROPY_QSTR_BYTES_IN_LEN)
+ QCFG(BYTES_IN_HASH, MICROPY_QSTR_BYTES_IN_HASH)
++QCFG(OFFSET_BYTES, MICROPY_QSTR_OFFSET_BYTES)
+ 
+ // CIRCUITPY-CHANGE: translatable messages removed
+ 
