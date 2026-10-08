@@ -4,14 +4,14 @@
 # modules/castif, tracked in this repository. Commits are full SHAs: GitHub
 # serves a fetch by commit only for the whole 40 characters.
 audiocomponents   https://github.com/PyDevices/audiocomponents.git    883d591784c4560bf6073a1d2d10096cc7f2122f
-audiodsp          https://github.com/PyDevices/audiodsp.git           eaec6810c4970e00d2ec25d8b91bbc09fa3d2735
+audiodsp          https://github.com/PyDevices/audiodsp.git           92363cd10e323dcb48302141f4f6c1818de35a0c
 audioif           https://github.com/PyDevices/audioif.git            b6b35a48a0cd23ddc549f8c0643d77ffe778da28
 cameraif          https://github.com/PyDevices/cameraif.git           fdb65caaa587cf46677d275fd0e4aab2fb0a6491
 displayif         https://github.com/PyDevices/displayif.git          17b3750828d5bfc7dc33a6f068e98a17ec3389d6
-lvgl-micropython  https://github.com/PyDevices/lvgl-micropython.git   2c74ef56a90939206cab840ea720e5026c50e162
+lvgl-micropython  https://github.com/PyDevices/lvgl-micropython.git   04d0f77943d3935f9f0906c6a2a5465e79abdfc2
 palettes          https://github.com/PyDevices/palettes.git           6f0870f0c8a0b48c56d2150b3f800bbbee7761e1
 pdwidgets         https://github.com/PyDevices/pdwidgets.git          306c1e20e0c3c63066dab6d10155fcf165a6ba13
-pydevices         https://github.com/PyDevices/pydevices.git          ab3f7743aa266bd12a758e1780f66ce1948f6851
-pygraphics        https://github.com/PyDevices/pygraphics.git         b98288c2e4cfcac10482ff71bd9f3b243c2f03c1
+pydevices         https://github.com/PyDevices/pydevices.git          8bcf53dd23afb1844a6eb86720354fba46e5fb88
+pygraphics        https://github.com/PyDevices/pygraphics.git         4fb4d8b5f1ca3ef4d35c7665ed8e9300930c6297
 ulab              https://github.com/v923z/micropython-ulab.git       1d3ddd8f5228e2c7335dac71f4846e6abb0ec9f9
 usbif             https://github.com/PyDevices/usbif.git              95bcb3b29933009299abdf59d6b81cf742e95778
