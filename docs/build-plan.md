@@ -220,13 +220,18 @@ CircuitPython, with our C modules compiled in.
 ./build_mp.py --interpreter circuitpython --port raspberrypi \
     --board adafruit_feather_rp2040 --modules pygraphics
 ./build_mp.py --interpreter circuitpython --port unix --modules pygraphics
+./build_mp.py --interpreter circuitpython --port espressif \
+    --board adafruit_qtpy_esp32_pico --modules audiodsp
 ```
 
-Ports and boards are CircuitPython's own (`raspberrypi`, `atmel-samd`, `unix`
-and the rest; boards by their directory names under `ports/<port>/boards/`).
+Ports and boards are CircuitPython's own (`raspberrypi`, `atmel-samd`,
+`espressif`, `unix` and the rest; boards by their directory names under `ports/<port>/boards/`).
 Output lands in `builds/circuitpython/<port>/<board or variant>/`, with the
 same build record; unix builds CircuitPython's default variant, `coverage`,
-unless you name another.
+unless you name another. Arguments for make, such as `CIRCUITPY_ULAB=0` to
+free flash on a small board, go on the end and are part of the record: a
+build with different ones starts from an empty build dir, because
+CircuitPython's generated module table would otherwise keep the old set.
 
 It is a flag rather than a second command because everything around the
 interpreter is shared: the module names and `modules.lock`, the workspace
@@ -244,7 +249,18 @@ links, the output layout and the build record. What differs is one function:
   `USER_C_MODULES` block unchanged, so a module's `micropython.mk` is the one
   our MicroPython builds read. CircuitPython freezes Python its own way
   (`FROZEN_MPY_DIRS`), so a module with no `micropython.mk` is refused for
-  now rather than left out quietly.
+  now rather than left out quietly. Each module is handed to make through a
+  link named for it, in `usermods/` in the build dir: make puts a module's
+  objects under a directory named like the module's, and two worktrees
+  checked out under the same branch name would otherwise share one.
+- **espressif brings its own ESP-IDF.** CircuitPython's espressif port builds
+  with the ESP-IDF in `ports/espressif/esp-idf` (6.0 for 11.0.0-alpha.1), not
+  the `esp-idf` in `deps.lock`. Before make, the build initialises that tree's
+  submodules shallowly (ESP-IDF's CMake would otherwise clone them with their
+  whole history, gigabytes for `esp32-wifi-lib` alone), runs its `install.sh`
+  for the board's chip (compilers go in `~/.espressif`, shared with any
+  ESP-IDF of the same version) and puts ESP-IDF's Python requirements in
+  `deps/circuitpython-venv`.
 - **mpy-cross is built first, on its own**, for the same reason as on
   MicroPython (the trap below).
 - **`BUILD=` is a short link.** make is given `BUILD=build-<board>`, a link in
@@ -261,7 +277,8 @@ CircuitPython's shared-bindings.
 
 Two things a module's C has to absorb on CircuitPython's MCU ports: they
 append `-Werror` warnings (`sign-compare`, `float-equal`, `cast-align` on
-atmel-samd) after the module's flags, so a `-Wno-` meant for them goes on
+atmel-samd; `float-equal`, `double-promotion`, `cast-align` on espressif)
+after the module's flags, so a `-Wno-` meant for them goes on
 each object, where it lands last; and atmel-samd has no C heap, so
 `malloc()` doesn't link there (use `m_malloc()`).
 

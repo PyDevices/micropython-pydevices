@@ -351,7 +351,7 @@ def record(dirs):
         # needs to tell later whether the code that went in has moved.
         commit = git_out(real, "rev-parse", "HEAD") or None
         dirty = bool(git_out(real, "status", "--porcelain", "--untracked-files=no")) if commit else None
-        rows[d.name] = {"path": str(real), "revision": rev, "commit": commit, "dirty": dirty}
+        rows[module_name(d)] = {"path": str(real), "revision": rev, "commit": commit, "dirty": dirty}
     return rows
 
 
@@ -545,6 +545,15 @@ def ensure_circuitpython():
     have = dep_version("circuitpython", CP)
     if have != version:
         die(f"deps/circuitpython is {have or 'not at a tag'}, but deps.lock wants {version}")
+    # The short BUILD= links (below) are symlinks, which CircuitPython's
+    # .gitignore (build-*/, directories only) doesn't cover; without this the
+    # checkout reads as modified to anything that asks git.
+    exclude = CP / ".git" / "info" / "exclude"
+    excluded = exclude.read_text() if exclude.exists() else ""
+    if (CP / ".git").is_dir() and "ports/*/build-*" not in excluded:
+        exclude.parent.mkdir(exist_ok=True)
+        with open(exclude, "a") as f:
+            f.write("\n# build_mp.py's BUILD= links\nports/*/build-*\n")
     # CircuitPython's make runs python3 from PATH and needs its dev requirements
     # (cascadetoml, jinja2, typer, ...). The venv is redone when they change.
     reqs = CP / "requirements-dev.txt"
@@ -598,22 +607,84 @@ def cp_variants(port):
     return sorted(p.name for p in d.iterdir() if (p / "mpconfigvariant.mk").exists()) if d.is_dir() else []
 
 
-def cp_user_c_modules(module_dirs):
+def module_name(d):
+    """A module's own name: its modules/ entry, or for a path the repository
+    it is a checkout of. A worktree's directory is named for its branch, so
+    two modules from worktrees called alike would otherwise share a name."""
+    real = d.resolve()
+    if d.parent == MODULES_DIR:
+        return d.name
+    top = git_out(real, "rev-parse", "--show-toplevel")
+    common = git_out(real, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if top and Path(top).resolve() == real and Path(common).name == ".git":
+        return Path(common).parent.name
+    return real.name
+
+
+def cp_user_c_modules(module_dirs, link_dir):
     """The directory holding each module's micropython.mk, for USER_C_MODULES.
 
     CircuitPython's py/py.mk carries MicroPython 1.29's USER_C_MODULES block,
     so the micropython.mk our MicroPython builds use is the one it reads.
     Python is not frozen here yet: CircuitPython freezes through its own
     FROZEN_MPY_DIRS, not manifest.py, so a module without C is refused rather
-    than silently left out."""
-    dirs = []
+    than silently left out.
+
+    Each is given to make through a link named for the module, in link_dir:
+    py.mk puts a module's objects under BUILD/<its directory's name>/, so two
+    worktrees both called cp-phase1 would build into one place."""
+    found_dirs = []
     for d in module_dirs:
         real = d.resolve()
         found = next((c for c in (real, real / "code") if (c / "micropython.mk").is_file()), None)
         if not found:
             die(f"module '{d.name}' has no micropython.mk; CircuitPython builds take C modules only, so far")
-        dirs.append(found)
+        found_dirs.append((module_name(d), found))
+    names = [n for n, _ in found_dirs]
+    if len(set(names)) != len(names):
+        die(f"two modules with one name: {', '.join(sorted(n for n in names if names.count(n) > 1))}")
+    if link_dir.exists():
+        shutil.rmtree(link_dir)
+    link_dir.mkdir(parents=True)
+    dirs = []
+    for name, found in found_dirs:
+        (link_dir / name).symlink_to(found, target_is_directory=True)
+        dirs.append(link_dir / name)
     return dirs
+
+
+def cp_espressif_env(port_dir, board):
+    """What CircuitPython's espressif port needs before make: its ESP-IDF's
+    submodules, compilers and Python packages. Returns the shell prefix that
+    puts them on the path, with our venv still first.
+
+    CircuitPython carries its own ESP-IDF (ports/espressif/esp-idf, fetched by
+    ci_fetch_deps.py with the board's other submodules). Left alone, ESP-IDF's
+    CMake initialises that tree's own submodules with their whole history, and
+    esp32-wifi-lib alone is gigabytes; a shallow update first takes under a
+    minute. The compilers go where every ESP-IDF puts them (~/.espressif, or
+    IDF_TOOLS_PATH), shared with any other ESP-IDF of the same version. ESP-IDF's
+    Python packages go into our CircuitPython venv, pinned by the constraints
+    file its install.sh fetched, so nothing else's Python environment changes."""
+    idf = port_dir / "esp-idf"
+    mk = (port_dir / "boards" / board / "mpconfigboard.mk").read_text()
+    target = re.search(r"^IDF_TARGET\s*=\s*(\S+)", mk, re.M)
+    if not target:
+        die(f"{board}'s mpconfigboard.mk names no IDF_TARGET")
+    run(["git", "-C", str(idf), "submodule", "update", "--init", "--depth", "1", "--recursive", "-q"])
+    run([BASH, "-c", f'cd "{idf}" && ./install.sh {target.group(1)}'], stdout=subprocess.DEVNULL)
+    version = (idf / "tools" / "cmake" / "version.cmake").read_text()
+    major, minor = (re.search(rf"IDF_VERSION_{k} (\d+)", version).group(1) for k in ("MAJOR", "MINOR"))
+    tools = Path(os.environ.get("IDF_TOOLS_PATH", Path.home() / ".espressif"))
+    constraints = tools / f"espidf.constraints.v{major}.{minor}.txt"
+    reqs = idf / "tools" / "requirements" / "requirements.core.txt"
+    stamp = CP_VENV / f"esp-idf-{major}.{minor}-requirements.core.txt"
+    if not (stamp.exists() and stamp.read_text() == reqs.read_text()):
+        say(f"installing ESP-IDF {major}.{minor}'s Python requirements into {CP_VENV.relative_to(REPO)}")
+        run([str(CP_VENV / "bin" / "pip"), "install", "-q", "-r", str(reqs)]
+            + (["-c", str(constraints)] if constraints.exists() else []))
+        shutil.copy(reqs, stamp)
+    return f'. "{idf}/export.sh" >/dev/null && export PATH="{CP_VENV / "bin"}:$PATH" && '
 
 
 def build_dir_for(build, want, clean):
@@ -628,8 +699,11 @@ def build_dir_for(build, want, clean):
         if {k: had.get(k) for k in want} != want:
             shutil.rmtree(build)
             flash = f" (flash {had.get('flash')})" if "flash" in want else ""
-            say(f"{build} was built with {had.get('modules')!r} {had.get('module_set') or ''}{flash}; "
-                f"wiped, building {want['modules']!r} {want['module_set']}")
+            args = ("" if "make_args" not in want else " (make arguments not recorded)" if "make_args" not in had
+                    else f" (make {' '.join(had['make_args']) or 'with no arguments'})")
+            say(f"{build} was built with {had.get('modules')!r} {had.get('module_set') or ''}{flash}{args}; "
+                f"wiped, building {want['modules']!r} {want['module_set']}"
+                + (f" (make {' '.join(want['make_args']) or 'with no arguments'})" if args else ""))
     elif build.exists() and any(build.iterdir()):
         # Something built here without a record: nobody can say with what.
         shutil.rmtree(build)
@@ -676,14 +750,16 @@ def build_circuitpython(args, make_extra, ws):
         say("Modules: " + ", ".join(module_choices()))
         spec = input('Which (comma list; full paths for others; empty for none)? ').strip()
     spec, module_dirs = resolve_modules(spec)
-    user_c = cp_user_c_modules(module_dirs)
 
     # The unix port's own default variant is coverage.
     build = OUT_DIR / "circuitpython" / port / (board or variant or "coverage")
     module_set = sorted(d.name if d.parent == MODULES_DIR else str(d) for d in module_dirs)
+    # make's own arguments are part of what was built: a CIRCUITPY_X=0 left
+    # out of the next build would otherwise keep its generated module table.
     want = {"interpreter": "circuitpython", "port": port, "board": board, "variant": variant,
-            "modules": spec, "module_set": module_set}
+            "modules": spec, "module_set": module_set, "make_args": make_extra}
     rec_path = build_dir_for(build, want, args.clean)
+    user_c = cp_user_c_modules(module_dirs, build / "usermods")
 
     env = {k: v for k, v in os.environ.items()
            if k not in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "VARIANT_DIR", "PYTHONPATH")}
@@ -717,7 +793,8 @@ def build_circuitpython(args, make_extra, ws):
     make += make_extra
     say(f"CircuitPython {dep_version('circuitpython', cp)} {port} {board or variant or 'coverage'}; "
         f"USER_C_MODULES: {' '.join(str(d) for d in user_c) or '(none)'}")
-    rc = subprocess.run(make, env=env).returncode
+    prefix = cp_espressif_env(port_dir, board) if port == "espressif" else ""
+    rc = subprocess.run([BASH, "-c", prefix + shlex.join(make)], env=env).returncode
     if rc != 0:
         die(f"the build failed (make exit {rc})")
     rec = dict(want, complete=True)
