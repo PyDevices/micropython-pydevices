@@ -1,0 +1,59 @@
+# The CircuitPython-compatible path from a bare clone, the way a user builds
+# it: build_mp.py fetches CircuitPython at its deps.lock tag and pygraphics at
+# its modules.lock commit, builds the unix port with pygraphics as a user C
+# module, and the result has to import it, draw, and read the pixels back.
+name: circuitpython
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'build_mp.py'
+      - 'deps.lock'
+      - 'modules.lock'
+      - '.github/workflows/circuitpython.yml'
+  pull_request:
+    paths:
+      - 'build_mp.py'
+      - 'deps.lock'
+      - 'modules.lock'
+      - '.github/workflows/circuitpython.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the unix port's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev pkg-config
+
+      - name: Build CircuitPython's unix port with pygraphics
+        run: python3 build_mp.py --interpreter circuitpython --port unix --modules pygraphics
+
+      - name: pygraphics imports, draws and reads back
+        run: |
+          cat > check.py <<'PY'
+          import sys
+          import pygraphics
+          from pygraphics import FrameBuffer, RGB565
+          fb = FrameBuffer(bytearray(32 * 32 * 2), 32, 32, RGB565)
+          fb.fill(0)
+          fb.fill_rect(4, 4, 8, 8, 0xF800)
+          fb.circle(20, 20, 6, 0x07E0, True)
+          fb.line(0, 31, 31, 31, 0x001F)
+          got = (fb.pixel(5, 5), fb.pixel(20, 20), fb.pixel(16, 31), fb.pixel(0, 0))
+          print(sys.implementation.name, pygraphics.implementation(), [hex(p) for p in got])
+          assert sys.implementation.name == "circuitpython"
+          assert pygraphics.implementation() == "native_cmod"
+          assert pygraphics.capabilities()["framebuf"] == "native"
+          assert got == (0xF800, 0x07E0, 0x001F, 0), got
+          PY
+          ./builds/circuitpython/unix/coverage/micropython check.py

@@ -28,6 +28,19 @@ On Windows you can build the windows port natively from PowerShell, with
 MSYS2 is installed: [On Windows](docs/newcomers.md#on-windows) has the
 steps. Everything else builds from WSL.
 
+The same command builds OmniPython (CircuitPython-compatible) firmware, which
+is CircuitPython with our C modules compiled in, for CircuitPython's own
+ports and boards:
+
+```bash
+./build_mp.py --interpreter circuitpython --port raspberrypi \
+    --board adafruit_feather_rp2040 --modules pygraphics
+```
+
+It takes C modules only, so far; the
+[build plan](docs/build-plan.md#circuitpython-compatible-builds) has how it
+works.
+
 New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
 [build plan](docs/build-plan.md) has the layout, the rules and the traps.
 
@@ -38,7 +51,8 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   the port's own `make`.
 - `UPSTREAM` — the MicroPython release everything applies to (v1.29.0).
 - `modules.lock`, `deps.lock` — the commits and versions `build_mp.py`
-  fetches when a module or a toolchain isn't there. Beside sibling
+  fetches when a module or a toolchain isn't there. `deps.lock` also pins
+  CircuitPython, for `--interpreter circuitpython`. Beside sibling
   checkouts, both are links to those checkouts instead.
 - `modules/` — `manifest.py` (the manifest every build freezes), `all/`
   (every module), `castif/` (the ESP32-P4 cast) and `jpegio/` (the JPEG
