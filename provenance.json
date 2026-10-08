@@ -67,6 +67,9 @@
   },
   "0022-micropython-py-mkrules-link-response-file-on-windows.patch": {
    "sha256": "b4d522a23779986dae282a4ad54f9e7f2984c49727c84dfbae484fb1d4fe4816"
+  },
+  "0023-micropython-esp32-nimble-default-eventq-deinit-without-controller.patch": {
+   "sha256": "acad1e25d06627549e157737f2901d03e69364d65163b1bc40c461cf7734b0f7"
   }
  }
 }
