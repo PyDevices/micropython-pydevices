@@ -4,7 +4,7 @@
 # modules/castif, tracked in this repository. Commits are full SHAs: GitHub
 # serves a fetch by commit only for the whole 40 characters.
 audiocomponents   https://github.com/PyDevices/audiocomponents.git    883d591784c4560bf6073a1d2d10096cc7f2122f
-audiodsp          https://github.com/PyDevices/audiodsp.git           92363cd10e323dcb48302141f4f6c1818de35a0c
+audiodsp          https://github.com/PyDevices/audiodsp.git           1b56554e65dc340ffd4ebefecfd5fa4d3e73b6c6
 audioif           https://github.com/PyDevices/audioif.git            b6b35a48a0cd23ddc549f8c0643d77ffe778da28
 cameraif          https://github.com/PyDevices/cameraif.git           fdb65caaa587cf46677d275fd0e4aab2fb0a6491
 displayif         https://github.com/PyDevices/displayif.git          17b3750828d5bfc7dc33a6f068e98a17ec3389d6
