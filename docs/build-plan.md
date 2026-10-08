@@ -211,6 +211,62 @@ that wants one (the wasm one) requires it by name.
    tidier, not possible; it already works without it. It isn't planned as an
    upstream PR.
 
+## CircuitPython-compatible builds
+
+The same command builds OmniPython (CircuitPython-compatible) firmware:
+CircuitPython, with our C modules compiled in.
+
+```bash
+./build_mp.py --interpreter circuitpython --port raspberrypi \
+    --board adafruit_feather_rp2040 --modules pygraphics
+./build_mp.py --interpreter circuitpython --port unix --modules pygraphics
+```
+
+Ports and boards are CircuitPython's own (`raspberrypi`, `atmel-samd`, `unix`
+and the rest; boards by their directory names under `ports/<port>/boards/`).
+Output lands in `builds/circuitpython/<port>/<board or variant>/`, with the
+same build record; unix builds CircuitPython's default variant, `coverage`,
+unless you name another.
+
+It is a flag rather than a second command because everything around the
+interpreter is shared: the module names and `modules.lock`, the workspace
+links, the output layout and the build record. What differs is one function:
+
+- **The checkout.** CircuitPython is pinned in `deps.lock` like a toolchain
+  (`11.0.0-alpha.1`, whose core is MicroPython 1.29) and cloned into
+  `deps/circuitpython`, always our own clone, never a link to a sibling
+  checkout. A build fetches only the submodules its target needs, with
+  CircuitPython's own `tools/ci_fetch_deps.py` (a board's name, or `tests`
+  for unix), and its build tools go in `deps/circuitpython-venv` from its
+  `requirements-dev.txt`.
+- **The modules go in as `USER_C_MODULES`**, not a manifest. From the 1.29
+  merge on, CircuitPython's `py/py.mk` carries MicroPython 1.29's
+  `USER_C_MODULES` block unchanged, so a module's `micropython.mk` is the one
+  our MicroPython builds read. CircuitPython freezes Python its own way
+  (`FROZEN_MPY_DIRS`), so a module with no `micropython.mk` is refused for
+  now rather than left out quietly.
+- **mpy-cross is built first, on its own**, for the same reason as on
+  MicroPython (the trap below).
+- **`BUILD=` is a short link.** make is given `BUILD=build-<board>`, a link in
+  the port directory to our build dir: raspberrypi's link step echoes every
+  object path in one shell argument, and with a long absolute path in front
+  of each it passes Linux's 128 KB limit on one argument.
+
+The banner is CircuitPython's, unchanged: `Adafruit CircuitPython
+11.0.0-alpha.1 on <date>; <board name> with <chip>`. A module that has to
+behave differently here can test `CIRCUITPY`, which every CircuitPython port
+sets, unix included; pygraphics also passes its own define from its
+`micropython.mk`, so it knows it came in as a user C module and not through
+CircuitPython's shared-bindings.
+
+Two things a module's C has to absorb on CircuitPython's MCU ports: they
+append `-Werror` warnings (`sign-compare`, `float-equal`, `cast-align` on
+atmel-samd) after the module's flags, so a `-Wno-` meant for them goes on
+each object, where it lands last; and atmel-samd has no C heap, so
+`malloc()` doesn't link there (use `m_malloc()`).
+
+Builds from Linux or WSL only.
+
 ## Traps we already know
 
 **`BUILD=` and the mpy-cross sub-make.** Passed on its own, `BUILD=` reaches
@@ -249,5 +305,5 @@ Deferred, because the build script doesn't need them:
   sensor and H.264 replace cameraif (and castif's encoder) stays open. esp-vision's
   `tflite` and image stack are in as modules; where `sensor` stands is in
   [esp-vision.md](esp-vision.md).
-- **CircuitPython.** It doesn't read our manifests, and none of this reaches
-  it yet.
+- **CircuitPython-compatible builds** take C modules only, so far; see
+  [CircuitPython-compatible builds](#circuitpython-compatible-builds).
