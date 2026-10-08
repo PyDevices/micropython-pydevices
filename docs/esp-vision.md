@@ -17,7 +17,7 @@ esp-vision's stubs (`stubs/*.pyi` in esp-vision) document the API.
 ## How it is built
 
 `modules/.esp-vision` pins esp-vision at a full commit (`ESP_VISION.lock`).
-Its `fetch.sh` links a clone beside the workspace at that commit (`~/gh/esp-vision`),
+Its `fetch.sh` links a sibling clone at that commit (`../esp-vision`),
 or fetches that commit alone. The leading dot keeps it out of `--modules` and
 `all`, because esp-vision's own `micropython.cmake` is its whole firmware
 build, not a module.
@@ -54,7 +54,7 @@ the pedestrian test with one person blacked out.
 
 ## What it costs
 
-Which is why they're opt-in (Brad, 2026-10-06). Built into an `all` image on
+Which is why they're opt-in (since 2026-10-06). Built into an `all` image on
 2026-10-06 they added about 2.1 MB on the S3 (the LCD-7's app partition grew
 from 0x440000 to 0x6b0000, leaving about 1.2 MB of filesystem on 8 MB of
 flash) and about 3.1 MB on the P4 (`firmware.bin` 4.53 MB to 7.68 MB of

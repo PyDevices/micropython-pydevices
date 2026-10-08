@@ -1,7 +1,6 @@
 # Draft issue: esp32 BLE reports the MTU exchange before the connection
 
-A draft for Brad to post on micropython/micropython. Nothing here has been
-posted. We carry no patch for this: PyDevices' `bledev` works around it in
+A draft for micropython/micropython. Nothing here has been posted yet. We carry no patch for this: PyDevices' `bledev` works around it in
 Python (`bledev.mpble` keeps an early MTU and applies it on the connect), in
 [PyDevices/pydevices#81](https://github.com/PyDevices/pydevices/pull/81).
 

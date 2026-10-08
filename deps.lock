@@ -1,8 +1,14 @@
 # Toolchain pins: name, URL, version. A build fetches and checks only the one
 # its port uses: esp-idf for esp32, emsdk for webassembly, SDL2 for windows
-# when displayif is selected. In the workspace deps/<name> is a symlink to the
-# anchor's checkout, and a build refuses if it isn't the version below.
+# when displayif is selected, circuitpython for --interpreter circuitpython.
+# In a workspace deps/<name> may be a symlink to a shared checkout, and a
+# build refuses if it isn't the version below.
 # The ESP-IDF version is our choice, not upstream's recommendation.
 esp-idf   https://github.com/espressif/esp-idf.git                                                           v5.5.4
 emsdk     https://github.com/emscripten-core/emsdk.git                                                       6.0.1
 SDL2      https://github.com/libsdl-org/SDL/releases/download/release-2.30.10/SDL2-devel-2.30.10-mingw.tar.gz  2.30.10
+# CircuitPython is the second interpreter, and the one pin that is a source
+# tree rather than a toolchain. Always our own checkout in deps/, never a link
+# to a sibling. 11.0.0-alpha.1 is commit 520805e12, the first release of the
+# 11.0 line, whose core is MicroPython 1.29, like UPSTREAM.
+circuitpython https://github.com/adafruit/circuitpython.git                                                  11.0.0-alpha.1

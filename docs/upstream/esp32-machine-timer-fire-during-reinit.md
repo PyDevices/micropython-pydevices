@@ -1,7 +1,6 @@
 # Draft issue: esp32 machine.Timer re-armed while it fires calls NULL
 
-A draft for Brad to post on micropython/micropython. Nothing here has been
-posted. The fix we carry meanwhile is
+A draft for micropython/micropython. Nothing here has been posted yet. The fix we carry meanwhile is
 [patches/0016](../../patches/0016-micropython-esp32-machine-timer-fire-during-reinit.patch),
 and the tracking issue is micropython-pydevices#14.
 

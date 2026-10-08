@@ -2,9 +2,14 @@
 # pinned upstream, so drift is known before a pin move is ever attempted.
 name: Overlay compatibility
 
+# Documentation-only changes can't change this result, so they don't run it.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
   schedule:
     - cron: '43 6 * * 1'
   workflow_dispatch:

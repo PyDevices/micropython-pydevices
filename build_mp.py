@@ -10,6 +10,13 @@ optional. Leave out --modules and it lists modules/ and asks. Our modules go
 by short name, anything else by full path; "all" is every module. Arguments
 it doesn't recognise go straight to make.
 
+    ./build_mp.py --interpreter circuitpython --port raspberrypi \\
+        --board adafruit_feather_rp2040 --modules pygraphics
+
+--interpreter circuitpython builds CircuitPython-compatible firmware instead:
+CircuitPython at its deps.lock pin, our C modules compiled in through its
+USER_C_MODULES. Ports and boards are then CircuitPython's own.
+
 This script names no version and no setting. Pins live in modules.lock,
 deps.lock and UPSTREAM; esp32 settings live in sdkconfig fragments found by
 convention. See docs/build-plan.md.
@@ -192,6 +199,10 @@ def dep_version(name, path):
     if name == "emsdk":
         f = path / "upstream" / "emscripten" / "emscripten-version.txt"
         return f.read_text().strip().strip('"') if f.exists() else ""
+    if name == "circuitpython":
+        # The tag the checkout is exactly at; CircuitPython's own build reads
+        # its version the same way, from git describe.
+        return git_out(path, "describe", "--tags", "--exact-match")
     if name == "SDL2":
         h = path / "x86_64-w64-mingw32" / "include" / "SDL2" / "SDL_version.h"
         if not h.exists():
@@ -499,10 +510,201 @@ def rp2_autosize(log_text):
     return storage if storage >= align else None
 
 
+# ---- CircuitPython: the second interpreter ---------------------------------
+
+CP = DEPS / "circuitpython"
+CP_VENV = DEPS / "circuitpython-venv"
+
+
+def lock_beside(path):
+    """One build at a time in a checkout: held until this process exits."""
+    lock = open(path.parent / f".{path.name}-build.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        say(f"waiting for another build to release {lock.name}")
+        fcntl.flock(lock, fcntl.LOCK_EX)
+    return lock
+
+
+def ensure_circuitpython():
+    """deps/circuitpython at its deps.lock tag, and a venv with its build tools.
+
+    Always a checkout of our own, never a link to a sibling circuitpython/: a
+    sibling is at whatever version its owner needs, and may carry other
+    repositories' patches. Only the submodules a target needs are fetched,
+    by CircuitPython's own tools/ci_fetch_deps.py, at build time."""
+    url, version = {row[0]: row[1:] for row in read_lock("deps.lock")}["circuitpython"]
+    if not CP.exists():
+        DEPS.mkdir(exist_ok=True)
+        clone_at(url, version, CP)
+    have = dep_version("circuitpython", CP)
+    if have != version:
+        die(f"deps/circuitpython is {have or 'not at a tag'}, but deps.lock wants {version}")
+    # CircuitPython's make runs python3 from PATH and needs its dev requirements
+    # (cascadetoml, jinja2, typer, ...). The venv is redone when they change.
+    reqs = CP / "requirements-dev.txt"
+    stamp = CP_VENV / "requirements-dev.txt"
+    if not (stamp.exists() and stamp.read_text() == reqs.read_text()):
+        say(f"setting up {CP_VENV.relative_to(REPO)} with CircuitPython's requirements-dev.txt")
+        run([sys.executable, "-m", "venv", "--clear", str(CP_VENV)])
+        run([str(CP_VENV / "bin" / "pip"), "install", "-q", "-r", str(reqs)])
+        shutil.copy(reqs, stamp)
+    return CP
+
+
+def cp_ports():
+    # zephyr-cp builds through west and never reads USER_C_MODULES.
+    return sorted(p.name for p in (CP / "ports").iterdir() if (p / "Makefile").exists() and p.name != "zephyr-cp")
+
+
+def cp_boards(port):
+    d = CP / "ports" / port / "boards"
+    return sorted(p.parent.name for p in d.glob("*/mpconfigboard.mk")) if d.is_dir() else []
+
+
+def cp_variants(port):
+    d = CP / "ports" / port / "variants"
+    return sorted(p.name for p in d.iterdir() if (p / "mpconfigvariant.mk").exists()) if d.is_dir() else []
+
+
+def cp_user_c_modules(module_dirs):
+    """The directory holding each module's micropython.mk, for USER_C_MODULES.
+
+    CircuitPython's py/py.mk carries MicroPython 1.29's USER_C_MODULES block,
+    so the micropython.mk our MicroPython builds use is the one it reads.
+    Python is not frozen here yet: CircuitPython freezes through its own
+    FROZEN_MPY_DIRS, not manifest.py, so a module without C is refused rather
+    than silently left out."""
+    dirs = []
+    for d in module_dirs:
+        real = d.resolve()
+        found = next((c for c in (real, real / "code") if (c / "micropython.mk").is_file()), None)
+        if not found:
+            die(f"module '{d.name}' has no micropython.mk; CircuitPython builds take C modules only, so far")
+        dirs.append(found)
+    return dirs
+
+
+def build_dir_for(build, want, clean):
+    """The build dir for a target, emptied first if it was built with
+    something other than `want` (another module set, flash size, ...)."""
+    rec_path = build / "pydevices-build.json"
+    if clean and build.exists():
+        shutil.rmtree(build)
+        say(f"--clean: removed {build}")
+    if rec_path.exists():
+        had = json.loads(rec_path.read_text())
+        if {k: had.get(k) for k in want} != want:
+            shutil.rmtree(build)
+            flash = f" (flash {had.get('flash')})" if "flash" in want else ""
+            say(f"{build} was built with {had.get('modules')!r} {had.get('module_set') or ''}{flash}; "
+                f"wiped, building {want['modules']!r} {want['module_set']}")
+    elif build.exists() and any(build.iterdir()):
+        # Something built here without a record: nobody can say with what.
+        shutil.rmtree(build)
+        say(f"{build} has no build record; wiped")
+    build.mkdir(parents=True, exist_ok=True)
+    # Written before the build, so a build that fails still says what it was
+    # built with, and the next one with a different set wipes it.
+    rec_path.write_text(json.dumps(dict(want, complete=False), indent=1) + "\n")
+    return rec_path
+
+
+def build_circuitpython(args, make_extra, ws):
+    if os.name == "nt":
+        die("--interpreter circuitpython builds from Linux or WSL")
+    if args.flash:
+        die("--flash is for MicroPython's esp32 port")
+    ensure_modules(ws)
+    cp = ensure_circuitpython()
+    lock = lock_beside(cp)  # noqa: F841 -- held until exit
+
+    port = args.port or choose("CircuitPython port:", cp_ports())
+    if port not in cp_ports():
+        die(f"no CircuitPython port '{port}' (have: {', '.join(cp_ports())})")
+    board, variant = args.board, args.variant
+    if cp_boards(port):
+        board = board or choose("Board:", cp_boards(port))
+        if board not in cp_boards(port):
+            die(f"no board '{board}' for CircuitPython's {port}")
+        if variant:
+            die("CircuitPython boards have no variants; leave out --variant")
+    else:
+        if board:
+            die(f"{port} has no boards; leave out --board")
+        if variant is None and not args.port:
+            variant = choose("Variant:", cp_variants(port), allow_none=True)
+        if variant and variant not in cp_variants(port):
+            die(f"no variant '{variant}' (have: {', '.join(cp_variants(port))})")
+
+    spec = args.modules
+    if spec is None:
+        if not sys.stdin.isatty():
+            die("--modules: not given, and there is no terminal to ask on")
+        say("Modules: " + ", ".join(module_choices()))
+        spec = input('Which (comma list; full paths for others; empty for none)? ').strip()
+    spec, module_dirs = resolve_modules(spec)
+    user_c = cp_user_c_modules(module_dirs)
+
+    # The unix port's own default variant is coverage.
+    build = OUT_DIR / "circuitpython" / port / (board or variant or "coverage")
+    module_set = sorted(d.name if d.parent == MODULES_DIR else str(d) for d in module_dirs)
+    want = {"interpreter": "circuitpython", "port": port, "board": board, "variant": variant,
+            "modules": spec, "module_set": module_set}
+    rec_path = build_dir_for(build, want, args.clean)
+
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "VARIANT_DIR", "PYTHONPATH")}
+    env["PATH"] = os.pathsep.join([str(CP_VENV / "bin"), env.get("PATH", "")])
+    env["VIRTUAL_ENV"] = str(CP_VENV)
+    # Only the submodules this target needs, the way CircuitPython's CI does:
+    # a board name fetches its port's, "tests" what the unix port builds with.
+    run([str(CP_VENV / "bin" / "python"), "tools/ci_fetch_deps.py", board or "tests"], cwd=cp, env=env,
+        stdout=subprocess.DEVNULL)
+    # mpy-cross first and on its own: a port's sub-make for it would inherit
+    # BUILD= from our command line (the same trap as micropython#19667).
+    run(["make", "-C", str(cp / "mpy-cross"), "-j", JOBS], env=env, stdout=subprocess.DEVNULL)
+
+    # make is given a short relative BUILD, a link in the port dir to ours: the
+    # raspberrypi link rule echoes every object path in one shell argument,
+    # and with our absolute build path in front of each that passes Linux's
+    # 128 KB limit on a single argument ("Argument list too long").
+    port_dir = cp / "ports" / port
+    short = port_dir / f"build-{board or variant or 'coverage'}"
+    if short.is_symlink() or short.is_file():
+        short.unlink()
+    elif short.is_dir():
+        shutil.rmtree(short)
+    short.symlink_to(build, target_is_directory=True)
+    make = ["make", "-C", str(port_dir), "-j", JOBS, f"BUILD={short.name}",
+            "USER_C_MODULES=" + " ".join(str(d) for d in user_c)]
+    if board:
+        make.append(f"BOARD={board}")
+    elif variant:
+        make.append(f"VARIANT={variant}")
+    make += make_extra
+    say(f"CircuitPython {dep_version('circuitpython', cp)} {port} {board or variant or 'coverage'}; "
+        f"USER_C_MODULES: {' '.join(str(d) for d in user_c) or '(none)'}")
+    rc = subprocess.run(make, env=env).returncode
+    if rc != 0:
+        die(f"the build failed (make exit {rc})")
+    rec = dict(want, complete=True)
+    rec["circuitpython"] = git_out(cp, "describe", "--tags", "--always", "--dirty")
+    rec["module_revisions"] = record(module_dirs)
+    rec_path.write_text(json.dumps(rec, indent=1) + "\n")
+    say(f"\nBuilt into {build}")
+    for name in ("firmware.uf2", "firmware.bin", "firmware.elf", "micropython"):
+        if (build / name).exists():
+            say(f"  {build / name}")
+
+
 # ---- the build -------------------------------------------------------------
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], allow_abbrev=False)
+    ap.add_argument("--interpreter", choices=("micropython", "circuitpython"), default="micropython",
+                    help="circuitpython: CircuitPython-compatible firmware, from CircuitPython's own ports and boards")
     ap.add_argument("--port")
     ap.add_argument("--board")
     ap.add_argument("--variant")
@@ -516,13 +718,15 @@ def main():
     if msys2:
         say(f"using MSYS2 at {msys2}")
     ws = workspace()
+    if args.interpreter == "circuitpython":
+        return build_circuitpython(args, make_extra, ws)
     ensure_micropython(ws)
     ensure_modules(ws)
     mp = MP.resolve()
     # One build at a time in a MicroPython checkout: preparing rewrites the
     # tree, and two esp32 builds race on the port's managed_components/. The
-    # lock sits beside the checkout, so in the workspace it is the one the
-    # other build tools there take (the anchor's .micropython-build.lock).
+    # lock sits beside the checkout, so it is the one any other build tool
+    # sharing that checkout takes.
     # Held until this process exits.
     lock = open(mp.parent / ".micropython-build.lock", "w")
     if fcntl:
@@ -592,23 +796,7 @@ def main():
     module_set = sorted(d.name if d.parent == MODULES_DIR else str(d) for d in module_dirs)
     want = {"port": port, "board": board, "variant": variant, "flash": flash, "modules": spec,
             "module_set": module_set}
-    if args.clean and build.exists():
-        shutil.rmtree(build)
-        say(f"--clean: removed {build}")
-    if rec_path.exists():
-        had = json.loads(rec_path.read_text())
-        if {k: had.get(k) for k in want} != want:
-            shutil.rmtree(build)
-            say(f"{build} was built with {had.get('modules')!r} {had.get('module_set') or ''} (flash {had.get('flash')}); "
-                f"wiped, building {spec!r} {module_set}")
-    elif build.exists() and any(build.iterdir()):
-        # Something built here without a record: nobody can say with what.
-        shutil.rmtree(build)
-        say(f"{build} has no build record; wiped")
-    build.mkdir(parents=True, exist_ok=True)
-    # Written before the build, so a build that fails still says what it was
-    # built with, and the next one with a different set wipes it.
-    rec_path.write_text(json.dumps(dict(want, complete=False), indent=1) + "\n")
+    build_dir_for(build, want, args.clean)
 
     env = dict(os.environ)
     for leak in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "BOARD_DIR", "VARIANT_DIR"):

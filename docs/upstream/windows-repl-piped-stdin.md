@@ -1,7 +1,6 @@
 # Draft issue: windows `micropython -i` with piped stdin prints prompts forever
 
-A draft for Brad to post on micropython/micropython, if he wants to. Nothing
-here has been posted. The fix we carry meanwhile is
+A draft for micropython/micropython. Nothing here has been posted yet. The fix we carry meanwhile is
 [patches/0013](../../patches/0013-micropython-windows-read-piped-stdin-in-the-repl.patch).
 
 ---
