@@ -541,6 +541,15 @@ def ensure_circuitpython():
     have = dep_version("circuitpython", CP)
     if have != version:
         die(f"deps/circuitpython is {have or 'not at a tag'}, but deps.lock wants {version}")
+    # The short BUILD= links (below) are symlinks, which CircuitPython's
+    # .gitignore (build-*/, directories only) doesn't cover; without this the
+    # checkout reads as modified to anything that asks git.
+    exclude = CP / ".git" / "info" / "exclude"
+    excluded = exclude.read_text() if exclude.exists() else ""
+    if (CP / ".git").is_dir() and "ports/*/build-*" not in excluded:
+        exclude.parent.mkdir(exist_ok=True)
+        with open(exclude, "a") as f:
+            f.write("\n# build_mp.py's BUILD= links\nports/*/build-*\n")
     # CircuitPython's make runs python3 from PATH and needs its dev requirements
     # (cascadetoml, jinja2, typer, ...). The venv is redone when they change.
     reqs = CP / "requirements-dev.txt"
