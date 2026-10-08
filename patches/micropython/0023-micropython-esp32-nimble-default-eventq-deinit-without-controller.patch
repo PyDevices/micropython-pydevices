@@ -1,0 +1,94 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Thu, 8 Oct 2026 04:35:58 -0500
+Subject: [PATCH] esp32: finish the default NimBLE event queue's deinit on
+ controller-less targets.
+
+On an ESP32-P4 (no Bluetooth controller of its own; NimBLE reaches a C6
+over ESP-Hosted), BLE().active(True) after a soft reset hangs and the board
+reboots with "Guru Meditation Error: Core 1 panic'ed (Interrupt wdt timeout
+on CPU1)" (micropython-pydevices#13). The backtrace runs mp_bluetooth_init
+-> nimble_port_init -> esp_nimble_init -> ble_hs_init ->
+npl_freertos_eventq_put -> xQueueGenericSend, spinning on a spinlock.
+
+ESP-IDF v5.5.4's esp_nimble_deinit() calls
+ble_npl_eventq_deinit(&g_eventq_dflt) only under
+CONFIG_BT_CONTROLLER_ENABLED, then frees the pool g_eventq_dflt.eventq
+points into (components/bt/host/nimble/nimble/porting/nimble/src/
+nimble_port.c:237-249). The next npl_freertos_eventq_init() sees a
+non-NULL eventq, skips the allocation, and uses freed memory
+(npl_os_freertos.c:297).
+
+mp_bluetooth_nimble_port_shutdown() now reads the queue's FreeRTOS handle
+before nimble_port_deinit() and, if the deinit left eventq set, deletes
+the queue and clears the pointer. ESP-IDF v5.5.5 deinitialises the queue
+itself (esp-nimble aa5775e93), so there the pointer is already NULL and
+this does nothing. Builds with CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC keep the
+queue in memory the deinit frees, so they are left alone.
+
+Drop this patch when the ESP-IDF pin reaches v5.5.5.
+
+Proven on an ESP32-P4 (Waveshare ESP32-P4-WIFI6-Touch-LCD-4B, pre-rev-3,
+ESP-IDF v5.5.4): without this patch, active(True) after a soft reset
+panics with the interrupt watchdog every time; with it, active(True) came
+up after four soft resets in a row, and five active(True)/advertise/
+active(False) cycles in one session ran clean, with no reboot.
+
+Based-on: micropython 0fd6c573e (tag v1.29.0)
+---
+ ports/esp32/mpnimbleport.c | 29 +++++++++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+
+diff --git a/ports/esp32/mpnimbleport.c b/ports/esp32/mpnimbleport.c
+index 77185883f..5f16e6b8c 100644
+--- a/ports/esp32/mpnimbleport.c
++++ b/ports/esp32/mpnimbleport.c
+@@ -37,6 +37,18 @@
+ 
+ #include "extmod/nimble/modbluetooth_nimble.h"
+ 
++// On a target with no Bluetooth controller of its own (the ESP32-P4, which
++// reaches a C6 over ESP-Hosted), ESP-IDF v5.5.4's esp_nimble_deinit() frees
++// the event-queue pool but skips ble_npl_eventq_deinit() for the default
++// queue. The queue keeps a pointer into freed memory, the next
++// nimble_port_init() reuses it, and BLE().active(True) after a soft reset
++// spins in xQueueGenericSend until the interrupt watchdog fires. ESP-IDF
++// v5.5.5 deinitialises the queue itself (esp-nimble aa5775e93); the check
++// after the deinit below makes this a no-op there. With
++// CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC the queue lives in memory the deinit
++// frees, so it is left alone.
++#define MP_NIMBLE_FINISH_DFLT_EVENTQ (!CONFIG_BT_CONTROLLER_ENABLED && !CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC)
++
+ static void ble_host_task(void *param) {
+     DEBUG_printf("ble_host_task\n");
+     nimble_port_run(); // This function will return only when nimble_port_stop() is executed.
+@@ -70,9 +82,26 @@ int mp_bluetooth_nimble_port_shutdown(void) {
+     // Calls ble_hs_stop() and waits for stack shutdown.
+     nimble_port_stop();
+ 
++    #if MP_NIMBLE_FINISH_DFLT_EVENTQ
++    // The FreeRTOS queue handle, read while the pool holding it is valid.
++    struct ble_npl_eventq *dflt_eventq = nimble_port_get_dflt_eventq();
++    struct ble_npl_eventq_freertos *dflt_q = dflt_eventq->eventq;
++    QueueHandle_t dflt_queue = dflt_q ? dflt_q->q : NULL;
++    #endif
++
+     // Shuts down the event queue.
+     nimble_port_deinit();
+ 
++    #if MP_NIMBLE_FINISH_DFLT_EVENTQ
++    // Still set means ESP-IDF skipped the queue's deinit: finish it.
++    if (dflt_eventq->eventq != NULL) {
++        if (dflt_queue != NULL) {
++            vQueueDelete(dflt_queue);
++        }
++        dflt_eventq->eventq = NULL;
++    }
++    #endif
++
+     #if MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS_WITH_INTERLOCK
+     MP_THREAD_GIL_ENTER();
+     #endif
+-- 
+2.43.0
+
