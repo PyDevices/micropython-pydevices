@@ -28,6 +28,7 @@ windows port.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -777,8 +778,16 @@ def build_circuitpython(args, make_extra, ws):
     # raspberrypi link rule echoes every object path in one shell argument,
     # and with our absolute build path in front of each that passes Linux's
     # 128 KB limit on a single argument ("Argument list too long").
+    #
+    # The link's name is also where a coverage binary writes its profile data
+    # when it runs, so a build under another OUT_DIR gets a link of its own:
+    # two binaries sharing one would each find the other's .gcda files and
+    # print "overwriting an existing profile data" on every exit.
     port_dir = cp / "ports" / port
-    short = port_dir / f"build-{board or variant or 'coverage'}"
+    tag = board or variant or "coverage"
+    if OUT_DIR != (REPO / "builds").resolve():
+        tag += "-" + hashlib.sha1(str(build).encode()).hexdigest()[:8]
+    short = port_dir / f"build-{tag}"
     if short.is_symlink() or short.is_file():
         short.unlink()
     elif short.is_dir():
