@@ -73,6 +73,9 @@
   },
   "0024-micropython-shared-tinyusb-cdc-keep-tx-fifo-during-in-transfer.patch": {
    "sha256": "e0437cf768418af5e7f5cdd4a2dc8b325150dd098ab2f07ce402f33621dbbafe"
+  },
+  "0025-micropython-shared-tinyusb-usbd-stall-cdc-in-before-clearing-tx-fifo.patch": {
+   "sha256": "1853e8f04b3b3ae3cf532fe489dec9a25c5505bdc43a69a70e7997020025e1a5"
   }
  }
 }
