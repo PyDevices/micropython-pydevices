@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 12:00:00 -0500
+Subject: [PATCH] shared/tinyusb: don't clear the CDC TX FIFO under an IN
+ transfer when the host closes the port.
+
+On an ESP32-S3 on its native USB, a host that closes the CDC port while
+the board is still sending reboots it: "Guru Meditation Error: Core 1
+panic'ed (Interrupt wdt timeout on CPU1)", with the USB interrupt
+re-entering dcd_int_handler -> handle_epin_slave -> epin_write_tx_fifo
+in TinyUSB's DWC2 driver (micropython-pydevices#68). Closing straight
+after leaving raw REPL, while the banner is going out, did it 18 times in
+20 from pyserial; mpremote, terminals and IDEs that close mid-reply hit it
+too.
+
+When the host drops DTR, mp_usbd_cdc.c's line-state callback calls
+tud_cdc_n_write_clear() (added upstream in 8d3597ca5, "Fix CDC reconnect
+stall and TX FIFO"). With TinyUSB 0.21 (patch 0014) the DWC2 driver runs
+in slave mode with dedicated endpoint FIFOs, and the CDC TX stream hands
+its software FIFO to the driver instead of copying into an endpoint
+buffer (usbd_edpt_xfer_fifo, tusb.c stream_xfer). Each packet after the
+first is pulled from that FIFO in the TX-FIFO-empty interrupt. If the
+clear empties it mid-transfer, epin_write_tx_fifo() reads nothing,
+DIEPTSIZ never counts down, the interrupt stays unmasked and asserted,
+and the handler runs until the interrupt watchdog fires. TinyUSB 0.18,
+which upstream v1.29.0 pins, copies each transfer into an endpoint
+buffer, so a stock build doesn't show this.
+
+The callback now skips the clear while the CDC IN endpoint is busy. The
+FIFO is overwritable from the moment DTR drops, so what stays in it can't
+block a later write, which is what the clear was for. Raising GAHBCFG's
+TX-FIFO-empty level to "completely empty" doesn't help: set from the
+REPL, the same close still panicked 19 times in 20.
+
+Proven on a Waveshare ESP32-S3-Touch-LCD-7 (ESP32_GENERIC_S3 LCD_7,
+native USB CDC on Windows), counting panics on its UART console. Each
+trial enters raw REPL, runs print(time.ticks_ms()), sends Ctrl-B and
+closes at once:
+
+  | how the port is closed          | without | with this patch |
+  |---------------------------------|---------|-----------------|
+  | plain close (Windows drops DTR) | 18/20   | 0/40            |
+  | drop RTS and DTR, then close    | 8/20    | 0/40            |
+
+With the patch, closing in the middle of a 3000-line print loop (0/40)
+and while the board was blocked on a full TX FIFO (0/10) didn't panic
+either, and the friendly REPL, a 14 KB paste-mode block, 4000 lines of
+output read back whole and in order, and mpftp (exec, a 42 KB put with
+hash, run) all worked. Back on the unpatched build, the plain close
+panicked 19 times in 20.
+
+The ESP32-S2 and ESP32-P4 build TinyUSB 0.21 the same way, in slave
+mode (CFG_TUD_DWC2_DMA_ENABLE defaults to 0), so they share the path.
+
+Drop this patch when upstream guards the clear or TinyUSB makes
+tud_cdc_n_write_clear() safe under an in-flight transfer.
+
+Based-on: micropython 0fd6c573e (tag v1.29.0)
+---
+ shared/tinyusb/mp_usbd_cdc.c | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/shared/tinyusb/mp_usbd_cdc.c b/shared/tinyusb/mp_usbd_cdc.c
+index 8018032d3..a5f60c873 100644
+--- a/shared/tinyusb/mp_usbd_cdc.c
++++ b/shared/tinyusb/mp_usbd_cdc.c
+@@ -192,7 +192,17 @@ void MICROPY_WRAP_TUD_CDC_LINE_STATE_CB(tud_cdc_line_state_cb)(uint8_t itf, bool
+     } else {
+         // Host has closed the cdc serial port. Discard pending TX data to
+         // avoid a full FIFO blocking writes on the next connection.
+-        tud_cdc_n_write_clear(itf);
++        //
++        // But not while an IN transfer is in flight: in slave mode the DWC2
++        // driver (ESP32-S2/S3/P4) pulls each packet straight from this FIFO
++        // in its interrupt, and finding it emptied mid-transfer it writes
++        // nothing, the TX-FIFO-empty interrupt stays asserted, and the
++        // handler re-enters until the interrupt watchdog resets the chip.
++        // With DTR low the FIFO is overwritable, so what stays in it can't
++        // block a later write either.
++        if (itf != 0 || !usbd_edpt_busy(TUD_OPT_RHPORT, USBD_CDC_EP_IN)) {
++            tud_cdc_n_write_clear(itf);
++        }
+     }
+     #endif
+     #if MICROPY_HW_USB_CDC_DTR_RTS_BOOTLOADER
