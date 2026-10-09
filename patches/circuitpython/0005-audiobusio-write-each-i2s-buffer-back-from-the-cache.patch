@@ -8,6 +8,10 @@ plays what was in memory. On a P4 that was audible as scratchiness: the
 energy above 6 kHz in a 3 kHz low-passed arpeggio was 0.034% of the total
 without this and 0.0008% with it.
 
+The soc_caps.h macro is tested with defined() first: chips that lack the
+cache layout, the ESP32-S3 among them, don't define it at all, and the
+port builds with -Werror=undef.
+
 diff --git a/ports/espressif/common-hal/audiobusio/__init__.c b/ports/espressif/common-hal/audiobusio/__init__.c
 index dae7111..3272821 100644
 --- a/ports/espressif/common-hal/audiobusio/__init__.c
@@ -17,7 +21,7 @@ index dae7111..3272821 100644
  #include "freertos/FreeRTOS.h"
  #include "freertos/task.h"
 +#include "soc/soc_caps.h"
-+#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
++#if defined(SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE) && SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
 +#include "esp_cache.h"
 +#endif
  
@@ -34,7 +38,7 @@ index dae7111..3272821 100644
 +// in memory: stale audio, heard as scratchiness. Write each buffer back once
 +// it's filled.
 +static void i2s_writeback(void *buf, size_t size) {
-+    #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
++    #if defined(SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE) && SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
 +    esp_cache_msync(buf, size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 +    #endif
 +}
