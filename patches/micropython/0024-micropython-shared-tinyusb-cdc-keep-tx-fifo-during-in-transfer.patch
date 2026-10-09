@@ -41,6 +41,7 @@ closes at once:
   |---------------------------------|---------|-----------------|
   | plain close (Windows drops DTR) | 18/20   | 0/40            |
   | drop RTS and DTR, then close    | 8/20    | 0/40            |
+  | mpremote 1.28 exec, its own way | 6/20    | 0/40            |
 
 With the patch, closing in the middle of a 3000-line print loop (0/40)
 and while the board was blocked on a full TX FIFO (0/10) didn't panic
