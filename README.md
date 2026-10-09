@@ -67,7 +67,8 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   `vst3-engine`), and `webassembly/` (`pydevices`, with the `wasmbridge`
   module and a Fetch-backed `requests`), and `esp32/`: the sdkconfig
   fragments and partition table every esp32 or every chip gets, and the few
-  board variants of ours (`ESP32_GENERIC_S3` `LCD_7` and `T_EMBED`).
+  board variants of ours (`ESP32_GENERIC_S3` `LCD_7` and `T_EMBED`,
+  `ESP32_GENERIC_P4` `WIFI6_DEV_KIT`).
 - `scripts/exercise_build.sh` — builds every desktop port and two esp32
   boards from a bare clone, checks the failure paths, and writes a report of
   what should match on any machine. Needs no board.

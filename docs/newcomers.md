@@ -79,7 +79,7 @@ on top. Add `--modules` to any of these:
 
 | Board | Command |
 |---|---|
-| Waveshare ESP32-P4-WIFI6-DEV-KIT | `--port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB` |
+| Waveshare ESP32-P4-WIFI6-DEV-KIT | `--port esp32 --board ESP32_GENERIC_P4 --variant WIFI6_DEV_KIT --flash 16MB` |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-4B | `--port esp32 --board ESP32_GENERIC_P4 --variant PRE_REV3_C6_WIFI --flash 32MB` |
 | Waveshare ESP32-S3-Touch-LCD-7 | `--port esp32 --board ESP32_GENERIC_S3 --variant LCD_7 --flash 8MB` |
 | Waveshare ESP32-S3-Touch-LCD-4.3 | `--port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB` |
@@ -138,7 +138,11 @@ in this order:
 3. `variants/esp32/<BOARD>/<VARIANT>/sdkconfig`: what's left that is one
    board's alone. A variant dir of ours also holds an `mpconfigvariant.cmake`
    that includes the upstream variant it builds on, which is how `LCD_7`
-   and `T_EMBED` become variants of `ESP32_GENERIC_S3`.
+   and `T_EMBED` become variants of `ESP32_GENERIC_S3`, and `WIFI6_DEV_KIT`
+   one of `ESP32_GENERIC_P4`. That file can also set the board's C
+   defines: `WIFI6_DEV_KIT` moves the USB device to the P4's full-speed
+   controller with `MICROPY_HW_USB_HS=0`, so other P4 boards keep theirs on
+   the high-speed one.
 
 The partition table is found the same way, the most specific
 `partitions.csv` winning (`variants/esp32/partitions.esp32s3.csv` adds a
