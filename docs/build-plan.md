@@ -261,6 +261,12 @@ links, the output layout and the build record. What differs is one function:
   for the board's chip (compilers go in `~/.espressif`, shared with any
   ESP-IDF of the same version) and puts ESP-IDF's Python requirements in
   `deps/circuitpython-venv`.
+- **Our patches and boards go on first.** `patches/circuitpython/*.patch`
+  are applied to `deps/circuitpython` and each `boards/circuitpython/<port>/<board>`
+  is linked into the port's `boards/`, once each; the build record lists the
+  patches. The boards are ones CircuitPython has no definition for:
+  `feather_rp2040_lvgl` (room for LVGL) and `waveshare_esp32s3_touch_lcd_7`
+  (its 800x480 panel as `board.DISPLAY`, one 4 MB app slot).
 - **mpy-cross is built first, on its own**, for the same reason as on
   MicroPython (the trap below).
 - **`BUILD=` is a short link.** make is given `BUILD=build-<board>`, a link in
