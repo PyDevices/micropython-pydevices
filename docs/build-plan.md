@@ -98,7 +98,11 @@ for every esp32 build, `sdkconfig.<chip>` (the chip read from the board's
    in their own repos.
 3. `variants/esp32/<BOARD>/<VARIANT>/`: what's left that really is the board,
    such as the LCD-7's cache tuning. A variant of ours there carries an
-   `mpconfigvariant.cmake` that includes the upstream variant it builds on.
+   `mpconfigvariant.cmake` that includes the upstream variant it builds on,
+   and may carry an `mpconfigboard.h`, included before the board's own, for
+   a C define the ESP-IDF components read too (they see the board header
+   but not `MICROPY_DEF_BOARD`; `WIFI6_DEV_KIT`'s `MICROPY_HW_USB_HS` is
+   one).
 
 A `partitions.csv` is found the same way, the most specific winning
 (`<BOARD>/<VARIANT>/partitions.csv`, then `partitions.<chip>.csv`, then

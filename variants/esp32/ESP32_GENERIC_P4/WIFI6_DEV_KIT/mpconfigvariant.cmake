@@ -11,12 +11,11 @@
 # CH343 UART ("USB TO UART") and on USB Serial/JTAG ("USB") as before, and on
 # the full-speed device's CDC once that socket is wired.
 #
-# MICROPY_HW_USB_HS (0) needs usbif's patch 0005, which gives the device the
-# full-speed PHY: build with usbif (or "all").
+# The USB setting is in the mpconfigboard.h beside this file, not here: the
+# TinyUSB component reads the board header but not MICROPY_DEF_BOARD.
 include(${MICROPY_BOARD_DIR}/mpconfigvariant_C6_WIFI.cmake)
 
 list(FILTER MICROPY_DEF_BOARD EXCLUDE REGEX "^MICROPY_HW_BOARD_NAME=")
 list(APPEND MICROPY_DEF_BOARD
     MICROPY_HW_BOARD_NAME="Waveshare ESP32-P4-WIFI6-DEV-KIT"
-    MICROPY_HW_USB_HS=0
 )

@@ -139,10 +139,12 @@ in this order:
    board's alone. A variant dir of ours also holds an `mpconfigvariant.cmake`
    that includes the upstream variant it builds on, which is how `LCD_7`
    and `T_EMBED` become variants of `ESP32_GENERIC_S3`, and `WIFI6_DEV_KIT`
-   one of `ESP32_GENERIC_P4`. That file can also set the board's C
-   defines: `WIFI6_DEV_KIT` moves the USB device to the P4's full-speed
-   controller with `MICROPY_HW_USB_HS=0`, so other P4 boards keep theirs on
-   the high-speed one.
+   one of `ESP32_GENERIC_P4`. A variant dir may also hold an
+   `mpconfigboard.h`, included before the board's own, for C defines the
+   port's ESP-IDF components must see too: `WIFI6_DEV_KIT`'s sets
+   `MICROPY_HW_USB_HS (0)`, which moves the USB device to the P4's
+   full-speed controller, so other P4 boards keep theirs on the high-speed
+   one.
 
 The partition table is found the same way, the most specific
 `partitions.csv` winning (`variants/esp32/partitions.esp32s3.csv` adds a
