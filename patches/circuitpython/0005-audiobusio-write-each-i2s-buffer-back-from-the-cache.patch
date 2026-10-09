@@ -1,0 +1,60 @@
+audiobusio: write each I2S buffer back from the cache once it is filled
+
+ESP-IDF writes a DMA buffer back from the CPU cache right after the I2S
+on_sent callback returns. This port fills the buffer later, from a
+background callback, so on a chip whose internal RAM sits behind the L1
+cache (the ESP32-P4) the new samples can stay in the cache while the DMA
+plays what was in memory. On a P4 that was audible as scratchiness: the
+energy above 6 kHz in a 3 kHz low-passed arpeggio was 0.034% of the total
+without this and 0.0008% with it.
+
+diff --git a/ports/espressif/common-hal/audiobusio/__init__.c b/ports/espressif/common-hal/audiobusio/__init__.c
+index dae7111..3272821 100644
+--- a/ports/espressif/common-hal/audiobusio/__init__.c
++++ b/ports/espressif/common-hal/audiobusio/__init__.c
+@@ -12,6 +12,10 @@
+ #include "bindings/espidf/__init__.h"
+ #include "freertos/FreeRTOS.h"
+ #include "freertos/task.h"
++#include "soc/soc_caps.h"
++#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
++#include "esp_cache.h"
++#endif
+ 
+ #include "shared-module/audiocore/__init__.h"
+ 
+@@ -24,6 +28,18 @@
+ // The number of output channels is fixed at 2
+ #define CIRCUITPY_OUTPUT_SLOTS (2)
+ 
++// ESP-IDF writes a DMA buffer back from the CPU cache right after the on_sent
++// callback returns. This port fills the buffer later, from a background
++// callback, so on a chip whose internal RAM sits behind the L1 cache (the
++// ESP32-P4) those samples can stay in the cache while the DMA plays what was
++// in memory: stale audio, heard as scratchiness. Write each buffer back once
++// it's filled.
++static void i2s_writeback(void *buf, size_t size) {
++    #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
++    esp_cache_msync(buf, size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
++    #endif
++}
++
+ static void i2s_fill_buffer(i2s_t *self) {
+     if (self->next_buffer_size == 0) {
+         // Error, no new buffer queued.
+@@ -35,6 +51,7 @@ static void i2s_fill_buffer(i2s_t *self) {
+     size_t bytes_per_input_frame = self->channel_count * self->bytes_per_sample;
+     if (!self->playing || self->paused || !self->sample || self->stopping) {
+         memset(output_buffer, 0, self->next_buffer_size);
++        i2s_writeback(output_buffer, self->next_buffer_size);
+         self->next_buffer = NULL;
+         self->next_buffer_size = 0;
+         return;
+@@ -108,6 +125,7 @@ static void i2s_fill_buffer(i2s_t *self) {
+     if (output_buffer_size > 0) {
+         memset(output_buffer, 0, output_buffer_size);
+     }
++    i2s_writeback(self->next_buffer, self->next_buffer_size);
+     self->next_buffer = NULL;
+     self->next_buffer_size = 0;
+ }

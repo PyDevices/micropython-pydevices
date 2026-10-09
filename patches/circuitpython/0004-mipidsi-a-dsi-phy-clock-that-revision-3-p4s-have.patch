@@ -1,0 +1,24 @@
+mipidsi.Bus: a DSI PHY clock source that revision 3 ESP32-P4s have
+
+The bus asked for MIPI_DSI_PHY_CLK_SRC_DEFAULT, ESP-IDF's backward-
+compatible name for PLL_F20M, which only P4s older than revision 3 have.
+On a revision 3 chip, selecting it faulted, and every mipidsi.Bus() call
+rebooted the board into safe mode. Passing 0 lets ESP-IDF pick the PHY PLL
+reference for the chip revision the build targets.
+
+diff --git a/ports/espressif/common-hal/mipidsi/Bus.c b/ports/espressif/common-hal/mipidsi/Bus.c
+index dbb559e..ff09220 100644
+--- a/ports/espressif/common-hal/mipidsi/Bus.c
++++ b/ports/espressif/common-hal/mipidsi/Bus.c
+@@ -29,7 +29,10 @@ void common_hal_mipidsi_bus_construct(mipidsi_bus_obj_t *self, mp_uint_t frequen
+     esp_lcd_dsi_bus_config_t bus_config = {
+         .bus_id = 0,
+         .num_data_lanes = num_lanes,
+-        .phy_clk_src = MIPI_DSI_PHY_CLK_SRC_DEFAULT,
++        // 0 lets ESP-IDF pick the PHY PLL reference for the chip revision.
++        // MIPI_DSI_PHY_CLK_SRC_DEFAULT is the pre-revision-3 PLL_F20M, which
++        // a revision 3 P4 doesn't have: selecting it faults.
++        .phy_clk_src = 0,
+         .lane_bit_rate_mbps = frequency / 1000000, // Convert Hz to MHz
+     };
+ 

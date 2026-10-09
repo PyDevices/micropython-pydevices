@@ -1,0 +1,152 @@
+mipidsi.Display: non_burst and continuous_clock
+
+ESP-IDF's DPI panel always sends burst video and lets the clock lane drop
+to low power between lines. DSI-to-RGB bridges such as the Chipone ICN6211
+on Raspberry Pi-style panels need non-burst video with sync pulses and a
+continuous high-speed clock, or the panel stays white. Two keyword
+arguments set both, through the HAL context in ESP-IDF's DSI bus. The
+M5Stack Tab5 board passes False for both.
+
+diff --git a/ports/espressif/boards/m5stack_tab5/board.c b/ports/espressif/boards/m5stack_tab5/board.c
+index 7c7c768..c8fbcc2 100644
+--- a/ports/espressif/boards/m5stack_tab5/board.c
++++ b/ports/espressif/boards/m5stack_tab5/board.c
+@@ -361,7 +361,9 @@ void board_init(void) {
+         vsync_pulse_width,
+         vsync_back_porch,
+         vsync_front_porch,
+-        pixel_clock_frequency
++        pixel_clock_frequency,
++        false,                  // non_burst
++        false                   // continuous_clock
+         );
+ 
+     // Create framebuffer display
+diff --git a/ports/espressif/common-hal/mipidsi/Display.c b/ports/espressif/common-hal/mipidsi/Display.c
+index dc70f90..d2a7f7e 100644
+--- a/ports/espressif/common-hal/mipidsi/Display.c
++++ b/ports/espressif/common-hal/mipidsi/Display.c
+@@ -14,6 +14,19 @@
+ #include <esp_lcd_panel_ops.h>
+ #include <esp_heap_caps.h>
+ #include "py/runtime.h"
++#include "esp_lcd_mipi_dsi.h"
++#include "hal/mipi_dsi_hal.h"
++#include "hal/mipi_dsi_host_ll.h"
++
++// ESP-IDF's DPI panel always sends burst video and lets the clock lane drop to
++// low power between lines, with no public way to ask for anything else. The
++// HAL context that reaches those registers is inside ESP-IDF's private
++// esp_lcd_dsi_bus_t (components/esp_lcd/dsi/mipi_dsi_priv.h); its leading
++// fields are mirrored here. The layout is the same in ESP-IDF 5.5 and 6.0.
++typedef struct {
++    int bus_id;
++    mipi_dsi_hal_context_t hal;
++} mipidsi_idf_dsi_bus_t;
+ 
+ // Cache write-back function (should be from rom/cache.h but it's not always available)
+ extern int Cache_WriteBack_Addr(uint32_t addr, uint32_t size);
+@@ -37,7 +50,9 @@ void common_hal_mipidsi_display_construct(mipidsi_display_obj_t *self,
+     mp_uint_t vsync_pulse_width,
+     mp_uint_t vsync_back_porch,
+     mp_uint_t vsync_front_porch,
+-    mp_uint_t pixel_clock_frequency) {
++    mp_uint_t pixel_clock_frequency,
++    bool non_burst,
++    bool continuous_clock) {
+     self->bus = bus;
+     self->virtual_channel = virtual_channel;
+     self->width = width;
+@@ -132,6 +147,12 @@ void common_hal_mipidsi_display_construct(mipidsi_display_obj_t *self,
+         i += 2 + data_size;
+     }
+ 
++    mipi_dsi_hal_context_t *hal = &((mipidsi_idf_dsi_bus_t *)bus->bus_handle)->hal;
++    if (non_burst) {
++        // Before panel init, which turns video mode on.
++        mipi_dsi_host_ll_dpi_set_video_burst_type(hal->host, MIPI_DSI_LL_VIDEO_NON_BURST_WITH_SYNC_PULSES);
++    }
++
+     // Initialize the panel after sending init commands
+     ret = esp_lcd_panel_init(self->dpi_panel_handle);
+     if (ret != ESP_OK) {
+@@ -139,6 +160,11 @@ void common_hal_mipidsi_display_construct(mipidsi_display_obj_t *self,
+         CHECK_ESP_RESULT(ret);
+     }
+ 
++    if (continuous_clock) {
++        // After panel init, which sets the clock lane to automatic.
++        mipi_dsi_host_ll_set_clock_lane_state(hal->host, MIPI_DSI_LL_CLOCK_LANE_STATE_HS);
++    }
++
+     // Setup backlight PWM if pin is provided
+     self->backlight_inout.base.type = &mp_type_NoneType;
+     if (backlight_pin != NULL && common_hal_mcu_pin_is_free(backlight_pin)) {
+diff --git a/shared-bindings/mipidsi/Display.c b/shared-bindings/mipidsi/Display.c
+index 7f5d802..a264730 100644
+--- a/shared-bindings/mipidsi/Display.c
++++ b/shared-bindings/mipidsi/Display.c
+@@ -37,6 +37,8 @@
+ //|         brightness: float = 1.0,
+ //|         native_frames_per_second: int = 60,
+ //|         backlight_on_high: bool = True,
++//|         non_burst: bool = False,
++//|         continuous_clock: bool = False,
+ //|     ) -> None:
+ //|         """Create a MIPI DSI Display object connected to the given bus.
+ //|
+@@ -69,6 +71,10 @@
+ //|         :param float brightness: Initial display brightness (0.0 to 1.0)
+ //|         :param int native_frames_per_second: Number of display refreshes per second
+ //|         :param bool backlight_on_high: If True, pulling the backlight pin high turns the backlight on
++//|         :param bool non_burst: Send non-burst video with sync pulses instead of burst video. DSI-to-RGB
++//|           bridges such as the Chipone ICN6211 on Raspberry Pi-style panels need it.
++//|         :param bool continuous_clock: Keep the clock lane in high-speed mode instead of letting it drop
++//|           to low power between lines. The same bridges need it.
+ //|         """
+ //|
+ 
+@@ -77,7 +83,7 @@ static mp_obj_t mipidsi_display_make_new(const mp_obj_type_t *type, size_t n_arg
+            ARG_hsync_front_porch, ARG_vsync_pulse_width, ARG_vsync_back_porch, ARG_vsync_front_porch,
+            ARG_pixel_clock_frequency, ARG_virtual_channel, ARG_rotation,
+            ARG_color_depth, ARG_backlight_pin, ARG_brightness, ARG_native_frames_per_second,
+-           ARG_backlight_on_high };
++           ARG_backlight_on_high, ARG_non_burst, ARG_continuous_clock };
+     static const mp_arg_t allowed_args[] = {
+         { MP_QSTR_bus, MP_ARG_REQUIRED | MP_ARG_OBJ },
+         { MP_QSTR_init_sequence, MP_ARG_REQUIRED | MP_ARG_OBJ },
+@@ -97,6 +103,8 @@ static mp_obj_t mipidsi_display_make_new(const mp_obj_type_t *type, size_t n_arg
+         { MP_QSTR_brightness, MP_ARG_OBJ | MP_ARG_KW_ONLY, {.u_obj = MP_OBJ_NEW_SMALL_INT(1)} },
+         { MP_QSTR_native_frames_per_second, MP_ARG_INT | MP_ARG_KW_ONLY, {.u_int = 60} },
+         { MP_QSTR_backlight_on_high, MP_ARG_BOOL | MP_ARG_KW_ONLY, {.u_bool = true} },
++        { MP_QSTR_non_burst, MP_ARG_BOOL | MP_ARG_KW_ONLY, {.u_bool = false} },
++        { MP_QSTR_continuous_clock, MP_ARG_BOOL | MP_ARG_KW_ONLY, {.u_bool = false} },
+     };
+     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+     mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+@@ -138,7 +146,9 @@ static mp_obj_t mipidsi_display_make_new(const mp_obj_type_t *type, size_t n_arg
+         args[ARG_vsync_pulse_width].u_int,
+         args[ARG_vsync_back_porch].u_int,
+         args[ARG_vsync_front_porch].u_int,
+-        args[ARG_pixel_clock_frequency].u_int);
++        args[ARG_pixel_clock_frequency].u_int,
++        args[ARG_non_burst].u_bool,
++        args[ARG_continuous_clock].u_bool);
+ 
+     return MP_OBJ_FROM_PTR(self);
+ }
+diff --git a/shared-bindings/mipidsi/Display.h b/shared-bindings/mipidsi/Display.h
+index 09cf130..b356d33 100644
+--- a/shared-bindings/mipidsi/Display.h
++++ b/shared-bindings/mipidsi/Display.h
+@@ -31,7 +31,9 @@ void common_hal_mipidsi_display_construct(mipidsi_display_obj_t *self,
+     mp_uint_t vsync_pulse_width,
+     mp_uint_t vsync_back_porch,
+     mp_uint_t vsync_front_porch,
+-    mp_uint_t pixel_clock_frequency);
++    mp_uint_t pixel_clock_frequency,
++    bool non_burst,
++    bool continuous_clock);
+ void common_hal_mipidsi_display_deinit(mipidsi_display_obj_t *self);
+ bool common_hal_mipidsi_display_deinited(mipidsi_display_obj_t *self);
+ void common_hal_mipidsi_display_refresh(mipidsi_display_obj_t *self);
