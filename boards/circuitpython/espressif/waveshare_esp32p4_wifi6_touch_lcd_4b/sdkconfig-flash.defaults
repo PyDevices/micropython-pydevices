@@ -1,0 +1,5 @@
+# 16 MB of flash with one 6 MB app partition; see mpconfigboard.mk.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="boards/waveshare_esp32p4_wifi6_touch_lcd_4b/partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="boards/waveshare_esp32p4_wifi6_touch_lcd_4b/partitions.csv"
