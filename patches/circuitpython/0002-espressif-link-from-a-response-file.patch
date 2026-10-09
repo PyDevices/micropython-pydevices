@@ -1,0 +1,23 @@
+The espressif port links with every object path on one command line, which
+make hands to the shell as a single argument. Linux caps one argument at
+128 KB, and a firmware with LVGL as a user C module passes it: LVGL's objects
+are named for their absolute source paths, about 1,200 objects and 150 KB of
+paths with CircuitPython's own ("/bin/sh: Argument list too long"). This
+writes the object list to a response file with make's $(file) function, which
+never goes through the shell, and links from it, as the raspberrypi port
+already does.
+
+diff --git a/ports/espressif/Makefile b/ports/espressif/Makefile
+index 881bfbf..1659bf0 100644
+--- a/ports/espressif/Makefile
++++ b/ports/espressif/Makefile
+@@ -1101,7 +1101,8 @@ esp-idf-stamp: $(BUILD)/esp-idf/config/sdkconfig.h
+ 
+ $(BUILD)/firmware.elf: $(OBJ) | esp-idf-stamp $(IDF_CMAKE_TARGETS)
+ 	$(STEPECHO) "LINK $@"
+-	$(Q)$(CC) -o $@ $(LDFLAGS) $^ -Wl,--print-memory-usage -Wl,--start-group $(ESP_IDF_COMPONENTS_EXPANDED) $(BINARY_BLOBS) $(MBEDTLS_COMPONENTS_LINK_EXPANDED) $(LIBS) -Wl,--end-group $(REGISTRATION_FUNCTIONS)
++	$(file >$(BUILD)/firmware.objs,$^)
++	$(Q)$(CC) -o $@ $(LDFLAGS) @$(BUILD)/firmware.objs -Wl,--print-memory-usage -Wl,--start-group $(ESP_IDF_COMPONENTS_EXPANDED) $(BINARY_BLOBS) $(MBEDTLS_COMPONENTS_LINK_EXPANDED) $(LIBS) -Wl,--end-group $(REGISTRATION_FUNCTIONS)
+ 
+ $(BUILD)/circuitpython-firmware.bin: $(BUILD)/firmware.elf | tools/build_memory_info.py
+ 	$(STEPECHO) "Create $@"
