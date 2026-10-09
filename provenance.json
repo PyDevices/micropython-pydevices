@@ -79,6 +79,9 @@
   },
   "0026-micropython-shared-tinyusb-usbd-stall-busy-runtime-in-endpoints-with-irq-held-off.patch": {
    "sha256": "0b82c38683fd8c365f19e55170b925895e63886a9d9c43c27e99b72cc941a519"
+  },
+  "0027-micropython-esp32-sdcard-stage-unaligned-buffers-for-multi-sector-dma.patch": {
+   "sha256": "b3f0a51a2d8d387154e87ad9e5d905a444e26d5a8b73abab71efb97e3a98dd7b"
   }
  }
 }

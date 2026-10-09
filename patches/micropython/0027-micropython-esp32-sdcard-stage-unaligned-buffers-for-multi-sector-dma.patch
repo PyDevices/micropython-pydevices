@@ -1,0 +1,169 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 16:00:00 -0500
+Subject: [PATCH] esp32/machine_sdcard: stage unaligned buffers so transfers
+ stay multi-sector.
+
+On an ESP32-P4 a card in the SDMMC slot reads at about 0.9 MB/s and
+writes at about 0.2 MB/s through a mounted filesystem, while the same
+card moves 7.4 MB/s and 5.5 MB/s when the buffer handed to readblocks()
+and writeblocks() happens to be cache-line aligned.
+
+ESP-IDF's sdmmc_read_sectors() and sdmmc_write_sectors() take the DMA
+path only for a buffer the host can DMA into: aligned to the cache line
+of the memory it is in, and, on chips whose SDMMC can't reach PSRAM, not
+in PSRAM. Any other buffer is moved one sector per command through a
+512-byte temporary, so each sector costs a command and, when writing,
+the card's whole busy period. A MicroPython bytearray is 16-byte
+aligned and on a chip with PSRAM usually lives there, and FatFs passes
+the caller's buffer straight down for whole sectors, so this slow path
+is what every file read and write takes.
+
+A buffer the host can't DMA into is now staged through a 16 KB
+DMA-capable internal buffer, 32 sectors per transfer. It is allocated on
+first need, so boards whose heap is internal RAM never pay for it, and
+deinit() frees it. If the allocation fails the old path still works.
+
+Measured on an ESP32-P4 (Waveshare ESP32-P4-WIFI6-Touch-LCD-4B, 32 GB
+SDHC card, 4-bit at the default 20 MHz), 1 MB in 32 KB calls through a
+mounted FAT32 filesystem unless noted, every transfer hash-checked:
+
+  | path                                 | before    | this patch |
+  |--------------------------------------|-----------|------------|
+  | file write, 16-byte-aligned buffer   | 194 KB/s  | 3776-4049  |
+  | file read, 16-byte-aligned buffer    | 888 KB/s  | 6240-6277  |
+  | file write, odd address              | 192 KB/s  | 4000-4009  |
+  | file read, odd address               | 888 KB/s  | 6214-6215  |
+  | file write, 128-byte-aligned buffer  | 4743-5133 | 4742-5119  |
+  | file read, 128-byte-aligned buffer   | 7422-7610 | 7383-7417  |
+  | readblocks(), 16-byte-aligned buffer | 1049 KB/s | 6786 KB/s  |
+
+A buffer that was already aligned takes the same path as before. A
+100-sector readblocks() (three full stagings and a partial one) into
+16-byte-aligned and odd buffers matched the aligned read byte for byte,
+and a 1 MB file written through the staging read back with the same
+SHA-256 after a hard reset.
+---
+ ports/esp32/machine_sdcard.c | 65 ++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 63 insertions(+), 2 deletions(-)
+
+diff --git a/ports/esp32/machine_sdcard.c b/ports/esp32/machine_sdcard.c
+index ce0419bd5..404b79496 100644
+--- a/ports/esp32/machine_sdcard.c
++++ b/ports/esp32/machine_sdcard.c
+@@ -43,6 +43,8 @@
+ #include "driver/sdspi_host.h"
+ #include "sdmmc_cmd.h"
+ #include "esp_log.h"
++#include "esp_heap_caps.h"
++#include "esp_memory_utils.h"
+ 
+ #include "machine_sdcard.h"
+ 
+@@ -67,8 +69,20 @@ typedef struct _sdcard_obj_t {
+     // The card structure duplicates the host. It's not clear if we
+     // can avoid this given the way that it is copied.
+     sdmmc_card_t card;
++    // DMA-capable staging for buffers the host can't DMA into directly,
++    // allocated on first need and freed by deinit().
++    uint8_t *bounce;
+ } sdcard_card_obj_t;
+ 
++// Sectors staged per transfer when the caller's buffer isn't DMA-capable.
++// ESP-IDF moves such a buffer one sector per command, which on a card is
++// a whole command and busy wait per 512 bytes: on an ESP32-P4 that reads
++// 8x and writes 25x slower than one multi-sector transfer. A MicroPython bytearray
++// is only 16-byte aligned, and on a chip with PSRAM it usually lives
++// there, so this is the common case, not the exception.
++#define SDCARD_BOUNCE_SECTORS (32)
++#define SDCARD_BOUNCE_ALIGN (128)
++
+ #define SDCARD_CARD_FLAGS_HOST_INIT_DONE 0x01
+ #define SDCARD_CARD_FLAGS_CARD_INIT_DONE 0x02
+ 
+@@ -297,6 +311,7 @@ static mp_obj_t machine_sdcard_make_new(const mp_obj_type_t *type, size_t n_args
+ 
+     sdcard_card_obj_t *self = mp_obj_malloc_with_finaliser(sdcard_card_obj_t, &machine_sdcard_type);
+     self->flags = 0;
++    self->bounce = NULL;
+     // Note that these defaults are macros that expand to structure
+     // constants so we can't directly assign them to fields.
+     int freq = arg_vals[ARG_freq].u_int;
+@@ -483,6 +498,10 @@ static mp_obj_t sd_deinit(mp_obj_t self_in) {
+         #endif
+         self->flags &= ~SDCARD_CARD_FLAGS_HOST_INIT_DONE;
+     }
++    if (self->bounce) {
++        heap_caps_free(self->bounce);
++        self->bounce = NULL;
++    }
+ 
+     return mp_const_none;
+ }
+@@ -508,6 +527,48 @@ static mp_obj_t sd_info(mp_obj_t self_in) {
+ }
+ static MP_DEFINE_CONST_FUN_OBJ_1(sd_info_obj, sd_info);
+ 
++// Read or write whole sectors. A buffer the host can DMA into goes straight
++// through; anything else is staged through a DMA-capable buffer a few
++// sectors at a time, so the card still sees multi-sector transfers.
++static esp_err_t sdcard_transfer(sdcard_card_obj_t *self, uint8_t *buf, size_t block, size_t count, bool write) {
++    size_t sector = _SECTOR_SIZE(self);
++    bool direct = self->card.host.check_buffer_alignment == NULL
++        || self->card.host.check_buffer_alignment(self->card.host.slot, buf, sector * count);
++    #if !SOC_SDMMC_PSRAM_DMA_CAPABLE
++    // The same test ESP-IDF applies before it takes the DMA path.
++    direct = direct && !esp_ptr_external_ram(buf);
++    #endif
++    if (!direct && self->bounce == NULL && sector * SDCARD_BOUNCE_SECTORS % SDCARD_BOUNCE_ALIGN == 0) {
++        self->bounce = heap_caps_aligned_alloc(SDCARD_BOUNCE_ALIGN, sector * SDCARD_BOUNCE_SECTORS,
++            MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
++    }
++    if (direct || self->bounce == NULL) {
++        // ESP-IDF's own path, which copes with any buffer, a sector at a time.
++        return write ? sdmmc_write_sectors(&self->card, buf, block, count)
++                     : sdmmc_read_sectors(&self->card, buf, block, count);
++    }
++    while (count > 0) {
++        size_t n = count < SDCARD_BOUNCE_SECTORS ? count : SDCARD_BOUNCE_SECTORS;
++        esp_err_t err;
++        if (write) {
++            memcpy(self->bounce, buf, n * sector);
++            err = sdmmc_write_sectors(&self->card, self->bounce, block, n);
++        } else {
++            err = sdmmc_read_sectors(&self->card, self->bounce, block, n);
++            if (err == ESP_OK) {
++                memcpy(buf, self->bounce, n * sector);
++            }
++        }
++        if (err != ESP_OK) {
++            return err;
++        }
++        buf += n * sector;
++        block += n;
++        count -= n;
++    }
++    return ESP_OK;
++}
++
+ static mp_obj_t machine_sdcard_readblocks(mp_obj_t self_in, mp_obj_t block_num, mp_obj_t buf) {
+     sdcard_card_obj_t *self = self_in;
+     mp_buffer_info_t bufinfo;
+@@ -519,7 +580,7 @@ static mp_obj_t machine_sdcard_readblocks(mp_obj_t self_in, mp_obj_t block_num,
+     }
+ 
+     mp_get_buffer_raise(buf, &bufinfo, MP_BUFFER_WRITE);
+-    err = sdmmc_read_sectors(&(self->card), bufinfo.buf, mp_obj_get_int(block_num), bufinfo.len / _SECTOR_SIZE(self));
++    err = sdcard_transfer(self, bufinfo.buf, mp_obj_get_int(block_num), bufinfo.len / _SECTOR_SIZE(self), false);
+ 
+     int ret = err == ESP_OK ? 0 : -MP_EIO;
+     return MP_OBJ_NEW_SMALL_INT(ret);
+@@ -537,7 +598,7 @@ static mp_obj_t machine_sdcard_writeblocks(mp_obj_t self_in, mp_obj_t block_num,
+     }
+ 
+     mp_get_buffer_raise(buf, &bufinfo, MP_BUFFER_READ);
+-    err = sdmmc_write_sectors(&(self->card), bufinfo.buf, mp_obj_get_int(block_num), bufinfo.len / _SECTOR_SIZE(self));
++    err = sdcard_transfer(self, bufinfo.buf, mp_obj_get_int(block_num), bufinfo.len / _SECTOR_SIZE(self), true);
+ 
+     int ret = err == ESP_OK ? 0 : -MP_EIO;
+     return MP_OBJ_NEW_SMALL_INT(ret);
