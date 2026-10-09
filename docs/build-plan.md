@@ -271,6 +271,18 @@ links, the output layout and the build record. What differs is one function:
   console on USB Serial/JTAG) and `waveshare_esp32p4_wifi6_touch_lcd_4b`
   (revision 1, console on the CH343 UART; its panel isn't set up yet), each
   with one 6 MB app slot.
+- **A module can ask espressif for ESP-IDF components.** CircuitPython's
+  espressif port builds and links a fixed list of ESP-IDF components, which
+  leaves out the camera's. With `0006-espressif-esp-idf-components-a-user-c-module-asks-for.patch`,
+  a module's `micropython.mk` adds names to `USER_ESP_IDF_COMPONENTS`
+  (cameraif: the CSI controller, the ISP and the sensor drivers; jpegio and
+  ppa: the P4's JPEG engine and PPA), and the make line's
+  `USER_ESP_IDF_COMPONENT_DIRS` adds components ESP-IDF doesn't ship.
+  CircuitPython builds with the component manager off, so for cameraif the
+  build fetches `esp_cam_sensor`, `esp_sccb_intf` and `cmake_utilities` at
+  their `deps.lock` versions into `deps/` and passes them. On CircuitPython,
+  jpegio is only the encoder's C API (CircuitPython has its own `jpegio`
+  decoder module). The DEV-KIT's board sdkconfig enables the OV5647.
 - **mpy-cross is built first, on its own**, for the same reason as on
   MicroPython (the trap below).
 - **`BUILD=` is a short link.** make is given `BUILD=build-<board>`, a link in

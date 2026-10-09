@@ -1,6 +1,8 @@
 # Toolchain pins: name, URL, version. A build fetches and checks only the one
 # its port uses: esp-idf for esp32, emsdk for webassembly, SDL2 for windows
-# when displayif is selected, circuitpython for --interpreter circuitpython.
+# when displayif is selected, circuitpython for --interpreter circuitpython,
+# and the ESP-IDF components below for a CircuitPython espressif build with
+# cameraif.
 # In a workspace deps/<name> may be a symlink to a shared checkout, and a
 # build refuses if it isn't the version below.
 # The ESP-IDF version is our choice, not upstream's recommendation.
@@ -12,3 +14,11 @@ SDL2      https://github.com/libsdl-org/SDL/releases/download/release-2.30.10/SD
 # to a sibling. 11.0.0-alpha.1 is commit 520805e12, the first release of the
 # 11.0 line, whose core is MicroPython 1.29, like UPSTREAM.
 circuitpython https://github.com/adafruit/circuitpython.git                                                  11.0.0-alpha.1
+# ESP-IDF components for cameraif on CircuitPython's espressif port: the camera
+# sensor drivers and the two components they need, from Espressif's component
+# registry, at the versions MicroPython's P4 build resolves. CircuitPython
+# builds with the component manager off, so these are fetched into deps/ when
+# an espressif build names cameraif.
+esp_cam_sensor  https://components-file.espressif.com/components/espressif/esp_cam_sensor/2.6.0/espressif__esp_cam_sensor-v2.6.0.zip    2.6.0
+esp_sccb_intf   https://components-file.espressif.com/components/espressif/esp_sccb_intf/0.0.9/espressif__esp_sccb_intf-v0.0.9.zip      0.0.9
+cmake_utilities https://components-file.espressif.com/components/espressif/cmake_utilities/0.5.3/espressif__cmake_utilities-v0.5.3.zip  0.5.3

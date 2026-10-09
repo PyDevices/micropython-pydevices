@@ -11,6 +11,25 @@
 JPEGIO_MOD_DIR := $(USERMOD_DIR)
 JPEGIO_DIR := $(JPEGIO_MOD_DIR)/src
 
+ifneq ($(wildcard $(TOP)/py/circuitpy_mpconfig.h),)
+# CircuitPython has a jpegio module of its own (the decoder, on its own
+# TJpgDec), so there this module adds no Python module and no decoder: only
+# the encoder's C API, jpegio_encode(), which cameraif's capture_jpeg() calls.
+# On an ESP32-P4 it encodes on the chip's JPEG engine, as on MicroPython.
+SRC_USERMOD_C += $(JPEGIO_DIR)/jpegio_enc.c
+SRC_USERMOD_LIB_C += $(JPEGIO_DIR)/jpegio_hw.c
+SRC_USERMOD_LIB_C += $(JPEGIO_DIR)/jpegenc/jpegenc.c
+ifeq ($(IDF_TARGET),esp32p4)
+CFLAGS_USERMOD += -DJPEGIO_HW=1 \
+	-isystem $(TOP)/ports/espressif/esp-idf/components/esp_driver_jpeg/include \
+	-isystem $(TOP)/ports/espressif/esp-idf/components/esp_hal_jpeg/include \
+	-isystem $(TOP)/ports/espressif/esp-idf/components/esp_hal_jpeg/esp32p4/include
+# Built and linked by CircuitPython's espressif port when a module names them
+# (micropython-pydevices' CircuitPython patches).
+USER_ESP_IDF_COMPONENTS += esp_driver_jpeg esp_hal_jpeg
+endif
+else
+
 CFLAGS_USERMOD += -I$(JPEGIO_DIR)/tjpgd
 
 SRC_USERMOD_C += $(JPEGIO_DIR)/jpegio.c
@@ -41,4 +60,5 @@ SRC_USERMOD_LIB_C += $(JPEGIO_DIR)/lvgl_decoder.c
 # on ports that append those after CFLAGS_USERMOD (unix, webassembly): the
 # same per-object suppression lvgl-micropython puts on LVGL's own objects.
 $(eval $(BUILD)/$(patsubst $(JPEGIO_MOD_DIR)/%,$(notdir $(JPEGIO_MOD_DIR))/%,$(JPEGIO_DIR)/lvgl_decoder.o): CFLAGS += -Wno-double-promotion -Wno-float-conversion)
+endif
 endif
