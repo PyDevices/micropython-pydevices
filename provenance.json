@@ -76,6 +76,9 @@
   },
   "0025-micropython-shared-tinyusb-usbd-stall-cdc-in-before-clearing-tx-fifo.patch": {
    "sha256": "1853e8f04b3b3ae3cf532fe489dec9a25c5505bdc43a69a70e7997020025e1a5"
+  },
+  "0026-micropython-shared-tinyusb-usbd-stall-busy-runtime-in-endpoints-with-irq-held-off.patch": {
+   "sha256": "0b82c38683fd8c365f19e55170b925895e63886a9d9c43c27e99b72cc941a519"
   }
  }
 }
