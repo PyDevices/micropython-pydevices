@@ -94,8 +94,10 @@ static void jpegio_hw_widen(const uint8_t *src, int width, int height, size_t st
         const uint8_t *p = src;
         int x = 0;
         if ((((uintptr_t)p | (uintptr_t)dst) & 3) == 0) {
-            const uint32_t *pw = (const uint32_t *)p;
-            uint32_t *dw = (uint32_t *)dst;
+            // Through void *: the alignment was checked just above, which
+            // -Wcast-align (CircuitPython builds with it) can't see.
+            const uint32_t *pw = (const uint32_t *)(const void *)p;
+            uint32_t *dw = (uint32_t *)(void *)dst;
             for (; x + 4 <= width; x += 4, pw += 2, dw += 3) {
                 uint32_t a = pw[0], b = pw[1];
                 if (swap) {

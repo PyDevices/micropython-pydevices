@@ -39,6 +39,7 @@ import sys
 import tarfile
 import tempfile
 import urllib.request
+import zipfile
 from pathlib import Path
 
 try:
@@ -204,6 +205,11 @@ def dep_version(name, path):
         # The tag the checkout is exactly at; CircuitPython's own build reads
         # its version the same way, from git describe.
         return git_out(path, "describe", "--tags", "--exact-match")
+    if name in CP_ESP_IDF_COMPONENT_DEPS:
+        # An ESP-IDF component's own manifest says its version.
+        f = path / "idf_component.yml"
+        m = re.search(r"^version:\s*['\"]?([^'\"\s]+)", f.read_text(), re.M) if f.exists() else None
+        return m.group(1) if m else ""
     if name == "SDL2":
         h = path / "x86_64-w64-mingw32" / "include" / "SDL2" / "SDL_version.h"
         if not h.exists():
@@ -237,6 +243,17 @@ def ensure_dep(name, ws):
                     t.extractall(tmp)
                 top = next(p for p in Path(tmp).iterdir() if p.is_dir())
                 shutil.move(str(top), str(dest))
+        elif url.endswith(".zip"):
+            # An ESP-IDF component from Espressif's registry: its files sit at
+            # the archive's top level.
+            DEPS.mkdir(exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=DEPS) as tmp:
+                archive = Path(tmp) / "component.zip"
+                say(f"downloading {url}")
+                urllib.request.urlretrieve(url, archive)
+                with zipfile.ZipFile(archive) as z:
+                    z.extractall(Path(tmp) / name)
+                shutil.move(str(Path(tmp) / name), str(dest))
     have = dep_version(name, dest.resolve())
     if have != version:
         die(f"deps/{name} is {have or 'unreadable'}, but deps.lock wants {version}")
@@ -519,6 +536,13 @@ CP_VENV = DEPS / "circuitpython-venv"
 # source, and board definitions CircuitPython doesn't have.
 CP_PATCHES = REPO / "patches" / "circuitpython"
 CP_BOARDS = REPO / "boards" / "circuitpython"
+# ESP-IDF components a module needs on CircuitPython's espressif port that
+# ESP-IDF doesn't ship. MicroPython's esp32 build gets them from Espressif's
+# component manager; CircuitPython builds with it off, so they are pinned in
+# deps.lock, fetched into deps/, and handed to make as
+# USER_ESP_IDF_COMPONENT_DIRS (one of our CircuitPython patches).
+CP_ESP_IDF_COMPONENTS = {"cameraif": ("esp_cam_sensor", "esp_sccb_intf", "cmake_utilities")}
+CP_ESP_IDF_COMPONENT_DEPS = {n for names in CP_ESP_IDF_COMPONENTS.values() for n in names}
 
 
 def lock_beside(path):
@@ -755,10 +779,19 @@ def build_circuitpython(args, make_extra, ws):
     # The unix port's own default variant is coverage.
     build = OUT_DIR / "circuitpython" / port / (board or variant or "coverage")
     module_set = sorted(d.name if d.parent == MODULES_DIR else str(d) for d in module_dirs)
+    components = []
+    if port == "espressif":
+        for d in module_dirs:
+            for name in CP_ESP_IDF_COMPONENTS.get(module_name(d), ()):
+                if name not in components:
+                    components.append(name)
+    component_dirs = [ensure_dep(name, ws) for name in components]
     # make's own arguments are part of what was built: a CIRCUITPY_X=0 left
     # out of the next build would otherwise keep its generated module table.
     want = {"interpreter": "circuitpython", "port": port, "board": board, "variant": variant,
             "modules": spec, "module_set": module_set, "make_args": make_extra}
+    if components:
+        want["esp_idf_components"] = [f"{n} {dep_version(n, d)}" for n, d in zip(components, component_dirs)]
     rec_path = build_dir_for(build, want, args.clean)
     user_c = cp_user_c_modules(module_dirs, build / "usermods")
 
@@ -799,6 +832,8 @@ def build_circuitpython(args, make_extra, ws):
         make.append(f"BOARD={board}")
     elif variant:
         make.append(f"VARIANT={variant}")
+    if component_dirs:
+        make.append("USER_ESP_IDF_COMPONENT_DIRS=" + " ".join(str(d) for d in component_dirs))
     make += make_extra
     say(f"CircuitPython {dep_version('circuitpython', cp)} {port} {board or variant or 'coverage'}; "
         f"USER_C_MODULES: {' '.join(str(d) for d in user_c) or '(none)'}")

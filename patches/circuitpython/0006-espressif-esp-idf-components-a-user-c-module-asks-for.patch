@@ -1,0 +1,122 @@
+espressif: build the ESP-IDF components a user C module asks for
+
+The espressif port builds a fixed list of ESP-IDF components (CMakeLists.txt)
+and links a fixed list of their libraries (ESP_IDF_COMPONENTS_LINK), so a user
+C module that drives a peripheral CircuitPython doesn't, such as the ESP32-P4's
+MIPI-CSI camera controller, has nothing to link against. This lets a module
+name the components it needs, and lets the make line add directories of
+components ESP-IDF doesn't ship:
+
+- USER_ESP_IDF_COMPONENTS: component names, appended by a module's
+  micropython.mk. Each is configured, built and linked.
+- USER_ESP_IDF_COMPONENT_DIRS: directories of out-of-tree components (from
+  Espressif's registry, since the build runs with the component manager off).
+  Every component in them is configured and built.
+
+Both are empty unless a build sets them, and then nothing changes.
+
+Two things the camera needs beyond that. esp_cam_sensor keeps each sensor's
+probe in a linker section nothing names, and its CMakeLists.txt adds
+`-u <sensor>_detect` for each sensor whose AUTO_DETECT option is on; this
+link isn't CMake's, so the same options are read from the sdkconfig. And like
+esp-camera, the cameraif module holds an SCCB device on the board I2C, so it
+is closed in reset_port_early(), before the board buses are deleted, when it
+is in the firmware.
+
+diff --git a/ports/espressif/CMakeLists.txt b/ports/espressif/CMakeLists.txt
+--- a/ports/espressif/CMakeLists.txt
++++ b/ports/espressif/CMakeLists.txt
+@@ -8,6 +8,20 @@
+ set(COMPONENTS bt driver esp_driver_dac esp_driver_gpio esp_driver_gptimer esp_driver_i2c esp_driver_i2s esp_driver_ledc esp_driver_pcnt esp_driver_rmt esp_driver_sdmmc esp_driver_spi esp_driver_touch_sens esp_driver_tsens esp_driver_uart esp-tls esp_adc esp_event esp_netif esp_psram esp_security esp_wifi esptool_py freertos log lwip main mbedtls mdns pthread soc ulp wpa_supplicant esp_lcd vfs esp_stdio sdmmc esp-camera)
+ set(EXTRA_COMPONENT_DIRS "esp-protocols/components/mdns" "esp-camera")
+ 
++# ESP-IDF components a user C module needs that this list leaves out
++# (USER_ESP_IDF_COMPONENTS, which the module's micropython.mk adds to), and
++# directories of components ESP-IDF doesn't ship (USER_ESP_IDF_COMPONENT_DIRS,
++# given on the make line). Every component in such a directory is built: it
++# is there because a module asked for it. Both are empty unless a build asks,
++# so other builds configure exactly as before.
++foreach(dir ${USER_ESP_IDF_COMPONENT_DIRS})
++    list(APPEND EXTRA_COMPONENT_DIRS ${dir})
++    get_filename_component(name ${dir} NAME)
++    list(APPEND COMPONENTS ${name})
++endforeach()
++list(APPEND COMPONENTS ${USER_ESP_IDF_COMPONENTS})
++list(REMOVE_DUPLICATES COMPONENTS)
++
+ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+ project(circuitpython)
+ 
+diff --git a/ports/espressif/Makefile b/ports/espressif/Makefile
+--- a/ports/espressif/Makefile
++++ b/ports/espressif/Makefile
+@@ -879,13 +879,19 @@
+ 
+ SDKCONFIGS := esp-idf-config/sdkconfig.defaults;$(DEBUG_SDKCONFIG);$(FLASH_SIZE_SDKCONFIG);$(FLASH_MODE_SDKCONFIG);$(FLASH_SPEED_SDKCONFIG);$(PSRAM_SDKCONFIG);$(PSRAM_SIZE_SDKCONFIG);$(PSRAM_MODE_SDKCONFIG);$(PSRAM_SPEED_SDKCONFIG);$(BLE_SDKCONFIG)$(NATIVE_SDKCONFIG);$(TARGET_SDKCONFIG);boards/$(BOARD)/sdkconfig
+ 
++# A user C module's ESP-IDF components (see CMakeLists.txt), as CMake lists.
++USER_ESP_IDF_SPACE := $() $()
++USER_ESP_IDF_CMAKE_ARGS = \
++	-DUSER_ESP_IDF_COMPONENTS="$(subst $(USER_ESP_IDF_SPACE),;,$(strip $(USER_ESP_IDF_COMPONENTS)))" \
++	-DUSER_ESP_IDF_COMPONENT_DIRS="$(subst $(USER_ESP_IDF_SPACE),;,$(strip $(abspath $(USER_ESP_IDF_COMPONENT_DIRS))))"
++
+ # create the config headers
+ .PHONY: do-sdkconfig
+ do-sdkconfig: $(BUILD)/esp-idf/config/sdkconfig.h
+ QSTR_GLOBAL_REQUIREMENTS += $(BUILD)/esp-idf/config/sdkconfig.h
+ $(BUILD)/esp-idf/config/sdkconfig.h: boards/$(BOARD)/sdkconfig boards/$(BOARD)/mpconfigboard.mk CMakeLists.txt | $(BUILD)/esp-idf
+ 	$(STEPECHO) "Create $@"
+-	$(Q)env IDF_PATH=$(IDF_PATH) IDF_COMPONENT_MANAGER=0 cmake -S . -B $(BUILD)/esp-idf -DSDKCONFIG=$(BUILD)/esp-idf/sdkconfig -DSDKCONFIG_DEFAULTS="$(SDKCONFIGS)" -DCMAKE_TOOLCHAIN_FILE=$(IDF_PATH)/tools/cmake/toolchain-$(IDF_TARGET).cmake -DIDF_TARGET=$(IDF_TARGET) -GNinja
++	$(Q)env IDF_PATH=$(IDF_PATH) IDF_COMPONENT_MANAGER=0 cmake -S . -B $(BUILD)/esp-idf -DSDKCONFIG=$(BUILD)/esp-idf/sdkconfig -DSDKCONFIG_DEFAULTS="$(SDKCONFIGS)" -DCMAKE_TOOLCHAIN_FILE=$(IDF_PATH)/tools/cmake/toolchain-$(IDF_TARGET).cmake -DIDF_TARGET=$(IDF_TARGET) $(USER_ESP_IDF_CMAKE_ARGS) -GNinja
+ 	$(Q)$(PYTHON) tools/check-sdkconfig.py \
+ 		CIRCUITPY_DUALBANK=$(CIRCUITPY_DUALBANK) \
+ 		CIRCUITPY_STORAGE_EXTEND=$(CIRCUITPY_STORAGE_EXTEND) \
+@@ -996,6 +1002,21 @@
+ ifneq ($(CIRCUITPY_SDIOIO),0)
+ 	ESP_IDF_COMPONENTS_LINK += sdmmc esp_driver_sdmmc esp_driver_sd_intf esp_hal_sd
+ endif
++# Each component a user C module named builds a library; link them all.
++ESP_IDF_COMPONENTS_LINK += $(USER_ESP_IDF_COMPONENTS)
++# esp_cam_sensor registers each camera sensor's probe in a linker section that
++# no code names. Under CMake its CMakeLists.txt adds `-u <sensor>_detect` for
++# every sensor whose AUTO_DETECT option is set, so the probe is kept; this
++# link isn't CMake's, so the same options are read from the sdkconfig, at
++# link time, once it exists. Without them the sensor table is empty and every
++# camera looks absent.
++ifneq ($(filter esp_cam_sensor,$(USER_ESP_IDF_COMPONENTS)),)
++ESP_CAM_SENSOR_DETECT = $(addprefix -u ,$(addsuffix _detect,$(shell sed -n \
++	-e 's/^CONFIG_CAMERA_\(.*\)_AUTO_DETECT.*=y$$/\1/p' \
++	-e 's/^CONFIG_CAM_MOTOR_\(.*\)_AUTO_DETECT=y$$/\1/p' \
++	$(BUILD)/esp-idf/sdkconfig | tr A-Z a-z | sort -u)))
++REGISTRATION_FUNCTIONS += $(ESP_CAM_SENSOR_DETECT)
++endif
+ 
+ ESP_IDF_COMPONENTS_EXPANDED = $(foreach component, $(ESP_IDF_COMPONENTS_LINK), $(BUILD)/esp-idf/esp-idf/$(component)/lib$(component).a)
+ 
+diff --git a/ports/espressif/supervisor/port.c b/ports/espressif/supervisor/port.c
+--- a/ports/espressif/supervisor/port.c
++++ b/ports/espressif/supervisor/port.c
+@@ -413,6 +413,9 @@
+ }
+ #endif
+ 
++// Defined by the cameraif user C module, when it is in this firmware.
++extern void cameraif_reset(void) __attribute__((weak));
++
+ void reset_port_early(void) {
+     // esp-camera adds an I2C device on the ESP I2C bus, and keeps it there. This
+     // is unlike busio.I2C, which adds and removes the device on each operation.
+@@ -421,6 +424,13 @@
+     #if CIRCUITPY_ESPCAMERA
+     espcamera_reset();
+     #endif
++
++    // The cameraif user C module (MIPI-CSI cameras) holds its SCCB device on
++    // the board I2C the same way, along with the CSI controller, the ISP and
++    // the PHY's LDO. When it is in the firmware, it closes the camera here.
++    if (cameraif_reset != NULL) {
++        cameraif_reset();
++    }
+ }
+ 
+ void reset_port(void) {
