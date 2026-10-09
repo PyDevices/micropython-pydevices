@@ -1,0 +1,93 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 14:00:00 -0500
+Subject: [PATCH] shared/tinyusb: stall a busy runtime IN endpoint with the USB
+ interrupt held off on disconnect.
+
+On an ESP32-S3 on its native USB, machine.USBDevice().active(False)
+while a runtime interface (one defined from Python, such as
+micropython-lib's usb-device-cdc) is sending hangs the board for good,
+with no REPL on either port (micropython-pydevices#73). A soft reset with
+the runtime device active takes the same path.
+
+mp_usbd_disconnect() stalls every endpoint that has a transfer in flight.
+Disabling a busy IN endpoint in TinyUSB 0.21's DWC2 driver (patch 0014)
+polls DIEPINT for NAK-effective and then endpoint-disabled, and the
+interrupt handler writes back every DIEPINT bit it reads. In slave mode
+the TX-FIFO-empty interrupt keeps firing while a multi-packet transfer
+runs, so one that lands between the hardware setting a flag and the poll
+reading it clears the flag, and the poll spins forever. Patch 0025 fixed
+the same race for the built-in CDC by stalling it with the USB interrupt
+held off.
+
+A busy runtime IN endpoint is now stalled the same way, in an atomic
+section of its own. OUT endpoints are still stalled with the interrupt
+running, because disabling one waits for the global OUT NAK, which in
+slave mode only arrives when the interrupt pops it from the RX FIFO; the
+OUT side's endpoint-disabled flag is one the handler never clears. The IN
+half waits only on the hardware, so it finishes with the interrupt held
+off.
+
+The other ways to close the race live in the DWC2 driver: wait on the
+endpoint's own enable bit (which the core clears and the handler never
+writes) instead of the flags, or have the handler write back only the
+bits it acts on. Both are the better fix upstream, but this port builds
+TinyUSB from the IDF component manager, which this series can't patch,
+and the atomic section is the mechanism patch 0025 already proved.
+
+Proven on a Waveshare ESP32-S3-Touch-LCD-7 (ESP32_GENERIC_S3 LCD_7, with
+usbif), driven from its UART console. Each trial soft-resets, builds a
+runtime device, waits for Windows to configure it and open the port,
+keeps the IN endpoint busy and calls active(False); the endpoint was
+busy at every disconnect. All the failures were hangs:
+
+  | runtime interface, how it is kept busy             | before | this patch |
+  |----------------------------------------------------|--------|------------|
+  | usb-device-cdc, one 16 KB write, disconnect 0-6 ms | 5/40   | 0/80       |
+  | usb-device-cdc, writing for 150 ms, then 0-600 us  | 4/40   | 0/40       |
+  | usb-device-mouse at a 1 ms interval, empty reports | 0/40   | 0/40       |
+
+A HID report is a single packet, so its endpoint gives the interrupt no
+window: that row passes either way. With the patch, patch 0025's own
+trials on the built-in CDC (active(False) and the switch to a runtime
+device, mid-print) were 0 in 40, and the friendly REPL, a 12 KB paste-mode
+block, 4000 lines read back whole and in order, and mpftp (exec, a 78 KB
+put with hash, run, rm) all worked over the CDC.
+
+The ESP32-S2 and ESP32-P4 build TinyUSB 0.21 the same way, in slave mode
+(CFG_TUD_DWC2_DMA_ENABLE defaults to 0), so they share the path.
+
+Drop this patch when TinyUSB's DWC2 endpoint disable stops depending on
+interrupt flags the handler can clear.
+
+Based-on: micropython 0fd6c573e (tag v1.29.0)
+---
+ shared/tinyusb/mp_usbd_runtime.c | 16 +++++++++++++++-
+ 1 file changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
+--- a/shared/tinyusb/mp_usbd_runtime.c
++++ b/shared/tinyusb/mp_usbd_runtime.c
+@@ -476,7 +476,21 @@
+         for (int epnum = 0; epnum < CFG_TUD_ENDPPOINT_MAX; epnum++) {
+             for (int dir = 0; dir < 2; dir++) {
+                 if (usbd->xfer_data[epnum][dir] != mp_const_none) {
+-                    usbd_edpt_stall(RHPORT, tu_edpt_addr(epnum, dir));
++                    if (dir == TUSB_DIR_IN) {
++                        // A busy IN endpoint is stalled with the USB interrupt
++                        // held off, as the built-in CDC's is below: disabling
++                        // it polls for the NAK-effective and endpoint-disabled
++                        // flags, which the DWC2 interrupt (ESP32-S2/S3/P4)
++                        // clears if it runs in between, and the poll never
++                        // ends. An OUT endpoint is stalled with the interrupt
++                        // running: its disable waits on the global OUT NAK,
++                        // which only the interrupt's RX FIFO handling delivers.
++                        mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
++                        usbd_edpt_stall(RHPORT, tu_edpt_addr(epnum, dir));
++                        MICROPY_END_ATOMIC_SECTION(atomic_state);
++                    } else {
++                        usbd_edpt_stall(RHPORT, tu_edpt_addr(epnum, dir));
++                    }
+                     usbd->xfer_data[epnum][dir] = mp_const_none;
+                 }
+             }
