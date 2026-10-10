@@ -79,7 +79,8 @@ on top. Add `--modules` to any of these:
 
 | Board | Command |
 |---|---|
-| Waveshare ESP32-P4-WIFI6-DEV-KIT | `--port esp32 --board ESP32_GENERIC_P4 --variant WIFI6_DEV_KIT --flash 16MB` |
+| Waveshare ESP32-P4-WIFI6-DEV-KIT, USB device on a USB-C wired to header P6 | `--port esp32 --board ESP32_GENERIC_P4 --variant WIFI6_DEV_KIT --flash 16MB` |
+| Waveshare ESP32-P4-WIFI6-DEV-KIT, USB device on its USB-C marked "USB" | `--port esp32 --board ESP32_GENERIC_P4 --variant WIFI6_DEV_KIT_H2 --flash 16MB` |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-4B | `--port esp32 --board ESP32_GENERIC_P4 --variant PRE_REV3_C6_WIFI --flash 32MB` |
 | Waveshare ESP32-S3-Touch-LCD-7 | `--port esp32 --board ESP32_GENERIC_S3 --variant LCD_7 --flash 8MB` |
 | Waveshare ESP32-S3-Touch-LCD-4.3 | `--port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB` |
@@ -144,7 +145,11 @@ in this order:
    port's ESP-IDF components must see too: `WIFI6_DEV_KIT`'s sets
    `MICROPY_HW_USB_HS (0)`, which moves the USB device to the P4's
    full-speed controller, so other P4 boards keep theirs on the high-speed
-   one.
+   one. A variant dir may carry C sources too, through
+   `MICROPY_SOURCE_BOARD` in its `mpconfigvariant.cmake`, the way upstream's
+   `ESP32_GENERIC_C2` does: `WIFI6_DEV_KIT_H2` builds on `WIFI6_DEV_KIT` and
+   adds a board startup hook that swaps the P4's two full-speed PHYs, so the
+   USB device comes out on the kit's USB-C marked "USB".
 
 The partition table is found the same way, the most specific
 `partitions.csv` winning (`variants/esp32/partitions.esp32s3.csv` adds a
