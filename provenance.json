@@ -82,6 +82,9 @@
   },
   "0027-micropython-esp32-sdcard-stage-unaligned-buffers-for-multi-sector-dma.patch": {
    "sha256": "b3f0a51a2d8d387154e87ad9e5d905a444e26d5a8b73abab71efb97e3a98dd7b"
+  },
+  "0028-micropython-esp32-i2s-pdm-rx.patch": {
+   "sha256": "055d67f88fe120a11ec807fd5d0e49e59551f9c587d50d4118eec91645e3b0ce"
   }
  }
 }
