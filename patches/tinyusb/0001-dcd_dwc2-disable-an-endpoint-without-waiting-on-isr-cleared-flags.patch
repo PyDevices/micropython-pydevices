@@ -1,0 +1,121 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 22:00:00 -0500
+Subject: [PATCH] dcd_dwc2: disable an endpoint without waiting on flags the
+ interrupt handler clears.
+
+Stalling or closing a busy endpoint goes through edpt_disable(). For an
+IN endpoint it sets SNAK and polls DIEPINT for NAK effective, then sets
+EPDIS and polls DIEPINT for endpoint disabled. handle_ep_irq() writes
+back every DIEPINT bit it reads to clear the interrupt, so when another
+interrupt of the same endpoint is serviced between the core setting one
+of those flags and the poll reading it, the flag is gone and the poll
+spins for good. In slave mode a multi-packet IN transfer keeps the
+TX FIFO empty interrupt firing, so on an ESP32-S3 a USB disconnect
+while the CDC was sending hung the chip for good.
+
+The TX FIFO empty interrupt also kept serving the endpoint being
+disabled, pushing packets into a FIFO about to be flushed.
+
+Now edpt_disable():
+
+- masks the endpoint's TX FIFO empty interrupt (DIEPEMPMSK) first. A
+  new transfer unmasks it again in edpt_schedule_packets();
+- clears NAK effective, sets SNAK and polls for NAK effective, which
+  handle_ep_irq() no longer clears (nothing there acts on it);
+- waits for EPENA to drop instead of polling endpoint disabled. The core
+  clears EPENA once the endpoint is disabled, and the handler never
+  writes it. Both polls also end if the endpoint finishes its transfer
+  on its own, when no NAK effective or endpoint disabled is due, and
+  EPDIS is set only on an endpoint that is still enabled;
+- does the same for an OUT endpoint, waiting on EPENA after EPDIS.
+
+Proven on a Waveshare ESP32-S3-Touch-LCD-7 (MicroPython ESP32_GENERIC_S3
+LCD_7, native USB on Windows), counting resets and hangs on its UART
+console while machine.USBDevice disconnects a busy IN endpoint. Both
+builds carry MicroPython's own stall-before-clear reordering
+(micropython-pydevices patch 0025); neither holds the USB interrupt off:
+
+  | trial                                          | without | with   |
+  |------------------------------------------------|---------|--------|
+  | built-in CDC mid-print, active(False)          | 9/40    | 0/89   |
+  | built-in CDC mid-print, switch to runtime      | 5/40    | 0/86   |
+  | runtime CDC (usb-device-cdc), 16 KB write      | 2/40    | 0/50   |
+  | runtime HID mouse, 1 ms reports                | -       | 0/40   |
+
+Every failure without it was a hang, with no REPL on either port.
+
+Based-on: micropython/tinyusb-espressif v0.21.0.1-micropython1 (5c5c660)
+---
+diff --git a/src/portable/synopsys/dwc2/dcd_dwc2.c b/src/portable/synopsys/dwc2/dcd_dwc2.c
+index a866805..740b795 100644
+--- a/src/portable/synopsys/dwc2/dcd_dwc2.c
++++ b/src/portable/synopsys/dwc2/dcd_dwc2.c
+@@ -315,18 +315,30 @@ static void edpt_disable(uint8_t rhport, uint8_t ep_addr, bool stall) {
+   const uint32_t stall_mask = (stall ? EPCTL_STALL : 0);
+ 
+   if (dir == TUSB_DIR_IN) {
++    // Stop the TX FIFO empty interrupt from feeding this endpoint while it is disabled. In slave mode it would go on
++    // pushing packets into a FIFO that is about to be flushed, and fire again for as long as that FIFO is empty.
++    dwc2->diepempmsk &= ~(1u << epnum);
++
+     if (!edpt_is_enabled(dep)) {
+       dep->diepctl |= DIEPCTL_SNAK | stall_mask;
+     } else {
+-      // Stop transmitting packets and NAK IN xfers.
++      // Stop transmitting packets and NAK IN xfers. NAK effective is a flag the interrupt handler leaves alone (see
++      // handle_ep_irq), so clear any earlier one first. The endpoint may also finish its transfer on its own meanwhile.
++      dep->diepint = DIEPINT_INEPNE;
+       dep->diepctl |= DIEPCTL_SNAK;
+-      while ((dep->diepint & DIEPINT_INEPNE) == 0) {}
++      while ((dep->diepint & DIEPINT_INEPNE) == 0 && edpt_is_enabled(dep)) {}
+ 
+-      // Disable the endpoint.
+-      dep->diepctl |= DIEPCTL_EPDIS | stall_mask;
+-      while ((dep->diepint & DIEPINT_EPDISD_Msk) == 0) {}
++      // Disable the endpoint, and wait on its enable bit, which the core clears once it is disabled and the interrupt
++      // handler never writes. The endpoint disabled flag is no good to poll: the handler clears it whenever another
++      // interrupt of this endpoint is serviced in between, and then the wait never ends.
++      if (edpt_is_enabled(dep)) {
++        dep->diepctl |= DIEPCTL_EPDIS | stall_mask;
++      } else {
++        dep->diepctl |= stall_mask;
++      }
++      while (edpt_is_enabled(dep)) {}
+ 
+-      dep->diepint = DIEPINT_EPDISD;
++      dep->diepint = DIEPINT_EPDISD | DIEPINT_INEPNE;
+     }
+ 
+     // Flush the FIFO, and wait until we have confirmed it cleared.
+@@ -344,9 +356,14 @@ static void edpt_disable(uint8_t rhport, uint8_t ep_addr, bool stall) {
+       dwc2->dctl |= DCTL_SGONAK;
+       while ((dwc2->gintsts & GINTSTS_BOUTNAKEFF_Msk) == 0) {}
+ 
+-      // Ditto here disable the endpoint.
+-      dep->doepctl |= DOEPCTL_EPDIS | stall_mask;
+-      while ((dep->doepint & DOEPINT_EPDISD_Msk) == 0) {}
++      // Ditto here disable the endpoint, waiting on its enable bit as the IN side does: the interrupt handler can
++      // clear the endpoint disabled flag before this reads it, and the endpoint may finish its transfer on its own.
++      if (edpt_is_enabled(dep)) {
++        dep->doepctl |= DOEPCTL_EPDIS | stall_mask;
++      } else {
++        dep->doepctl |= stall_mask;
++      }
++      while (edpt_is_enabled(dep)) {}
+ 
+       dep->doepint = DOEPINT_EPDISD;
+ 
+@@ -1103,7 +1120,11 @@ static void handle_ep_irq(uint8_t rhport, uint8_t dir) {
+       } intr;
+       intr.value = epout->intr;
+ 
+-      epout->intr = intr.value; // Clear interrupt //-V::2584::{otg_int}
++      // Clear interrupt, except an IN endpoint's NAK effective flag: nothing here acts on it, and edpt_disable() polls
++      // for it with this handler free to run, so clearing it between the core setting it and the poll reading it would
++      // leave that poll spinning. edpt_disable() clears it itself.
++      const uint32_t keep = (dir == TUSB_DIR_IN) ? DIEPINT_INEPNE : 0;
++      epout->intr = intr.value & ~keep; //-V::2584::{otg_int}
+ 
+       if (is_dma) {
+         #if CFG_TUD_DWC2_DMA_ENABLE
