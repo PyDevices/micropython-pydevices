@@ -419,7 +419,7 @@ def esp32_table(chip, board, variant):
     return next((t.resolve() for t in found if t.is_file()), None)
 
 
-def esp32_board_dir(gen, base, board, variant, fragment_path, module_dirs):
+def esp32_board_dir(gen, base, board, variant, fragment_path, module_dirs, components=()):
     """Upstream's board, unchanged, plus our fragment, as BOARD_DIR= (the way
     cmods' build_mp.sh did it). Everything else the board holds is linked
     through, because ${MICROPY_BOARD_DIR} is an include directory and board
@@ -438,6 +438,8 @@ def esp32_board_dir(gen, base, board, variant, fragment_path, module_dirs):
         for c in sorted(comps.iterdir()) if comps.is_dir() else []:
             if (c / "CMakeLists.txt").exists():
                 lines.append(f"list(APPEND EXTRA_COMPONENT_DIRS {c.resolve().as_posix()})")
+    for c in components:
+        lines.append(f"list(APPEND EXTRA_COMPONENT_DIRS {c.resolve().as_posix()})")
     (gen / "mpconfigboard.cmake").write_text("\n".join(lines) + "\n")
     # A variant of ours may carry an mpconfigboard.h of its own, included
     # before the board's. It is how a variant sets a C define that the port's
@@ -462,6 +464,78 @@ def esp32_board_dir(gen, base, board, variant, fragment_path, module_dirs):
     vlines.append(f"include({base_variant.as_posix()}{'' if variant else ' OPTIONAL'})")
     vlines.append(f"list(APPEND SDKCONFIG_DEFAULTS {fragment_path.as_posix()})")
     (gen / vfile).write_text("\n".join(vlines) + "\n")
+
+
+# TinyUSB, for the esp32 targets that build it. The port takes it from the
+# IDF component manager, which fetches it into managed_components/ at
+# configure time, so the overlay can't patch it. Instead a copy at the same
+# tag, with patches/tinyusb/ applied, replaces it through the component
+# manager's own override_path, declared by a one-file component of ours that
+# the generated board directory adds to EXTRA_COMPONENT_DIRS. (A component of
+# the same name in EXTRA_COMPONENT_DIRS isn't enough: the managed copy is
+# still fetched, and ESP-IDF adds it later, so it wins.)
+TINYUSB = "espressif__tinyusb"  # ESP-IDF names a component after its directory
+TINYUSB_CHIPS = ("esp32s2", "esp32s3", "esp32p4")
+TINYUSB_PATCHES = REPO / "patches" / "tinyusb"
+
+
+def tinyusb_component(mp, chip):
+    """deps/espressif__tinyusb at its deps.lock tag with patches/tinyusb/
+    applied (one local commit, like the MicroPython tree's), or None for a
+    chip without TinyUSB."""
+    if chip not in TINYUSB_CHIPS:
+        return None
+    url, tag = {row[0]: row[1:] for row in read_lock("deps.lock")}[TINYUSB]
+    # The copy replaces whatever TinyUSB the port asks for, so it must be the
+    # one the prepared tree's manifest names (patch 0014).
+    manifest = (mp / "ports" / "esp32" / "main" / "idf_component.yml").read_text()
+    block = re.search(r"^  espressif/tinyusb:\n((?:    .*\n|\s*\n)+)", manifest, re.M)
+    git_src = re.search(r"^\s+git:\s*(\S+)", block.group(1), re.M) if block else None
+    version = re.search(r"^\s+version:\s*(\S+)", block.group(1), re.M) if block else None
+    if not (git_src and version) or (git_src.group(1), version.group(1)) != (url, tag):
+        die(f"the port builds TinyUSB {git_src.group(1) if git_src else '?'} {version.group(1) if version else '?'}, "
+            f"but deps.lock patches {url} {tag}: move them together")
+    dest = DEPS / TINYUSB
+    if not dest.exists():
+        DEPS.mkdir(exist_ok=True)
+        clone_at(url, tag, dest)
+    patches = sorted(TINYUSB_PATCHES.glob("*.patch"))
+    digest = hashlib.sha256()
+    for patch in patches:
+        digest.update(patch.read_bytes())
+    sid = "Patch-Series: " + digest.hexdigest()[:16]
+    mark = f"PyDevices patches applied to {tag} (a local record, never pushed)"
+    head = git_out(dest, "log", "-1", "--format=%s%n%b").splitlines()
+    clean = not git_out(dest, "status", "--porcelain")
+    if patches and head[:1] == [mark] and sid in head and clean:
+        return dest
+    if not patches and git_out(dest, "describe", "--tags", "--exact-match") == tag and clean:
+        return dest
+    run(["git", "-C", str(dest), "-c", "advice.detachedHead=false", "checkout", "-q", "--force", tag])
+    run(["git", "-C", str(dest), "clean", "-fdq"])
+    for patch in patches:
+        if subprocess.run(["git", "-C", str(dest), "apply", str(patch)]).returncode != 0:
+            die(f"{patch.relative_to(REPO)} does not apply to TinyUSB {tag}")
+        say(f"applied {patch.relative_to(REPO)}")
+    if patches:
+        run(["git", "-C", str(dest), "add", "-A"])
+        run(["git", "-C", str(dest), "-c", "user.name=pydevices", "-c", "user.email=pydevices@local",
+             "commit", "-q", "-m", mark, "-m", sid])
+    return dest
+
+
+def tinyusb_override(shim, tinyusb):
+    """The component that points the port's espressif/tinyusb at `tinyusb`."""
+    if shim.exists():
+        shutil.rmtree(shim)
+    shim.mkdir(parents=True)
+    (shim / "CMakeLists.txt").write_text("# Generated by build_mp.py: no sources, only the manifest beside it.\nidf_component_register()\n")
+    (shim / "idf_component.yml").write_text(
+        "# Generated by build_mp.py: the port's TinyUSB, with patches/tinyusb/ applied.\n"
+        "dependencies:\n"
+        "  espressif/tinyusb:\n"
+        f'    override_path: "{tinyusb.as_posix()}"\n')
+    return shim
 
 
 def autosize_headroom(flash_bytes):
@@ -1017,6 +1091,7 @@ def main():
         return p.wait(), "".join(out)
 
     rc = 0
+    tinyusb = None
     try:
         if port == "esp32":
             base = board_dir(port, board)
@@ -1024,10 +1099,12 @@ def main():
             gen = build / board
             frag = build / "sdkconfig.pydevices"
             table = esp32_table(chip, board, variant)
+            tinyusb = tinyusb_component(mp, chip)
             for attempt in (1, 2):
                 text, used = esp32_fragment(chip, module_dirs, board, variant, flash, table)
                 frag.write_text(text)
-                esp32_board_dir(gen, base, board, variant, frag, module_dirs)
+                shims = [tinyusb_override(build / "tinyusb_override", tinyusb)] if tinyusb else []
+                esp32_board_dir(gen, base, board, variant, frag, module_dirs, shims)
                 make_esp = [c for c in make if not c.startswith("BOARD=")] + [f"BOARD={board}", f"BOARD_DIR={gen}"]
                 # A saved sdkconfig beats SDKCONFIG_DEFAULTS; ours is generated (cmods#29).
                 (build / "sdkconfig").unlink(missing_ok=True)
@@ -1094,6 +1171,8 @@ def main():
         rec["rp2_storage_bytes"] = rp2_storage
     rec["micropython"] = git_out(mp, "describe", "--always", "--abbrev=12")
     rec["module_revisions"] = record(module_dirs)
+    if port == "esp32" and tinyusb:
+        rec["tinyusb"] = git_out(tinyusb, "describe", "--tags", "--always")
     rec_path.write_text(json.dumps(rec, indent=1) + "\n")
     say(f"\nBuilt into {build}")
     for name in ("firmware.bin", "firmware.uf2", "micropython", "micropython.exe", "micropython.mjs", "micropython.wasm"):

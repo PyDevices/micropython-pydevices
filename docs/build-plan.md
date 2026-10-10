@@ -44,7 +44,8 @@ micropython-pydevices/
 │   └── jpegio                later: see "Open"
 ├── patches/
 │   ├── apply_patches.py     the overlay and the modules' own patches, applied once as one local commit
-│   └── micropython/         0001-…patch to 0016-…patch, as today
+│   ├── micropython/         0001-…patch to 0016-…patch, as today
+│   └── tinyusb/             patches to the TinyUSB the esp32 port builds (S2, S3, P4)
 ├── variants/                only where a board truly differs from upstream
 │   ├── unix/  windows/      pydevices/, vst3-engine/ (as today)
 │   ├── webassembly/         pydevices/, and wasmbridge moves in here from usermods/
@@ -103,6 +104,17 @@ for every esp32 build, `sdkconfig.<chip>` (the chip read from the board's
    a C define the ESP-IDF components read too (they see the board header
    but not `MICROPY_DEF_BOARD`; `WIFI6_DEV_KIT`'s `MICROPY_HW_USB_HS` is
    one).
+
+On the S2, S3 and P4 the build also patches TinyUSB, which the port takes
+from the IDF component manager and so the overlay can't reach. It checks out
+`deps/espressif__tinyusb` at its `deps.lock` tag, which must be the one patch
+0014 points the port's manifest at, applies `patches/tinyusb/` as one local
+commit, and adds a one-file component to the board dir whose manifest gives
+`espressif/tinyusb` an `override_path` to that copy. The configure log says
+`Using component placed at .../deps/espressif__tinyusb`, and the build record
+names the TinyUSB it built. (A component of the same name in
+`EXTRA_COMPONENT_DIRS` isn't enough: the managed copy is still fetched and
+added after it, and wins.)
 
 A `partitions.csv` is found the same way, the most specific winning
 (`<BOARD>/<VARIANT>/partitions.csv`, then `partitions.<chip>.csv`, then

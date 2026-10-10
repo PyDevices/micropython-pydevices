@@ -75,16 +75,18 @@
    "sha256": "e0437cf768418af5e7f5cdd4a2dc8b325150dd098ab2f07ce402f33621dbbafe"
   },
   "0025-micropython-shared-tinyusb-usbd-stall-cdc-in-before-clearing-tx-fifo.patch": {
-   "sha256": "1853e8f04b3b3ae3cf532fe489dec9a25c5505bdc43a69a70e7997020025e1a5"
-  },
-  "0026-micropython-shared-tinyusb-usbd-stall-busy-runtime-in-endpoints-with-irq-held-off.patch": {
-   "sha256": "0b82c38683fd8c365f19e55170b925895e63886a9d9c43c27e99b72cc941a519"
+   "sha256": "18996cf42eb4b052aba3a3ca54c01944b018000500c40ac8c7d0771c86c849ea"
   },
   "0027-micropython-esp32-sdcard-stage-unaligned-buffers-for-multi-sector-dma.patch": {
    "sha256": "b3f0a51a2d8d387154e87ad9e5d905a444e26d5a8b73abab71efb97e3a98dd7b"
   },
   "0028-micropython-esp32-i2s-pdm-rx.patch": {
    "sha256": "055d67f88fe120a11ec807fd5d0e49e59551f9c587d50d4118eec91645e3b0ce"
+  }
+ },
+ "tinyusb_patches": {
+  "0001-dcd_dwc2-disable-an-endpoint-without-waiting-on-isr-cleared-flags.patch": {
+   "sha256": "9a15fb67a1c948b9c1554e3e8759a3271da423c37532d690b846ed0643572687"
   }
  }
 }

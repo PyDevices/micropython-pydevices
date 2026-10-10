@@ -1,15 +1,14 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 13:00:00 -0500
-Subject: [PATCH] shared/tinyusb: stall the CDC IN endpoint, with the USB
- interrupt held off, before clearing its TX FIFO on disconnect.
+Subject: [PATCH] shared/tinyusb: stall the CDC IN endpoint before clearing its
+ TX FIFO on disconnect.
 
 On an ESP32-S3 on its native USB, a machine.USBDevice disconnect while
-the board is still sending over the built-in CDC either reboots it
-("Guru Meditation Error: Core 1 panic'ed (Interrupt wdt timeout on
-CPU1)") or hangs it for good, with no REPL on either port
+the board is still sending over the built-in CDC rebooted it ("Guru
+Meditation Error: Core 1 panic'ed (Interrupt wdt timeout on CPU1)")
 (micropython-pydevices#70). Both active(False) and a switch from the
-built-in device to a runtime one (active(True) while connected) do it.
+built-in device to a runtime one (active(True) while connected) did it.
 
 mp_usbd_disconnect() cleared the CDC TX FIFO and then stalled the CDC IN
 endpoint. With TinyUSB 0.21 (patch 0014) the DWC2 driver runs in slave
@@ -20,57 +19,44 @@ nothing, stays asserted and re-enters until the watchdog fires. A coredump
 from the unpatched build shows it interrupting edpt_disable() under
 usbd_edpt_stall(), called from mp_usbd_disconnect().
 
-Stalling first isn't enough on its own. Disabling a busy IN endpoint
-polls DIEPINT for NAK-effective and then endpoint-disabled, and the
-interrupt handler writes back every DIEPINT bit it reads, so a
-TX-FIFO-empty interrupt that lands between the hardware setting a flag
-and the poll reading it clears the flag, and the poll spins forever:
-that is the hang. With the stall moved ahead of the clear, the panics
-stopped but the hangs went to 11 in 40.
+So the stall now comes first. Disabling the endpoint masks its
+TX-FIFO-empty interrupt (patches/tinyusb/0001), so by the time the clear
+runs nothing pulls from the FIFO any more.
 
-So the CDC IN stall now runs with the USB interrupt held off, in an atomic
-section, and the clear comes after it. When the section ends, the pending
-interrupt refills the disabled endpoint's hardware FIFO from the TX FIFO,
-which still holds the data; that FIFO then never drains, so the interrupt
-stops pulling, and the clear is safe. The stall of a runtime IN endpoint
-that is busy has the same polling race and is left as it was: the OUT
-side of that loop waits on a flag only the interrupt's RX FIFO handling
-produces, so it can't simply run with the interrupt off.
+The disconnect also hung the board, with no REPL on either port: the
+endpoint disable polled interrupt flags the USB interrupt handler can
+clear. That is fixed in TinyUSB itself by patches/tinyusb/0001.
 
 Proven on a Waveshare ESP32-S3-Touch-LCD-7 (ESP32_GENERIC_S3 LCD_7,
 native USB CDC on Windows), driven from its UART console while a host
 reads the CDC port. Each trial checks the host is receiving, prints 1000
 characters and disconnects at once or 50 to 300 us later, then counts
-resets and hangs on the UART:
+resets and hangs on the UART. Before this patch, active(False) mid-print
+failed 13 times in 40 (8 panics, 5 hangs) and the switch to a runtime
+device 7 times in 20 (4 panics, 3 hangs).
 
-  | path                                 | before                     | this patch |
-  |--------------------------------------|----------------------------|------------|
-  | active(False) mid-print              | 13/40 (8 panics, 5 hangs)  | 0/40       |
-  | switch to a runtime device mid-print | 7/20 (4 panics, 3 hangs)   | 0/40       |
-
-Stalling first without the atomic section took active(False) to 0
-panics and 11 hangs in 40.
-
-With the patch, the CDC came back after every reconnect, and the friendly
-REPL, a 14 KB paste-mode block, 4000 lines of output read back whole and
-in order, and mpftp (exec, a 58 KB put with hash, run) all worked.
+With patches/tinyusb/0001 the endpoint disable no longer hangs, and most
+of the panics went with it, since the interrupt now stops pulling as soon
+as the stall begins. The clear still comes first without this patch,
+though, and an interrupt landing between the two calls still panicked the
+board once in 240 trials of both kinds. With this patch the two kinds
+passed 0 of 89 and 0 of 86.
 
 The ESP32-S2 and ESP32-P4 build TinyUSB 0.21 the same way, in slave mode
 (CFG_TUD_DWC2_DMA_ENABLE defaults to 0), so they share the path.
 
 Drop this patch when upstream reorders the disconnect or TinyUSB makes
-tud_cdc_n_write_clear() and endpoint disable safe under an in-flight
-transfer.
+tud_cdc_n_write_clear() safe under an in-flight transfer.
 
 Based-on: micropython 0fd6c573e (tag v1.29.0)
 ---
- shared/tinyusb/mp_usbd_runtime.c | 17 +++++++++++++++--
- 1 file changed, 15 insertions(+), 2 deletions(-)
+ shared/tinyusb/mp_usbd_runtime.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
 
 diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
 --- a/shared/tinyusb/mp_usbd_runtime.c
 +++ b/shared/tinyusb/mp_usbd_runtime.c
-@@ -484,10 +484,23 @@
+@@ -484,10 +484,17 @@
      }
  
      #if MICROPY_HW_USB_CDC
@@ -78,20 +64,14 @@ diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
 -    tud_cdc_write_clear();
      // Prevent cdc write flush from initiating any new transfers while disconnecting
 +    //
-+    // This comes before the clear below, and with the USB interrupt held off.
-+    // In slave mode the DWC2 driver (ESP32-S2/S3/P4) pulls each packet of an
-+    // IN transfer straight from the CDC TX FIFO in its interrupt: emptied
-+    // mid-transfer, the TX-FIFO-empty interrupt finds nothing to write, stays
-+    // asserted, and re-enters until the interrupt watchdog resets the chip.
-+    // And disabling a busy IN endpoint polls for the NAK-effective and
-+    // endpoint-disabled flags, which that same interrupt clears if it runs in
-+    // between, leaving the poll spinning for good.
-+    mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
++    // This comes before the clear below. In slave mode the DWC2 driver
++    // (ESP32-S2/S3/P4) pulls each packet of an IN transfer straight from the
++    // CDC TX FIFO in its interrupt: emptied mid-transfer, the TX-FIFO-empty
++    // interrupt finds nothing to write, stays asserted, and re-enters until
++    // the interrupt watchdog resets the chip. The stall disables the endpoint
++    // and masks that interrupt first.
      usbd_edpt_stall(RHPORT, USBD_CDC_EP_IN);
-+    MICROPY_END_ATOMIC_SECTION(atomic_state);
 +    // Ensure no pending static CDC writes, as these can cause TinyUSB to crash.
-+    // The disabled endpoint's FIFO no longer drains, so the interrupt has
-+    // stopped pulling from this one by now.
 +    tud_cdc_write_clear();
      #endif
  

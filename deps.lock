@@ -9,6 +9,11 @@
 esp-idf   https://github.com/espressif/esp-idf.git                                                           v5.5.4
 emsdk     https://github.com/emscripten-core/emsdk.git                                                       6.0.1
 SDL2      https://github.com/libsdl-org/SDL/releases/download/release-2.30.10/SDL2-devel-2.30.10-mingw.tar.gz  2.30.10
+# TinyUSB for the esp32 port's S2, S3 and P4 builds, at the tag patch 0014
+# points the port's component manifest at. build_mp.py checks the two agree,
+# applies patches/tinyusb/ to this copy and builds it in place of the managed
+# component. The name is the component's: ESP-IDF names one by its directory.
+espressif__tinyusb https://github.com/micropython/tinyusb-espressif.git                                     v0.21.0.1-micropython1
 # CircuitPython is the second interpreter, and the one pin that is a source
 # tree rather than a toolchain. Always our own checkout in deps/, never a link
 # to a sibling. 11.0.0-alpha.1 is commit 520805e12, the first release of the
