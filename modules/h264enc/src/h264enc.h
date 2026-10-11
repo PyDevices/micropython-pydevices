@@ -17,7 +17,7 @@ typedef struct h264enc_session h264enc_session_t;
 
 // Opens the encoder for width x height RGB565 frames (multiples of 16), placed
 // centred on a canvas_w x canvas_h picture (0 = the frame's own size; the
-// border is black). out_size caps one access unit (0 = 256 KB). Returns NULL
+// border is black). out_size caps one access unit (0 = the canvas at its raw size, at least 256 KB). Returns NULL
 // and sets *out, or returns why not: "busy", or a short reason.
 const char *h264enc_open(h264enc_session_t **out, int width, int height, int canvas_w, int canvas_h,
     int fps, int gop, int bitrate, int qp_min, int qp_max, uint32_t out_size);
