@@ -158,9 +158,15 @@ const char *h264enc_open(h264enc_session_t **out, int width, int height, int can
     cfg.rc.bitrate = bitrate;
     cfg.rc.qp_min = qp_min;
     cfg.rc.qp_max = qp_max;
-    if (esp_h264_enc_hw_new(&cfg, &s->enc) != ESP_H264_ERR_OK) {
+    esp_h264_err_t herr = esp_h264_enc_hw_new(&cfg, &s->enc);
+    if (herr != ESP_H264_ERR_OK) {
         s->enc = NULL;
-        why = "the encoder refused these settings (qp_min <= qp_max <= 51?)";
+        // Its reference rows need one block of internal RAM, 1,152 bytes per
+        // 16 pixels of width (92 KB at 1280), so this is usually memory:
+        // free in total, but in pieces.
+        why = herr == ESP_H264_ERR_MEM
+            ? "not enough internal RAM in one piece for the encoder (restart, or a narrower picture)"
+            : "the encoder refused these settings (qp_min <= qp_max <= 51?)";
         goto fail;
     }
     if (esp_h264_enc_open(s->enc) != ESP_H264_ERR_OK) {
