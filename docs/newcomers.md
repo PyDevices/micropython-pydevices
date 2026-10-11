@@ -18,14 +18,69 @@ Then, from the clone:
 ```
 
 The first run fetches what it needs. Where the repositories are already
-checked out side by side, it links those sibling checkouts instead.
+checked out side by side, it links those sibling checkouts instead. An
+esp32 build's first run also clones ESP-IDF into `deps/` and installs its
+toolchains, for every ESP chip, under `~/.espressif`: about 4 GB, outside
+the clone (set `IDF_TOOLS_PATH` to put them elsewhere), and most of the
+first esp32 build's time.
 
 The desktop `pydevices` variants freeze a board config that imports
 `displaydev`, which is frozen only when `--modules` names `pydevices` (the
 repository whose `lib/` holds it) or `all`; without it `import board_config`
 fails.
 
+## What each port needs
+
+`build_mp.py` fetches the big pieces itself: MicroPython, the modules,
+ESP-IDF, emsdk, the pico-sdk and picotool, SDL2 for MinGW. What it can't
+fetch are your distribution's packages. On Debian or Ubuntu (WSL included):
+
+| Port | Packages |
+|---|---|
+| every port | `git make cmake python3 gcc g++` |
+| unix | `pkg-config libsdl2-dev libffi-dev` (the desktop display) |
+| esp32 | `ninja-build python3-venv` |
+| rp2 | `gcc-arm-none-eabi libnewlib-arm-none-eabi` |
+| windows, cross-built from Linux | `gcc-mingw-w64-x86-64 libtool libltdl-dev autoconf automake` |
+| webassembly | `nodejs` |
+
+All of it in one line:
+
+```bash
+sudo apt-get update && sudo apt-get install -y git make cmake ninja-build \
+    python3 python3-venv python3-pip gcc g++ pkg-config libffi-dev libsdl2-dev \
+    gcc-mingw-w64-x86-64 libtool libltdl-dev autoconf automake \
+    gcc-arm-none-eabi libnewlib-arm-none-eabi nodejs
+```
+
+The installer prints this line cut down to what your machine is missing,
+and says which ports build now. Other distributions carry the same tools
+under their own names; a build for a port that's still missing something
+stops and says so.
+
+### Warnings you can ignore
+
+A build prints a few things that look wrong and aren't:
+
+- Every esp32 and rp2 build with `all` fails its first link on size, then
+  autosize builds again. [The model](#the-model) says what that looks like.
+- esp32: `warning: unknown kconfig symbol 'XTAL_FREQ_AUTO'`, a run of
+  `CONFIG_… was replaced with CONFIG_…` lines (ESP-IDF renamed those
+  settings and still maps the old names), and cmake's `Could NOT find
+  Threads`.
+- rp2: `No installed picotool with version 2.3.0 found - building from
+  source`, once per pass.
+- windows: libffi's configure says `libtool.m4: error: problem compiling CXX
+  test program`; it is probing for a C++ compiler it doesn't need, and the
+  build goes on.
+
 ## On Windows
+
+This section is for building on Windows itself. A Linux or WSL machine
+cross-builds the same `micropython.exe` with the same command,
+`./build_mp.py --port windows --variant pydevices --modules all`, once the
+MinGW packages in [What each port needs](#what-each-port-needs) are
+installed; the SDL2 it links against is fetched.
 
 You can build the windows port natively, from PowerShell, with MSYS2's
 MinGW toolchain. You need Python from python.org and Git for Windows; the
@@ -86,7 +141,7 @@ on top. Add `--modules` to any of these:
 | Waveshare ESP32-S3-Touch-LCD-4.3 | `--port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB` |
 | LilyGO T-Embed S3 | `--port esp32 --board ESP32_GENERIC_S3 --variant T_EMBED --flash 16MB` |
 | WT32-SC01 Plus | `--port esp32 --board ESP32_GENERIC_S3 --flash 16MB` |
-| Raspberry Pi Pico (RP2040) | `--port rp2 --board RPI_PICO` |
+| Raspberry Pi Pico (RP2040) | `--port rp2 --board RPI_PICO` (not `--modules all`: see [The model](#the-model)) |
 | Raspberry Pi Pico 2 (RP2350) | `--port rp2 --board RPI_PICO2` |
 
 A new board usually needs no file at all: pick the upstream board and
@@ -108,6 +163,9 @@ pinned MicroPython tag (UPSTREAM)
    the port's own make  ->  builds/<port>/[<board>/]<variant>/
 ```
 
+With no `--variant`, that last directory is `default` on esp32 and rp2, and
+`standard`, upstream's default variant, on unix, windows and webassembly.
+
 Three choices make a build: the board (or not, on the desktop ports), the
 variant (always optional, as with upstream's `make`), and the modules. A
 module is a directory with a `manifest.py`, or a C module with its glue,
@@ -120,8 +178,25 @@ On esp32 and rp2 the build may grow the firmware's share of flash to fit the
 image (on esp32 the app partition, on rp2 the region before the filesystem),
 leaving 1/32 of the flash as headroom, 64 KB to 256 KB. That moves the
 filesystem, so a board flashed with that image comes up with an empty one.
-`--no-autosize` refuses instead. On a Pico, `all` is far too big either way;
-name what your project uses.
+`--no-autosize` refuses instead.
+
+It finds out by trying: the first link fails, loudly, and only then does it
+build again. On esp32 that is a red `Error: app partition is too small for
+binary micropython.bin size 0x…`, then `ninja: build stopped`, `make: ***
+Error 1` and a Build-Troubleshooting link; on rp2 it is ``region `FLASH'
+overflowed by … bytes``, `collect2: error: ld returned 1 exit status` and
+nested `Error 2` lines. Then an `autosize:` line says it didn't fit and is
+building once more. With `all`, expect that second pass on every board
+above; it roughly doubles the build time, since the whole esp32 compile
+runs twice.
+
+How much fits depends on the flash. On a Pico 2 (4 MB), `all` builds and
+fits, at 93 % of flash with a 1600 KB filesystem. On a Pico (2 MB) it can't:
+an image of that size (2.3 MB on the Pico 2) is bigger than the whole flash,
+so the build stops at the first link with the overflow error. Name what your
+project uses instead: `displayif,jpegio,pygraphics,palettes,pdwidgets`, a
+display project's set, builds to about 540 KB and fits with the Pico's
+default 1408 KB filesystem untouched.
 
 ## esp32 settings
 

@@ -13,8 +13,9 @@ Boards are upstream's own generic ones; the
 for each board we use. You name the modules you want: ours
 by short name, anything else by its path, or `all`. Leave out `--port` and it
 asks you for port, board and variant. Output lands in
-`builds/<port>/[<board>/]<variant>/`, beside a record of every module's
-commit.
+`builds/<port>/[<board>/]<variant>/` (with no `--variant`, that last
+directory is `default` on esp32 and rp2, `standard` on the desktop ports),
+beside a record of every module's commit.
 
 Don't have it yet? This clones it into `micropython-pydevices` in the current
 directory and checks your tools (Linux, WSL, or Git Bash on Windows):
@@ -23,10 +24,16 @@ directory and checks your tools (Linux, WSL, or Git Bash on Windows):
 curl -fsSL https://pydevices.github.io/install.sh | sh
 ```
 
+It names the Debian packages each port still needs, with the `apt-get` line
+that installs them; [What each port needs](docs/newcomers.md#what-each-port-needs)
+is the same list.
+
 On Windows you can build the windows port natively from PowerShell, with
 `python build_mp.py --port windows --variant pydevices --modules all`, once
 MSYS2 is installed: [On Windows](docs/newcomers.md#on-windows) has the
-steps. Everything else builds from WSL.
+steps. Everything else builds from WSL. A Linux or WSL machine also
+cross-builds that same `micropython.exe`, with the same command and the
+MinGW packages from the list above; the SDL2 it links against is fetched.
 
 The same command builds OmniPython (CircuitPython-compatible) firmware, which
 is CircuitPython with our C modules compiled in, for CircuitPython's own
@@ -60,8 +67,9 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   `tflite/` and `vision/` (esp-vision's modules, from the pin in `.esp-vision/`;
   see [docs/esp-vision.md](docs/esp-vision.md)), and the modules themselves,
   linked or cloned.
-- `patches/micropython/` — our patch series (`0001-…` to `0028-…`), each
-  justified in its own header; `patches/apply_patches.py` applies it, plus
+- `patches/micropython/` — our patch series (`0001-…` to `0028-…`; there
+  is no `0026`, whose fix moved into `patches/tinyusb/`), each justified
+  in its own header; `patches/apply_patches.py` applies it, plus
   each module's own MicroPython patches, once, as one local commit.
 - `patches/tinyusb/` — patches to the TinyUSB the esp32 port builds on the
   S2, S3 and P4, which `build_mp.py` applies to `deps/espressif__tinyusb`

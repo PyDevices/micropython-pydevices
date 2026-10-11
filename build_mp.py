@@ -240,7 +240,9 @@ def ensure_dep(name, ws):
                 say(f"downloading {url}")
                 urllib.request.urlretrieve(url, archive)
                 with tarfile.open(archive) as t:
-                    t.extractall(tmp)
+                    # Python 3.12 and 3.13 warn, on every build, that 3.14 will
+                    # filter archives by default; ask for that filter where it exists.
+                    t.extractall(tmp, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
                 top = next(p for p in Path(tmp).iterdir() if p.is_dir())
                 shutil.move(str(top), str(dest))
         elif url.endswith(".zip"):
