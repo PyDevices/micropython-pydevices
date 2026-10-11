@@ -27,8 +27,10 @@ name it with `--modules h264enc` otherwise.
 `width` and `height` are multiples of 16, from 80x80 to 1920x2032. `gop` is
 the frames from one IDR (key) frame to the next. With `canvas_w` / `canvas_h`
 the frame is placed centred on a larger black picture, which is how a cast
-puts a 720x720 panel on a 1280x720 TV. `out_size` caps one access unit (the
-default, 256 KB, holds any frame at these bitrates).
+puts a 720x720 panel on a 1280x720 TV. `out_size` caps one access unit. The
+default holds a keyframe of the whole canvas at its raw size (1.4 MB at
+1280x720, in PSRAM), because a busy picture such as a camera's can encode
+bigger than any fixed guess, and a frame that doesn't fit stops the encoder.
 
 The P4 has one H.264 encoder, so one `Encoder` (or one cast) at a time: a
 second raises `OSError` saying it is busy, and the first carries on. `close()`

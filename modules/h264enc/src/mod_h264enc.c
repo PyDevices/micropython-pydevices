@@ -54,7 +54,13 @@ extern const char *ppa_mod_srm(ppa_mod_client_t *c, const ppa_mod_srm_t *op) __a
 #define H264ENC_PPA_RGB565 0
 #define H264ENC_PPA_YUV420 6
 
-#define H264ENC_AU_MAX (256 * 1024)
+// The output buffer, when out_size doesn't say: room for a keyframe of the
+// whole canvas at its raw size. A busy picture (a camera's, with its sensor
+// noise) can make a keyframe bigger than any fixed guess, and one that
+// doesn't fit stops the encoder until its 10 s timeout; then the next frame
+// is a keyframe of the same picture and overflows too, so it never recovers.
+// Flat screens come nowhere near this. It's PSRAM, and 1.4 MB at 1280x720.
+#define H264ENC_AU_MIN (256 * 1024)
 
 struct h264enc_session {
     esp_h264_enc_handle_t enc;
@@ -178,7 +184,13 @@ const char *h264enc_open(h264enc_session_t **out, int width, int height, int can
         why = "no encoder parameter handle";
         goto fail;
     }
-    s->out = esp_h264_aligned_calloc(16, 1, out_size ? out_size : H264ENC_AU_MAX, &s->out_cap, ESP_H264_MEM_SPIRAM);
+    if (out_size == 0) {
+        out_size = (uint32_t)cw * ch * 3 / 2 + 4096;
+        if (out_size < H264ENC_AU_MIN) {
+            out_size = H264ENC_AU_MIN;
+        }
+    }
+    s->out = esp_h264_aligned_calloc(16, 1, out_size, &s->out_cap, ESP_H264_MEM_SPIRAM);
     if (s->out == NULL) {
         why = "no memory for the output buffer";
         goto fail;
