@@ -11,7 +11,7 @@ displayif         https://github.com/PyDevices/displayif.git          be7669ebd3
 lvgl-micropython  https://github.com/PyDevices/lvgl-micropython.git   e8aea6672566ff0bbcb62f2f8e91733c31ed4ca1
 palettes          https://github.com/PyDevices/palettes.git           f3dfad0bac281f1e8816b30861445498b4137de6
 pdwidgets         https://github.com/PyDevices/pdwidgets.git          e92267f2ef938b60ba3b97177ceb2bd0e0d402d3
-pydevices         https://github.com/PyDevices/pydevices.git          14c5e59eb46f3368e8775178108bb6fce3fd85ce
+pydevices         https://github.com/PyDevices/pydevices.git          dacef90aa9d5fa88ff55c1514d1b4728d12d3dc1
 pygraphics        https://github.com/PyDevices/pygraphics.git         2d7ca35847db78d450428cdc0cb5aa69ab81c809
 ulab              https://github.com/v923z/micropython-ulab.git       1d3ddd8f5228e2c7335dac71f4846e6abb0ec9f9
 usbif             https://github.com/PyDevices/usbif.git              d8acf6bd215d951b35c4b1d5aac2967341c06aca
