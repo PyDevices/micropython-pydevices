@@ -371,8 +371,48 @@ def record(dirs):
         # needs to tell later whether the code that went in has moved.
         commit = git_out(real, "rev-parse", "HEAD") or None
         dirty = bool(git_out(real, "status", "--porcelain", "--untracked-files=no")) if commit else None
-        rows[module_name(d)] = {"path": str(real), "revision": rev, "commit": commit, "dirty": dirty}
+        # Which uncommitted changes, so the next build can tell an edit from
+        # the same edit built again.
+        changes = None
+        if dirty:
+            diff = subprocess.run(["git", "-C", str(real), "diff", "HEAD", "--binary"], capture_output=True).stdout
+            changes = hashlib.sha1(diff).hexdigest()[:12]
+        rows[module_name(d)] = {"path": str(real), "revision": rev, "commit": commit, "dirty": dirty,
+                                "changes": changes}
     return rows
+
+
+def modules_moved(had, now):
+    """What has moved in the modules since a build dir was built: a line per
+    module whose commit or uncommitted changes differ between the build
+    record's module_revisions (`had`) and record()'s rows for this build
+    (`now`), or [] when nothing has.
+
+    make alone doesn't catch a moved module. Its C side can change the qstr
+    pool, and the frozen content and qstr headers generated against the old
+    pool are reused (frozen_content.c redeclares MP_QSTR_port, ...); a .py
+    file it no longer has stays frozen. A record from before module_revisions were kept can't say, so it counts
+    as moved."""
+    if had is None:
+        return ["the build record doesn't name its modules' commits"]
+
+    def at(row):
+        if not row.get("commit"):
+            return "(not a git checkout)"
+        text = row["commit"][:12]
+        if row.get("dirty"):
+            text += " with uncommitted changes" + (f" ({row['changes']})" if row.get("changes") else "")
+        return text
+
+    moved = []
+    for name, row in now.items():
+        old = had.get(name)
+        if old is None:
+            moved.append(f"{name}: not in the build record")
+        elif (old.get("commit"), bool(old.get("dirty")), old.get("changes")) != (
+                row.get("commit"), bool(row.get("dirty")), row.get("changes")):
+            moved.append(f"{name} was at {at(old)}, now {at(row)}")
+    return moved
 
 
 # ---- esp32: the generated board directory, the fragments, autosize --------
@@ -798,9 +838,10 @@ def cp_espressif_env(port_dir, board):
     return f'. "{idf}/export.sh" >/dev/null && export PATH="{CP_VENV / "bin"}:$PATH" && '
 
 
-def build_dir_for(build, want, clean):
+def build_dir_for(build, want, clean, revisions):
     """The build dir for a target, emptied first if it was built with
-    something other than `want` (another module set, flash size, ...)."""
+    something other than `want` (another module set, flash size, ...) or
+    with its modules at other commits than `revisions`, record()'s rows."""
     rec_path = build / "pydevices-build.json"
     if clean and build.exists():
         shutil.rmtree(build)
@@ -815,6 +856,9 @@ def build_dir_for(build, want, clean):
             say(f"{build} was built with {had.get('modules')!r} {had.get('module_set') or ''}{flash}{args}; "
                 f"wiped, building {want['modules']!r} {want['module_set']}"
                 + (f" (make {' '.join(want['make_args']) or 'with no arguments'})" if args else ""))
+        elif moved := modules_moved(had.get("module_revisions"), revisions):
+            shutil.rmtree(build)
+            say(f"{build} was built from modules that have moved since; wiped:\n" + "\n".join("  " + m for m in moved))
     elif build.exists() and any(build.iterdir()):
         # Something built here without a record: nobody can say with what.
         shutil.rmtree(build)
@@ -822,7 +866,7 @@ def build_dir_for(build, want, clean):
     build.mkdir(parents=True, exist_ok=True)
     # Written before the build, so a build that fails still says what it was
     # built with, and the next one with a different set wipes it.
-    rec_path.write_text(json.dumps(dict(want, complete=False), indent=1) + "\n")
+    rec_path.write_text(json.dumps(dict(want, complete=False, module_revisions=revisions), indent=1) + "\n")
     return rec_path
 
 
@@ -878,7 +922,8 @@ def build_circuitpython(args, make_extra, ws):
             "modules": spec, "module_set": module_set, "make_args": make_extra}
     if components:
         want["esp_idf_components"] = [f"{n} {dep_version(n, d)}" for n, d in zip(components, component_dirs)]
-    rec_path = build_dir_for(build, want, args.clean)
+    revisions = record(module_dirs)
+    rec_path = build_dir_for(build, want, args.clean, revisions)
     user_c = cp_user_c_modules(module_dirs, build / "usermods")
 
     env = {k: v for k, v in os.environ.items()
@@ -930,7 +975,7 @@ def build_circuitpython(args, make_extra, ws):
     rec = dict(want, complete=True)
     rec["circuitpython"] = git_out(cp, "describe", "--tags", "--always", "--dirty")
     rec["circuitpython_patches"] = cp_patches
-    rec["module_revisions"] = record(module_dirs)
+    rec["module_revisions"] = revisions
     rec_path.write_text(json.dumps(rec, indent=1) + "\n")
     say(f"\nBuilt into {build}")
     for name in ("firmware.uf2", "firmware.bin", "firmware.elf", "micropython"):
@@ -1043,7 +1088,10 @@ def main():
     module_set = sorted(d.name if d.parent == MODULES_DIR else str(d) for d in module_dirs)
     want = {"port": port, "board": board, "variant": variant, "flash": flash, "modules": spec,
             "module_set": module_set}
-    build_dir_for(build, want, args.clean)
+    # Each module's commit too: a module that moved keeps its name, and make
+    # would reuse frozen content and qstr headers from before it moved.
+    revisions = record(module_dirs)
+    build_dir_for(build, want, args.clean, revisions)
 
     env = dict(os.environ)
     for leak in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "BOARD_DIR", "VARIANT_DIR"):
@@ -1184,7 +1232,7 @@ def main():
     if port == "rp2" and rp2_storage:
         rec["rp2_storage_bytes"] = rp2_storage
     rec["micropython"] = git_out(mp, "describe", "--always", "--abbrev=12")
-    rec["module_revisions"] = record(module_dirs)
+    rec["module_revisions"] = revisions
     if port == "esp32" and tinyusb:
         rec["tinyusb"] = git_out(tinyusb, "describe", "--tags", "--always")
     rec_path.write_text(json.dumps(rec, indent=1) + "\n")
