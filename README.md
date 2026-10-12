@@ -53,37 +53,37 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
 
 ## What's in here
 
-- `build_mp.py` — the one command. It fills in `micropython/`, `modules/`
+- [`build_mp.py`](build_mp.py) — the one command. It fills in `micropython/`, `modules/`
   and `deps/` if they're missing, prepares the MicroPython tree, and runs
   the port's own `make`.
-- `UPSTREAM` — the MicroPython release everything applies to (v1.29.0).
-- `modules.lock`, `deps.lock` — the commits and versions `build_mp.py`
+- [`UPSTREAM`](UPSTREAM) — the MicroPython release everything applies to (v1.29.0).
+- [`modules.lock`](modules.lock), [`deps.lock`](deps.lock) — the commits and versions `build_mp.py`
   fetches when a module or a toolchain isn't there. `deps.lock` also pins
   CircuitPython, for `--interpreter circuitpython`. Beside sibling
   checkouts, both are links to those checkouts instead.
-- `modules/` — `manifest.py` (the manifest every build freezes), `all/`
+- [`modules/`](modules/) — [`manifest.py`](modules/manifest.py) (the manifest every build freezes), `all/`
   (every module), `castif/` (the ESP32-P4 cast) and `jpegio/` (the JPEG
   decoder, from displayif), which live only here,
   `tflite/` and `vision/` (esp-vision's modules, from the pin in `.esp-vision/`;
   see [docs/esp-vision.md](docs/esp-vision.md)), and the modules themselves,
   linked or cloned.
-- `patches/micropython/` — our patch series (`0001-…` to `0028-…`; there
+- [`patches/micropython/`](patches/micropython/) — our patch series (`0001-…` to `0028-…`; there
   is no `0026`, whose fix moved into `patches/tinyusb/`), each justified
-  in its own header; `patches/apply_patches.py` applies it, plus
+  in its own header; [`patches/apply_patches.py`](patches/apply_patches.py) applies it, plus
   each module's own MicroPython patches, once, as one local commit.
-- `patches/tinyusb/` — patches to the TinyUSB the esp32 port builds on the
+- [`patches/tinyusb/`](patches/tinyusb/) — patches to the TinyUSB the esp32 port builds on the
   S2, S3 and P4, which `build_mp.py` applies to `deps/espressif__tinyusb`
   (at its `deps.lock` tag) and builds in place of the port's own copy.
-- `variants/` — our variants: `unix/` and `windows/` (`pydevices`,
+- [`variants/`](variants/) — our variants: `unix/` and `windows/` (`pydevices`,
   `vst3-engine`), and `webassembly/` (`pydevices`, with the `wasmbridge`
   module and a Fetch-backed `requests`), and `esp32/`: the sdkconfig
   fragments and partition table every esp32 or every chip gets, and the few
   board variants of ours (`ESP32_GENERIC_S3` `LCD_7` and `T_EMBED`,
   `ESP32_GENERIC_P4` `WIFI6_DEV_KIT` and `WIFI6_DEV_KIT_H2`).
-- `scripts/exercise_build.sh` — builds every desktop port and two esp32
+- [`scripts/exercise_build.sh`](scripts/exercise_build.sh) — builds every desktop port and two esp32
   boards from a bare clone, checks the failure paths, and writes a report of
   what should match on any machine. Needs no board.
-- `provenance.json` — the patches' checksums and migration record.
+- [`provenance.json`](provenance.json) — the patches' checksums and migration record.
 
 What's planned next is in [ROADMAP.md](ROADMAP.md).
 

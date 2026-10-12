@@ -1,7 +1,7 @@
 # Draft issue: esp32 WebREPL Ctrl-C can't break a loop that never waits
 
 A draft for micropython/micropython. Nothing here has been posted yet. The fix we carry meanwhile is
-[patches/0011](../../patches/0011-micropython-esp32-webrepl-ctrl-c-in-tight-loops.patch).
+[patches/0011](../../patches/micropython/0011-micropython-esp32-webrepl-ctrl-c-in-tight-loops.patch).
 
 ---
 

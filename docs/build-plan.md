@@ -61,7 +61,7 @@ micropython-pydevices/
 When the repositories are already checked out side by side, the real
 checkouts stay where they are, and `modules/<name>` and `micropython/` are
 symlinks to them.
-Anywhere else, `build_mp.py` clones what's missing: modules at their
+Anywhere else, [`build_mp.py`](../build_mp.py) clones what's missing: modules at their
 `modules.lock` commit, MicroPython at the `UPSTREAM` tag, and the toolchains
 at their `deps.lock` version. Beside such checkouts, `deps/` links to the
 sibling `esp-idf/`, `emsdk/` and `SDL2/`. A build fetches and checks only the toolchain
@@ -75,7 +75,7 @@ never shows as modified.
 
 `build_mp.py` fills in whatever is missing from `micropython/`, `modules/` and
 `deps/`, then prepares the MicroPython tree if it isn't prepared already. It
-puts your module list in an environment variable that `modules/manifest.py`
+puts your module list in an environment variable that [`modules/manifest.py`](../modules/manifest.py)
 reads, and calls the port's own `make` with `FROZEN_MANIFEST=modules/manifest.py`
 and, where you asked for one of ours, `VARIANT_DIR`.
 
@@ -91,7 +91,7 @@ exists. Every place that can carry them uses the same two names: `sdkconfig`
 for every esp32 build, `sdkconfig.<chip>` (the chip read from the board's
 `board.json`, such as `esp32p4`) for one chip. They stack in this order:
 
-1. `variants/esp32/`: PyDevices on any esp32, then on that chip. The S3's
+1. [`variants/esp32/`](../variants/esp32/): PyDevices on any esp32, then on that chip. The S3's
    Wi-Fi, lwIP and PSRAM settings and the P4's NimBLE-over-C6 and
    cache-writeback settings live here.
 2. Each selected module's root, in the order you listed them: what that
@@ -108,7 +108,7 @@ for every esp32 build, `sdkconfig.<chip>` (the chip read from the board's
 On the S2, S3 and P4 the build also patches TinyUSB, which the port takes
 from the IDF component manager and so the overlay can't reach. It checks out
 `deps/espressif__tinyusb` at its `deps.lock` tag, which must be the one patch
-0014 points the port's manifest at, applies `patches/tinyusb/` as one local
+0014 points the port's manifest at, applies [`patches/tinyusb/`](../patches/tinyusb/) as one local
 commit, and adds a one-file component to the board dir whose manifest gives
 `espressif/tinyusb` an `override_path` to that copy. The configure log says
 `Using component placed at .../deps/espressif__tinyusb`, and the build record
@@ -149,11 +149,11 @@ different module set and it wipes that dir and rebuilds, and says so. One dir
 per target, never a stale cache (idf.py keeps `-D` values between runs), and
 no pile of experiment dirs.
 
-`all` is a module like any other, `modules/all/`, so the logic of "everything"
+`all` is a module like any other, [`modules/all/`](../modules/all/), so the logic of "everything"
 lives in its own manifest, which we can change without touching the build
 script. A module with an `OPT_IN` file is the one exception: `all` leaves it
 out, and it's built only when named. tflite and vision are opt-in, for their
-size (docs/esp-vision.md).
+size ([docs/esp-vision.md](esp-vision.md)).
 
 A module never brings another module. ulab is a module like any other,
 pinned only by `modules.lock`; audiodsp, which never used it, no longer names
@@ -167,9 +167,9 @@ Our desktop and browser variants (`unix`, `windows` and `webassembly`
 complete desktop runtime and `all` stays all. Board images never carry a board
 config, and neither does mpvst's `vst3-engine`, which has its own.
 
-castif is the one module whose only home is this repo, so `modules/castif/` is
+castif is the one module whose only home is this repo, so [`modules/castif/`](../modules/castif/) is
 tracked here rather than linked. It's ESP32-P4 only. Its H.264 encoder moved
-into `modules/h264enc/` (the media roadmap's Phase 3), an ESP-IDF component
+into [`modules/h264enc/`](../modules/h264enc/) (the media roadmap's Phase 3), an ESP-IDF component
 that has to be added before `project()` runs, so the generated board dir adds
 `h264enc/components/h264enc_esp_h264` to `EXTRA_COMPONENT_DIRS` whenever
 h264enc is selected: any selected module's `components/<name>/` is added that
@@ -212,15 +212,15 @@ that wants one (the wasm one) requires it by name.
 4. **Repoint what calls the old way:** the interpreter build script,
    mpvst's engine build (its modules listed by name plus
    `<mpvst>/vstaudio,<mpvst>/vstui`; not `all`, which now freezes pydevices),
-   wokwi's stage script, earful's build, the README and `newcomers.md`.
+   wokwi's stage script, earful's build, the README and [`newcomers.md`](newcomers.md).
 5. **Retire `boards/`.** Done 2026-10-05. The four boards' sdkconfig lines
-   sorted into the three homes above: chip settings into `variants/esp32/`,
+   sorted into the three homes above: chip settings into [`variants/esp32/`](../variants/esp32/),
    usbif's and cameraif's into their repos (usbif's board-header lines became
    compile definitions in its own CMake), and two board variants of
    `ESP32_GENERIC_S3`, not one: the LCD-7's cache tuning, and the T-Embed's
    flash auto-suspend, which IDF supports only on particular flash chips. The
    partition tables went; the S3 keeps a coredump partition through
-   `variants/esp32/partitions.esp32s3.csv`, found by the same convention as
+   [`variants/esp32/partitions.esp32s3.csv`](../variants/esp32/partitions.esp32s3.csv), found by the same convention as
    the fragments.
 6. **Dropped (2026-10-05): the VARIANT_DIR spike.** Teaching the esp32 and rp2 ports to
    take a variant from outside the board dir would make the generated dir
@@ -277,7 +277,7 @@ links, the output layout and the build record. What differs is one function:
   for the board's chip (compilers go in `~/.espressif`, shared with any
   ESP-IDF of the same version) and puts ESP-IDF's Python requirements in
   `deps/circuitpython-venv`.
-- **Our patches and boards go on first.** `patches/circuitpython/*.patch`
+- **Our patches and boards go on first.** [`patches/circuitpython/*.patch`](../patches/circuitpython/)
   are applied to `deps/circuitpython` and each `boards/circuitpython/<port>/<board>`
   is linked into the port's `boards/`, once each; the build record lists the
   patches. The boards are ones CircuitPython has no definition for:
@@ -289,7 +289,7 @@ links, the output layout and the build record. What differs is one function:
   with one 6 MB app slot.
 - **A module can ask espressif for ESP-IDF components.** CircuitPython's
   espressif port builds and links a fixed list of ESP-IDF components, which
-  leaves out the camera's. With `0006-espressif-esp-idf-components-a-user-c-module-asks-for.patch`,
+  leaves out the camera's. With [`0006-espressif-esp-idf-components-a-user-c-module-asks-for.patch`](../patches/circuitpython/0006-espressif-esp-idf-components-a-user-c-module-asks-for.patch),
   a module's `micropython.mk` adds names to `USER_ESP_IDF_COMPONENTS`
   (cameraif: the CSI controller, the ISP and the sensor drivers; jpegio and
   ppa: the P4's JPEG engine and PPA), and the make line's
@@ -356,7 +356,7 @@ Deferred, because the build script doesn't need them:
 - **A CI leg that builds the union** on one desktop port, so building only
   what you ask for doesn't lose the cross-port check that caught usbif's
   breaks in September.
-- **jpegio** left displayif on 2026-10-06 for `modules/jpegio` here, not a repo of its own. Whether esp-vision's
+- **jpegio** left displayif on 2026-10-06 for [`modules/jpegio`](../modules/jpegio/) here, not a repo of its own. Whether esp-vision's
   sensor and H.264 replace cameraif (and castif's encoder) stays open. esp-vision's
   `tflite` and image stack are in as modules; where `sensor` stands is in
   [esp-vision.md](esp-vision.md).

@@ -31,7 +31,7 @@ fails.
 
 ## What each port needs
 
-`build_mp.py` fetches the big pieces itself: MicroPython, the modules,
+[`build_mp.py`](../build_mp.py) fetches the big pieces itself: MicroPython, the modules,
 ESP-IDF, emsdk, the pico-sdk and picotool, SDL2 for MinGW. What it can't
 fetch are your distribution's packages. On Debian or Ubuntu (WSL included):
 
@@ -227,7 +227,7 @@ in this order:
    USB device comes out on the kit's USB-C marked "USB".
 
 The partition table is found the same way, the most specific
-`partitions.csv` winning (`variants/esp32/partitions.esp32s3.csv` adds a
+`partitions.csv` winning ([`variants/esp32/partitions.esp32s3.csv`](../variants/esp32/partitions.esp32s3.csv) adds a
 coredump partition on the S3); without one, the board's own is used. Either
 way autosize grows the app partition when the image doesn't fit.
 
@@ -235,18 +235,18 @@ way autosize grows the app partition when the image doesn't fit.
 
 | Path | What it is |
 |---|---|
-| `build_mp.py` | The build command. |
-| `UPSTREAM` | The MicroPython release the patches apply to. |
-| `modules.lock`, `deps.lock` | What gets fetched when it's missing. |
-| `modules/` | The module manifest, `all/`, the modules that live only here (`castif/`, `h264enc/`, `jpegio/`, and `tflite/` and `vision/`, [esp-vision's](esp-vision.md)), and the rest, linked or cloned. |
-| `patches/` | The patch series and `apply_patches.py`. |
-| `variants/` | Our unix, windows and webassembly variants, and the esp32 settings and board variants. |
+| [`build_mp.py`](../build_mp.py) | The build command. |
+| [`UPSTREAM`](../UPSTREAM) | The MicroPython release the patches apply to. |
+| [`modules.lock`](../modules.lock), [`deps.lock`](../deps.lock) | What gets fetched when it's missing. |
+| [`modules/`](../modules/) | The module manifest, `all/`, the modules that live only here (`castif/`, `h264enc/`, `jpegio/`, and `tflite/` and `vision/`, [esp-vision's](esp-vision.md)), and the rest, linked or cloned. |
+| [`patches/`](../patches/) | The patch series and [`apply_patches.py`](../patches/apply_patches.py). |
+| [`variants/`](../variants/) | Our unix, windows and webassembly variants, and the esp32 settings and board variants. |
 
 ## Boundaries
 
 The upstream tag is a compatibility boundary: moving `UPSTREAM` means
 re-validating every patch. Never hand-edit a patched checkout; change the
-patch and prepare again (`patches/apply_patches.py`).
+patch and prepare again ([`patches/apply_patches.py`](../patches/apply_patches.py)).
 
 The `vst3-engine` variants are deliberately narrow. They set
 `MICROPY_PY_SOCKET`, `MICROPY_PY_SSL` and `MICROPY_PY_FFI` to 0, in the
