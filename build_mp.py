@@ -1082,7 +1082,7 @@ def main():
         make.append(f"VARIANT={variant}")
 
     if port == "esp32":
-        # ESP-IDF's include dirs are the most of them: it matters when they're in the clone too.
+        # ESP-IDF's include dirs are the largest share; one lent by a workspace keeps them out of the clone.
         local_idf = DEPS / "esp-idf"
         lent = local_idf.is_symlink() or (not local_idf.exists() and ws and (ws / "esp-idf").is_dir())
         if len(str(REPO)) > ESP32_PATH_LIMIT and not lent:
