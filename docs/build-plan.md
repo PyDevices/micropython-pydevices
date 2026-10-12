@@ -84,7 +84,7 @@ On esp32 it also writes a thin board dir into the build dir, the way cmods'
 links the rest of the board's files through, and appends our sdkconfig
 **last**: the flash size and partition table, then the fragments below.
 Last matters, because kconfgen takes the last assignment, and a fragment
-listed earlier is silently overridden (cmods#29).
+listed earlier is silently overridden.
 
 The fragments are found by convention, and each is applied only if it
 exists. Every place that can carry them uses the same two names: `sdkconfig`
@@ -132,7 +132,7 @@ error, grows the app partition to the image plus headroom (1/32 of the flash,
 that table, which lives only in the build dir. It then prints the new layout
 and warns that the filesystem moved. This port puts the filesystem after the
 last partition, so a board flashed with the new layout comes up with an empty
-filesystem (cmods#30). Dev boards hold nothing we keep, so this is on by
+filesystem. Dev boards hold nothing we keep, so this is on by
 default; `--no-autosize` refuses instead and prints the table that would fit.
 
 rp2 gets the same treatment. When the link overflows the `FLASH` region, the
@@ -342,7 +342,7 @@ flash. Hence `--flash`.
 build dir as your configuration, so one failed run can pin the wrong
 partition table for every run after it. The build deletes it first, and
 afterwards checks that the configured table is the one we chose, failing
-loudly if it isn't (cmods#29).
+loudly if it isn't.
 
 **`make clean` on esp32 is `idf.py fullclean`**, which deletes the whole
 port's `managed_components/`. Never run it against a build dir that doesn't
