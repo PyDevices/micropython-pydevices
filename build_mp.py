@@ -384,9 +384,12 @@ def record(dirs):
 
 def modules_moved(had, now):
     """What has moved in the modules since a build dir was built: a line per
-    module whose commit or uncommitted changes differ between the build
-    record's module_revisions (`had`) and record()'s rows for this build
-    (`now`), or [] when nothing has.
+    module whose commit differs between the build record's module_revisions
+    (`had`) and record()'s rows for this build (`now`), or [] when nothing has.
+
+    Only the commit counts. Uncommitted edits to a module rebuild incrementally,
+    the way make and ninja already handle them: wiping on each edit would make
+    every change to a sibling module a full esp32 rebuild.
 
     make alone doesn't catch a moved module. Its C side can change the qstr
     pool, and the frozen content and qstr headers generated against the old
@@ -397,20 +400,14 @@ def modules_moved(had, now):
         return ["the build record doesn't name its modules' commits"]
 
     def at(row):
-        if not row.get("commit"):
-            return "(not a git checkout)"
-        text = row["commit"][:12]
-        if row.get("dirty"):
-            text += " with uncommitted changes" + (f" ({row['changes']})" if row.get("changes") else "")
-        return text
+        return row["commit"][:12] if row.get("commit") else "(not a git checkout)"
 
     moved = []
     for name, row in now.items():
         old = had.get(name)
         if old is None:
             moved.append(f"{name}: not in the build record")
-        elif (old.get("commit"), bool(old.get("dirty")), old.get("changes")) != (
-                row.get("commit"), bool(row.get("dirty")), row.get("changes")):
+        elif old.get("commit") != row.get("commit"):
             moved.append(f"{name} was at {at(old)}, now {at(row)}")
     return moved
 

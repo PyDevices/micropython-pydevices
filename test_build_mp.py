@@ -30,31 +30,17 @@ class ModulesMoved(unittest.TestCase):
         moved = build_mp.modules_moved({"pydevices": row(A)}, {"pydevices": row(B)})
         self.assertEqual(moved, [f"pydevices was at {A[:12]}, now {B[:12]}"])
 
-    def test_tree_became_dirty(self):
-        moved = build_mp.modules_moved({"pydevices": row()}, {"pydevices": row(dirty=True, changes="123abc")})
-        self.assertEqual(moved, [f"pydevices was at {A[:12]}, now {A[:12]} with uncommitted changes (123abc)"])
+    def test_uncommitted_edits_build_incrementally(self):
+        # Only a commit counts: an edit to a module rebuilds incrementally.
+        for had, now in ((row(), row(dirty=True, changes="123abc")),
+                         (row(dirty=True, changes="123abc"), row(dirty=True, changes="456def")),
+                         (row(dirty=True, changes="123abc"), row())):
+            self.assertEqual(build_mp.modules_moved({"pydevices": had}, {"pydevices": now}), [])
 
-    def test_same_uncommitted_changes_again(self):
-        now = {"pydevices": row(dirty=True, changes="123abc")}
-        self.assertEqual(build_mp.modules_moved(dict(now), now), [])
-
-    def test_other_uncommitted_changes(self):
-        moved = build_mp.modules_moved({"pydevices": row(dirty=True, changes="123abc")},
-                                       {"pydevices": row(dirty=True, changes="456def")})
-        self.assertEqual(len(moved), 1)
-        self.assertIn("(123abc)", moved[0])
-        self.assertIn("(456def)", moved[0])
-
-    def test_dirty_record_from_before_changes_were_kept(self):
-        old = row(dirty=True)
-        del old["changes"]
-        self.assertEqual(len(build_mp.modules_moved({"pydevices": old},
-                                                    {"pydevices": row(dirty=True, changes="123abc")})), 1)
-
-    def test_clean_record_from_before_changes_were_kept(self):
-        old = row()
-        del old["changes"]
-        self.assertEqual(build_mp.modules_moved({"pydevices": old}, {"pydevices": row()}), [])
+    def test_commit_moved_with_edits_names_only_the_commits(self):
+        moved = build_mp.modules_moved({"pydevices": row(A, dirty=True, changes="123abc")},
+                                       {"pydevices": row(B, dirty=True, changes="123abc")})
+        self.assertEqual(moved, [f"pydevices was at {A[:12]}, now {B[:12]}"])
 
     def test_record_without_revisions(self):
         self.assertEqual(len(build_mp.modules_moved(None, {"pydevices": row()})), 1)
