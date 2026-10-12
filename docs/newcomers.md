@@ -9,11 +9,6 @@ build command. It is not a fork, and it publishes no Python package.
 Get it, if you haven't: `curl -fsSL https://pydevices.github.io/install.sh | sh`
 clones this repository into `micropython-pydevices` in the current directory
 and checks your tools. On Windows, see [On Windows](#on-windows).
-Run it somewhere that keeps the clone's path short, under about 60
-characters, such as your home directory (`~/micropython-pydevices`): an
-esp32 build with many modules hands gcc every include path, and a long
-clone path pushes that past a Linux limit
-([#97](https://github.com/PyDevices/micropython-pydevices/issues/97)).
 Then, from the clone:
 
 ```bash

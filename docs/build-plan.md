@@ -44,7 +44,7 @@ micropython-pydevices/
 │   └── jpegio                later: see "Open"
 ├── patches/
 │   ├── apply_patches.py     the overlay and the modules' own patches, applied once as one local commit
-│   ├── micropython/         0001-…patch to 0028-…patch (no 0026)
+│   ├── micropython/         0001-…patch to 0029-…patch (no 0026)
 │   └── tinyusb/             patches to the TinyUSB the esp32 port builds (S2, S3, P4)
 ├── variants/                only where a board truly differs from upstream
 │   ├── unix/  windows/      pydevices/, vst3-engine/ (as today)

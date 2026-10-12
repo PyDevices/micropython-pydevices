@@ -17,10 +17,8 @@ asks you for port, board and variant. Output lands in
 directory is `default` on esp32 and rp2, `standard` on the desktop ports),
 beside a record of every module's commit.
 
-Don't have it yet? Run this from your home directory, or anywhere with a short
-path ([esp32 builds need one](docs/newcomers.md#build-something)). It clones
-the repository into `micropython-pydevices` there and checks your tools
-(Linux, WSL, or Git Bash on Windows):
+Don't have it yet? This clones it into `micropython-pydevices` in the current
+directory and checks your tools (Linux, WSL, or Git Bash on Windows):
 
 ```bash
 curl -fsSL https://pydevices.github.io/install.sh | sh
@@ -69,7 +67,7 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   `tflite/` and `vision/` (esp-vision's modules, from the pin in `.esp-vision/`;
   see [docs/esp-vision.md](docs/esp-vision.md)), and the modules themselves,
   linked or cloned.
-- [`patches/micropython/`](patches/micropython/) — our patch series (`0001-…` to `0028-…`; there
+- [`patches/micropython/`](patches/micropython/) — our patch series (`0001-…` to `0029-…`; there
   is no `0026`, whose fix moved into `patches/tinyusb/`), each justified
   in its own header; [`patches/apply_patches.py`](patches/apply_patches.py) applies it, plus
   each module's own MicroPython patches, once, as one local commit.
