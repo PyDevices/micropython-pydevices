@@ -70,6 +70,8 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
     Display, or serves them as live HLS.
   - [`h264enc/`](modules/h264enc/): RGB565 frames to H.264 on the ESP32-P4's hardware encoder.
   - [`jpegio/`](modules/jpegio/): JPEG decode and encode, with CircuitPython's `jpegio` API.
+  - [`mdns/`](modules/mdns/): find and advertise services on the local network, with
+    CircuitPython's `mdns` API (esp32, rp2, unix, windows).
   - [`pngio/`](modules/pngio/): PNG encode and decode, RGB565 in and out.
   - [`ppa/`](modules/ppa/): scale, rotate, convert and fill pixel buffers, on the
     ESP32-P4's Pixel Processing Accelerator or in portable C elsewhere.

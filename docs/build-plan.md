@@ -37,6 +37,7 @@ micropython-pydevices/
 │   ├── all/manifest.py      tracked: every sibling with a root manifest.py, except opt-in ones
 │   ├── castif/              tracked: lives only here (moves from usermods/); ESP32-P4 only
 │   ├── jpegio/              tracked: lives only here (moved from displayif, 2026-10-06); every port
+│   ├── mdns/                tracked: lives only here; esp32, rp2, unix, windows
 │   ├── audiodsp -> ../../audiodsp          ignored symlinks to sibling checkouts,
 │   ├── audioif  -> ../../audioif           clones at the modules.lock commit anywhere else
 │   ├── audiocomponents, cameraif, displayif, lvgl-micropython, palettes,

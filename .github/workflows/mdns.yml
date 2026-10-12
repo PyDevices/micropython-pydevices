@@ -1,0 +1,58 @@
+# mdns from a bare clone: the unix port's own test, the unix port against
+# python-zeroconf both ways, and the windows port cross-built (it needs
+# Windows' mDNS service to run, which a Linux runner hasn't got).
+name: mdns
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/mdns/**'
+      - 'build_mp.py'
+      - '.github/workflows/mdns.yml'
+  pull_request:
+    paths:
+      - 'modules/mdns/**'
+      - 'build_mp.py'
+      - '.github/workflows/mdns.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the unix port's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev pkg-config
+
+      - name: Build the unix port with mdns
+        run: python3 build_mp.py --port unix --modules mdns
+
+      - name: The API, its errors, and a service found by the process that advertised it
+        run: ./builds/unix/standard/micropython modules/mdns/tests/test_mdns.py
+
+      - name: zeroconf finds MicroPython's service, and MicroPython finds zeroconf's
+        run: |
+          python3 -m pip install zeroconf
+          python3 modules/mdns/tests/check_mdns_zeroconf.py ./builds/unix/standard/micropython
+
+  windows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the MinGW cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 libtool libltdl-dev autoconf automake
+
+      - name: Cross-build the windows port with mdns
+        run: python3 build_mp.py --port windows --modules mdns
