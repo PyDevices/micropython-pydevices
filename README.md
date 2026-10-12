@@ -15,7 +15,8 @@ by short name, anything else by its path, or `all`. Leave out `--port` and it
 asks you for port, board and variant. Output lands in
 `builds/<port>/[<board>/]<variant>/` (with no `--variant`, that last
 directory is `default` on esp32 and rp2, `standard` on the desktop ports),
-beside a record of every module's commit.
+beside a record of every module's commit. [Flash it](docs/newcomers.md#flash-it)
+says where `firmware.bin` goes on the board.
 
 Don't have it yet? This clones it into `micropython-pydevices` in the current
 directory and checks your tools (Linux, WSL, or Git Bash on Windows):
@@ -62,11 +63,17 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   CircuitPython, for `--interpreter circuitpython`. Beside sibling
   checkouts, both are links to those checkouts instead.
 - [`modules/`](modules/) — [`manifest.py`](modules/manifest.py) (the manifest every build freezes), `all/`
-  (every module), `castif/` (the ESP32-P4 cast) and `jpegio/` (the JPEG
-  decoder, from displayif), which live only here,
-  `tflite/` and `vision/` (esp-vision's modules, from the pin in `.esp-vision/`;
-  see [docs/esp-vision.md](docs/esp-vision.md)), and the modules themselves,
-  linked or cloned.
+  (every module), `tflite/` and `vision/` (esp-vision's modules, from the pin
+  in `.esp-vision/`; see [docs/esp-vision.md](docs/esp-vision.md)), the modules
+  themselves, linked or cloned, and the C modules that live only here:
+  - [`castif/`](modules/castif/): casts an ESP32-P4's screen and sound to a TV over Wi-Fi
+    Display, or serves them as live HLS.
+  - [`h264enc/`](modules/h264enc/): RGB565 frames to H.264 on the ESP32-P4's hardware encoder.
+  - [`jpegio/`](modules/jpegio/): JPEG decode and encode, with CircuitPython's `jpegio` API.
+  - [`pngio/`](modules/pngio/): PNG encode and decode, RGB565 in and out.
+  - [`ppa/`](modules/ppa/): scale, rotate, convert and fill pixel buffers, on the
+    ESP32-P4's Pixel Processing Accelerator or in portable C elsewhere.
+  - [`tsmux/`](modules/tsmux/): MPEG-TS and HLS segments from H.264.
 - [`patches/micropython/`](patches/micropython/) — our patch series (`0001-…` to `0029-…`; there
   is no `0026`, whose fix moved into `patches/tinyusb/`), each justified
   in its own header; [`patches/apply_patches.py`](patches/apply_patches.py) applies it, plus
