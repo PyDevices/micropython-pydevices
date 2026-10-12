@@ -1,0 +1,97 @@
+From 5e0baaf6734326d258f59250976366aec10ffdf9 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 21:01:38 -0500
+Subject: [PATCH] py/mkrules.cmake: name the qstr preprocessor's include
+ directories briefly.
+
+gcc hands cc1 all its options in one environment string,
+COLLECT_GCC_OPTIONS, and Linux caps any single string at 128 KiB
+(MAX_ARG_STRLEN). An esp32 build gathers every ESP-IDF component's
+include directories for the qstr preprocessor: an ESP32-P4 build with
+micropython-pydevices' --modules all names 890 (321 distinct), so with
+the tree at a path longer than about 65 characters the options passed
+128 KiB and cc1 never started:
+
+    riscv32-esp-elf-gcc: fatal error: cannot execute '.../cc1':
+        posix_spawn: Argument list too long
+
+A response file would not help: gcc expands @file before it builds
+COLLECT_GCC_OPTIONS (checked with the same toolchain).
+
+MICROPY_CPP_INC now drops a directory named twice (the preprocessor
+keeps only the first, so the search is unchanged), and names a directory
+relative to the commands' working directory, CMAKE_CURRENT_BINARY_DIR,
+when that is shorter. That takes the tree's path out of every include
+directory under it. A path is made relative only when the working
+directory's own path has no symlinks (so ".." climbs exactly the path it
+names) and the include path is absolute with no "." or ".." segments or
+generator expression; anything else stays as it was. The two commands
+that take MICROPY_CPP_FLAGS name their WORKING_DIRECTORY, which was
+already their default. The compile itself is untouched, and so are make
+ports.
+
+Seen building ESP32_GENERIC_P4 from a clone at a 119-character path.
+Unchanged on upstream v1.29.0.
+---
+ py/mkrules.cmake | 29 +++++++++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+
+diff --git a/py/mkrules.cmake b/py/mkrules.cmake
+index 0903f81..976ebdc 100644
+--- a/py/mkrules.cmake
++++ b/py/mkrules.cmake
+@@ -66,8 +66,35 @@ endif()
+ # Compute MICROPY_CPP_FLAGS for preprocessor
+ list(APPEND MICROPY_CPP_INC ${MICROPY_CPP_INC_EXTRA})
+ list(APPEND MICROPY_CPP_DEF ${MICROPY_CPP_DEF_EXTRA})
++
++# Keep the include directories short. gcc hands cc1 all its options in one
++# environment string, COLLECT_GCC_OPTIONS, which Linux caps at 128 KiB, and a
++# response file doesn't help (gcc expands it first). The esp32 port can name
++# hundreds of directories here, so a tree at a path longer than about 65
++# characters failed with "posix_spawn: Argument list too long". So a directory
++# named twice is named once (the preprocessor keeps only the first anyway), and
++# one is named relative to the commands' working directory when that is
++# shorter. Relative only when ".." from there climbs the very path it names
++# (the working directory's path has no symlinks) and the directory's own path
++# has no "." or ".." to collapse; otherwise it stays as given.
++if(MICROPY_CPP_INC)
++    list(REMOVE_DUPLICATES MICROPY_CPP_INC)
++endif()
++set(MICROPY_CPP_WORKING_DIR ${CMAKE_CURRENT_BINARY_DIR})
++get_filename_component(_real_dir ${MICROPY_CPP_WORKING_DIR} REALPATH)
+ set(_prefix "-I")
+ foreach(_arg ${MICROPY_CPP_INC})
++    if(_real_dir STREQUAL MICROPY_CPP_WORKING_DIR
++        AND IS_ABSOLUTE "${_arg}"
++        AND NOT _arg MATCHES "\\$<"
++        AND NOT _arg MATCHES "(^|/)\\.\\.?(/|$)")
++        file(RELATIVE_PATH _rel ${MICROPY_CPP_WORKING_DIR} ${_arg})
++        string(LENGTH "${_rel}" _rel_len)
++        string(LENGTH "${_arg}" _arg_len)
++        if(_rel AND _rel_len LESS _arg_len)
++            set(_arg ${_rel})
++        endif()
++    endif()
+     list(APPEND MICROPY_CPP_FLAGS ${_prefix}${_arg})
+ endforeach()
+ set(_prefix "-D")
+@@ -125,6 +152,7 @@ add_custom_target(
+ add_custom_command(
+     OUTPUT ${MICROPY_QSTRDEFS_LAST}
+     COMMAND ${Python3_EXECUTABLE} ${MICROPY_PY_DIR}/makeqstrdefs.py pp ${CMAKE_C_COMPILER} -E output ${MICROPY_GENHDR_DIR}/qstr.i.last cflags ${MICROPY_CPP_FLAGS} -DNO_QSTR cxxflags ${MICROPY_CPP_FLAGS} -DNO_QSTR sources ${MICROPY_SOURCE_QSTR}
++    WORKING_DIRECTORY ${MICROPY_CPP_WORKING_DIR}
+     DEPENDS ${MICROPY_MPVERSION}
+         ${MICROPY_SOURCE_QSTR}
+     VERBATIM
+@@ -152,6 +180,7 @@ add_custom_command(
+ add_custom_command(
+     OUTPUT ${MICROPY_QSTRDEFS_PREPROCESSED}
+     COMMAND cat ${MICROPY_QSTRDEFS_PY} ${MICROPY_QSTRDEFS_PORT} ${MICROPY_QSTRDEFS_COLLECTED} | sed "s/^Q(.*)/\"&\"/" | ${CMAKE_C_COMPILER} -E ${MICROPY_CPP_FLAGS} - | sed "s/^\\\"\\(Q(.*)\\)\\\"/\\1/" > ${MICROPY_QSTRDEFS_PREPROCESSED}
++    WORKING_DIRECTORY ${MICROPY_CPP_WORKING_DIR}
+     DEPENDS ${MICROPY_QSTRDEFS_PY}
+         ${MICROPY_QSTRDEFS_PORT}
+         ${MICROPY_QSTRDEFS_COLLECTED}
+-- 
+2.43.0
+
