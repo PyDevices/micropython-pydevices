@@ -940,6 +940,19 @@ def build_circuitpython(args, make_extra, ws):
 
 # ---- the build -------------------------------------------------------------
 
+# How long the clone's path can be before an esp32 build with many modules
+# overflows the 128 KiB gcc gives its options (micropython-pydevices#97).
+ESP32_PATH_LIMIT = 60
+
+
+def failure_hint(port, log_text):
+    """One line naming the fix for a build failure we recognise, or None."""
+    if port == "windows" and os.name != "nt" and "LT_SYS_SYMBOL_USCORE" in log_text:
+        # libffi's autoreconf, without libltdl's m4 macros.
+        return "libffi's autoreconf can't find libltdl's macros: install libltdl-dev (Debian, Ubuntu), then build again"
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], allow_abbrev=False)
     ap.add_argument("--interpreter", choices=("micropython", "circuitpython"), default="micropython",
@@ -1069,6 +1082,12 @@ def main():
         make.append(f"VARIANT={variant}")
 
     if port == "esp32":
+        # ESP-IDF's include dirs are the most of them: it matters when they're in the clone too.
+        local_idf = DEPS / "esp-idf"
+        lent = local_idf.is_symlink() or (not local_idf.exists() and ws and (ws / "esp-idf").is_dir())
+        if len(str(REPO)) > ESP32_PATH_LIMIT and not lent:
+            say(f"note: this clone's path is {len(str(REPO))} characters; past about {ESP32_PATH_LIMIT}, an esp32 build with many modules")
+            say('  fails with "posix_spawn: Argument list too long" (micropython-pydevices#97). Clone somewhere shorter.')
         idf = ensure_dep("esp-idf", ws)
         prefix = f'. "{idf}/export.sh" >/dev/null && '
     elif port == "webassembly":
@@ -1092,7 +1111,7 @@ def main():
             out.append(chunk)
         return p.wait(), "".join(out)
 
-    rc = 0
+    rc, out = 0, ""
     tinyusb = None
     try:
         if port == "esp32":
@@ -1160,14 +1179,18 @@ def main():
             rp2_storage = int(got.group(1)) if rc == 0 and got else None
         else:
             shell(make + ["submodules"])
-            rc = shell(make)
+            if port == "windows" and os.name != "nt":  # cross-built: failure_hint() reads the log
+                rc, out = shell(make, log=True)
+            else:
+                rc = shell(make)
     finally:
         if port == "esp32":
             # The component manager rewrites these on every build; the tree's own copy is the record.
             subprocess.run(["git", "-C", str(mp), "checkout", "--quiet", "--", "ports/esp32/lockfiles"], check=False)
 
     if rc != 0:
-        die(f"the build failed (make exit {rc})")
+        hint = failure_hint(port, out)
+        die(f"the build failed (make exit {rc})" + (f"\n{hint}" if hint else ""))
     rec = dict(want, complete=True)
     if port == "rp2" and rp2_storage:
         rec["rp2_storage_bytes"] = rp2_storage

@@ -9,6 +9,11 @@ build command. It is not a fork, and it publishes no Python package.
 Get it, if you haven't: `curl -fsSL https://pydevices.github.io/install.sh | sh`
 clones this repository into `micropython-pydevices` in the current directory
 and checks your tools. On Windows, see [On Windows](#on-windows).
+Run it somewhere that keeps the clone's path short, under about 60
+characters, such as your home directory (`~/micropython-pydevices`): an
+esp32 build with many modules hands gcc every include path, and a long
+clone path pushes that past a Linux limit
+([#97](https://github.com/PyDevices/micropython-pydevices/issues/97)).
 Then, from the clone:
 
 ```bash
@@ -19,10 +24,12 @@ Then, from the clone:
 
 The first run fetches what it needs. Where the repositories are already
 checked out side by side, it links those sibling checkouts instead. An
-esp32 build's first run also clones ESP-IDF into `deps/` and installs its
-toolchains, for every ESP chip, under `~/.espressif`: about 4 GB, outside
-the clone (set `IDF_TOOLS_PATH` to put them elsewhere), and most of the
-first esp32 build's time.
+esp32 build's first run also clones ESP-IDF into the clone's `deps/` (about
+770 MB) and installs its toolchains, for every ESP chip, under
+`~/.espressif`: about 4 GB, outside the clone (set `IDF_TOOLS_PATH` to put
+them elsewhere), and most of the first esp32 build's time. The toolchains
+stay put, but ESP-IDF goes with the clone: move it or clone again and the
+next esp32 build fetches ESP-IDF again.
 
 The desktop `pydevices` variants freeze a board config that imports
 `displaydev`, which is frozen only when `--modules` names `pydevices` (the
@@ -64,15 +71,41 @@ A build prints a few things that look wrong and aren't:
 
 - Every esp32 and rp2 build with `all` fails its first link on size, then
   autosize builds again. [The model](#the-model) says what that looks like.
-- esp32: `warning: unknown kconfig symbol 'XTAL_FREQ_AUTO'`, a run of
-  `CONFIG_… was replaced with CONFIG_…` lines (ESP-IDF renamed those
-  settings and still maps the old names), and cmake's `Could NOT find
-  Threads`.
-- rp2: `No installed picotool with version 2.3.0 found - building from
-  source`, once per pass.
-- windows: libffi's configure says `libtool.m4: error: problem compiling CXX
-  test program`; it is probing for a C++ compiler it doesn't need, and the
-  build goes on.
+- esp32:
+  - `warning: unknown kconfig symbol 'XTAL_FREQ_AUTO'` and a run of
+    `CONFIG_… was replaced with CONFIG_…` lines: ESP-IDF renamed those
+    settings and still maps the old names.
+  - `Component lockfile contents have changed`, a CMake warning that asks
+    you to mention it in any issue. The build uses its own TinyUSB and a
+    newer ESP-IDF than upstream's lockfile records; `build_mp.py` puts the
+    lockfile back afterwards.
+  - cmake's `Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed` and `Could
+    NOT find Threads`.
+  - On the P4, `Detecting C compiler ABI info - failed` and the same for
+    CXX, each checked again a moment later and reported `done`.
+  - On the first build, `WARNING: Download failure: HTTP Error 502` from
+    ESP-IDF's tool installer, which tries again by itself.
+- rp2:
+  - `No installed picotool with version 2.3.0 found - building from
+    source`, once per pass.
+  - On the first build, `PICO_TINYUSB_PATH specified, but does not contain
+    hw/bsp/rp2040; USB support will be unavailable`. It comes from the pass
+    that fetches submodules, before TinyUSB is checked out; the real build
+    says `TinyUSB available` and builds it.
+  - `PICO_BTSTACK_PATH specified but content not present` and the same for
+    `PICO_LWIP_PATH`, on boards without networking or Bluetooth, which
+    don't fetch those libraries.
+- windows:
+  - libffi's configure says `libtool.m4: error: problem compiling CXX test
+    program`; it is probing for a C++ compiler it doesn't need, and the
+    build goes on.
+  - Cross-built from Linux, `configure: WARNING: using cross tools not
+    prefixed with host triplet`: there's no MinGW-named `file` command, so
+    it uses the plain one.
+  - Autoconf's ``The macro `AC_TRY_COMPILE' is obsolete`` and ``The
+    preprocessor macro `STDC_HEADERS' is obsolete``, and four `… is
+    deprecated [-Wdeprecated-declarations]` warnings, all from libffi's own
+    sources.
 
 ## On Windows
 
@@ -137,6 +170,7 @@ on top. Add `--modules` to any of these:
 | Waveshare ESP32-P4-WIFI6-DEV-KIT, USB device on a USB-C wired to header P6 | `--port esp32 --board ESP32_GENERIC_P4 --variant WIFI6_DEV_KIT --flash 16MB` |
 | Waveshare ESP32-P4-WIFI6-DEV-KIT, USB device on its USB-C marked "USB" | `--port esp32 --board ESP32_GENERIC_P4 --variant WIFI6_DEV_KIT_H2 --flash 16MB` |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-4B | `--port esp32 --board ESP32_GENERIC_P4 --variant PRE_REV3_C6_WIFI --flash 32MB` |
+| Another ESP32-P4 board, chip revision 3 or later, with an ESP32-C6 for Wi-Fi | `--port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB` |
 | Waveshare ESP32-S3-Touch-LCD-7 | `--port esp32 --board ESP32_GENERIC_S3 --variant LCD_7 --flash 8MB` |
 | Waveshare ESP32-S3-Touch-LCD-4.3 | `--port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB` |
 | LilyGO T-Embed S3 | `--port esp32 --board ESP32_GENERIC_S3 --variant T_EMBED --flash 16MB` |

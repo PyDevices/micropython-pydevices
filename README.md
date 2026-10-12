@@ -17,8 +17,10 @@ asks you for port, board and variant. Output lands in
 directory is `default` on esp32 and rp2, `standard` on the desktop ports),
 beside a record of every module's commit.
 
-Don't have it yet? This clones it into `micropython-pydevices` in the current
-directory and checks your tools (Linux, WSL, or Git Bash on Windows):
+Don't have it yet? Run this from your home directory, or anywhere with a short
+path ([esp32 builds need one](docs/newcomers.md#build-something)). It clones
+the repository into `micropython-pydevices` there and checks your tools
+(Linux, WSL, or Git Bash on Windows):
 
 ```bash
 curl -fsSL https://pydevices.github.io/install.sh | sh
