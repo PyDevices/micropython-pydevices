@@ -4,7 +4,7 @@
 natively, so one script decodes on both — CircuitPython uses its own, a
 MicroPython firmware built with this module uses this one. It exists so a
 `displaydev` firmware can show a camera's MJPEG frames (or a JPEG on flash)
-without carrying LVGL for its decoder (org `docs/jpegio-vision.md`).
+without carrying LVGL for its decoder.
 
 ```bash
 ./build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB --modules displayif,jpegio
@@ -267,7 +267,7 @@ to byte-swap for `RGB565_SWAPPED`); see above. And errors are typed
 (RGB565), `JD_USE_SCALE 1`, `JD_TBLCLIP 1`, `JD_FASTDECODE 1`. `jpegio.c`
 refuses to build with any other `JD_FORMAT`.
 
-**With LVGL (D4 of the org's `docs/jpegio-vision.md`: jpegio
+**With LVGL (jpegio
 self-detects).** LVGL's own TJPGD is off by config on MicroPython
 (`LV_USE_TJPGD 0` in lvgl-bindings' `lv_conf.h`), so nothing clashes with
 the vendored copy and LVGL has no JPEG decoder of its own; this module
