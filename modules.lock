@@ -6,7 +6,7 @@
 audiocomponents   https://github.com/PyDevices/audiocomponents.git    b2ebc92c77276229a40d7c279c0a321550a68103
 audiodsp          https://github.com/PyDevices/audiodsp.git           af2f3c7450d8b904a59466f22cc5a1de85687204
 audioif           https://github.com/PyDevices/audioif.git            76fc96d64a8c06565d15cd11464b101733aac922
-cameraif          https://github.com/PyDevices/cameraif.git           013b16eeeb805dca1f8fbb8310dc08c41207897f
+cameraif          https://github.com/PyDevices/cameraif.git           d1a7aa8e9fa2a07578095d7ce9b626d0f7f4183f
 displayif         https://github.com/PyDevices/displayif.git          be7669ebd3cb1e603d0a9f6b1aba94fa1140ac2c
 lvgl-micropython  https://github.com/PyDevices/lvgl-micropython.git   e8aea6672566ff0bbcb62f2f8e91733c31ed4ca1
 palettes          https://github.com/PyDevices/palettes.git           f3dfad0bac281f1e8816b30861445498b4137de6
