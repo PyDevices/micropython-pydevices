@@ -52,16 +52,16 @@ type 0x83. LPCM is not an HLS audio format: a Roku plays it silent.
 
 ## For C
 
-`src/tsmux_core.h` is the muxer with no MicroPython in it, writing each
+[`src/tsmux_core.h`](src/tsmux_core.h) is the muxer with no MicroPython in it, writing each
 188-byte packet to a callback. castif's cast task uses it on core 0 through
 weak symbols, so castif still links without tsmux.
 
 ## Tests
 
-`tests/test_tsmux.py` (unix MicroPython) muxes `tests/canned_160x96.h264`
-(90 frames from ffmpeg) into a stream and HLS, and `tests/check_tsmux_ffmpeg.py`
+[`tests/test_tsmux.py`](tests/test_tsmux.py) (unix MicroPython) muxes [`tests/canned_160x96.h264`](tests/canned_160x96.h264)
+(90 frames from ffmpeg) into a stream and HLS, and [`tests/check_tsmux_ffmpeg.py`](tests/check_tsmux_ffmpeg.py)
 has ffmpeg decode the stream, each segment alone and the playlist.
-`tests/compare_castif.c` builds castif's muxer as it was (extracted verbatim
-from git by `tests/extract_castif_ref.py`) beside tsmux and checks they write
+[`tests/compare_castif.c`](tests/compare_castif.c) builds castif's muxer as it was (extracted verbatim
+from git by [`tests/extract_castif_ref.py`](tests/extract_castif_ref.py)) beside tsmux and checks they write
 the same bytes: 86,000 packets, every packet-boundary size, with and without
-LPCM. CI runs all three (`.github/workflows/tsmux.yml`).
+LPCM. CI runs all three ([`.github/workflows/tsmux.yml`](../../.github/workflows/tsmux.yml)).

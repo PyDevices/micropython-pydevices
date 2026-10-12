@@ -57,7 +57,7 @@ YUV 4:2:0, the only raw format the pre-revision-3 P4 accepts.
 
 ## For C
 
-`src/h264enc.h` is the same session for native code: `h264enc_open()`,
+[`src/h264enc.h`](src/h264enc.h) is the same session for native code: `h264enc_open()`,
 `h264enc_encode()` into the session's own buffer, `h264enc_force_idr()`,
 `h264enc_set_bitrate()`, `h264enc_close()`. castif's core-0 cast task encodes
 through it, declaring the functions weak so castif still links without
@@ -65,15 +65,15 @@ h264enc.
 
 ## Tests
 
-`tests/test_h264enc.py` runs on a P4 with `tests/h264_frames.py` beside it:
+[`tests/test_h264enc.py`](tests/test_h264enc.py) runs on a P4 with [`tests/h264_frames.py`](tests/h264_frames.py) beside it:
 60 frames of a moving box, IDR placement, `force_idr()`, the busy rule. It
-writes `h264enc.h264`, and `tests/check_h264_ffmpeg.py` has ffmpeg on the PC
+writes `h264enc.h264`, and [`tests/check_h264_ffmpeg.py`](tests/check_h264_ffmpeg.py) has ffmpeg on the PC
 decode it: every frame, at 30 dB or better against the source (33.3 dB
 measured), and a frame-late comparison that must fail.
 
 ## Build
 
-`components/h264enc_esp_h264/` is an ESP-IDF component with no sources whose
-`idf_component.yml` fetches Espressif's `esp_h264` (1.4.1);
-`build_mp.py` adds it to the build whenever h264enc is selected. It lived in
+[`components/h264enc_esp_h264/`](components/h264enc_esp_h264/) is an ESP-IDF component with no sources whose
+[`idf_component.yml`](components/h264enc_esp_h264/idf_component.yml) fetches Espressif's `esp_h264` (1.4.1);
+[`build_mp.py`](../../build_mp.py) adds it to the build whenever h264enc is selected. It lived in
 castif until the media roadmap's Phase 3 (2026-10-06).

@@ -63,9 +63,9 @@ uzlib, so it holds two rows and a 32 KB window rather than the whole image.
 
 ## Tests
 
-`tests/test_pngio.py` runs on any MicroPython and on CPython: exact round
+[`tests/test_pngio.py`](tests/test_pngio.py) runs on any MicroPython and on CPython: exact round
 trips, the formats, a stride and a placed decode, a UI frame's size, and the
-errors. `tests/check_pngio_pillow.py` checks both ways on the PC. Pillow
+errors. [`tests/check_pngio_pillow.py`](tests/check_pngio_pillow.py) checks both ways on the PC. Pillow
 reads every file pngio wrote, and pngio reads Pillow's files in every layout
 it supports, with Pillow's own filters and dynamic Huffman blocks.
 
