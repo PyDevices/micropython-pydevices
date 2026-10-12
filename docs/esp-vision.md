@@ -16,13 +16,13 @@ esp-vision's stubs (`stubs/*.pyi` in esp-vision) document the API.
 
 ## How it is built
 
-`modules/.esp-vision` pins esp-vision at a full commit (`ESP_VISION.lock`).
-Its `fetch.sh` links a sibling clone at that commit (`../esp-vision`),
+[`modules/.esp-vision`](../modules/.esp-vision/) pins esp-vision at a full commit ([`ESP_VISION.lock`](../modules/.esp-vision/ESP_VISION.lock)).
+Its [`fetch.sh`](../modules/.esp-vision/fetch.sh) links a sibling clone at that commit (`../esp-vision`),
 or fetches that commit alone. The leading dot keeps it out of `--modules` and
 `all`, because esp-vision's own `micropython.cmake` is its whole firmware
 build, not a module.
 
-`modules/tflite` and `modules/vision` are our glue around esp-vision's files:
+[`modules/tflite`](../modules/tflite/) and [`modules/vision`](../modules/vision/) are our glue around esp-vision's files:
 the ESP-IDF components esp-vision uses, at its versions; the include paths and
 definitions MicroPython's QSTR scan needs (it sees only a module's own paths,
 never a linked component's); and two pieces of our own:
@@ -34,7 +34,7 @@ never a linked component's); and two pieces of our own:
   headers by `MICROPY_BOARD`, which names upstream's generic boards here. Ours
   takes them from one of esp-vision's boards per chip
   (`ESP32_P4X_FUNCTION_EV_BOARD`, `ESP32_S3_EYE`).
-- **`src/vision_preview_none.c`** stands in for esp-vision's preview, which
+- **[`src/vision_preview_none.c`](../modules/vision/src/vision_preview_none.c)** stands in for esp-vision's preview, which
   streams frames to its IDE over its own USB multiplexer. `image.flush()`
   raises `OSError("preview flush failed: ESP_ERR_NOT_SUPPORTED")`.
 
@@ -44,7 +44,7 @@ never a linked component's); and two pieces of our own:
 |---|---|---|
 | `tflite`: TFLM's own hello-world test (its int8 model, four golden inputs, 0.05 tolerance) | pass, worst error 0.016 | pass, outputs identical |
 | `tflite`: esp-vision's sine model, per prediction | 104 µs | 397 µs |
-| `vision`: `examples/vision_smoke.py` (draw, read back, `find_blobs`, JPEG out and in, `flush`) | pass; JPEG 42 ms | pass; JPEG 84 ms |
+| `vision`: [`examples/vision_smoke.py`](../modules/vision/examples/vision_smoke.py) (draw, read back, `find_blobs`, JPEG out and in, `flush`) | pass; JPEG 42 ms | pass; JPEG 84 ms |
 | `espdl`: ESP-DL's pedestrian example photo, against ESP-DL's published boxes | pass, 68 ms, IoU ≥ 0.90 | pass, 176 ms, IoU ≥ 0.92 |
 | `h264`: 30 frames decoded on the PC by ffmpeg | Constrained Baseline, frames as drawn | (P4 only) |
 | `rtsp`: ffmpeg on the PC pulls the stream | 151 frames in 10 s at 15 fps | (P4 only) |

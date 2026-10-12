@@ -368,7 +368,7 @@ registering twice adds nothing. On a build with no decoder in it, `()`
 always.
 
 **Why these two names are unconditional.** The general rule and the check that
-enforces it are in [../../docs/qstrs-and-usermod-defines.md](../../docs/qstrs-and-usermod-defines.md);
+enforces it are in [displayif's docs/qstrs-and-usermod-defines.md](https://github.com/PyDevices/displayif/blob/main/docs/qstrs-and-usermod-defines.md);
 this is where it was first found. They are module attributes on
 every build, and only `lvgl_decoder.c` is conditional. Partly so the API
 never silently disappears when the sibling scan misses — a decoder-less
