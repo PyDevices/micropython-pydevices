@@ -13,7 +13,7 @@ without carrying LVGL for its decoder (org `docs/jpegio-vision.md`).
 It lived in displayif until 2026-10-06, when it moved here on its own (the
 media modules roadmap's Phase 1), so a firmware that wants JPEG now names
 `jpegio` (`all` includes it). Platform-neutral C: built on every port from this
-directory's `micropython.mk` / `micropython.cmake`. Output is native-order RGB565, block by block, straight
+directory's [`micropython.mk`](micropython.mk) / [`micropython.cmake`](micropython.cmake). Output is native-order RGB565, block by block, straight
 from TJpgDec — no full-frame buffer inside the module.
 
 Beside the `lvgl-micropython` usermod it is also LVGL's JPEG decoder: the
@@ -183,10 +183,10 @@ given back when a much smaller image comes along.
 
 The software and hardware encoders write different bytes for the same image
 (different quantisation and rounding); both decode to the source within the
-same quality threshold (the test, `tests/test_jpegio_encode.py`, holds both
+same quality threshold (the test, [`tests/test_jpegio_encode.py`](tests/test_jpegio_encode.py), holds both
 to it).
 
-Other C modules can encode through `jpegio_encode()` in `src/jpegio.h`;
+Other C modules can encode through `jpegio_encode()` in [`src/jpegio.h`](src/jpegio.h);
 cameraif's `capture_jpeg()` does.
 
 ### Hardware decode (ESP32-P4)
@@ -248,19 +248,19 @@ to byte-swap for `RGB565_SWAPPED`); see above. And errors are typed
 
 ## Build
 
-- `jpegio.c` — the module (`MP_REGISTER_MODULE(MP_QSTR_jpegio, ...)`) and
+- [`jpegio.c`](src/jpegio.c) — the module (`MP_REGISTER_MODULE(MP_QSTR_jpegio, ...)`) and
   `JpegDecoder`.
-- `jpegio_enc.c`, `jpegio.h` — `JpegEncoder` and the C API.
-- `jpegenc/` — the software encoder, generated from stb_image_write by
-  `tools/make_jpegenc.py` (rerun it to take a newer stb).
-- `jpegio_hw.c`, `jpegio_hw.h` — the ESP32-P4's JPEG engine
+- [`jpegio_enc.c`](src/jpegio_enc.c), [`jpegio.h`](src/jpegio.h) — `JpegEncoder` and the C API.
+- [`jpegenc/`](src/jpegenc/) — the software encoder, generated from stb_image_write by
+  [`tools/make_jpegenc.py`](tools/make_jpegenc.py) (rerun it to take a newer stb).
+- [`jpegio_hw.c`](src/jpegio_hw.c), [`jpegio_hw.h`](src/jpegio_hw.h) — the ESP32-P4's JPEG engine
   (`esp_driver_jpeg`), compiled in when `micropython.cmake` sees an esp32p4
   target; two stubs everywhere else.
-- `tjpgd/` — vendored TJpgDec: `tjpgd.c`, `tjpgd.h`, `tjpgdcnf.h`. The
+- [`tjpgd/`](src/tjpgd/) — vendored TJpgDec: `tjpgd.c`, `tjpgd.h`, `tjpgdcnf.h`. The
   firmware's only TJpgDec, always compiled.
-- `lvgl_decoder.c` / `lvgl_decoder.h` — the LVGL image decoder on that
+- [`lvgl_decoder.c`](src/lvgl_decoder.c) / [`lvgl_decoder.h`](src/lvgl_decoder.h) — the LVGL image decoder on that
   TJpgDec; compiled only beside `lvgl-micropython` (below).
-- `micropython.mk` / `micropython.cmake` — the module's glue (`manifest.py`
+- [`micropython.mk`](micropython.mk) / [`micropython.cmake`](micropython.cmake) — the module's glue ([`manifest.py`](manifest.py)
   names it with `c_module`).
 
 `tjpgdcnf.h` is CircuitPython's, verbatim: `JD_SZBUF 512`, `JD_FORMAT 1`
@@ -272,7 +272,7 @@ self-detects).** LVGL's own TJPGD is off by config on MicroPython
 (`LV_USE_TJPGD 0` in lvgl-bindings' `lv_conf.h`), so nothing clashes with
 the vendored copy and LVGL has no JPEG decoder of its own; this module
 supplies one. When lvgl-micropython is in the same build (`USER_C_MODULES`
-names it, which a `build_mp.py` build with both modules does), both glue files
+names it, which a [`build_mp.py`](../../build_mp.py) build with both modules does), both glue files
 compile `lvgl_decoder.c` with `-DJPEGIO_LVGL_DECODER=1`; its `lvgl/lvgl.h`
 resolves through the bindings directory lvgl-micropython puts on the include
 path. `JPEGIO_LVGL=0` / `1` (make) or `-DJPEGIO_LVGL=OFF` / `ON` (CMake)
@@ -283,14 +283,14 @@ are unconditional* below.
 
 ## NOTICE — stb_image_write
 
-`jpegenc/jpegenc.c` is the JPEG writer from Sean Barrett's
+[`jpegenc/jpegenc.c`](src/jpegenc/jpegenc.c) is the JPEG writer from Sean Barrett's
 [stb_image_write](https://github.com/nothings/stb) v1.16, itself Jon Olick's
 public-domain jo_jpeg. Its licence (MIT or public domain, your choice) is
 at the top of that file.
 
 ## NOTICE — TJpgDec
 
-`tjpgd/tjpgd.c`, `tjpgd/tjpgd.h` and `tjpgd/tjpgdcnf.h` are ChaN's TJpgDec
+[`tjpgd/tjpgd.c`](src/tjpgd/tjpgd.c), [`tjpgd/tjpgd.h`](src/tjpgd/tjpgd.h) and [`tjpgd/tjpgdcnf.h`](src/tjpgd/tjpgdcnf.h) are ChaN's TJpgDec
 R0.03 with patch1, taken from CircuitPython's `lib/tjpgd/src/` (which
 imported it from http://elm-chan.org/fsw/tjpgd/00index.html), with two
 deviations. First, the RGB565 store in `mcu_output` is ChaN's original
@@ -318,7 +318,7 @@ Industries, MIT).
 
 ## LVGL image decoder
 
-The decoder itself (`lvgl_decoder.c`) is compiled only beside
+The decoder itself ([`lvgl_decoder.c`](src/lvgl_decoder.c)) is compiled only beside
 `lvgl-micropython` (see Build); the two Python names below exist on every
 build. It is an ordinary LVGL image decoder named `"jpegio"`
 (`lv_image_decoder_t.name`), created with `lv_image_decoder_create`, so

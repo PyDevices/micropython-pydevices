@@ -94,7 +94,7 @@ for `hardware=True`. The PPA's rules are these:
 - The destination buffer must start on a 64-byte boundary, a cache line, and
   a `bytearray`'s data is only 16-byte aligned. Allocate 64 bytes extra and
   hand over a `memoryview` slice that starts on the boundary, as
-  `tests/test_ppa.py`'s `aligned()` does. The PPA also writes whole cache
+  [`tests/test_ppa.py`](tests/test_ppa.py)'s `aligned()` does. The PPA also writes whole cache
   lines, so the buffer must hold the picture rounded up to the next 64
   bytes. An unaligned or short buffer still works, but in software.
 - On a P4 before chip revision 3 (the Waveshare 4" panel), the PPA has no
@@ -119,7 +119,7 @@ is identical).
 
 ## For C
 
-`src/ppa_mod.h` is the same thing for native code: `ppa_mod_open()`,
+[`src/ppa_mod.h`](src/ppa_mod.h) is the same thing for native code: `ppa_mod_open()`,
 `ppa_mod_srm()`, `ppa_mod_used_hw()`, `ppa_mod_close()`. Each caller opens its
 own client. h264enc's colour conversion and cameraif's `capture_scaled` and
 `capture_yuy2` use it. A module that may be built without ppa declares these
@@ -127,7 +127,7 @@ weak and checks `ppa_mod_open()` for `NULL`.
 
 ## Tests
 
-`tests/test_ppa.py` runs anywhere. On unix it proves the software path against
+[`tests/test_ppa.py`](tests/test_ppa.py) runs anywhere. On unix it proves the software path against
 a Python model of each operation. On a P4 it adds the PPA against the software
 path, the PPA's refusals, and the timings above.
 
