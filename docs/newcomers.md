@@ -22,9 +22,12 @@ checked out side by side, it links those sibling checkouts instead. An
 esp32 build's first run also clones ESP-IDF into the clone's `deps/` (about
 770 MB) and installs its toolchains, for every ESP chip, under
 `~/.espressif`: about 4 GB, outside the clone (set `IDF_TOOLS_PATH` to put
-them elsewhere), and most of the first esp32 build's time. The toolchains
-stay put, but ESP-IDF goes with the clone: move it or clone again and the
-next esp32 build fetches ESP-IDF again.
+them elsewhere), and a few minutes of the first esp32 build, more on a slow
+connection. The toolchains stay put, but ESP-IDF goes with the clone: move it
+or clone again and the next esp32 build fetches ESP-IDF again. Each build
+folder takes room in the clone too; with `--modules all`, about 1 GB for a
+P4, 700 MB for an S3, 250 MB for a Pico 2 and 80 MB for windows. Those four
+builds leave the clone at about 3 GB, so plan on 7 GB with the toolchains.
 
 The desktop `pydevices` variants freeze a board config that imports
 `displaydev`, which is frozen only when `--modules` names `pydevices` (the
@@ -66,6 +69,10 @@ A build prints a few things that look wrong and aren't:
 
 - Every esp32 and rp2 build with `all` fails its first link on size, then
   autosize builds again. [The model](#the-model) says what that looks like.
+  That failure's last line can read `-e See [1;31mhttps://…/Build-Troubleshooting[0m`.
+  Upstream's Makefile prints it with `echo -e`, and where `/bin/sh` is dash,
+  as on Debian and Ubuntu, the `-e` comes out as text and a log shows the
+  colour codes raw. Nothing is broken.
 - esp32:
   - `warning: unknown kconfig symbol 'XTAL_FREQ_AUTO'` and a run of
     `CONFIG_… was replaced with CONFIG_…` lines: ESP-IDF renamed those
@@ -178,6 +185,26 @@ variant that match its chip and PSRAM, and give `--flash` its flash size. Make
 a variant of ours only for settings that really are that board's, like the
 LCD-7's cache sizes; see [esp32 settings](#esp32-settings) below.
 
+## Flash it
+
+An esp32 build ends with ESP-IDF's `To flash, run: idf.py flash`. That isn't
+the route here: `idf.py` lives in the ESP-IDF environment the build sets up,
+not on your shell's `PATH`. Write `firmware.bin` with esptool (`pip install
+esptool`) instead. It's the merged image, bootloader, partition table and app
+in one, so it goes where the bootloader goes: 0x2000 on the P4, 0x0 on the
+S3. For another chip, the build folder's `flasher_args.json` has the
+bootloader's offset.
+
+```bash
+esptool --chip esp32p4 write-flash 0x2000 builds/esp32/ESP32_GENERIC_P4/WIFI6_DEV_KIT_H2/firmware.bin
+esptool --chip esp32s3 write-flash 0x0 builds/esp32/ESP32_GENERIC_S3/SPIRAM_OCT/firmware.bin
+```
+
+On rp2, hold BOOTSEL while you plug the board in, and copy `firmware.uf2` to
+the drive it shows. From there, pydevices'
+[Bringing up a board](https://github.com/PyDevices/pydevices/blob/main/docs/board-bringup.md)
+takes a flashed board to one drawing on its own panel.
+
 ## The model
 
 ```text
@@ -267,7 +294,13 @@ way autosize grows the app partition when the image doesn't fit.
 | [`build_mp.py`](../build_mp.py) | The build command. |
 | [`UPSTREAM`](../UPSTREAM) | The MicroPython release the patches apply to. |
 | [`modules.lock`](../modules.lock), [`deps.lock`](../deps.lock) | What gets fetched when it's missing. |
-| [`modules/`](../modules/) | The module manifest, `all/`, the modules that live only here (`castif/`, `h264enc/`, `jpegio/`, and `tflite/` and `vision/`, [esp-vision's](esp-vision.md)), and the rest, linked or cloned. |
+| [`modules/`](../modules/) | The module manifest, `all/`, `tflite/` and `vision/` ([esp-vision's](esp-vision.md)), the rest linked or cloned, and the C modules that live only here, below. |
+| [`modules/castif/`](../modules/castif/) | Casts an ESP32-P4's screen and sound to a TV over Wi-Fi Display, or serves them as live HLS. |
+| [`modules/h264enc/`](../modules/h264enc/) | RGB565 frames to H.264 on the ESP32-P4's hardware encoder. |
+| [`modules/jpegio/`](../modules/jpegio/) | JPEG decode and encode, with CircuitPython's `jpegio` API. |
+| [`modules/pngio/`](../modules/pngio/) | PNG encode and decode, RGB565 in and out. |
+| [`modules/ppa/`](../modules/ppa/) | Scale, rotate, convert and fill pixel buffers, on the ESP32-P4's Pixel Processing Accelerator or in portable C elsewhere. |
+| [`modules/tsmux/`](../modules/tsmux/) | MPEG-TS and HLS segments from H.264. |
 | [`patches/`](../patches/) | The patch series and [`apply_patches.py`](../patches/apply_patches.py). |
 | [`variants/`](../variants/) | Our unix, windows and webassembly variants, and the esp32 settings and board variants. |
 

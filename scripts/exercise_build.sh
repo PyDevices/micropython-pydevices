@@ -71,7 +71,11 @@ EOF
         done
     fi
     if [ -f "$rb_dir/partitions.csv" ]; then
-        say "partitions (autosize grew the app):"
+        if grep -v '^#' "$rb_dir/partitions.csv" | grep -qE ',[[:space:]]*data[[:space:]]*,[[:space:]]*(fat|littlefs|spiffs)'; then
+            say "partitions (autosize grew the app):"
+        else
+            say "partitions (autosize grew the app; the filesystem is the flash after the last one):"
+        fi
         grep -v '^#' "$rb_dir/partitions.csv" | grep . | sed 's/^/  /' | tee -a "$REPORT"
     fi
     for rb_f in micropython micropython.exe micropython.mjs micropython.wasm micropython.bin firmware.bin firmware.uf2; do
