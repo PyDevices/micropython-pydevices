@@ -145,7 +145,10 @@ there, so one build never nests inside another: with no `--variant` it's the
 name upstream's `make` uses, `standard` on unix, windows and webassembly and
 `default` for a board. Each dir holds a record of what
 went in: each module's path and commit. Build the same target with a
-different module set and it wipes that dir and rebuilds, and says so. One dir
+different module set, or with a module at another commit, and it wipes that
+dir and rebuilds, and says which module moved and from where to where.
+Uncommitted edits to a module build incrementally, as make and ninja handle
+them. One dir
 per target, never a stale cache (idf.py keeps `-D` values between runs), and
 no pile of experiment dirs.
 

@@ -1,0 +1,29 @@
+# build_mp.py's own unit tests: the decisions it makes before any build, such
+# as when a build dir has to be wiped. No toolchain, no MicroPython checkout.
+name: build_mp.py tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'build_mp.py'
+      - 'test_build_mp.py'
+      - '.github/workflows/build-mp.yml'
+  pull_request:
+    paths:
+      - 'build_mp.py'
+      - 'test_build_mp.py'
+      - '.github/workflows/build-mp.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Unit tests
+        run: python3 -m unittest test_build_mp -v
