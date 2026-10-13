@@ -245,7 +245,7 @@ that wants one (the wasm one) requires it by name.
 
 ## CircuitPython-compatible builds
 
-The same command builds OmniPython (CircuitPython-compatible) firmware:
+The same command builds OmniPython CP (CircuitPython-compatible) firmware:
 CircuitPython, with our C modules compiled in.
 
 ```bash
