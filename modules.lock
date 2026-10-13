@@ -20,4 +20,4 @@ pdwidgets         https://github.com/PyDevices/pdwidgets.git          e92267f2ef
 pydevices         https://github.com/PyDevices/pydevices.git          81290b13573b51889def33e65559fe64fb5471c1
 pygraphics        https://github.com/PyDevices/pygraphics.git         2d7ca35847db78d450428cdc0cb5aa69ab81c809
 ulab              https://github.com/v923z/micropython-ulab.git       1d3ddd8f5228e2c7335dac71f4846e6abb0ec9f9
-usbif             https://github.com/PyDevices/usbif.git              d1d1812513df03e0e1b90413af4b5dcde272e525
+usbif             https://github.com/PyDevices/usbif.git              d8252b64764d68792c7daf3a8e13ac3270dd06e3
