@@ -60,8 +60,11 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
 - [`UPSTREAM`](UPSTREAM) — the MicroPython release everything applies to (v1.29.0).
 - [`modules.lock`](modules.lock), [`deps.lock`](deps.lock) — the commits and versions `build_mp.py`
   fetches when a module or a toolchain isn't there. `deps.lock` also pins
-  CircuitPython, for `--interpreter circuitpython`. Beside sibling
-  checkouts, both are links to those checkouts instead.
+  CircuitPython, for `--interpreter circuitpython`. `modules.lock` also pins
+  lvgl-bindings, the generated binding and LVGL that lvgl-micropython
+  compiles: a build with lvgl-micropython fetches it into
+  `modules/.lvgl-bindings`. Beside sibling checkouts, these are links to those
+  checkouts instead.
 - [`modules/`](modules/) — [`manifest.py`](modules/manifest.py) (the manifest every build freezes), `all/`
   (every module), `tflite/` and `vision/` (esp-vision's modules, from the pin
   in `.esp-vision/`; see [docs/esp-vision.md](docs/esp-vision.md)), the modules

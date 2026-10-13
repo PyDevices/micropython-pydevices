@@ -178,8 +178,19 @@ def ensure_micropython(ws):
         run(["git", "-c", "advice.detachedHead=false", "clone", "-q", "--depth", "1", "--branch", upstream, "https://github.com/micropython/micropython", str(MP)])
 
 
+# lvgl-bindings is pinned in modules.lock beside the modules, but it is not a
+# module: it is the generated binding and LVGL that lvgl-micropython compiles.
+# It lands in modules/.lvgl-bindings (the dot keeps it out of "all" and of the
+# module list) and reaches lvgl-micropython as BINDINGS_DIR, so that module's
+# own pin and fetch never come into a build made here.
+LVGL_BINDINGS = "lvgl-bindings"
+LVGL_MODULE = "lvgl-micropython"
+
+
 def ensure_modules(ws):
     for name, url, commit in read_lock("modules.lock"):
+        if name == LVGL_BINDINGS:
+            continue
         dest = MODULES_DIR / name
         if dest.exists() or dest.is_symlink():
             continue
@@ -187,6 +198,67 @@ def ensure_modules(ws):
             link(dest, ws / name)
         else:
             clone_at(url, commit, dest)
+
+
+def lvgl_bindings(ws, module_dirs):
+    """The lvgl-bindings a build with lvgl-micropython compiles, or None
+    when the build has no lvgl-micropython.
+
+    In a workspace, modules/.lvgl-bindings links to the sibling checkout and
+    builds it as it is, like every other module. Anywhere else, it is fetched
+    at its modules.lock commit: lvgl-bindings' generated/ and lv_conf.h, and
+    LVGL's src/ at the commit lvgl-bindings records. Shallow, sparse and
+    blobless, so it downloads tens of MB rather than LVGL's whole history."""
+    if not any(module_name(d) == LVGL_MODULE for d in module_dirs):
+        return None
+    rows = {row[0]: row[1:] for row in read_lock("modules.lock")}
+    if LVGL_BINDINGS not in rows:
+        die(f"modules.lock has no {LVGL_BINDINGS} row, which {LVGL_MODULE} needs")
+    url, commit = rows[LVGL_BINDINGS]
+    dest = MODULES_DIR / f".{LVGL_BINDINGS}"
+    if dest.is_symlink():
+        if (dest / "lv_conf.h").is_file():
+            return dest
+        dest.unlink()
+    elif dest.is_dir():
+        if git_out(dest, "rev-parse", "HEAD") == commit and (dest / "lvgl" / "lvgl.h").is_file():
+            return dest
+        say(f"{dest} is not at modules.lock's {commit[:12]}; fetching it again")
+        shutil.rmtree(dest)
+    sibling = ws / LVGL_BINDINGS if ws else None
+    if sibling and (sibling / "lv_conf.h").is_file():
+        if not (sibling / "lvgl" / "lvgl.h").is_file():
+            die(f"{sibling} has no LVGL: git -C {sibling} submodule update --init --depth 1 lvgl")
+        link(dest, sibling)
+        return dest
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        die(f"modules.lock pins {LVGL_BINDINGS} at {commit!r}: it takes a full 40-character commit")
+    say(f"fetching {url} at {commit[:12]} into {dest} (generated/, lv_conf.h and LVGL's src/)")
+    part = dest.with_name(dest.name + ".partial")
+    shutil.rmtree(part, ignore_errors=True)
+
+    def sparse(repo, origin, sha, paths):
+        repo.mkdir(parents=True)
+        for cmd in (["init", "-q"], ["config", "core.autocrlf", "false"], ["remote", "add", "origin", origin],
+                    ["config", "extensions.partialClone", "origin"], ["sparse-checkout", "set", *paths],
+                    ["fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", sha],
+                    ["-c", "advice.detachedHead=false", "checkout", "-q", "FETCH_HEAD"]):
+            r = subprocess.run(["git", "-C", str(repo), *cmd], text=True, capture_output=True, check=False)
+            if r.returncode:
+                shutil.rmtree(part, ignore_errors=True)
+                die(f"could not fetch {origin} at {sha} (git {cmd[0]}: {r.stderr.strip() or r.returncode});"
+                    f" is modules.lock's {LVGL_BINDINGS} commit on GitHub?")
+
+    sparse(part, url, commit, ["generated", "lvgl"])
+    lvgl_sha = git_out(part, "ls-tree", "HEAD", "lvgl").split()[2:3]
+    lvgl_url = git_out(part, "config", "-f", ".gitmodules", "submodule.lvgl.url")
+    if not lvgl_sha or not lvgl_url:
+        shutil.rmtree(part, ignore_errors=True)
+        die(f"{LVGL_BINDINGS} {commit[:12]} records no lvgl submodule")
+    shutil.rmtree(part / "lvgl")
+    sparse(part / "lvgl", lvgl_url, lvgl_sha[0], ["src"])
+    part.rename(dest)
+    return dest
 
 
 def dep_version(name, path):
@@ -362,9 +434,13 @@ def resolve_modules(spec):
     return ",".join(names), unique
 
 
-def record(dirs):
+def record(dirs, bindings=None):
+    """A row per module, and one for the lvgl-bindings lvgl-micropython
+    compiles when the build has it: which commit went in, and whether it had
+    uncommitted changes."""
     rows = {}
-    for d in dirs:
+    named = [(module_name(d), d) for d in dirs] + ([(LVGL_BINDINGS, bindings)] if bindings else [])
+    for name, d in named:
         real = d.resolve()
         rev = git_out(real, "describe", "--always", "--dirty", "--abbrev=12") or "(not a git checkout)"
         # The commit and whether anything was uncommitted: what a consumer
@@ -377,7 +453,7 @@ def record(dirs):
         if dirty:
             diff = subprocess.run(["git", "-C", str(real), "diff", "HEAD", "--binary"], capture_output=True).stdout
             changes = hashlib.sha1(diff).hexdigest()[:12]
-        rows[module_name(d)] = {"path": str(real), "revision": rev, "commit": commit, "dirty": dirty,
+        rows[name] = {"path": str(real), "revision": rev, "commit": commit, "dirty": dirty,
                                 "changes": changes}
     return rows
 
@@ -926,12 +1002,16 @@ def build_circuitpython(args, make_extra, ws):
             "modules": spec, "module_set": module_set, "make_args": make_extra}
     if components:
         want["esp_idf_components"] = [f"{n} {dep_version(n, d)}" for n, d in zip(components, component_dirs)]
-    revisions = record(module_dirs)
+    bindings = lvgl_bindings(ws, module_dirs)
+    revisions = record(module_dirs, bindings)
     rec_path = build_dir_for(build, want, args.clean, revisions)
     user_c = cp_user_c_modules(module_dirs, build / "usermods")
 
     env = {k: v for k, v in os.environ.items()
-           if k not in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "VARIANT_DIR", "PYTHONPATH")}
+           if k not in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "VARIANT_DIR", "PYTHONPATH",
+                        "BINDINGS_DIR")}
+    if bindings:
+        env["BINDINGS_DIR"] = str(bindings.resolve())
     env["PATH"] = os.pathsep.join([str(CP_VENV / "bin"), env.get("PATH", "")])
     env["VIRTUAL_ENV"] = str(CP_VENV)
     # Only the submodules this target needs, the way CircuitPython's CI does:
@@ -1107,13 +1187,17 @@ def main():
             "module_set": module_set}
     # Each module's commit too: a module that moved keeps its name, and make
     # would reuse frozen content and qstr headers from before it moved.
-    revisions = record(module_dirs)
+    bindings = lvgl_bindings(ws, module_dirs)
+    revisions = record(module_dirs, bindings)
     build_dir_for(build, want, args.clean, revisions)
 
     env = dict(os.environ)
-    for leak in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "BOARD_DIR", "VARIANT_DIR"):
+    for leak in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "BOARD_DIR", "VARIANT_DIR",
+                 "BINDINGS_DIR"):
         env.pop(leak, None)
     env["PYDEVICES_MODULES"] = spec
+    if bindings:
+        env["BINDINGS_DIR"] = bindings.resolve().as_posix()
     if os.name == "nt":
         # Upstream's tools open sources without encoding=; Windows' default is cp1252.
         env.setdefault("PYTHONUTF8", "1")

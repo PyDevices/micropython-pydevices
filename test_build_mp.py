@@ -122,5 +122,50 @@ class Record(unittest.TestCase):
             self.assertNotEqual(build_mp.record([repo])["mod"]["changes"], first["changes"])
 
 
+class LvglBindings(unittest.TestCase):
+    """lvgl-bindings comes from modules.lock and lands in the build record."""
+
+    def git_repo(self, path, name="f.py"):
+        path.mkdir(parents=True)
+
+        def git(*args):
+            subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True)
+
+        git("init", "-q")
+        (path / name).write_text("x = 1\n")
+        git("add", name)
+        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "one")
+        return path
+
+    def test_not_fetched_without_lvgl_micropython(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(build_mp.lvgl_bindings(None, [Path(tmp) / "ulab"]))
+
+    def test_record_names_the_bindings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mod = self.git_repo(Path(tmp) / "mod")
+            bindings = self.git_repo(Path(tmp) / ".lvgl-bindings", "lv_conf.h")
+            rows = build_mp.record([mod], bindings)
+            self.assertEqual(sorted(rows), ["lvgl-bindings", "mod"])
+            self.assertEqual(len(rows["lvgl-bindings"]["commit"]), 40)
+            self.assertFalse(rows["lvgl-bindings"]["dirty"])
+            (bindings / "lv_conf.h").write_text("x = 2\n")
+            self.assertTrue(build_mp.record([mod], bindings)["lvgl-bindings"]["dirty"])
+
+    def test_a_short_commit_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "modules").mkdir()
+            (repo / "modules.lock").write_text("lvgl-bindings https://example.invalid/lvgl-bindings.git 7740c2f\n")
+            saved = build_mp.REPO, build_mp.MODULES_DIR
+            build_mp.REPO, build_mp.MODULES_DIR = repo, repo / "modules"
+            try:
+                with self.assertRaises(SystemExit) as cm:
+                    build_mp.lvgl_bindings(None, [repo / "modules" / "lvgl-micropython"])
+            finally:
+                build_mp.REPO, build_mp.MODULES_DIR = saved
+            self.assertIn("full 40-character commit", str(cm.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -28,7 +28,7 @@ micropython-pydevices/
 ├── UPSTREAM                 the MicroPython tag we build on (v1.29.0)
 ├── VERSION                  our version (scheme still open, below)
 ├── build_mp.py              the one command; Python so it runs anywhere
-├── modules.lock             one line per module: name, git URL, commit
+├── modules.lock             one line per module: name, git URL, commit (and lvgl-bindings, below)
 ├── deps.lock                one line per dependency: name, URL, version (ESP-IDF v5.5.4, emsdk 6.0.1, SDL2 2.30.10)
 ├── micropython/             ignored: symlink to a sibling checkout, or a clone of UPSTREAM
 ├── deps/                    ignored: esp-idf/, emsdk/, SDL2/, symlinked or fetched on demand
@@ -42,6 +42,7 @@ micropython-pydevices/
 │   ├── audioif  -> ../../audioif           clones at the modules.lock commit anywhere else
 │   ├── audiocomponents, cameraif, displayif, lvgl-micropython, palettes,
 │   ├── pdwidgets, pydevices, pygraphics, ulab, usbif
+│   ├── .lvgl-bindings       ignored: what lvgl-micropython compiles; a link, or a sparse fetch at its modules.lock commit
 │   └── jpegio                later: see "Open"
 ├── patches/
 │   ├── apply_patches.py     the overlay and the modules' own patches, applied once as one local commit
@@ -71,6 +72,17 @@ displayif is selected, nothing for unix or rp2. If that one isn't the locked
 version, the build refuses. Nothing is a git
 submodule, so a module commit never dirties this repo and the overlay commit
 never shows as modified.
+
+lvgl-bindings is pinned in `modules.lock` too, though it isn't a module: it
+holds the generated binding and the LVGL that lvgl-micropython compiles. A
+build with lvgl-micropython puts it at `modules/.lvgl-bindings`, a link to the
+sibling checkout or, anywhere else, a fetch of its `modules.lock` commit with
+only what gets compiled (tens of MB, not LVGL's history). The build hands it
+to lvgl-micropython as `BINDINGS_DIR`, so lvgl-micropython's own
+`LVGL_BINDINGS_COMMIT` and fetch never come into a build made here. A sibling
+checkout is built as it is, like every other module; when it isn't
+lvgl-micropython's pinned commit, the build prints a note. The build record
+has a row for it, its commit and whether it was dirty, beside the modules'.
 
 ## How a build runs
 
