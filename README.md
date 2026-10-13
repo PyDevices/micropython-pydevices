@@ -36,7 +36,7 @@ steps. Everything else builds from WSL. A Linux or WSL machine also
 cross-builds that same `micropython.exe`, with the same command and the
 MinGW packages from the list above; the SDL2 it links against is fetched.
 
-The same command builds OmniPython (CircuitPython-compatible) firmware, which
+The same command builds OmniPython CP (CircuitPython-compatible) firmware, which
 is CircuitPython with our C modules compiled in, for CircuitPython's own
 ports and boards:
 
