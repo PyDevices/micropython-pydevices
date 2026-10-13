@@ -85,6 +85,9 @@
   },
   "0029-micropython-py-mkrules-cmake-short-qstr-include-paths.patch": {
    "sha256": "1b675c07f807b56288d6626e1bfe52aeb21bb4bd567cd70c3d1cfc279c088b1f"
+  },
+  "0030-micropython-py-mkrules-qstr-arguments-in-a-response-file.patch": {
+   "sha256": "2e4ef37460ef174c81c778c2274735d61894c4ad732efdd2574bea3ce6e6e337"
   }
  },
  "tinyusb_patches": {

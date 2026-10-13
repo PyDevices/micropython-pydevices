@@ -997,8 +997,21 @@ def failure_hint(port, log_text):
     return None
 
 
+EXAMPLES = """examples:
+  ./build_mp.py                       asks for port, board, variant and modules
+  ./build_mp.py --port unix --variant pydevices --modules all
+  ./build_mp.py --port windows --variant pydevices --modules all
+  ./build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT \\
+      --flash 8MB --modules all
+  ./build_mp.py --port rp2 --board RPI_PICO2 --modules displayif,pygraphics
+
+Output lands in builds/<port>/[<board>/]<variant>/. Arguments it doesn't
+recognise go to make (-j4, V=1). The guide: docs/newcomers.md."""
+
+
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], allow_abbrev=False)
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], allow_abbrev=False,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=EXAMPLES)
     ap.add_argument("--interpreter", choices=("micropython", "circuitpython"), default="micropython",
                     help="circuitpython: CircuitPython-compatible firmware, from CircuitPython's own ports and boards")
     ap.add_argument("--port")
