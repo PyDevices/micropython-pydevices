@@ -298,6 +298,7 @@ way autosize grows the app partition when the image doesn't fit.
 | [`modules/castif/`](../modules/castif/) | Casts an ESP32-P4's screen and sound to a TV over Wi-Fi Display, or serves them as live HLS. |
 | [`modules/h264enc/`](../modules/h264enc/) | RGB565 frames to H.264 on the ESP32-P4's hardware encoder. |
 | [`modules/jpegio/`](../modules/jpegio/) | JPEG decode and encode, with CircuitPython's `jpegio` API. |
+| [`modules/mdns/`](../modules/mdns/) | Find and advertise services on the local network, with CircuitPython's `mdns` API. |
 | [`modules/pngio/`](../modules/pngio/) | PNG encode and decode, RGB565 in and out. |
 | [`modules/ppa/`](../modules/ppa/) | Scale, rotate, convert and fill pixel buffers, on the ESP32-P4's Pixel Processing Accelerator or in portable C elsewhere. |
 | [`modules/tsmux/`](../modules/tsmux/) | MPEG-TS and HLS segments from H.264. |
