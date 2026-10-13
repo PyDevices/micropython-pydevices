@@ -46,7 +46,7 @@ fetch are your distribution's packages. On Debian or Ubuntu (WSL included):
 | unix | `pkg-config libsdl2-dev libffi-dev` (the desktop display) |
 | esp32 | `ninja-build python3-venv` |
 | rp2 | `gcc-arm-none-eabi libnewlib-arm-none-eabi` |
-| windows, cross-built from Linux | `gcc-mingw-w64-x86-64 libtool libltdl-dev autoconf automake` |
+| windows, cross-built from Linux | `gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 libtool libltdl-dev autoconf automake` (the binutils package has `windres`) |
 | webassembly | `nodejs` |
 
 All of it in one line:
@@ -54,14 +54,16 @@ All of it in one line:
 ```bash
 sudo apt-get update && sudo apt-get install -y git make cmake ninja-build \
     python3 python3-venv python3-pip gcc g++ pkg-config libffi-dev libsdl2-dev \
-    gcc-mingw-w64-x86-64 libtool libltdl-dev autoconf automake \
+    gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 libtool libltdl-dev \
+    autoconf automake \
     gcc-arm-none-eabi libnewlib-arm-none-eabi nodejs
 ```
 
-The installer prints this line cut down to what your machine is missing,
-and says which ports build now. Other distributions carry the same tools
-under their own names; a build for a port that's still missing something
-stops and says so.
+The installer prints only what your machine is missing, one `apt-get install`
+line per port and marked with it, so you can leave out the ports you won't
+build. It also says which ports build now. Other distributions carry the same
+tools under their own names; a build for a port that's still missing
+something stops and says so.
 
 ### Warnings you can ignore
 

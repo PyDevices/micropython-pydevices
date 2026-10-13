@@ -76,7 +76,7 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   - [`ppa/`](modules/ppa/): scale, rotate, convert and fill pixel buffers, on the
     ESP32-P4's Pixel Processing Accelerator or in portable C elsewhere.
   - [`tsmux/`](modules/tsmux/): MPEG-TS and HLS segments from H.264.
-- [`patches/micropython/`](patches/micropython/) — our patch series (`0001-…` to `0029-…`; there
+- [`patches/micropython/`](patches/micropython/) — our patch series (`0001-…` to `0030-…`; there
   is no `0026`, whose fix moved into `patches/tinyusb/`), each justified
   in its own header; [`patches/apply_patches.py`](patches/apply_patches.py) applies it, plus
   each module's own MicroPython patches, once, as one local commit.
@@ -91,7 +91,9 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   `ESP32_GENERIC_P4` `WIFI6_DEV_KIT` and `WIFI6_DEV_KIT_H2`).
 - [`scripts/exercise_build.sh`](scripts/exercise_build.sh) — builds every desktop port and two esp32
   boards from a bare clone, checks the failure paths, and writes a report of
-  what should match on any machine. Needs no board.
+  what should match on any machine. Needs no board. For a report on builds you
+  already have, name their folders:
+  `scripts/exercise_build.sh --report builds/rp2/RPI_PICO2/default ...`.
 - [`provenance.json`](provenance.json) — the patches' checksums and migration record.
 
 What's planned next is in [ROADMAP.md](ROADMAP.md).

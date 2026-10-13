@@ -1,0 +1,135 @@
+From f66b2051c53c936c114f6e0c2abebcae0cc106df Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 21:30:46 -0500
+Subject: [PATCH] py/mkrules: pass makeqstrdefs.py its arguments in a response
+ file.
+
+Make runs each command as one argument to /bin/sh, and Linux caps a
+single argument at 128 KiB (MAX_ARG_STRLEN). The qstr preprocessing
+command named every QSTR source by its absolute path, and the
+preprocessor flags twice, so it grew with every user C module and with
+every character of the tree's path. An rp2 RPI_PICO2 build with
+micropython-pydevices' --modules all names 879 sources: from a tree at
+a 65-character path its command was 127,095 bytes, and from one at a
+118-character path 173,951, and make failed before linking:
+
+    make[3]: /bin/sh: Argument list too long
+    make[3]: *** [.../build.make:987: genhdr/qstr.i.last] Error 127
+
+py/mkrules.cmake now writes the flags and sources to genhdr/qstr.i.args
+with file(GENERATE), one argument per line, and passes @<that file>; the
+rule depends on the file, which is rewritten only when its contents
+change. py/mkrules.mk does the same for the source lists wherever GNU
+make has $(file) (4.0 and later), not only on Windows, and writes one
+word per line. makeqstrdefs.py reads a response file as one argument per
+line, so a flag with a space or a quote in it arrives intact. The
+command's length no longer depends on the sources or the path. make
+3.81 (macOS) keeps the command line as it was.
+
+The preprocessor flags stay on the command line of the step that
+preprocesses the collected qstrs: they are passed once there, and gcc
+already caps them at 128 KiB in the options it hands cc1.
+
+Seen building ports/rp2 RPI_PICO2 with micropython-pydevices' modules
+from a clone at a 118-character path. Unchanged on upstream v1.29.0.
+---
+ py/makeqstrdefs.py |  8 +++++---
+ py/mkrules.cmake   | 18 +++++++++++++++++-
+ py/mkrules.mk      | 22 +++++++++++++++-------
+ 3 files changed, 37 insertions(+), 11 deletions(-)
+
+diff --git a/py/makeqstrdefs.py b/py/makeqstrdefs.py
+index f34eaaa3e..7056e2949 100644
+--- a/py/makeqstrdefs.py
++++ b/py/makeqstrdefs.py
+@@ -222,13 +222,15 @@ if __name__ == "__main__":
+             ]
+         }
+ 
+-        # An @file argument is a response file: its words stand in its place
+-        # (py/mkrules.mk passes the source lists that way on Windows).
++        # An @file argument is a response file holding one argument per line,
++        # which stand in its place (py/mkrules.cmake passes everything that
++        # way, and py/mkrules.mk the source lists on Windows). A line is one
++        # argument, so a flag with a space or a quote in it arrives intact.
+         argv = []
+         for arg in sys.argv[1:]:
+             if arg.startswith("@"):
+                 with open(arg[1:]) as f:
+-                    argv.extend(f.read().split())
++                    argv.extend(line for line in f.read().splitlines() if line)
+             else:
+                 argv.append(arg)
+ 
+diff --git a/py/mkrules.cmake b/py/mkrules.cmake
+index 8929db70f..495339364 100644
+--- a/py/mkrules.cmake
++++ b/py/mkrules.cmake
+@@ -146,14 +146,30 @@ add_custom_target(
+ 
+ # Generate qstrs
+ 
++# makeqstrdefs.py takes its flags and sources from a file, one argument per
++# line, instead of from the command line. Make runs a rule's command as one
++# argument to /bin/sh, which Linux caps at 128 KiB (MAX_ARG_STRLEN), and this
++# command named every QSTR source by its absolute path and the flags twice, so
++# it grew with each user C module and with the length of the tree's path. The
++# file is rewritten only when its contents change, and a change reruns the rule.
++set(MICROPY_QSTR_ARGS_FILE ${MICROPY_GENHDR_DIR}/qstr.i.args)
++set(_qstr_args cflags ${MICROPY_CPP_FLAGS} -DNO_QSTR cxxflags ${MICROPY_CPP_FLAGS} -DNO_QSTR sources ${MICROPY_SOURCE_QSTR})
++list(JOIN _qstr_args "\n" _qstr_args)
++if(CMAKE_VERSION VERSION_LESS 3.19)
++    file(GENERATE OUTPUT ${MICROPY_QSTR_ARGS_FILE} CONTENT "${_qstr_args}\n")
++else()
++    file(GENERATE OUTPUT ${MICROPY_QSTR_ARGS_FILE} CONTENT "${_qstr_args}\n" TARGET ${MICROPY_TARGET})
++endif()
++
+ # If any of the dependencies in this rule change then the C-preprocessor step must be run.
+ # It only needs to be passed the list of MICROPY_SOURCE_QSTR files that have changed since
+ # it was last run, but it looks like it's not possible to specify that with cmake.
+ add_custom_command(
+     OUTPUT ${MICROPY_QSTRDEFS_LAST}
+-    COMMAND ${Python3_EXECUTABLE} ${MICROPY_PY_DIR}/makeqstrdefs.py pp ${CMAKE_C_COMPILER} -E output ${MICROPY_GENHDR_DIR}/qstr.i.last cflags ${MICROPY_CPP_FLAGS} -DNO_QSTR cxxflags ${MICROPY_CPP_FLAGS} -DNO_QSTR sources ${MICROPY_SOURCE_QSTR}
++    COMMAND ${Python3_EXECUTABLE} ${MICROPY_PY_DIR}/makeqstrdefs.py pp ${CMAKE_C_COMPILER} -E output ${MICROPY_GENHDR_DIR}/qstr.i.last @${MICROPY_QSTR_ARGS_FILE}
+     WORKING_DIRECTORY ${MICROPY_CPP_WORKING_DIR}
+     DEPENDS ${MICROPY_MPVERSION}
++        ${MICROPY_QSTR_ARGS_FILE}
+         ${MICROPY_SOURCE_QSTR}
+     VERBATIM
+     COMMAND_EXPAND_LISTS
+diff --git a/py/mkrules.mk b/py/mkrules.mk
+index 19acea62e..e82304c2e 100644
+--- a/py/mkrules.mk
++++ b/py/mkrules.mk
+@@ -139,13 +139,21 @@ $(BUILD)/%.o: $(BUILD)/%.c
+ # to get built before we try to compile any of them.
+ $(OBJ): | $(HEADER_BUILD)/qstrdefs.generated.h $(HEADER_BUILD)/mpversion.h $(OBJ_EXTRA_ORDER_DEPS)
+ 
+-# The file lists for makeqstrdefs.py pp. Windows caps a command line at 32767
+-# characters, which a build with large user C modules passes (every source is
+-# named twice on a fresh build: $^ and $?), so there they go in a response file
+-# that makeqstrdefs.py expands. $(file) needs GNU make 4.0; Windows' (MSYS2) has
+-# it, and other hosts keep the command line as it was.
+-ifeq ($(OS),Windows_NT)
+-QSTR_PP_FILES = $(file >$(HEADER_BUILD)/qstr.i.args,sources $^ dependencies $(QSTR_GLOBAL_DEPENDENCIES) changed_sources $?)@$(HEADER_BUILD)/qstr.i.args
++# The file lists for makeqstrdefs.py pp. They go in a response file, one word
++# per line, that makeqstrdefs.py expands: make runs a command as one argument
++# to the shell, which Linux caps at 128 KiB and Windows at 32767 characters, and
++# a build with large user C modules names every source twice on a fresh build
++# ($^ and $?), so the command grew with each module and each character of the
++# tree's path. $(file) needs GNU make 4.0, so make 3.81 (macOS) keeps the
++# command line as it was.
++ifneq ($(filter-out 3.%,$(MAKE_VERSION)),)
++QSTR_PP_EMPTY :=
++QSTR_PP_SPACE := $(QSTR_PP_EMPTY) $(QSTR_PP_EMPTY)
++define QSTR_PP_NEWLINE
++
++
++endef
++QSTR_PP_FILES = $(file >$(HEADER_BUILD)/qstr.i.args,$(subst $(QSTR_PP_SPACE),$(QSTR_PP_NEWLINE),$(strip sources $^ dependencies $(QSTR_GLOBAL_DEPENDENCIES) changed_sources $?)))@$(HEADER_BUILD)/qstr.i.args
+ else
+ QSTR_PP_FILES = sources $^ dependencies $(QSTR_GLOBAL_DEPENDENCIES) changed_sources $?
+ endif
+-- 
+2.43.0
+
