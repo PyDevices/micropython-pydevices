@@ -295,7 +295,8 @@ way autosize grows the app partition when the image doesn't fit.
 |---|---|
 | [`build_mp.py`](../build_mp.py) | The build command. |
 | [`UPSTREAM`](../UPSTREAM) | The MicroPython release the patches apply to. |
-| [`modules.lock`](../modules.lock), [`deps.lock`](../deps.lock) | What gets fetched when it's missing. |
+| [`modules.lock`](../modules.lock), [`deps.lock`](../deps.lock) | What gets fetched when it's missing, lvgl-bindings included. |
+| `modules/.lvgl-bindings` | The lvgl-bindings lvgl-micropython compiles: the sibling checkout, linked, or `modules.lock`'s commit, fetched. |
 | [`modules/`](../modules/) | The module manifest, `all/`, `tflite/` and `vision/` ([esp-vision's](esp-vision.md)), the rest linked or cloned, and the C modules that live only here, below. |
 | [`modules/castif/`](../modules/castif/) | Casts an ESP32-P4's screen and sound to a TV over Wi-Fi Display, or serves them as live HLS. |
 | [`modules/h264enc/`](../modules/h264enc/) | RGB565 frames to H.264 on the ESP32-P4's hardware encoder. |
