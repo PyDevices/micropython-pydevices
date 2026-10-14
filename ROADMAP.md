@@ -21,7 +21,12 @@ on the boards people actually use.
 - usbif rebuilds on MicroPython's own USB support: device classes become
   packages on `machine.USBDevice`, with what MicroPython lacks added in the
   same style. Code written for usbif's current API will need changing.
-- Host mode follows, without losing anything usbif's host does today.
+- Every class works at full and high speed, choosing its packet sizes when the
+  host connects, so a P4's high-speed port streams audio and video as well as
+  its full-speed one.
+- Host mode follows, in CircuitPython's `usb.core` shape, without losing
+  anything usbif's host does today. It stays on ESP-IDF's USB host library on
+  the ESP32 chips; a TinyUSB host, for other chips, comes after.
 - Keyboards, mice and other HID devices take CircuitPython's `adafruit_hid`
   API, so the same keyboard code runs over USB and over BLE.
 
