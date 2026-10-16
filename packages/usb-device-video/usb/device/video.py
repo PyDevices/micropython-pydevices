@@ -181,11 +181,20 @@ class CameraInterface(Interface):
         return True
 
     def _set_alt(self, alt):
-        self.alt = alt
+        self.alt = 0    # no frames written while the ring is emptied
+        # Every session starts at a frame boundary. A host that stops watching
+        # mid-frame leaves that frame's tail in the ring, and the next session
+        # would take it for the start of a frame: every frame after it shifted
+        # by the same amount, the picture cut into blocks and rearranged. So
+        # detach, empty the ring (nothing else reads it once detached), then
+        # attach.
+        self._usbd.stream(self.ep_in, None)
+        scratch = bytearray(512)
+        while self.ring.any():
+            self.ring.readinto(scratch)
         if alt:
             self._usbd.stream(self.ep_in, self.ring, self.packet, _VARIABLE if self.mjpeg else self.frame_bytes)
-        else:
-            self._usbd.stream(self.ep_in, None)
+        self.alt = alt
 
     def on_reset(self):
         super().on_reset()
