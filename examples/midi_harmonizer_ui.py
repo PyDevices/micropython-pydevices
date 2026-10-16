@@ -17,8 +17,10 @@ the display loop; deploy standalone as /main.py, or `mpftp run` it.
 import display_driver  # noqa: F401 -- wires LVGL flush + input + event_loop
 import lvgl as lv
 
-import usbif
-import usbif.auto
+import adafruit_midi
+from adafruit_midi.note_off import NoteOff
+from adafruit_midi.note_on import NoteOn
+from midiports import usb_device
 
 CHORDS = (
     ("Major", (4, 7)),
@@ -33,9 +35,11 @@ _state = {"chord": 0, "direction": 0}
 _harmony = ()
 _styles = []
 
-# The board's own MIDI function, opened once. Point this at "host:<id>" and
-# the same surface drives a controller the board is hosting instead.
-_port = usbif.auto.open_midi("dev:midi")
+# The board's own USB MIDI function: midiports' ports over micropython-lib's
+# usb-device-midi, read by adafruit_midi. Other midiports transports (a 5-pin
+# UART, a keyboard on the board's USB host) open the same two ports.
+_midi_in, _port = usb_device.ports()
+_midi = adafruit_midi.MIDI(midi_in=_midi_in, midi_out=_port)
 
 
 def _rebuild_harmony():
@@ -54,8 +58,6 @@ def _rebuild_harmony():
 
 _rebuild_harmony()
 
-_rx = bytearray(64)
-_parser = usbif.MidiParser()
 
 
 def _emit(status, note, vel):
@@ -68,20 +70,19 @@ def _emit(status, note, vel):
 
 def _pump(_t):
     # Runs from LVGL's timer: drain everything waiting, harmonize notes, pass
-    # the rest through. usbif.MidiParser owns the wire rules, and it keeps its
-    # state between calls, so a message split across two timer ticks survives.
+    # the rest through. adafruit_midi keeps its buffer between calls, so a
+    # message split across two timer ticks survives.
+    if not _midi_in.any():
+        return
     while True:
-        n = _port.read(_rx)
-        if n <= 0:
+        msg = _midi.receive()
+        if msg is None:
             return
-        _parser.feed(_rx, n)
-        for status, data in _parser.drain():
-            if status >= 0xF8:
-                _port.write(bytes([status]))
-            elif (status & 0xF0) in (0x80, 0x90):
-                _emit(status, data[0], data[1])
-            else:
-                _port.write(bytes([status]) + bytes(data))
+        if isinstance(msg, (NoteOn, NoteOff)):
+            raw = msg.__bytes__()
+            _emit(raw[0], raw[1], raw[2])
+        else:
+            _port.write(msg.__bytes__())
 
 
 def _matrix(parent, options, key, y_ofs, status_lbl):

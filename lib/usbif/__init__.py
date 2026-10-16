@@ -487,7 +487,7 @@ class Device(_Role):
     # Portable names, which are not the C module's: the C constants are
     # FN_AUDIO and FN_VIDEO, the portable names are "uac" and "uvc" -- matching
     # the usbif.uvc module and what host_start() already takes.
-    FUNCTIONS = ("cdc", "msc", "uac", "midi", "hid", "uvc")
+    FUNCTIONS = ("cdc", "uac", "uvc")
 
     def _drain(self):
         return ()
@@ -507,7 +507,11 @@ class Device(_Role):
 
             dev.functions()                  # -> frozenset({'cdc'})
             dev.functions("cdc", "uac")      # a console and a sound card
-            dev.functions("midi")            # a bare MIDI instrument
+            dev.functions("uvc")             # a bare webcam
+
+        MIDI, HID, mass storage and extra serial ports are micropython-lib's
+        usb-device packages (and midiports, usb_hid, usb-device-msc) on
+        machine.USBDevice, beside whatever this presents.
 
         A backend without runtime selection reports what it was built with
         and raises on any attempt to change it.

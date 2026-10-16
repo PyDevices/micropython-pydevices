@@ -90,31 +90,23 @@
 // than a silent no-op.
 #define USBIF_FN_BUILT ( \
     (CFG_TUD_CDC ? USBIF_FN_CDC : 0) | \
-    (CFG_TUD_MSC ? USBIF_FN_MSC : 0) | \
     (USBIF_EXT_AUDIO ? USBIF_FN_AUDIO : 0) | \
-    (CFG_TUD_MIDI ? USBIF_FN_MIDI : 0) | \
-    (CFG_TUD_HID ? USBIF_FN_HID : 0) | \
     (CFG_TUD_VIDEO ? USBIF_FN_VIDEO : 0))
 
 // Where each function's block sits inside the compile-time descriptor, in
-// the order mp_usbd_descriptor.c emits them (CDC, MSC) followed by the
-// extension block (audio, MIDI). Derived from the same length macros that
-// built it, so the two cannot drift.
+// the order mp_usbd_descriptor.c emits them (CDC) followed by the
+// extension block (audio, video). Derived from the same length macros that
+// built it, so the two cannot drift. MSC, MIDI and HID left this costume for
+// micropython-lib's usb-device packages and ours on machine.USBDevice.
 #define USBIF_OFF_CDC   (TUD_CONFIG_DESC_LEN)
 #define USBIF_LEN_CDC   (CFG_TUD_CDC ? TUD_CDC_DESC_LEN : 0)
-#define USBIF_OFF_MSC   (USBIF_OFF_CDC + USBIF_LEN_CDC)
-#define USBIF_LEN_MSC   (CFG_TUD_MSC ? TUD_MSC_DESC_LEN : 0)
-#define USBIF_OFF_AUDIO (USBIF_OFF_MSC + USBIF_LEN_MSC)
+#define USBIF_OFF_AUDIO (USBIF_OFF_CDC + USBIF_LEN_CDC)
 #if USBIF_EXT_AUDIO
 #define USBIF_LEN_AUDIO (USBIF_AUDIO_SPEAKER_STEREO_FB_DESC_LEN)
 #else
 #define USBIF_LEN_AUDIO (0)
 #endif
-#define USBIF_OFF_MIDI  (USBIF_OFF_AUDIO + USBIF_LEN_AUDIO)
-#define USBIF_LEN_MIDI  (USBIF_MIDI_IAD_LEN + TUD_MIDI_DESC_LEN)
-#define USBIF_OFF_HID   (USBIF_OFF_MIDI + USBIF_LEN_MIDI)
-#define USBIF_LEN_HID   (CFG_TUD_HID ? TUD_HID_DESC_LEN : 0)
-#define USBIF_OFF_VIDEO (USBIF_OFF_HID + USBIF_LEN_HID)
+#define USBIF_OFF_VIDEO (USBIF_OFF_AUDIO + USBIF_LEN_AUDIO)
 #define USBIF_LEN_VIDEO (CFG_TUD_VIDEO ? USBIF_VIDEO_DESC_LEN : 0)
 
 typedef struct {
@@ -144,12 +136,7 @@ typedef struct {
 // order interfaces are numbered.
 static const usbif_fn_block_t usbif_blocks[] = {
     { USBIF_FN_CDC,   USBIF_OFF_CDC,   USBIF_LEN_CDC,   2, false, true  },
-    { USBIF_FN_MSC,   USBIF_OFF_MSC,   USBIF_LEN_MSC,   1, false, false },
     { USBIF_FN_AUDIO, USBIF_OFF_AUDIO, USBIF_LEN_AUDIO, 2, false, true  },
-    { USBIF_FN_MIDI,  USBIF_OFF_MIDI,  USBIF_LEN_MIDI,  2, true,  false },
-    // HID is a single interface and carries no association of its own, so
-    // there is nothing to strip and nothing that requires one.
-    { USBIF_FN_HID,   USBIF_OFF_HID,   USBIF_LEN_HID,   1, false, false },
     // Video spans two interfaces (VideoControl and VideoStreaming) and, like
     // UAC2, is only legal with an interface association grouping them -- the
     // host's video driver binds the association, not the interfaces. So it

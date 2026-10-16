@@ -1017,15 +1017,6 @@ class TestNativeMidiBackend(unittest.TestCase):
         self.mod._usbif = fake
         return fake
 
-    def test_the_device_function_is_reported_only_when_advertised(self):
-        # dev_functions(), not dev_functions_built(): a function compiled in
-        # but not advertised is not a port anyone can open, and reporting it
-        # would promise a host that is not there.
-        self._install(functions=8)
-        self.assertEqual([p.id for p in self.mod.ports()], ["dev:midi"])
-        self._install(functions=1)          # CDC only
-        self.assertEqual(self.mod.ports(), ())
-
     def test_a_hosted_midi_device_is_reported_too(self):
         self._install(functions=1, devices=(
             (3, 0x28e9, 0x0007, "DONNER DMK25Pro", None, {"midi", "uac"}, "full"),
@@ -1040,31 +1031,21 @@ class TestNativeMidiBackend(unittest.TestCase):
         ))
         self.assertEqual(self.mod.ports(), ())
 
-    def test_both_roles_appear_at_once(self):
-        # The board really can be both simultaneously, and the contract has to
-        # say so rather than making the caller choose a mode.
-        self._install(functions=8, devices=(
-            (3, 0x28e9, 0x0007, None, None, {"midi"}, "full"),
-        ))
-        self.assertEqual({p.id for p in self.mod.ports()}, {"dev:midi", "host:3"})
+    def test_the_device_role_left_for_midiports(self):
+        # The board's own USB MIDI function is midiports.usb_device now: the
+        # backend lists only hosted devices, and says where the other went.
+        self._install(functions=8)
+        self.assertEqual(self.mod.ports(), ())
+        with self.assertRaises(ValueError) as cm:
+            self.mod.open_port("dev:midi")
+        self.assertIn("midiports", str(cm.exception))
 
-    def test_both_roles_are_bidirectional(self):
+    def test_hosted_ports_are_bidirectional(self):
         self._install(functions=8, devices=(
             (3, 0x28e9, 0x0007, None, None, {"midi"}, "full"),
         ))
         for port in self.mod.ports():
             self.assertEqual(port.direction, usbif.INOUT)
-
-    def test_device_role_reads_and_writes_the_device_function(self):
-        fake = self._install(functions=8)
-        fake.incoming.extend(b"\x90\x3c\x64")
-        port = self.mod.open_port("dev:midi")
-        buf = bytearray(8)
-        self.assertEqual(port.read(buf), 3)
-        self.assertEqual(bytes(buf[:3]), b"\x90\x3c\x64")
-        self.assertEqual(port.write(b"\x80\x3c\x40"), 3)
-        self.assertEqual(bytes(fake.written), b"\x80\x3c\x40")
-        port.close()
 
     def test_host_role_opens_and_closes_the_hosted_device(self):
         fake = self._install(functions=1, devices=(
@@ -1077,25 +1058,6 @@ class TestNativeMidiBackend(unittest.TestCase):
         self.assertEqual(port.read(buf), 3)
         port.close()
         self.assertEqual(fake.closed, 1)
-
-    def test_the_same_program_works_against_either_role(self):
-        # The actual claim being made. One function, no role branch, both
-        # ports -- if this needs an if-statement the phase item is not done.
-        fake = self._install(functions=8, devices=(
-            (3, 0, 0, None, None, {"midi"}, "full"),
-        ))
-
-        def forward(port):
-            port.write(b"\x90\x3c\x64")
-            return port.read(bytearray(8))
-
-        for info in self.mod.ports():
-            handle = self.mod.open_port(info)
-            try:
-                self.assertEqual(forward(handle), 0)
-            finally:
-                handle.close()
-        self.assertEqual(bytes(fake.written), b"\x90\x3c\x64" * 2)
 
     def test_ids_are_refused_when_malformed(self):
         self._install()
@@ -2000,10 +1962,7 @@ class TestDeviceFunctionNames(unittest.TestCase):
     # portable name -> the C constant it fronts
     EXPECTED = {
         "cdc": "FN_CDC",
-        "msc": "FN_MSC",
         "uac": "FN_AUDIO",
-        "midi": "FN_MIDI",
-        "hid": "FN_HID",
         "uvc": "FN_VIDEO",
     }
 

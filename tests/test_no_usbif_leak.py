@@ -118,9 +118,6 @@ class FacadeWithoutTheModuleTests(unittest.TestCase):
     DEVICE_METHODS = (
         "state", "reinit", "pid", "desc_check", "builtin_desc_cfg",
         "functions", "functions_available",
-        "msc_attach", "msc_attach_blockdev", "msc_detach", "msc_status",
-        "msc_buffer", "msc_bd_stats",
-        "hid_send", "hid_leds",
         "uac_enable", "uac_pump_start", "uac_pump_stop", "uac_pump_stats",
         "uac_pump_rate",
         "uac_available", "uac_volume", "uac_read", "uac_stats",
@@ -180,24 +177,6 @@ class FacadeWithoutTheModuleTests(unittest.TestCase):
         ``_require()``.
         """
         self.assertEqual(native_usb.NativeHost().capabilities(), frozenset())
-
-
-class HidReportIdTests(unittest.TestCase):
-    """The facade's fallback report ids against the C module's own."""
-
-    def test_fallbacks_match_the_c_module(self):
-        source = (ROOT / "src" / "mod_usbif.c").read_text()
-        found = dict(
-            (name, int(value))
-            for name, value in re.findall(
-                r"MP_ROM_QSTR\(MP_QSTR_(HID_KEYBOARD|HID_MOUSE)\),"
-                r"\s*MP_ROM_INT\((\d+)\)", source)
-        )
-        self.assertEqual(
-            sorted(found), ["HID_KEYBOARD", "HID_MOUSE"],
-            "no HID report ids found in src/mod_usbif.c")
-        self.assertEqual(native_usb.NativeDevice.HID_KEYBOARD, found["HID_KEYBOARD"])
-        self.assertEqual(native_usb.NativeDevice.HID_MOUSE, found["HID_MOUSE"])
 
 
 if __name__ == "__main__":

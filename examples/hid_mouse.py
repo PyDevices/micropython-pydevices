@@ -1,63 +1,27 @@
-"""The board is a USB mouse: nudge the host cursor, then put it back.
+"""The board is a USB mouse: nudge the computer's pointer, then put it back.
 
-Presents as a boot mouse (report ID 2) and sends relative motion reports.
-Verified originally by watching Windows' cursor move 82 pixels and return --
-the host is the instrument, not a counter in this script.
+CircuitPython's mouse code, unchanged: ``usb_hid`` gives CircuitPython's
+``devices`` and Adafruit's ``adafruit_hid`` moves the pointer.
 
     mpftp run -d COM49 examples/hid_mouse.py
 
-**Report layout.** Boot mouse behind a report ID: buttons, dx, dy, wheel --
-four signed bytes after the ID the C side prepends via ``hid_send``.
-
-**Pairing.** Same as ``hid_keyboard.py``: a PC, or an S3 running a HID host.
+Install the packages first on a firmware that doesn't freeze them:
+``mip.install("github:PyDevices/usbif/packages/usb-hid")`` and
+``mip.install("github:PyDevices/pydevices/bledev_hid")`` for ``adafruit_hid``.
 """
-
 import time
 
-import usbif.auto
+import usb_hid
+from adafruit_hid.mouse import Mouse
 
-STEPS = 20
-DELTA = 4  # pixels per report
+usb_hid.enable()
+time.sleep(2)  # let the computer enumerate the mouse
 
-
-def _send(dev, report, retries=50):
-    for _ in range(retries):
-        if dev.hid_send(dev.HID_MOUSE, report):
-            return True
-        time.sleep_ms(2)
-    return False
-
-
-def move(dev, dx, dy):
-    # buttons=0, dx, dy, wheel=0. Values are signed 8-bit.
-    def s8(n):
-        return n & 0xFF
-
-    return _send(dev, bytes([0, s8(dx), s8(dy), 0]))
-
-
-def main():
-    dev = usbif.auto.device()
-    dev.functions("cdc", "hid")
-    print("costume: cdc+hid -- watch the host cursor")
-    time.sleep_ms(1500)
-
-    print("moving +x")
-    for _ in range(STEPS):
-        if not move(dev, DELTA, 0):
-            print("host did not accept a report")
-            return
-        time.sleep_ms(20)
-
-    print("moving -x (return)")
-    for _ in range(STEPS):
-        if not move(dev, -DELTA, 0):
-            print("host did not accept a report")
-            return
-        time.sleep_ms(20)
-
-    print("done; cursor should be back where it started")
-
-
-if __name__ == "__main__":
-    main()
+mouse = Mouse(usb_hid.devices)
+for _ in range(40):
+    mouse.move(x=2)
+    time.sleep_ms(10)
+for _ in range(40):
+    mouse.move(x=-2)
+    time.sleep_ms(10)
+print("moved 80 pixels right and back")

@@ -18,56 +18,51 @@
 
 import time
 
-import usbif
-import usbif.auto
+import adafruit_midi
+from adafruit_midi.note_off import NoteOff
+from adafruit_midi.note_on import NoteOn
+from midiports import usb_device
 
 # The chord stack, in semitones above each played note. Change these and
 # the board becomes a different instrument: (12,) octaves, (3, 7) minor,
 # (4, 7, 10) dominant sevenths, (7,) power chords.
 HARMONY = (4, 7)
 
-_rx = bytearray(64)
-
-# The board's own MIDI function, as a port. The same loop drives a hosted
-# controller instead by opening "host:<id>" -- role is configuration here,
-# not a code change.
-_port = usbif.auto.open_midi("dev:midi")
-
-
-def send(msg):
-    _port.write(msg)
+# The board's own USB MIDI function, as adafruit_midi's two ports. The same
+# loop drives a hosted controller by opening other ports (midiports.uart for
+# a 5-pin cable, midiports.usbif_shim for a keyboard on the board's USB host).
+midi_in, midi_out = usb_device.ports()
+midi = adafruit_midi.MIDI(midi_in=midi_in, midi_out=midi_out)
 
 
-def harmonize(status, note, vel):
+def harmonize(msg):
     # The played note first, then its harmonies, clamped to the MIDI
     # ceiling. Offsets are constant, so the note-off for every harmony is
-    # regenerated identically from the note-on's math -- no bookkeeping,
-    # no stuck notes.
-    send(bytes([status, note, vel]))
+    # regenerated identically from the note-on's math: no bookkeeping, no
+    # stuck notes.
+    midi.send(msg, channel=msg.channel)
+    kind = NoteOn if isinstance(msg, NoteOn) else NoteOff
     for iv in HARMONY:
-        h = note + iv
+        h = msg.note + iv
         if h <= 127:
-            send(bytes([status, h, vel]))
+            midi.send(kind(h, msg.velocity), channel=msg.channel)
 
 
 def run():
-    # usbif.MidiParser owns the wire rules -- running status, messages split
-    # across reads, realtime bytes landing mid-message, sysex. This loop only
-    # decides what to do with each complete message.
-    parser = usbif.MidiParser()
+    # adafruit_midi owns the wire rules; midiports hands it whole messages.
+    # Poll any() first so a quiet keyboard allocates nothing.
     while True:
-        n = _port.read(_rx)
-        if n <= 0:
+        if not midi_in.any():
             time.sleep_ms(2)
             continue
-        parser.feed(_rx, n)
-        for status, data in parser.drain():
-            if status >= 0xF8:
-                send(bytes([status]))       # realtime: straight back out
-            elif (status & 0xF0) in (0x80, 0x90):
-                harmonize(status, data[0], data[1])
+        while True:
+            msg = midi.receive()
+            if msg is None:
+                break
+            if isinstance(msg, (NoteOn, NoteOff)):
+                harmonize(msg)
             else:
-                send(bytes([status]) + bytes(data))
+                midi.send(msg, channel=getattr(msg, "channel", None) or 0)
 
 
 # The file is its own entry point: copied to /main.py it starts at boot,

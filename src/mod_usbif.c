@@ -37,10 +37,7 @@ extern uint16_t usbif_fn_built(void);
 extern int usbif_fn_set(uint16_t mask);
 extern int usbif_desc_check(void);
 #define USBIF_FN_CDC   (1u << 0)
-#define USBIF_FN_MSC   (1u << 1)
 #define USBIF_FN_AUDIO (1u << 2)
-#define USBIF_FN_MIDI  (1u << 3)
-#define USBIF_FN_HID   (1u << 4)
 #else
 #define USBIF_HAVE_FN (0)
 #endif
@@ -469,10 +466,10 @@ static mp_obj_t usbif_uac_enable(size_t n_args, const mp_obj_t *args) {
     if (n_args) {
         uint16_t mask = usbif_fn_get();
         if (mp_obj_is_true(args[0])) {
-            mask |= (uint16_t)(USBIF_FN_AUDIO | USBIF_FN_MIDI);
+            mask |= (uint16_t)USBIF_FN_AUDIO;
             mask &= usbif_fn_built();
         } else {
-            mask &= (uint16_t) ~(USBIF_FN_AUDIO | USBIF_FN_MIDI);
+            mask &= (uint16_t) ~USBIF_FN_AUDIO;
         }
         usbif_fn_set(mask);
     }
@@ -1455,34 +1452,6 @@ static mp_obj_t usbif_host_msc_close_py(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_msc_close_obj, usbif_host_msc_close_py);
 
-// USB MIDI device: raw MIDI 1.0 byte streams in and out. TinyUSB packs and
-// unpacks the USB-MIDI event framing; callers speak plain running-status-free
-// MIDI (0x90 0x3C 0x64 is a middle-C note-on).
-static mp_obj_t usbif_midi_write(mp_obj_t buf_in) {
-    #if defined(CFG_TUD_MIDI) && CFG_TUD_MIDI
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_READ);
-    uint32_t n = tud_midi_stream_write(0, (const uint8_t *)buf.buf, buf.len);
-    return mp_obj_new_int_from_uint(n);
-    #else
-    (void)buf_in;
-    return MP_OBJ_NEW_SMALL_INT(0);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_midi_write_obj, usbif_midi_write);
-
-static mp_obj_t usbif_midi_read(mp_obj_t buf_in) {
-    #if defined(CFG_TUD_MIDI) && CFG_TUD_MIDI
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_WRITE);
-    uint32_t n = tud_midi_stream_read(buf.buf, buf.len);
-    return mp_obj_new_int_from_uint(n);
-    #else
-    (void)buf_in;
-    return MP_OBJ_NEW_SMALL_INT(0);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_midi_read_obj, usbif_midi_read);
 
 // Device-side USB state, straight from TinyUSB: (connected, mounted,
 // suspended). connected = a host's bus reset was seen; mounted = the host
@@ -1556,35 +1525,6 @@ static mp_obj_t usbif_dev_functions_built(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(usbif_dev_functions_built_obj, usbif_dev_functions_built);
 
-// Submit one HID input report. Returns False when the host is not ready
-// for it -- not mounted, or it has not polled since the last one -- which
-// a caller should treat as "try again", not as an error.
-static mp_obj_t usbif_hid_send_py(mp_obj_t id_in, mp_obj_t buf_in) {
-    #if defined(CFG_TUD_HID) && CFG_TUD_HID
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_READ);
-    extern bool usbif_hid_send(uint8_t report_id, const uint8_t *data, uint16_t len);
-    return mp_obj_new_bool(usbif_hid_send((uint8_t)mp_obj_get_int(id_in),
-        (const uint8_t *)buf.buf, (uint16_t)buf.len));
-    #else
-    (void)id_in;
-    (void)buf_in;
-    return mp_const_false;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(usbif_hid_send_obj, usbif_hid_send_py);
-
-// The keyboard LED state the host last set (caps lock and friends), for a
-// control surface that wants to show it.
-static mp_obj_t usbif_hid_leds_py(void) {
-    #if defined(CFG_TUD_HID) && CFG_TUD_HID
-    extern uint8_t usbif_hid_get_leds(void);
-    return MP_OBJ_NEW_SMALL_INT(usbif_hid_get_leds());
-    #else
-    return MP_OBJ_NEW_SMALL_INT(0);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_hid_leds_obj, usbif_hid_leds_py);
 
 // Structural check of the descriptor the current costume produces: 0 when
 // sound, or a negative code naming the fault. A host finds these by
@@ -1611,141 +1551,6 @@ static mp_obj_t usbif_dev_pid(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(usbif_dev_pid_obj, usbif_dev_pid);
 
-// Offer a buffer to the host as a removable drive. The buffer's contents
-// are whatever the application put there -- usually a FAT image the board
-// built and then unmounted.
-//
-// The object is held in a VM root pointer while attached, so the collector
-// cannot free memory the USB task is still serving to a host. Without that
-// root, an application that dropped its own reference would leave the C
-// side reading freed memory on every host read -- a fault that would
-// present as corrupted files rather than as a crash, which is worse.
-//
-// The rule the firmware cannot enforce: do not mount this locally while a
-// host has it. Two writers on one filesystem is a corrupted filesystem.
-static mp_obj_t usbif_msc_attach_py(size_t n_args, const mp_obj_t *args) {
-    #if defined(CFG_TUD_MSC) && CFG_TUD_MSC
-    extern int usbif_msc_attach(uint8_t *buf, size_t len, bool writable);
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(args[0], &buf, MP_BUFFER_WRITE);
-    const bool writable = (n_args < 2) || mp_obj_is_true(args[1]);
-    if (usbif_msc_attach((uint8_t *)buf.buf, buf.len, writable) != 0) {
-        mp_raise_ValueError(MP_ERROR_TEXT("buffer smaller than one 512-byte block"));
-    }
-    MP_STATE_VM(usbif_msc_obj) = args[0];
-    usbif_arm_soft_reset();
-    return mp_const_none;
-    #else
-    (void)n_args;
-    (void)args;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_msc_attach_obj, 1, 2, usbif_msc_attach_py);
-
-// Real storage instead of a RAM buffer: `obj` is any object implementing
-// MicroPython's standard block-device protocol (readblocks/writeblocks,
-// e.g. mip's `sdcard.SDCard`) -- num_blocks/block_size come from the
-// object's own ioctl(4, 0)/ioctl(5, 0) rather than being asked for, so
-// this matches how a board would already open the same object for local
-// use (os.mount(obj, ...) reads its size the same way).
-static mp_obj_t usbif_msc_attach_blockdev_py(size_t n_args, const mp_obj_t *args) {
-    #if defined(CFG_TUD_MSC) && CFG_TUD_MSC
-    extern int usbif_msc_attach_blockdev(uint32_t num_blocks, uint32_t block_size, bool writable);
-    mp_obj_t dest[4];
-    mp_load_method(args[0], MP_QSTR_ioctl, dest);
-    dest[2] = MP_OBJ_NEW_SMALL_INT(4);   // IOCTL_BLOCK_COUNT
-    dest[3] = MP_OBJ_NEW_SMALL_INT(0);
-    mp_int_t num_blocks = mp_obj_get_int(mp_call_method_n_kw(2, 0, dest));
-    mp_load_method(args[0], MP_QSTR_ioctl, dest);
-    dest[2] = MP_OBJ_NEW_SMALL_INT(5);   // IOCTL_BLOCK_SIZE
-    dest[3] = MP_OBJ_NEW_SMALL_INT(0);
-    mp_int_t block_size = mp_obj_get_int(mp_call_method_n_kw(2, 0, dest));
-    const bool writable = (n_args < 2) || mp_obj_is_true(args[1]);
-    int err = usbif_msc_attach_blockdev((uint32_t)num_blocks, (uint32_t)block_size, writable);
-    if (err == -4) {
-        mp_raise_ValueError(MP_ERROR_TEXT("block device must report a 512-byte block size"));
-    } else if (err != 0) {
-        mp_raise_ValueError(MP_ERROR_TEXT("MSC already attached; detach first"));
-    }
-    MP_STATE_VM(usbif_msc_obj) = args[0];
-    usbif_arm_soft_reset();
-    return mp_const_none;
-    #else
-    (void)n_args;
-    (void)args;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_msc_attach_blockdev_obj, 1, 2, usbif_msc_attach_blockdev_py);
-
-static mp_obj_t usbif_msc_detach_py(void) {
-    #if defined(CFG_TUD_MSC) && CFG_TUD_MSC
-    extern void usbif_msc_detach(void);
-    usbif_msc_detach();
-    // Drop the root only after the C side has stopped pointing at it.
-    MP_STATE_VM(usbif_msc_obj) = MP_OBJ_NULL;
-    #endif
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_msc_detach_obj, usbif_msc_detach_py);
-
-// (attached, blocks, ejected). `ejected` goes true when the host says it
-// has finished with the medium -- the signal to wait for before mounting
-// the same buffer locally again.
-static mp_obj_t usbif_msc_status(void) {
-    #if defined(CFG_TUD_MSC) && CFG_TUD_MSC
-    extern bool usbif_msc_is_attached(void);
-    extern bool usbif_msc_was_ejected(void);
-    extern uint32_t usbif_msc_block_count(void);
-    mp_obj_t items[3] = {
-        mp_obj_new_bool(usbif_msc_is_attached()),
-        mp_obj_new_int_from_uint(usbif_msc_block_count()),
-        mp_obj_new_bool(usbif_msc_was_ejected()),
-    };
-    return mp_obj_new_tuple(3, items);
-    #else
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_msc_status_obj, usbif_msc_status);
-
-// The buffer currently attached, or None. The VM root keeps it alive
-// across anything the application does with its own references, so this is
-// how a board gets its drive back after the host has finished writing to
-// it, which is the whole point of the workflow: attach, let the host write,
-// wait for the eject, take it back and mount it. A soft reset detaches it
-// (see "Soft reset" below): the buffer lived in the heap the reset wipes.
-static mp_obj_t usbif_msc_buffer(void) {
-    #if defined(CFG_TUD_MSC) && CFG_TUD_MSC
-    mp_obj_t o = MP_STATE_VM(usbif_msc_obj);
-    return o == MP_OBJ_NULL ? mp_const_none : o;
-    #else
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_msc_buffer_obj, usbif_msc_buffer);
-
-// (calls, errors) for the blockdev path -- whether readblocks/writeblocks
-// is being reached at all, and how many of those calls raised a Python
-// exception (swallowed at the call site; see usbif_msc_dev.c).
-static mp_obj_t usbif_msc_bd_stats_py(void) {
-    #if defined(CFG_TUD_MSC) && CFG_TUD_MSC
-    extern uint32_t usbif_msc_bd_stats(uint32_t *errors);
-    extern uint8_t usbif_msc_last_rejected_scsi;
-    uint32_t errors;
-    uint32_t calls = usbif_msc_bd_stats(&errors);
-    mp_obj_t items[3] = {
-        mp_obj_new_int_from_uint(calls),
-        mp_obj_new_int_from_uint(errors),
-        mp_obj_new_int_from_uint(usbif_msc_last_rejected_scsi),
-    };
-    return mp_obj_new_tuple(3, items);
-    #else
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_msc_bd_stats_obj, usbif_msc_bd_stats_py);
 
 
 // _usbif.__revision__: which usbif this firmware was built from. The build
@@ -1758,25 +1563,12 @@ static const MP_DEFINE_STR_OBJ(_usbif_revision_obj, USBIF_REVISION);
 
 static const mp_rom_map_elem_t usbif_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___revision__), MP_ROM_PTR(&_usbif_revision_obj) },
-    { MP_ROM_QSTR(MP_QSTR_msc_attach), MP_ROM_PTR(&usbif_msc_attach_obj) },
-    { MP_ROM_QSTR(MP_QSTR_msc_attach_blockdev), MP_ROM_PTR(&usbif_msc_attach_blockdev_obj) },
-    { MP_ROM_QSTR(MP_QSTR_msc_bd_stats), MP_ROM_PTR(&usbif_msc_bd_stats_obj) },
-    { MP_ROM_QSTR(MP_QSTR_msc_detach), MP_ROM_PTR(&usbif_msc_detach_obj) },
-    { MP_ROM_QSTR(MP_QSTR_msc_status), MP_ROM_PTR(&usbif_msc_status_obj) },
-    { MP_ROM_QSTR(MP_QSTR_msc_buffer), MP_ROM_PTR(&usbif_msc_buffer_obj) },
     { MP_ROM_QSTR(MP_QSTR_dev_pid), MP_ROM_PTR(&usbif_dev_pid_obj) },
     { MP_ROM_QSTR(MP_QSTR_dev_desc_check), MP_ROM_PTR(&usbif_dev_desc_check_obj) },
-    { MP_ROM_QSTR(MP_QSTR_hid_send), MP_ROM_PTR(&usbif_hid_send_obj) },
-    { MP_ROM_QSTR(MP_QSTR_hid_leds), MP_ROM_PTR(&usbif_hid_leds_obj) },
-    { MP_ROM_QSTR(MP_QSTR_HID_KEYBOARD), MP_ROM_INT(1) },
-    { MP_ROM_QSTR(MP_QSTR_HID_MOUSE), MP_ROM_INT(2) },
     { MP_ROM_QSTR(MP_QSTR_dev_functions), MP_ROM_PTR(&usbif_dev_functions_obj) },
     { MP_ROM_QSTR(MP_QSTR_dev_functions_built), MP_ROM_PTR(&usbif_dev_functions_built_obj) },
     { MP_ROM_QSTR(MP_QSTR_FN_CDC), MP_ROM_INT(1) },
-    { MP_ROM_QSTR(MP_QSTR_FN_MSC), MP_ROM_INT(2) },
     { MP_ROM_QSTR(MP_QSTR_FN_AUDIO), MP_ROM_INT(4) },
-    { MP_ROM_QSTR(MP_QSTR_FN_MIDI), MP_ROM_INT(8) },
-    { MP_ROM_QSTR(MP_QSTR_FN_HID), MP_ROM_INT(16) },
     { MP_ROM_QSTR(MP_QSTR_FN_VIDEO), MP_ROM_INT(32) },
     { MP_ROM_QSTR(MP_QSTR_uac_enable), MP_ROM_PTR(&usbif_uac_enable_obj) },
     { MP_ROM_QSTR(MP_QSTR_uac_pump_start), MP_ROM_PTR(&usbif_uac_pump_start_obj) },
@@ -1842,36 +1634,11 @@ static const mp_rom_map_elem_t usbif_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_host_midi_close), MP_ROM_PTR(&usbif_host_midi_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_midi_dropped), MP_ROM_PTR(&usbif_host_midi_dropped_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_msc_close), MP_ROM_PTR(&usbif_host_msc_close_obj) },
-    { MP_ROM_QSTR(MP_QSTR_midi_write), MP_ROM_PTR(&usbif_midi_write_obj) },
-    { MP_ROM_QSTR(MP_QSTR_midi_read), MP_ROM_PTR(&usbif_midi_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_dev_state), MP_ROM_PTR(&usbif_dev_state_obj) },
     { MP_ROM_QSTR(MP_QSTR_dev_reinit), MP_ROM_PTR(&usbif_dev_reinit_obj) },
 };
 static MP_DEFINE_CONST_DICT(usbif_module_globals, usbif_module_globals_table);
 
-// Keeps the attached MSC buffer alive for as long as the USB task may read
-// it, independently of whether the application still holds a reference.
-MP_REGISTER_ROOT_POINTER(mp_obj_t usbif_msc_obj);
-
-#if defined(CFG_TUD_MSC) && CFG_TUD_MSC
-// Consulted by usbif_msc_dev.c before every host access. The root is NULL
-// once the drive is detached, by msc_detach() or by a soft reset (which
-// frees the buffer: mp_init() does not clear root pointers, so the soft-reset
-// teardown below clears this one itself). Without the check the host would
-// read reused memory and see corrupted files rather than an error. The drive
-// reports "no medium" instead, which is both true and something hosts handle.
-bool usbif_msc_root_alive(void) {
-    return MP_STATE_VM(usbif_msc_obj) != MP_OBJ_NULL;
-}
-
-// Consulted by usbif_msc_dev.c's blockdev path (msc_attach_blockdev) to
-// call readblocks/writeblocks on whatever object is currently attached.
-// Same root, same soft-reset guard as the buffer path -- usbif_msc_live()
-// is checked first in every caller, same as it always was.
-mp_obj_t usbif_msc_get_obj(void) {
-    return MP_STATE_VM(usbif_msc_obj);
-}
-#endif
 
 // --- Soft reset -------------------------------------------------------------
 //
@@ -1909,11 +1676,6 @@ static void usbif_soft_reset_teardown(void) {
     // Stops the pump task and deletes its I2S channel, so uac_pump_start()
     // and machine.I2S can have the peripheral again.
     usbif_pump_stop();
-    #endif
-    #if defined(CFG_TUD_MSC) && CFG_TUD_MSC
-    extern void usbif_msc_detach(void);
-    usbif_msc_detach();
-    MP_STATE_VM(usbif_msc_obj) = MP_OBJ_NULL;
     #endif
     // The guard is being swept with the rest of the heap. Its root has to go
     // too, or the next program's first start would find it still set and

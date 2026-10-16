@@ -18,9 +18,47 @@ import unittest
 
 import _env  # noqa: F401
 
-import usbif.auto
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+class _Stack:
+    """Stands in for micropython-lib's usb.device and usb-device-msc, and
+    records what the example served."""
+
+    def __init__(self):
+        self.attached = None
+        stack = self
+
+        class MSCInterface:
+            def __init__(self, bdev, **kwargs):
+                stack.attached = bdev
+                self.ejected = True  # already ejected, so the loop ends at once
+                self.blocks_read = self.blocks_written = self.errors = 0
+
+        class _Device:
+            def init(self, *itfs, **kwargs):
+                pass
+
+        self.usb = types.ModuleType("usb")
+        self.device = types.ModuleType("usb.device")
+        self.device.get = lambda: _Device()
+        self.msc = types.ModuleType("usb.device.msc")
+        self.msc.MSCInterface = MSCInterface
+        self.usb.device = self.device
+        self.device.msc = self.msc
+
+    def install(self):
+        self._saved = {k: sys.modules.get(k) for k in ("usb", "usb.device", "usb.device.msc")}
+        sys.modules.update({"usb": self.usb, "usb.device": self.device, "usb.device.msc": self.msc})
+
+    def remove(self):
+        for k, v in self._saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
 
 
 def _load_example():
@@ -41,38 +79,14 @@ class _Card:
         return self._answers.get(op)
 
 
-class _Device:
-    """Records what the example asked of the USB device."""
-
-    def __init__(self):
-        self.attached = None
-
-    def msc_detach(self):
-        pass
-
-    def msc_attach_blockdev(self, card, writable):
-        self.attached = card
-
-    def functions(self, *names):
-        pass
-
-    def msc_status(self):
-        # Attached, and already ejected, so the service loop ends at once.
-        return (self.attached is not None, 0, True)
-
-    def msc_bd_stats(self):
-        return (0, 0)
-
-
 class SdDriveRefusesDeadCard(unittest.TestCase):
     def setUp(self):
+        self.dev = _Stack()
+        self.dev.install()
         self.example = _load_example()
-        self.dev = _Device()
-        self._saved_device = usbif.auto.device
-        usbif.auto.device = lambda: self.dev
 
     def tearDown(self):
-        usbif.auto.device = self._saved_device
+        self.dev.remove()
 
     def _run_with(self, card):
         self.example.open_card = lambda: card

@@ -17,26 +17,15 @@
 #ifndef USBIF_TUSB_EXT_H
 #define USBIF_TUSB_EXT_H
 
-// The audio function can be excluded to present a slim CDC+MIDI composite:
-// purpose-built embedded MIDI hosts (the kind in a hardware synth box) often
-// carry enumeration buffers smaller than our full three-function descriptor,
-// and have no use for an isochronous audio function anyway. Default off for
-// the slim-descriptor experiment; boards that want the sound card set it.
+// The audio function can be excluded for a board that wants no sound card;
+// it is on by default.
 #ifndef USBIF_EXT_AUDIO
 #define USBIF_EXT_AUDIO (1)
 #endif
 #define CFG_TUD_AUDIO (USBIF_EXT_AUDIO)
-// And a USB MIDI function beside it: TinyUSB carries the whole class
-// (descriptor macro, jack plumbing, tud_midi_* API); this file only has to
-// give it numbers and space. Both functions appear and disappear together
-// through the same runtime opt-in the audio function uses.
-#define CFG_TUD_MIDI (1)
-// HID as a device: a keyboard, a mouse, or whatever report descriptor an
-// application wants. One interface, one interrupt IN endpoint.
-#define CFG_TUD_HID (1)
-#define CFG_TUD_HID_EP_BUFSIZE (16)
-#define CFG_TUD_MIDI_RX_BUFSIZE (TUD_OPT_HIGH_SPEED ? 512 : 64)
-#define CFG_TUD_MIDI_TX_BUFSIZE (TUD_OPT_HIGH_SPEED ? 512 : 64)
+// MIDI, HID and mass storage are no longer TinyUSB classes here: they are
+// micropython-lib's usb-device packages and ours on machine.USBDevice, which
+// open beside this costume.
 // Video as a device: the board *is* the webcam. One VideoControl interface
 // and one VideoStreaming interface, with an isochronous IN endpoint on the
 // streaming interface's alternate setting 1 -- the same shape usbif.uvc
@@ -89,32 +78,19 @@
 #define USBD_EP_AUDIO_OUT (USBIF_EPNUM_AUDIO)
 #define USBD_EP_AUDIO_FB (0x80 | USBIF_EPNUM_AUDIO)
 
-// MIDI sits after the audio function: its descriptor also spans two
-// interfaces (an AudioControl stub and MIDIStreaming), with one bulk
-// endpoint pair.
-#if USBIF_EXT_AUDIO
-#define USBD_ITF_MIDI (USBD_ITF_AUDIO + 2)
-#define USBIF_EPNUM_MIDI (USBIF_EPNUM_AUDIO + 1)
-#else
-#define USBD_ITF_MIDI (USBD_ITF_AUDIO)
-#define USBIF_EPNUM_MIDI (USBIF_EPNUM_AUDIO)
-#endif
-#define USBD_EP_MIDI_OUT (USBIF_EPNUM_MIDI)
-#define USBD_EP_MIDI_IN (0x80 | USBIF_EPNUM_MIDI)
-
-// HID follows MIDI: one interface, one interrupt IN endpoint.
-#define USBD_ITF_HID (USBD_ITF_MIDI + 2)
-#define USBIF_EPNUM_HID (USBIF_EPNUM_MIDI + 1)
-#define USBD_EP_HID_IN (0x80 | USBIF_EPNUM_HID)
-
 // Video last: two interfaces (VideoControl, VideoStreaming) and one
 // isochronous IN endpoint.
-#define USBD_ITF_VIDEO (USBD_ITF_HID + 1)
-#define USBIF_EPNUM_VIDEO (USBIF_EPNUM_HID + 1)
+#if USBIF_EXT_AUDIO
+#define USBD_ITF_VIDEO (USBD_ITF_AUDIO + 2)
+#define USBIF_EPNUM_VIDEO (USBIF_EPNUM_AUDIO + 1)
+#else
+#define USBD_ITF_VIDEO (USBD_ITF_AUDIO)
+#define USBIF_EPNUM_VIDEO (USBIF_EPNUM_AUDIO)
+#endif
 #define USBD_EP_VIDEO_IN (0x80 | USBIF_EPNUM_VIDEO)
 
 // The audio function occupies two interfaces (AudioControl and
-// AudioStreaming) and MIDI two more, which the bounds below must cover so
+// AudioStreaming) and video two more, which the bounds below must cover so
 // runtime_dev_open keeps declining everything the built-in descriptor owns.
 #undef USBD_ITF_BUILTIN_MAX
 #define USBD_ITF_BUILTIN_MAX (USBD_ITF_VIDEO + 2)
@@ -265,23 +241,6 @@
 // String index 0: the function is left unnamed so that no entry has to be
 // added to MicroPython's string table, which would be a third hook for
 // cosmetic benefit. Hosts fall back to the device product string.
-// The MIDI function needs its own Interface Association Descriptor: the
-// device already announces itself as an IAD composite (CDC's doing), and
-// on such devices Windows requires every function grouped by one.
-// TinyUSB's TUD_MIDI_DESCRIPTOR ships without it; the audio descriptor
-// that worked leads with its own IAD, which is the tell.
-// The IAD groups the MIDI function on composite (class EF) devices, where
-// Windows requires it. A single-function device must NOT carry one -- the
-// classic embedded MIDI host expects a bare AC+MS pair at interface 0 --
-// but that is a runtime property now: usbif_desc.c strips this IAD when
-// the assembled costume turns out to hold only one function. So it is
-// always compiled in, and always the first thing in the MIDI block.
-// The HID report descriptor's length is needed by the configuration
-// descriptor at compile time. Computed from the same macros that build it
-// in usbif_hid_dev.c, so the two cannot drift.
-#define USBIF_HID_REPORT_DESC_LEN \
-    (sizeof((uint8_t[]){ TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(1)), \
-                         TUD_HID_REPORT_DESC_MOUSE(HID_REPORT_ID(2)) }))
 
 // --- Video function: the board *is* the webcam.
 //
@@ -365,11 +324,6 @@
     TUD_VIDEO_DESC_EP_ISO(USBD_EP_VIDEO_IN,                                 \
     CFG_TUD_VIDEO_STREAMING_EP_BUFSIZE, 1)
 
-#define USBIF_MIDI_IAD_LEN (8)
-#define USBIF_MIDI_IAD \
-    8, TUSB_DESC_INTERFACE_ASSOCIATION, USBD_ITF_MIDI, 2, \
-    TUSB_CLASS_AUDIO, AUDIO_SUBCLASS_MIDI_STREAMING, \
-    AUDIO_FUNC_PROTOCOL_CODE_UNDEF, 0,
 
 // mp_usbd.h defaults this length to 0 when nothing has set it. A file that
 // includes mp_usbd.h before anything pulls in tusb_config.h (mp_usbd_cdc.c
@@ -377,9 +331,9 @@
 // first, so ours replaces it rather than redefining it.
 #undef MICROPY_HW_USB_EXT_DESC_CFG_LEN
 #if USBIF_EXT_AUDIO
-#define MICROPY_HW_USB_EXT_DESC_CFG_LEN (USBIF_AUDIO_SPEAKER_STEREO_FB_DESC_LEN + USBIF_MIDI_IAD_LEN + TUD_MIDI_DESC_LEN + TUD_HID_DESC_LEN + USBIF_VIDEO_DESC_LEN)
+#define MICROPY_HW_USB_EXT_DESC_CFG_LEN (USBIF_AUDIO_SPEAKER_STEREO_FB_DESC_LEN + USBIF_VIDEO_DESC_LEN)
 #else
-#define MICROPY_HW_USB_EXT_DESC_CFG_LEN (USBIF_MIDI_IAD_LEN + TUD_MIDI_DESC_LEN + TUD_HID_DESC_LEN + USBIF_VIDEO_DESC_LEN)
+#define MICROPY_HW_USB_EXT_DESC_CFG_LEN (USBIF_VIDEO_DESC_LEN)
 #endif
 // High speed counts in 125 us microframes, so bInterval 4 gives the 1 ms
 // feedback refresh the class expects; full speed counts in 1 ms frames, where
@@ -388,21 +342,6 @@
 
 #if !USBIF_EXT_AUDIO
 #define MICROPY_HW_USB_EXT_DESC_CFG                    \
-    USBIF_MIDI_IAD                                     \
-    TUD_MIDI_DESCRIPTOR(                               \
-    /*_itfnum*/ USBD_ITF_MIDI,                         \
-    /*_stridx*/ 0,                                     \
-    /*_epout*/ USBD_EP_MIDI_OUT,                       \
-    /*_epin*/ USBD_EP_MIDI_IN,                         \
-    /*_epsize*/ 64),                                   \
-    TUD_HID_DESCRIPTOR(                                \
-    /*_itfnum*/ USBD_ITF_HID,                          \
-    /*_stridx*/ 0,                                     \
-    /*_boot_protocol*/ HID_ITF_PROTOCOL_NONE,          \
-    /*_report_desc_len*/ USBIF_HID_REPORT_DESC_LEN,    \
-    /*_epin*/ USBD_EP_HID_IN,                          \
-    /*_epsize*/ CFG_TUD_HID_EP_BUFSIZE,                \
-    /*_ep_interval*/ 10),                              \
     USBIF_VIDEO_DESCRIPTOR,
 #else
 #define MICROPY_HW_USB_EXT_DESC_CFG                    \
@@ -415,21 +354,6 @@
     /*_epoutsize*/ CFG_TUD_AUDIO_FUNC_1_EP_OUT_SZ_MAX, \
     /*_epfb*/ USBD_EP_AUDIO_FB,                        \
     /*_epfbsize*/ 4),                                  \
-    USBIF_MIDI_IAD                                     \
-    TUD_MIDI_DESCRIPTOR(                               \
-    /*_itfnum*/ USBD_ITF_MIDI,                         \
-    /*_stridx*/ 0,                                     \
-    /*_epout*/ USBD_EP_MIDI_OUT,                       \
-    /*_epin*/ USBD_EP_MIDI_IN,                         \
-    /*_epsize*/ 64),                                   \
-    TUD_HID_DESCRIPTOR(                                \
-    /*_itfnum*/ USBD_ITF_HID,                          \
-    /*_stridx*/ 0,                                     \
-    /*_boot_protocol*/ HID_ITF_PROTOCOL_NONE,          \
-    /*_report_desc_len*/ USBIF_HID_REPORT_DESC_LEN,    \
-    /*_epin*/ USBD_EP_HID_IN,                          \
-    /*_epsize*/ CFG_TUD_HID_EP_BUFSIZE,                \
-    /*_ep_interval*/ 10),                              \
     USBIF_VIDEO_DESCRIPTOR,
 #endif // USBIF_EXT_AUDIO
 

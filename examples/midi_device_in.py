@@ -1,142 +1,67 @@
-# Device MIDI IN: prove the board receives MIDI from a host.
+# Device MIDI IN: prove the board receives MIDI from a computer.
 #
-# This is the last open corner of M3's four-way MIDI matrix. The other
-# three are closed: the board plays a DAW and a hardware GM box (device
-# MIDI OUT), reads a keyboard (host MIDI IN), and drives an instrument
-# (host MIDI OUT). What has never been exercised is the direction a
-# software instrument needs most -- a host sequencer playing *into* the
-# board, so `audiodsp` can render what a DAW sends it.
-#
-# The board wears a pure-MIDI costume, so on the host it is a MIDI
-# device and nothing else. Anything that can send MIDI drives it: a DAW
-# track whose output is this board, or a keyboard routed through one.
-#
-# Run it with the REPL on the UART bridge, not on native USB -- the
-# costume change drops CDC, and a REPL living on the port under test
-# would be cut off mid-run.
+# A sequencer playing *into* the board is the direction a software
+# instrument needs most, so audiodsp can render what a DAW sends it. The
+# board's own USB MIDI function is midiports' port over micropython-lib's
+# usb-device-midi, beside the board's serial port, and adafruit_midi reads
+# it. Anything that can send MIDI drives it: a DAW track whose output is
+# this board, or a keyboard routed through one.
 #
 #   mpftp run usbif/examples/midi_device_in.py -d COM49 --follow --timeout 90
 #
-# The tally at the end is the evidence: which message types arrived,
-# how many of each, and whether the parser ever fell out of sync. A
-# clean run shows note-ons with a spread of velocities (not a column of
-# 64s, which would mean the source is sending a fixed velocity and the
-# velocity byte is never really being tested), note-offs matching them,
-# and zero desync bytes.
-
+# The tally at the end is the evidence: which message types arrived, how
+# many of each, and the spread of velocities and channels. A clean run shows
+# note-ons with varied velocities (a column of 64s would mean the source
+# sends a fixed velocity and the velocity byte is never really tested) and
+# note-offs matching them.
 import time
 
-import usbif
-import usbif.auto
+import adafruit_midi
+from adafruit_midi.channel_pressure import ChannelPressure
+from adafruit_midi.control_change import ControlChange
+from adafruit_midi.note_off import NoteOff
+from adafruit_midi.note_on import NoteOn
+from adafruit_midi.pitch_bend import PitchBend
+from adafruit_midi.polyphonic_key_pressure import PolyphonicKeyPressure
+from adafruit_midi.program_change import ProgramChange
+from midiports import usb_device
 
-DURATION_MS = 20000       # how long to listen once the host has mounted us
-MOUNT_TIMEOUT_MS = 10000  # how long to wait for the host to configure us
-BUF = bytearray(256)
+DURATION_MS = 20000  # how long to listen
 
-NAMES = {
-    0x8: "note-off", 0x9: "note-on", 0xA: "aftertouch",
-    0xB: "cc", 0xC: "program", 0xD: "pressure", 0xE: "pitch-bend",
-}
-
-
-def wait_for_mount(dev):
-    deadline = time.ticks_add(time.ticks_ms(), MOUNT_TIMEOUT_MS)
-    while time.ticks_diff(deadline, time.ticks_ms()) > 0:
-        connected, mounted, _ = dev.state()
-        if mounted:
-            return True
-        time.sleep_ms(50)
-    connected, mounted, suspended = dev.state()
-    print("not mounted after {} ms: connected={} mounted={} suspended={}".format(
-        MOUNT_TIMEOUT_MS, connected, mounted, suspended))
-    if not connected:
-        # No bus reset ever seen. Nothing above this layer can help.
-        print("  connected=False means no host is on the native USB port at all --")
-        print("  check the cable is a data cable and is in the native USB jack,")
-        print("  not only the UART bridge.")
-    return False
+NAMES = (
+    (NoteOn, "note-on"), (NoteOff, "note-off"), (PolyphonicKeyPressure, "aftertouch"),
+    (ControlChange, "cc"), (ProgramChange, "program"), (ChannelPressure, "pressure"),
+    (PitchBend, "pitch-bend"),
+)
 
 
 def main():
-    dev = usbif.auto.device()
-    restore = dev.functions()
-    if "midi" not in dev.functions_available():
-        print("this firmware has no MIDI device function built in")
-        return False
-
+    midi_in, midi_out = usb_device.ports()
+    midi = adafruit_midi.MIDI(midi_in=midi_in, midi_out=midi_out)
+    print("listening for {} s: play into this board's MIDI port".format(DURATION_MS // 1000))
     counts = {}
     velocities = set()
     channels = set()
-    notes_on = 0
-    notes_off = 0
-    bend_lo = 8192
-    bend_hi = 8192
-    parser = usbif.MidiParser()
-    total_bytes = 0
-
-    try:
-        # Only re-enumerate if we are not already wearing it: changing the
-        # function mask drops the host's connection and costs a fresh
-        # enumeration, which is pure disruption when it is already correct.
-        if restore != frozenset(("midi",)):
-            dev.functions("midi")
-            print("costume: midi only -- look for the board as a MIDI device on the host")
-        else:
-            print("costume: already midi only, left alone")
-        if not wait_for_mount(dev):
-            return False
-        print("mounted. play into it for {} s ...".format(DURATION_MS // 1000))
-
-        port = usbif.auto.open_midi("dev:midi")
-
-        deadline = time.ticks_add(time.ticks_ms(), DURATION_MS)
-        while time.ticks_diff(deadline, time.ticks_ms()) > 0:
-            n = port.read(BUF)
-            if not n:
-                time.sleep_ms(2)
-                continue
-            total_bytes += n
-            parser.feed(BUF, n)
-            for status, data in parser.drain():
-                high = status >> 4
-                name = NAMES.get(high, "system")
-                counts[name] = counts.get(name, 0) + 1
-                if high < 0xF:
-                    channels.add(status & 0x0F)
-                if high == 0x9 and len(data) == 2 and data[1]:
-                    notes_on += 1
-                    velocities.add(data[1])
-                    print("  note-on  ch{:<2} note {:<3} vel {}".format(
-                        (status & 0x0F) + 1, data[0], data[1]))
-                elif high == 0x8 or (high == 0x9 and len(data) == 2 and not data[1]):
-                    # A note-on with velocity 0 is a note-off; count it as one.
-                    notes_off += 1
-                elif high == 0xE and len(data) == 2:
-                    value = data[0] | (data[1] << 7)
-                    bend_lo = min(bend_lo, value)
-                    bend_hi = max(bend_hi, value)
-    finally:
-        if dev.functions() != restore:
-            dev.functions(*restore)
-
-    print()
-    print("--- device MIDI IN ---")
-    print("bytes read      {}".format(total_bytes))
-    for name in sorted(counts):
-        print("{:<15} {}".format(name, counts[name]))
-    print("notes on/off    {} / {}".format(notes_on, notes_off))
-    print("channels seen   {}".format(
-        sorted(c + 1 for c in channels) if channels else "none"))
-    print("velocities      {} distinct{}".format(
-        len(velocities),
-        " (min {} max {})".format(min(velocities), max(velocities))
-        if velocities else ""))
-    if bend_hi != bend_lo:
-        print("pitch bend      {} .. {}".format(bend_lo, bend_hi))
-    print("desync bytes    {}".format(parser.desync))
-    ok = total_bytes > 0 and parser.desync == 0
-    print("result          {}".format("PASS" if ok else "no traffic" if not total_bytes else "FAIL"))
-    return ok
+    end = time.ticks_add(time.ticks_ms(), DURATION_MS)
+    while time.ticks_diff(end, time.ticks_ms()) > 0:
+        if not midi_in.any():
+            time.sleep_ms(2)
+            continue
+        while True:
+            msg = midi.receive()
+            if msg is None:
+                break
+            name = next((n for cls, n in NAMES if isinstance(msg, cls)), type(msg).__name__)
+            counts[name] = counts.get(name, 0) + 1
+            if isinstance(msg, NoteOn) and msg.velocity:
+                velocities.add(msg.velocity)
+            if getattr(msg, "channel", None) is not None:
+                channels.add(msg.channel + 1)
+    print("received:", counts or "nothing")
+    print("velocities seen:", len(velocities), sorted(velocities)[:12])
+    print("channels:", sorted(channels))
+    return bool(counts)
 
 
-main()
+if __name__ == "__main__":
+    main()

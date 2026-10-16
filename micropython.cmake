@@ -46,8 +46,6 @@ target_sources(usermod_usbif INTERFACE
     ${USBIF_SRC_DIR}/usbif_host_uac.c
     ${USBIF_SRC_DIR}/usbif_host_uvc.c
     ${USBIF_SRC_DIR}/usbif_desc.c
-    ${USBIF_SRC_DIR}/usbif_hid_dev.c
-    ${USBIF_SRC_DIR}/usbif_msc_dev.c
     ${USBIF_SRC_DIR}/usbif_uvc_dev.c
     ${USBIF_SRC_DIR}/shared/usbif_ringbuf.c
     ${USBIF_SRC_DIR}/shared/usbif_byte_ring.c
@@ -78,14 +76,14 @@ if(ESP_PLATFORM)
     target_compile_definitions(usermod_usbif INTERFACE ESP_PLATFORM=1)
 
     # Extend TinyUSB's device configuration (descriptor and class config come
-    # from this module) and turn on MSC, whose block callbacks live here. These
+    # from this module). Mass storage is usb-device-msc on machine.USBDevice
+    # now, so MicroPython's built-in MSC stays off. These
     # were a board header's lines until 2026-10-05; as compile definitions any
     # board can build usbif with no header of its own. Both halves need them:
     # MicroPython's sources (through usermod) and the TinyUSB component, which
     # compiles MicroPython's tusb_config.h but never sees the board's -D list.
     set(USBIF_TUSB_DEFS
-        MICROPY_HW_USB_EXT_TUSB_CONFIG="usbif_tusb_ext.h"
-        MICROPY_HW_USB_MSC=1)
+        MICROPY_HW_USB_EXT_TUSB_CONFIG="usbif_tusb_ext.h")
     target_compile_definitions(usermod_usbif INTERFACE ${USBIF_TUSB_DEFS})
     if(usbif_tusb_lib)
         target_compile_definitions(${usbif_tusb_lib} PRIVATE ${USBIF_TUSB_DEFS})

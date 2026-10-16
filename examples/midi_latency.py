@@ -8,7 +8,7 @@
 # timestamps that. Because the departure and the arrival happen on the
 # same clock, one ticks_diff spans the entire system:
 #
-#   midi_write -> host MIDI stack -> DAW input -> synthesis ->
+#   MIDI out -> host MIDI stack -> DAW input -> synthesis ->
 #   host audio engine -> USB audio -> this FIFO.
 #
 # What the number means: the whole system's latency, dominated by the
@@ -46,7 +46,11 @@ buf = bytearray(512)
 # Both ends of the chain, as objects: the board's sound-card function to listen
 # on, and its MIDI function to play into. One clock, one board, two roles.
 dev = usbif.auto.device()
-port = usbif.auto.open_midi("dev:midi")
+# The board's own USB MIDI function, beside the sound card the costume wears:
+# midiports' port over micropython-lib's usb-device-midi.
+from midiports import usb_device
+
+_midi_in, port = usb_device.ports()
 
 
 def block_is_loud():

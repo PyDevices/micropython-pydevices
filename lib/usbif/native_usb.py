@@ -236,7 +236,7 @@ class NativeDevice(Device):
     # Portable names to the C module's bitmask. Kept here rather than in the
     # C module so the names stay the portable API's, not the firmware's --
     # hence "uac" for FN_AUDIO and "uvc" for FN_VIDEO.
-    _BITS = {"cdc": 1, "msc": 2, "uac": 4, "midi": 8, "hid": 16, "uvc": 32}
+    _BITS = {"cdc": 1, "uac": 4, "uvc": 32}
 
     def _mask_to_names(self, mask):
         return frozenset(n for n, b in self._BITS.items() if mask & b)
@@ -301,33 +301,6 @@ class NativeDevice(Device):
         """The configuration descriptor the firmware would send, as bytes."""
         return _require().builtin_desc_cfg(*args)
 
-    # -- MSC: the board as a flash drive -----------------------------------
-    def msc_attach(self, *args):
-        return _require().msc_attach(*args)
-
-    def msc_attach_blockdev(self, *args):
-        return _require().msc_attach_blockdev(*args)
-
-    def msc_detach(self, *args):
-        return _require().msc_detach(*args)
-
-    def msc_status(self, *args):
-        return _require().msc_status(*args)
-
-    def msc_buffer(self, *args):
-        return _require().msc_buffer(*args)
-
-    def msc_bd_stats(self, *args):
-        return _require().msc_bd_stats(*args)
-
-    # -- HID: the board as a keyboard or mouse -----------------------------
-    def hid_send(self, *args):
-        return _require().hid_send(*args)
-
-    def hid_leds(self, *args):
-        """The host's keyboard LED state -- caps lock, num lock, scroll lock."""
-        return _require().hid_leds(*args)
-
     # -- UAC: the board as a sound card -------------------------------------
     def uac_enable(self, *args):
         return _require().uac_enable(*args)
@@ -386,12 +359,6 @@ class NativeDevice(Device):
         return _require().uvc_dev_stats(*args)
 
 
-# HID report ids, as class attributes so a caller reaches them through the
-# object it already holds rather than through the C module. Assigned after the
-# class body because they are read from the C module at import time when it is
-# present, and a firmware without HID simply has neither.
-NativeDevice.HID_KEYBOARD = getattr(_usbif, "HID_KEYBOARD", 1)
-NativeDevice.HID_MOUSE = getattr(_usbif, "HID_MOUSE", 2)
 
 
 class MscPartition:

@@ -1,20 +1,12 @@
 """MIDI backend for a board, over the ``_usbif`` native module.
 
-Phase 3 item 2. The board can be either end of a MIDI cable -- a device a DAW
-plays, or a host driving a controller -- and until now those were two different
-APIs: ``_usbif.midi_read``/``midi_write`` for the device role,
-``_usbif.host_midi_*`` for the host role. Both speak plain MIDI bytes, and the
-C module made them the same shape on purpose, but a caller still had to know
-which one to reach for. That makes role a code change.
+A MIDI device attached to the board acting as host, as a
+:class:`usbif.MidiPort`: plain MIDI bytes both ways, the same contract the
+``winmm`` and ALSA backends satisfy. Its id is ``"host:<device id>"``.
 
-Here both are :class:`usbif.MidiPort`, so **role is configuration**. The same
-program that harmonises, logs or forwards runs unchanged whether the board is
-the instrument or the thing driving one -- and, because it is the same contract
-the ``winmm`` and ALSA backends satisfy, unchanged on a workstation too.
-
-Ids name the role: ``"dev:midi"`` is the board's own MIDI function, and
-``"host:<device id>"`` is a MIDI device attached to the board acting as host.
-Both are bidirectional, because both really are.
+The board's own USB MIDI function (the board as the device a computer plays)
+moved to ``midiports.usb_device``, over micropython-lib's ``usb-device-midi``;
+asking here for ``"dev:midi"`` says so.
 """
 
 from . import INOUT, MidiPort, MidiPortInfo
@@ -37,27 +29,11 @@ def _require():
     return _usbif
 
 
-def _device_function_present():
-    """True if this firmware is currently presenting a MIDI device function.
-
-    Asked of ``dev_functions()`` rather than ``dev_functions_built()``: a
-    function compiled in but not advertised is not a port anyone can open, and
-    reporting it would promise a host that is not there.
-    """
-    try:
-        return bool(_usbif.dev_functions() & _usbif.FN_MIDI)
-    except (AttributeError, OSError):
-        return False
-
-
 def ports():
     """The board's own MIDI function, plus any MIDI device it is hosting."""
     if _usbif is None:
         return ()
     found = []
-    if _device_function_present():
-        found.append(MidiPortInfo(id=DEVICE_ID, name="usbif device MIDI",
-                                  direction=INOUT))
     try:
         attached = _usbif.host_devices()
     except (AttributeError, OSError):
@@ -99,17 +75,9 @@ def open_port(port):
         info = MidiPortInfo(id=port_id, direction=INOUT,
                             name="usbif device MIDI" if role == "dev"
                             else "hosted MIDI device {}".format(dev_id))
-    return NativeDeviceMidi(info) if role == "dev" else NativeHostMidi(info, dev_id)
-
-
-class NativeDeviceMidi(MidiPort):
-    """The board's own USB MIDI function, as seen by a host."""
-
-    def _read(self, buf):
-        return _usbif.midi_read(buf)
-
-    def _write(self, data):
-        return _usbif.midi_write(bytes(data))
+    if role == "dev":
+        raise ValueError("the board's own USB MIDI is midiports.usb_device now, not usbif")
+    return NativeHostMidi(info, dev_id)
 
 
 class NativeHostMidi(MidiPort):
