@@ -218,8 +218,8 @@ class SpeakerInterface(Interface):
         if not self.alt:
             return
         error = self.ring.any() - self._target
-        # A ring 1/8 off half-full moves the request by about 0.1 %.
-        step = (self._nominal * error) // (self._target * 1000 // 125 + 1)
+        # A ring 1/8 off half-full moves the request by 0.1 %.
+        step = (self._nominal * error * 8) // (1000 * self._target)
         fb = self._nominal - step
         lo = self._nominal - self._nominal // 100
         hi = self._nominal + self._nominal // 100
