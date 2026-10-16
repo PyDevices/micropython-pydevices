@@ -611,18 +611,26 @@ static void usbif_host_fifo_for(uint16_t classes, usb_host_config_t *config) {
     const bool uvc = (classes & USBIF_CLASS_UVC) != 0;
     const bool uac = (classes & USBIF_CLASS_UAC) != 0;
     const char *why;
+    // Non-periodic OUT: 64 bytes is a full-speed bulk packet, but a
+    // high-speed one is 512 (a tethering phone, a drive), so the P4 keeps
+    // 128 lines there and IN gives up the difference.
+    #if defined(CONFIG_IDF_TARGET_ESP32P4)
+    const uint32_t nptx = 128, rx_cut = 64;
+    #else
+    const uint32_t nptx = 16, rx_cut = 0;
+    #endif
     if (uvc) {
         // IDF's Bias IN: IN 600, non-periodic OUT 64, periodic OUT 128.
-        config->fifo_settings_custom.rx_fifo_lines = 152 * k;
-        config->fifo_settings_custom.nptx_fifo_lines = 16 * k;
+        config->fifo_settings_custom.rx_fifo_lines = 152 * k - rx_cut;
+        config->fifo_settings_custom.nptx_fifo_lines = nptx;
         config->fifo_settings_custom.ptx_fifo_lines = 32 * k;
         why = uac ? "uvc asked for, so IN-leaning; a 2.0 speaker's packet will not fit"
                   : "uvc asked for, so IN-leaning";
     } else if (uac) {
         // IN 528, non-periodic OUT 64, periodic OUT 200: a speaker at 48 kHz
         // stereo (196) and a microphone (192) in the same session.
-        config->fifo_settings_custom.rx_fifo_lines = 134 * k;
-        config->fifo_settings_custom.nptx_fifo_lines = 16 * k;
+        config->fifo_settings_custom.rx_fifo_lines = 134 * k - rx_cut;
+        config->fifo_settings_custom.nptx_fifo_lines = nptx;
         config->fifo_settings_custom.ptx_fifo_lines = 50 * k;
         why = "uac asked for without uvc, so periodic OUT gets the room a speaker needs";
     } else {

@@ -65,9 +65,6 @@ class Tether:
 
     def __init__(self, dev=None, *, wait_ms=10000):
         if dev is None:
-            # A camera's FIFO split leaves 256 bytes for bulk OUT, and a phone
-            # sends 512-byte packets at high speed: ask for a CDC session.
-            usb.core.start(classes=("cdc",))
             deadline = time.ticks_add(time.ticks_ms(), wait_ms)
             while dev is None:
                 dev = usb.core.find(custom_match=self.match)
