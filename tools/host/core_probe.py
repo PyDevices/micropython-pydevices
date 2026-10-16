@@ -134,3 +134,30 @@ def identity():
         dev._release_all()
         return {"device": "%04x:%04x" % (dev.idVendor, dev.idProduct), "reply": bytes(reply).hex(), "us": us}
     return None
+
+
+def hid(reads=10):
+    """A keyboard's report descriptor over a control request to its
+    interface, then interrupt IN reads: with no one typing each one times out,
+    and each timeout must leave the endpoint usable for the next."""
+    for dev in usb.core.find(find_all=True):
+        for k, v in _walk(dev):
+            if k == "ep" and v[0] and v[0][2] == 0x03 and v[2] == 3 and v[1] & 0x80:
+                itf, ep = v[0][0], v[1]
+                break
+        else:
+            continue
+        report = dev.ctrl_transfer(0x81, 6, 0x2200, itf, 256, 1000)
+        timeouts = got = 0
+        buf = bytearray(8)
+        t0 = time.ticks_ms()
+        for _ in range(reads):
+            try:
+                got += dev.read(ep, buf, timeout=100) > 0
+            except usb.core.USBTimeoutError:
+                timeouts += 1
+        dev._release_all()
+        return {"device": "%04x:%04x" % (dev.idVendor, dev.idProduct), "interface": itf, "endpoint": hex(ep),
+                "report_descriptor": len(report), "reports": got, "timeouts": timeouts,
+                "ms": time.ticks_diff(time.ticks_ms(), t0)}
+    return None
