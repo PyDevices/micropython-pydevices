@@ -207,8 +207,11 @@ def main():
     rc, out = sh([MPFTP, "hold", "start", "-d", args.dev or "ws://" + args.ws], timeout=60)
     # The board's REPL outlives a run: drop any matrix_board an earlier run
     # imported, so this run uses the file on the board now.
-    # Opening a UART bridge can reset the board: retry until it answers.
+    # Opening a UART bridge can reset the board, and a board that boots into
+    # an app (main.py) isn't at the prompt: interrupt, and retry until it
+    # answers.
     for _ in range(10):
+        sh([MPFTP, "hold", "interrupt"], timeout=30)
         sh([MPFTP, "hold", "ask", "import sys; sys.modules.pop('matrix_board', None); import matrix_board",
             "--timeout", "20"], timeout=60)
         if ask("'matrix_board' in sys.modules") == "True":
@@ -258,8 +261,15 @@ def main():
                     row["bulk_ok"] = False
             except (ValueError, IndexError, KeyError):
                 row["bulk_ok"] = False
-            found = functions_on_windows(args.serial)
-            missing = check_enumeration(combo, found)
+            # Windows installs each new combination's functions in its own
+            # time, slower at full speed: look again for up to 30 s.
+            deadline = time.time() + 30
+            while True:
+                found = functions_on_windows(args.serial)
+                missing = check_enumeration(combo, found)
+                if not missing or time.time() > deadline:
+                    break
+                time.sleep(3)
             row["enumerated"] = not missing
             if missing:
                 row["missing"] = missing
