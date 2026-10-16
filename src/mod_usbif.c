@@ -16,6 +16,7 @@
 #include "py/obj.h"
 #include "py/objstr.h"
 #include "py/mperrno.h"
+#include <stdio.h>
 #include <string.h>
 
 #include "shared/usbif_ringbuf.h"
@@ -1000,6 +1001,81 @@ static mp_obj_t usbif_host_xfer_py(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_xfer_obj, 4, 4, usbif_host_xfer_py);
 
+// A hosted network adapter (usb.host.net) as an ESP-IDF network interface,
+// in usbif_host_net.c: Python does the control side, this moves the frames.
+#if USBIF_HAVE_HOST
+extern int usbif_net_start(uint32_t dev_id, uint8_t itf, uint8_t ep_in, uint8_t ep_out, uint16_t mps,
+    const uint8_t mac[6], bool rndis);
+extern void usbif_net_stop(void);
+extern int usbif_net_info(uint32_t addr[4], uint32_t counts[5]);
+extern void usbif_net_set_default(void);
+#endif
+
+// host_net_start(dev_id, interface, ep_in, ep_out, max_packet, mac, rndis)
+static mp_obj_t usbif_host_net_start_py(size_t n_args, const mp_obj_t *args) {
+    #if USBIF_HAVE_HOST
+    mp_buffer_info_t mac;
+    mp_get_buffer_raise(args[5], &mac, MP_BUFFER_READ);
+    if (mac.len != 6) {
+        mp_raise_ValueError(MP_ERROR_TEXT("a MAC address is 6 bytes"));
+    }
+    usbif_xfer_check(usbif_net_start((uint32_t)mp_obj_get_int(args[0]), (uint8_t)mp_obj_get_int(args[1]),
+        (uint8_t)mp_obj_get_int(args[2]), (uint8_t)mp_obj_get_int(args[3]), (uint16_t)mp_obj_get_int(args[4]),
+        mac.buf, mp_obj_is_true(args[6])));
+    return mp_const_none;
+    #else
+    mp_raise_OSError(MP_EOPNOTSUPP);
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_net_start_obj, 7, 7, usbif_host_net_start_py);
+
+static mp_obj_t usbif_host_net_stop_py(void) {
+    #if USBIF_HAVE_HOST
+    usbif_net_stop();
+    #endif
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_net_stop_obj, usbif_host_net_stop_py);
+
+static mp_obj_t usbif_ip_str(uint32_t a) {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%u.%u.%u.%u", (unsigned)(a & 0xff), (unsigned)((a >> 8) & 0xff),
+        (unsigned)((a >> 16) & 0xff), (unsigned)(a >> 24));
+    return mp_obj_new_str(buf, strlen(buf));
+}
+
+// host_net_info(): (up, (ip, netmask, gateway, dns), (rx, tx, rx dropped,
+// tx dropped, rx errors)), or None when no interface is up.
+static mp_obj_t usbif_host_net_info_py(void) {
+    #if USBIF_HAVE_HOST
+    uint32_t addr[4], counts[5];
+    int up = usbif_net_info(addr, counts);
+    if (up < 0) {
+        return mp_const_none;
+    }
+    mp_obj_t ips[4], cs[5];
+    for (int i = 0; i < 4; i++) {
+        ips[i] = usbif_ip_str(addr[i]);
+    }
+    for (int i = 0; i < 5; i++) {
+        cs[i] = mp_obj_new_int_from_uint(counts[i]);
+    }
+    mp_obj_t items[3] = { mp_obj_new_bool(up > 0), mp_obj_new_tuple(4, ips), mp_obj_new_tuple(5, cs) };
+    return mp_obj_new_tuple(3, items);
+    #else
+    return mp_const_none;
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_net_info_obj, usbif_host_net_info_py);
+
+static mp_obj_t usbif_host_net_default_py(void) {
+    #if USBIF_HAVE_HOST
+    usbif_net_set_default();
+    #endif
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_net_default_obj, usbif_host_net_default_py);
+
 static mp_obj_t usbif_host_midi_open_py(mp_obj_t dev_id_in) {
     #if USBIF_HAVE_HOST
     int rc = usbif_host_midi_open((uint32_t)mp_obj_get_int(dev_id_in));
@@ -1110,6 +1186,10 @@ static const mp_rom_map_elem_t usbif_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_host_release), MP_ROM_PTR(&usbif_host_release_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_ctrl), MP_ROM_PTR(&usbif_host_ctrl_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_xfer), MP_ROM_PTR(&usbif_host_xfer_obj) },
+    { MP_ROM_QSTR(MP_QSTR_host_net_start), MP_ROM_PTR(&usbif_host_net_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_host_net_stop), MP_ROM_PTR(&usbif_host_net_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_host_net_info), MP_ROM_PTR(&usbif_host_net_info_obj) },
+    { MP_ROM_QSTR(MP_QSTR_host_net_default), MP_ROM_PTR(&usbif_host_net_default_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_uac_open), MP_ROM_PTR(&usbif_host_uac_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_uac_read), MP_ROM_PTR(&usbif_host_uac_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_uac_write), MP_ROM_PTR(&usbif_host_uac_write_obj) },

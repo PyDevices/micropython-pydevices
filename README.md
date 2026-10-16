@@ -43,8 +43,8 @@ an ESP32-P4's camera.
 [`packages/usb-core`](packages/usb-core) gives `usb.core`, `usb.util` and
 `usb_host`; the class packages build on it: `usb-host-msc` (mount a drive),
 `usb-host-hid` (keyboards and mice), `usb-host-cdc` (a USB serial device),
-`usb-host-audio` (a speaker or microphone) and `usb-host-video` (a webcam).
-MIDI is `midiports.usb_host`. Adafruit's `adafruit_usb_host_midi` runs on it
+`usb-host-audio` (a speaker or microphone), `usb-host-video` (a webcam) and
+`usb-host-net` (the internet through a phone's USB tethering). MIDI is `midiports.usb_host`. Adafruit's `adafruit_usb_host_midi` runs on it
 unchanged.
 
 ```python
@@ -55,6 +55,19 @@ import vfs
 drive = Drive(usb.core.find(custom_match=Drive.match))
 vfs.mount(vfs.VfsFat(drive), "/usb")
 ```
+
+A board with no radio can get online through a phone. Turn on USB tethering
+on an Android phone, plug it into the board's high-speed host port, and:
+
+```python
+from usb.host.net import Tether
+
+net = Tether()
+net.active(True)        # the phone gives the board an address by DHCP
+```
+
+Sockets, `requests` and `mip` then work over it. On an ESP32-P4 it moves
+about 7 Mbit/s, and needs the phone at high speed, so not behind a hub.
 
 The older host API, `usbif.auto` and its class drivers in C, is still here
 while the class packages replace it.

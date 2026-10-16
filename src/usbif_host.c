@@ -530,8 +530,11 @@ extern void usbif_host_uvc_close_for_host_stop(void);
 
 extern void usbif_xfer_on_dev_gone(usb_device_handle_t dev);
 extern void usbif_xfer_close(void);
+extern void usbif_net_on_dev_gone(usb_device_handle_t dev);
+extern void usbif_net_stop(void);
 
 static void usbif_host_on_dev_gone(usb_device_handle_t hdl) {
+    usbif_net_on_dev_gone(hdl);
     usbif_xfer_on_dev_gone(hdl);
     usbif_cdc_on_dev_gone(hdl);
     usbif_hid_on_dev_gone(hdl);
@@ -1126,6 +1129,7 @@ void usbif_host_stop_c(void) {
     // deregister, the root port power-off didn't release the device, and the
     // host came back wedged until a hard reset. A soft reset reaches here
     // with whatever the program had open, so this is the path that matters.
+    usbif_net_stop();
     usbif_xfer_close();
     usbif_cdc_close();
     usbif_hid_close();
