@@ -1,0 +1,121 @@
+From 079d038a2a035123faeff4c70dfaaded9c38ae4a Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 05:38:37 -0500
+Subject: [PATCH] shared/tinyusb: a streaming OUT endpoint can feed a C sink.
+
+mp_usbd_stream_sink(ep, fn, ctx, owner, packet) attaches a C function in
+place of a USBDevice.Ring: the USB interrupt hands it each packet. A user C
+module that has its own lock-free ring and consumer (audiodsp's
+audiopump.Ring and its pump) attaches its write there, so samples go from
+the USB interrupt to the playback thread with nothing in between.
+MP_USBD_HAS_SINK says the hook is there.
+---
+ shared/tinyusb/mp_usbd.h         | 10 ++++++++
+ shared/tinyusb/mp_usbd_runtime.c | 42 +++++++++++++++++++++++++++++++-
+ 2 files changed, 51 insertions(+), 1 deletion(-)
+
+diff --git a/shared/tinyusb/mp_usbd.h b/shared/tinyusb/mp_usbd.h
+index 5ee4d2eab..b4a4de4e8 100644
+--- a/shared/tinyusb/mp_usbd.h
++++ b/shared/tinyusb/mp_usbd.h
+@@ -160,6 +160,13 @@ const char *mp_usbd_runtime_string_cb(uint8_t index);
+ #define MP_USBD_STREAMS (4)
+ #endif
+ 
++// A C sink a streaming OUT endpoint can feed in place of a USBDevice.Ring,
++// called from the USB interrupt with each packet: returns the bytes it took.
++// Another C module (audiodsp's audiopump.Ring) attaches its own with
++// mp_usbd_stream_sink(), so samples reach its consumer with no VM between.
++#define MP_USBD_HAS_SINK (1)
++typedef uint32_t (*mp_usbd_sink_fn)(void *ctx, const uint8_t *buf, uint32_t len);
++
+ typedef struct {
+     mp_obj_base_t base;
+ 
+@@ -206,6 +213,9 @@ extern const mp_obj_type_t mp_usbd_ring_type;
+ // ring, each packet with its 2-byte payload header.
+ void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t ring, uint16_t packet, uint32_t frame);
+ void mp_usbd_stream_feedback(mp_obj_usb_device_t *usbd, uint8_t ep_addr, const uint8_t *value, size_t len);
++// Feed an OUT endpoint's packets to sink(ctx, ...) instead (sink NULL stops);
++// owner is kept alive while the stream runs.
++void mp_usbd_stream_sink(uint8_t ep_addr, mp_usbd_sink_fn sink, void *ctx, mp_obj_t owner, uint16_t packet);
+ bool mp_usbd_stream_stats(uint8_t ep_addr, uint32_t *packets, uint32_t *bytes, uint32_t *drops);
+ 
+ // Built-in constant objects, possible values of builtin_driver
+diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
+index fe0a22d09..a372c03d1 100644
+--- a/shared/tinyusb/mp_usbd_runtime.c
++++ b/shared/tinyusb/mp_usbd_runtime.c
+@@ -561,6 +561,8 @@ typedef struct {
+     volatile bool active;
+     uint16_t packet;            // bytes per transfer
+     uint32_t frame;             // video: bytes per frame (0: a plain stream)
++    mp_usbd_sink_fn sink;       // OUT: a C sink instead of the ring
++    void *sink_ctx;
+     uint32_t frame_pos;         // video: bytes of the current frame sent
+     uint8_t fid;                // video: the frame ID bit, toggled per frame
+     mp_usbd_ring_obj_t *ring;   // data streams
+@@ -627,7 +629,11 @@ static MP_USBD_ISR_ATTR bool runtime_dev_xfer_isr(uint8_t rhport, uint8_t ep_add
+         s->packets++;
+         s->bytes += xferred_bytes;
+         if (!s->feedback && tu_edpt_dir(ep_addr) == TUSB_DIR_OUT && xferred_bytes) {
+-            if (!ring_write(s->ring, s->pkt, xferred_bytes)) {
++            if (s->sink != NULL) {
++                if (s->sink(s->sink_ctx, s->pkt, xferred_bytes) < xferred_bytes) {
++                    s->drops++;
++                }
++            } else if (!ring_write(s->ring, s->pkt, xferred_bytes)) {
+                 s->drops++;
+             }
+         }
+@@ -684,6 +690,7 @@ void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t
+     s->ring = MP_OBJ_TO_PTR(ring);
+     s->pkt = ((mp_obj_array_t *)MP_OBJ_TO_PTR(pkt))->items;
+     s->packet = packet;
++    s->sink = NULL;
+     s->frame = frame;
+     s->frame_pos = 0;
+     s->fid = 0;
+@@ -725,6 +732,39 @@ void mp_usbd_stream_feedback(mp_obj_usb_device_t *usbd, uint8_t ep_addr, const u
+     }
+ }
+ 
++void mp_usbd_stream_sink(uint8_t ep_addr, mp_usbd_sink_fn sink, void *ctx, mp_obj_t owner, uint16_t packet) {
++    mp_obj_usb_device_t *usbd = MP_OBJ_TO_PTR(MP_STATE_VM(usbd));
++    if (usbd == NULL) {
++        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("USB device not configured"));
++    }
++    int i;
++    mp_usbd_stream_t *s = stream_slot(usbd, ep_addr, &i);
++    if (sink == NULL) {
++        if (s->ep == ep_addr) {
++            stream_release(usbd, i);
++        }
++        return;
++    }
++    if (packet == 0 || tu_edpt_dir(ep_addr) != TUSB_DIR_OUT) {
++        mp_raise_ValueError(MP_ERROR_TEXT("a sink takes an OUT endpoint and a packet size"));
++    }
++    s->active = false;
++    mp_obj_t pkt = mp_obj_new_bytearray_by_ref(packet, m_new(uint8_t, packet));
++    usbd->stream_objs[i][0] = owner;
++    usbd->stream_objs[i][1] = pkt;
++    s->ring = NULL;
++    s->sink = sink;
++    s->sink_ctx = ctx;
++    s->pkt = ((mp_obj_array_t *)MP_OBJ_TO_PTR(pkt))->items;
++    s->packet = packet;
++    s->frame = 0;
++    s->feedback = false;
++    s->packets = s->bytes = s->drops = 0;
++    s->ep = ep_addr;
++    s->active = true;
++    stream_arm(s, false);
++}
++
+ bool mp_usbd_stream_stats(uint8_t ep_addr, uint32_t *packets, uint32_t *bytes, uint32_t *drops) {
+     mp_usbd_stream_t *s = stream_find(ep_addr);
+     if (s == NULL) {
+-- 
+2.43.0
+
