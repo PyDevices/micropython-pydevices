@@ -10,8 +10,13 @@
 #         if cam.streaming and cam.wants_frame():
 #             cam.write_frame(frame)          # width * height * 2 bytes of YUY2
 #
-# The computer sees a camera (UVC 1.1, uncompressed YUY2, one size, one
-# rate). When it starts watching (selects the streaming alternate setting),
+#     cam = CameraInterface(width=640, height=480, fps=30, format="mjpeg",
+#                           max_frame=60_000)  # each frame a JPEG, any size up to that
+#
+# The computer sees a camera (UVC 1.1, one format, one size, one rate):
+# uncompressed YUY2, or MJPEG, where each frame is a JPEG and so far smaller,
+# which is how a webcam gets a large picture through a full-speed port. When
+# the computer starts watching (selects the streaming alternate setting),
 # machine.USBDevice's streaming endpoint sends frames from cam.ring in C,
 # from the USB interrupt, each isochronous packet with UVC's payload header.
 # Write whole frames: a frame goes out only once all of it is in the ring.
@@ -46,20 +51,29 @@ _CAMERA_ID = const(1)
 _OUTPUT_ID = const(2)
 
 _YUY2 = b"YUY2\x00\x00\x10\x00\x80\x00\x00\xaa\x00\x38\x9b\x71"
+_VARIABLE = const(-1)  # USBDevice.stream(): frames led by their length
 _PROBE_LEN = const(34)  # UVC 1.1
 
 
 class CameraInterface(Interface):
     """An uncompressed YUY2 webcam of one size and rate."""
 
-    def __init__(self, *, width=160, height=120, fps=10, packet=512, frames_buffered=2, interface_str=None):
+    def __init__(self, *, width=160, height=120, fps=10, format="yuy2", max_frame=None, packet=512,
+                 frames_buffered=2, interface_str=None):
         super().__init__()
+        if format not in ("yuy2", "mjpeg"):
+            raise ValueError("format is 'yuy2' or 'mjpeg'")
         self.width = width
         self.height = height
         self.fps = fps
+        self.format = format
         self.packet = packet
-        self.frame_bytes = width * height * 2
-        self.ring = machine.USBDevice.Ring(self.frame_bytes * frames_buffered)
+        self.mjpeg = format == "mjpeg"
+        # YUY2 frames are all one size; a JPEG is as big as the picture makes
+        # it, up to max_frame (a quarter of the raw size by default).
+        self.frame_bytes = (max_frame or width * height // 2) if self.mjpeg else width * height * 2
+        slot = self.frame_bytes + 4 if self.mjpeg else self.frame_bytes
+        self.ring = machine.USBDevice.Ring(slot * frames_buffered)
         self.interface_str = interface_str
         self.alt = 0
         self.ep_in = None
@@ -104,13 +118,17 @@ class CameraInterface(Interface):
                     + b"\x00\x00\x00")  # camera terminal, no controls
         desc.extend(struct.pack("<BBBBHBBB", 9, 0x24, 0x03, _OUTPUT_ID, 0x0101, 0, _CAMERA_ID, 0))  # to USB
         desc.extend(bytes((9, 0x04, itf_num + 1, 0, 0, 0x0E, 0x02, 0x00, 0)))  # VideoStreaming alt 0
-        vs_total = 14 + 27 + 30 + 6
+        vs_total = 14 + (11 if self.mjpeg else 27) + 30 + 6
         desc.extend(struct.pack("<BBBBHBBBBBBBB", 14, 0x24, 0x01, 1, vs_total, self.ep_in, 0, _OUTPUT_ID,
                                 0, 0, 0, 1, 0))  # input header
-        desc.extend(struct.pack("<BBBBB", 27, 0x24, 0x04, 1, 1) + _YUY2 + bytes((16, 1, 0, 0, 0, 0)))  # format
+        if self.mjpeg:
+            desc.extend(bytes((11, 0x24, 0x06, 1, 1, 0, 1, 0, 0, 0, 0)))  # format: MJPEG
+        else:
+            desc.extend(struct.pack("<BBBBB", 27, 0x24, 0x04, 1, 1) + _YUY2 + bytes((16, 1, 0, 0, 0, 0)))
         rate = self.frame_bytes * 8 * self.fps
-        desc.extend(struct.pack("<BBBBBHHIIIIBI", 30, 0x24, 0x05, 1, 0, self.width, self.height, rate, rate,
-                                self.frame_bytes, self._interval, 1, self._interval))  # frame
+        desc.extend(struct.pack("<BBBBBHHIIIIBI", 30, 0x24, 0x07 if self.mjpeg else 0x05, 1, 0, self.width,
+                                self.height, rate, rate, self.frame_bytes, self._interval, 1,
+                                self._interval))  # frame
         desc.extend(bytes((6, 0x24, 0x0D, 1, 1, 4)))  # colour matching: BT.709, sRGB
         desc.extend(bytes((9, 0x04, itf_num + 1, 1, 1, 0x0E, 0x02, 0x00, 0)))  # VideoStreaming alt 1
         desc.extend(struct.pack("<BBBBHB", 7, 0x05, self.ep_in, 0x05, self.packet, 1))  # isochronous IN
@@ -165,7 +183,7 @@ class CameraInterface(Interface):
     def _set_alt(self, alt):
         self.alt = alt
         if alt:
-            self._usbd.stream(self.ep_in, self.ring, self.packet, self.frame_bytes)
+            self._usbd.stream(self.ep_in, self.ring, self.packet, _VARIABLE if self.mjpeg else self.frame_bytes)
         else:
             self._usbd.stream(self.ep_in, None)
 
@@ -182,11 +200,23 @@ class CameraInterface(Interface):
     def wants_frame(self):
         """True when the ring has room for another whole frame."""
         size, waiting, _, _ = self.ring.stats()
-        return size - waiting >= self.frame_bytes
+        return size - waiting >= self.frame_bytes + (4 if self.mjpeg else 0)
 
     def write_frame(self, frame):
-        """Queue one whole YUY2 frame; False if there's no room for it yet."""
-        if len(frame) != self.frame_bytes:
+        """Queue one whole frame (YUY2, or a JPEG up to max_frame bytes);
+        False if there's no room for it yet."""
+        n = len(frame)
+        if self.mjpeg:
+            if n > self.frame_bytes:
+                raise ValueError("a JPEG of %d bytes is over max_frame, %d" % (n, self.frame_bytes))
+            size, waiting, _, _ = self.ring.stats()
+            if size - waiting < n + 4:
+                return False
+            # The length first, then the JPEG: C reads the length, then waits
+            # for all of the frame before it sends any of it.
+            self.ring.write(struct.pack("<I", n))
+            return self.ring.write(frame) == n
+        if n != self.frame_bytes:
             raise ValueError("a frame is %d bytes" % self.frame_bytes)
         return self.ring.write(frame) == self.frame_bytes
 
