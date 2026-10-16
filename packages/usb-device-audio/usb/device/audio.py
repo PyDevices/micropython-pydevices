@@ -18,6 +18,10 @@
 # the computer how fast this board consumes, from how full the ring is, so the
 # two clocks stay in step without the ring ever running dry or over.
 #
+# With an audiodsp pump, pass sink=audiopump.Ring(...) and play that ring:
+# the samples then go from the USB interrupt into the pump's ring, and Python
+# only calls service() now and then.
+#
 # mute and volume (in 1/256 dB) are what the computer's volume control set.
 import struct
 
@@ -55,7 +59,7 @@ class SpeakerInterface(Interface):
     """A stereo UAC2 speaker. ``ring_bytes`` sizes the ring the samples land
     in; about 50 ms of audio by default."""
 
-    def __init__(self, *, rate=48000, channels=2, sample_bytes=2, ring_bytes=8192, interface_str=None):
+    def __init__(self, *, rate=48000, channels=2, sample_bytes=2, ring_bytes=8192, sink=None, interface_str=None):
         super().__init__()
         self.rate = rate
         self.channels = channels
@@ -66,13 +70,17 @@ class SpeakerInterface(Interface):
         # one sample frame of slack for a clock running fast.
         per_frame = rate // (8000 if self.high_speed else 1000)
         self.packet = (per_frame + 1) * self.frame_bytes
-        self.ring = machine.USBDevice.Ring(ring_bytes)
+        # sink: an audiodsp audiopump.Ring the samples go to instead, from the
+        # USB interrupt straight to the pump that plays it (Ring.from_usb).
+        self.sink = sink
+        self.ring = None if sink is not None else machine.USBDevice.Ring(ring_bytes)
         self.interface_str = interface_str
         self.mute = False
         self.volume = 0
         self.alt = 0
         self.ep_out = self.ep_fb = None
-        self._target = (self.ring.stats()[0] // 2) // self.frame_bytes * self.frame_bytes
+        capacity = sink.level() + sink.space() if sink is not None else self.ring.stats()[0]
+        self._target = (capacity // 2) // self.frame_bytes * self.frame_bytes
         # Feedback: samples per frame, 10.14 at full speed in 3 bytes, 16.16
         # at high speed in 4.
         if self.high_speed:
@@ -192,10 +200,16 @@ class SpeakerInterface(Interface):
         self.alt = alt
         if alt:
             self._fb = self._nominal
-            self._usbd.stream(self.ep_out, self.ring, self.packet)
+            if self.sink is not None:
+                self.sink.from_usb(self.ep_out, self.packet)
+            else:
+                self._usbd.stream(self.ep_out, self.ring, self.packet)
             self._usbd.feedback(self.ep_fb, self._fb_bytes())
         else:
-            self._usbd.stream(self.ep_out, None)
+            if self.sink is not None:
+                self.sink.from_usb(self.ep_out, None)
+            else:
+                self._usbd.stream(self.ep_out, None)
             self._usbd.feedback(self.ep_fb, None)
 
     def _fb_bytes(self):
@@ -217,7 +231,7 @@ class SpeakerInterface(Interface):
         few milliseconds from the loop that reads the ring."""
         if not self.alt:
             return
-        error = self.ring.any() - self._target
+        error = (self.sink.level() if self.sink is not None else self.ring.any()) - self._target
         # A ring 1/8 off half-full moves the request by 0.1 %.
         step = (self._nominal * error * 8) // (1000 * self._target)
         fb = self._nominal - step
@@ -231,4 +245,5 @@ class SpeakerInterface(Interface):
     def stats(self):
         """(stream packets, bytes, drops), ring (size, waiting, overflows,
         underflows), and the feedback value."""
-        return self._usbd.stream_stats(self.ep_out), self.ring.stats(), self._fb
+        ring = self.sink.stats() if self.sink is not None else self.ring.stats()
+        return self._usbd.stream_stats(self.ep_out), ring, self._fb
