@@ -80,7 +80,8 @@ class SpeakerInterface(Interface):
         self.alt = 0
         self.ep_out = self.ep_fb = None
         capacity = sink.level() + sink.space() if sink is not None else self.ring.stats()[0]
-        self._target = (capacity // 2) // self.frame_bytes * self.frame_bytes
+        #: The level, in bytes, service() steers the computer's clock to hold.
+        self.target = (capacity // 2) // self.frame_bytes * self.frame_bytes
         # Feedback: samples per frame, 10.14 at full speed in 3 bytes, 16.16
         # at high speed in 4.
         if self.high_speed:
@@ -225,15 +226,22 @@ class SpeakerInterface(Interface):
     def streaming(self):
         return self.alt != 0
 
-    def service(self):
-        """Nudge the feedback from how full the ring is: fuller than half
-        asks the computer for fewer samples, emptier for more. Call it every
-        few milliseconds from the loop that reads the ring."""
+    def service(self, level=None):
+        """Nudge the feedback from how full the ring is: fuller than
+        ``target`` asks the computer for fewer samples, emptier for more.
+        Call it every few milliseconds from the loop that reads the ring.
+
+        When the samples move on from the ring to somewhere they accumulate
+        (an effect chain's own ring), pass that ``level`` in bytes and set
+        ``target`` to the level to hold there: the computer's clock is then
+        steered by what actually builds up."""
         if not self.alt:
             return
-        error = (self.sink.level() if self.sink is not None else self.ring.any()) - self._target
-        # A ring 1/8 off half-full moves the request by 0.1 %.
-        step = (self._nominal * error * 8) // (1000 * self._target)
+        if level is None:
+            level = self.sink.level() if self.sink is not None else self.ring.any()
+        error = level - self.target
+        # A ring 1/8 off target moves the request by 0.1 %.
+        step = (self._nominal * error * 8) // (1000 * max(self.target, self.frame_bytes))
         fb = self._nominal - step
         lo = self._nominal - self._nominal // 100
         hi = self._nominal + self._nominal // 100
