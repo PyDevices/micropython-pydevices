@@ -20,14 +20,16 @@ ports = sorted(
     (p for p in list_ports.comports() if p.serial_number and want in p.serial_number.upper()),
     key=lambda p: p.location or "",
 )
-extra = [p for p in ports if not (p.location or "").endswith("x.0")]
+# The board's own console is interface 0 (and some hosts report no location
+# for it); the extra port is a later interface.
+extra = [p for p in ports if p.location and ":x." in p.location and not p.location.endswith("x.0")]
 if not extra:
     print(json.dumps({"pass": False, "error": "no extra serial port", "ports": [p.device for p in ports]}))
     sys.exit(1)
 dev = extra[0].device
 pattern = bytes((i * 7) & 0xFF for i in range(size))
 got = bytearray()
-with serial.Serial(dev, 115200, timeout=0.1) as s:
+with serial.Serial(dev, 115200, timeout=0.1, write_timeout=2) as s:
     s.reset_input_buffer()
     for i in range(0, size, 64):
         s.write(pattern[i : i + 64])

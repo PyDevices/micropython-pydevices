@@ -2,6 +2,7 @@
 moves data. Runs in WSL; drives the board over WebREPL with ``mpftp hold``.
 
     python3 tools/matrix/run_matrix.py --ws 192.168.1.159 --serial DCDA0C48AC0C [--only msc,hid]
+    python3 tools/matrix/run_matrix.py --dev COM4 --serial E8F60AE0F070 --in-max 7   # the P4 panel
 
 The board needs ``matrix_board.py`` at its root, micropython-lib's
 usb-device-cdc, -hid and -midi, ``usb_hid``, ``usb-device-msc``, ``midiports``
@@ -9,7 +10,8 @@ and ``adafruit_hid``, and WebREPL. Each combination is brought up beside the
 board's own serial port with ``matrix_board.setup()``, then:
 
 - enumeration: Windows lists a function for each class, under the board's
-  USB serial number;
+  USB serial number, at the speed the port runs, and every bulk endpoint it
+  received is 512 bytes at high speed or 64 at full (``usb_desc.py``);
 - msc: Windows reads the board's file and writes one the board reads back;
 - hid: 100 mouse reports counted through Raw Input (``rawinput_count.py``);
 - midi: 200 note-ons round-trip through the board's echo, in order
@@ -42,7 +44,10 @@ IN_EPS = {"cdc": 2, "hid": 1, "midi": 1, "msc": 1}
 
 
 def sh(cmd, timeout=120, cwd=None):
-    r = subprocess.run(cmd, shell=isinstance(cmd, str), capture_output=True, text=True, timeout=timeout, cwd=cwd)
+    try:
+        r = subprocess.run(cmd, shell=isinstance(cmd, str), capture_output=True, text=True, timeout=timeout, cwd=cwd)
+    except subprocess.TimeoutExpired as e:
+        return 124, "timed out after %ss: %s" % (timeout, e.output or "")
     return r.returncode, r.stdout + r.stderr
 
 
@@ -136,21 +141,35 @@ def _with_echo(cmd, seconds):
     return out
 
 
-def check_midi():
-    # Windows may still be loading the MIDI driver just after enumeration.
-    probe = "import sys; sys.path.insert(0, '.'); from midiports import windows; " \
-            "print(bool(windows.find('Espressif Device')))"
+_MIDI_LIST = ("import sys; sys.path.insert(0, '.'); from midiports import windows; "
+              "print('|'.join(sorted({p.name for p in windows.available()})))")
+
+
+def midi_names():
+    rc, out = win_py("-c", _MIDI_LIST, timeout=30)
+    lines = [l for l in out.splitlines() if "|" in l or l.strip()]
+    return set(lines[-1].strip().split("|")) if lines else set()
+
+
+def check_midi(before):
+    # The board's port is the one that appeared after this combination's
+    # setup (another board may present a port with the same name); Windows may
+    # still be loading the MIDI driver just after enumeration.
+    name = None
     for _ in range(15):
-        rc, out = win_py("-c", probe, timeout=30)
-        if "True" in out:
+        new = midi_names() - before
+        if new:
+            name = sorted(new)[0]
             break
         time.sleep(1)
-    out = _with_echo(["midi_roundtrip.py", "Espressif Device", "--notes", "200", "--mode", "paced"], 25)
+    if name is None:
+        return {"pass": False, "midi_error": "no new MIDI port appeared"}
+    out = _with_echo(["midi_roundtrip.py", name, "--notes", "200", "--mode", "paced"], 25)
     try:
         r = json.loads([l for l in out.splitlines() if l.startswith("{")][-1])
     except (ValueError, IndexError):
         return {"pass": False, "midi_error": out[-200:]}
-    return {"midi_received": r["received"], "midi_in_order": r["in_order"], "pass": r["pass"]}
+    return {"midi_port": name, "midi_received": r["received"], "midi_in_order": r["in_order"], "pass": r["pass"]}
 
 
 def check_cdc(serial):
@@ -164,7 +183,8 @@ def check_cdc(serial):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ws", required=True, help="the board's WebREPL address")
+    ap.add_argument("--ws", help="the board's WebREPL address")
+    ap.add_argument("--dev", help="or a serial console that isn't the USB port under test (a UART bridge)")
     ap.add_argument("--serial", required=True, help="the board's USB serial number (hex)")
     ap.add_argument("--only", help="comma list: test only combinations of these classes")
     ap.add_argument("--in-max", type=int, default=4, help="the controller's highest IN endpoint")
@@ -172,7 +192,7 @@ def main():
     args = ap.parse_args()
 
     os.makedirs(WIN_TMP, exist_ok=True)
-    for f in ("rawinput_count.py", "cdc_echo.py"):
+    for f in ("rawinput_count.py", "cdc_echo.py", "usb_desc.py"):
         sh(["cp", os.path.join(HERE, f), WIN_TMP])
     sh(["cp", os.path.expanduser("~/gh/pydevices/.toolbox/scripts/midi_roundtrip.py"), WIN_TMP])
     lib = os.path.join(WIN_TMP, "lib")
@@ -182,11 +202,20 @@ def main():
         sh(["cp", "-r", "/tmp/midiports-adafruit_midi/1.6.0/adafruit_midi", WIN_TMP])
 
     sh([MPFTP, "hold", "stop"], timeout=30)
-    rc, out = sh([MPFTP, "hold", "start", "-d", "ws://" + args.ws], timeout=60)
+    if not (args.ws or args.dev):
+        ap.error("--ws or --dev is needed")
+    rc, out = sh([MPFTP, "hold", "start", "-d", args.dev or "ws://" + args.ws], timeout=60)
     # The board's REPL outlives a run: drop any matrix_board an earlier run
     # imported, so this run uses the file on the board now.
-    sh([MPFTP, "hold", "ask", "import sys; sys.modules.pop('matrix_board', None); import matrix_board",
-        "--timeout", "20"], timeout=60)
+    # Opening a UART bridge can reset the board: retry until it answers.
+    for _ in range(10):
+        sh([MPFTP, "hold", "ask", "import sys; sys.modules.pop('matrix_board', None); import matrix_board",
+            "--timeout", "20"], timeout=60)
+        if ask("'matrix_board' in sys.modules") == "True":
+            break
+        time.sleep(2)
+    else:
+        sys.exit("the board never imported matrix_board")
     if args.plant:
         sh([MPFTP, "hold", "ask", "matrix_board._drop = 0", "--timeout", "10"], timeout=40)
 
@@ -195,6 +224,9 @@ def main():
     for k in range(1, len(classes) + 1):
         for combo in itertools.combinations(classes, k):
             need = 2 + sum(IN_EPS[c] for c in combo)
+            ask("matrix_board.stop()", timeout=30)
+            time.sleep(3)
+            before = midi_names() if "midi" in combo else set()
             refused = ask("matrix_board.setup(%r)" % (combo,), timeout=60)
             row = {"combo": "+".join(combo), "in_endpoints": need}
             if need > args.in_max:
@@ -209,15 +241,36 @@ def main():
                 print(json.dumps(row), flush=True)
                 continue
             time.sleep(6)
+            rc, out = win_py("usb_desc.py", "303A", args.serial, timeout=60)
+            try:
+                d = json.loads(out.strip().splitlines()[-1])
+                bulk = sorted({e["max_packet"] for e in d["endpoints"] if e["type"] == "bulk"})
+                row["speed"] = d["speed"]
+                row["bulk_sizes"] = bulk
+                # USB 2.0: bulk endpoints are 512 bytes at high speed, 64 at full.
+                row["bulk_ok"] = bulk == [512 if d["speed"] == "high" else 64]
+                sys.path.insert(0, HERE)
+                from desc_check import faults
+
+                bad = faults(bytes.fromhex(d["config"]), d["speed"], args.in_max)
+                if bad:
+                    row["desc_faults"] = bad
+                    row["bulk_ok"] = False
+            except (ValueError, IndexError, KeyError):
+                row["bulk_ok"] = False
             found = functions_on_windows(args.serial)
             missing = check_enumeration(combo, found)
             row["enumerated"] = not missing
             if missing:
                 row["missing"] = missing
-            ok = not missing
+            ok = not missing and row["bulk_ok"]
             for c in combo:
-                part = {"msc": check_msc, "hid": check_hid, "midi": check_midi}.get(c)
-                r = part() if part else check_cdc(args.serial)
+                if c == "midi":
+                    r = check_midi(before)
+                elif c == "cdc":
+                    r = check_cdc(args.serial)
+                else:
+                    r = {"msc": check_msc, "hid": check_hid}[c]()
                 ok = ok and r.pop("pass")
                 row.update(r)
             row["pass"] = ok

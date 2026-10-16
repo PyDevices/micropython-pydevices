@@ -85,7 +85,9 @@ def serve(seconds):
 
 
 def stop():
+    """Back to the board's own serial port alone."""
     state.clear()
+    usb.device.get().init(builtin_driver=True)
 
 
 def hid_burst(n):
