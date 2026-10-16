@@ -37,9 +37,11 @@ Test: with a module that enables its class only on request, the board
 enumerates as plain CDC until asked and as a composite device afterwards, and
 the host's default-device selection follows.
 
+diff --git a/shared/tinyusb/mp_usbd.h b/shared/tinyusb/mp_usbd.h
+index e46c06d78..6caedcfc8 100644
 --- a/shared/tinyusb/mp_usbd.h
 +++ b/shared/tinyusb/mp_usbd.h
-@@ -94,6 +94,21 @@
+@@ -103,6 +103,21 @@ void mp_usbd_hex_str(char *out_str, const uint8_t *bytes, size_t bytes_len);
      MICROPY_HW_USB_EXT_DESC_CFG_LEN + \
      TUD_CONFIG_DESC_LEN)
  
@@ -61,9 +63,11 @@ the host's default-device selection follows.
  // Built-in USB device and configuration descriptor values
  extern const tusb_desc_device_t mp_usbd_builtin_desc_dev;
  extern const uint8_t mp_usbd_builtin_desc_cfg[MP_USBD_BUILTIN_DESC_CFG_LEN];
+diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
+index ef9ea04fe..95e8e8584 100644
 --- a/shared/tinyusb/mp_usbd_runtime.c
 +++ b/shared/tinyusb/mp_usbd_runtime.c
-@@ -113,7 +113,7 @@
+@@ -113,7 +113,7 @@ const uint8_t *tud_descriptor_device_cb(void) {
      if (usbd) {
          result = usbd_get_buffer_in_cb(usbd->desc_dev, MP_BUFFER_READ);
      }
@@ -72,8 +76,8 @@ the host's default-device selection follows.
  }
  
  const uint8_t *tud_descriptor_configuration_cb(uint8_t index) {
-@@ -123,7 +123,21 @@
-     if (usbd) {
+@@ -128,7 +128,21 @@ const uint8_t *tud_descriptor_configuration_cb(uint8_t index) {
+         #endif
          result = usbd_get_buffer_in_cb(usbd->desc_cfg, MP_BUFFER_READ);
      }
 -    return result ? result : &mp_usbd_builtin_desc_cfg;
@@ -95,7 +99,7 @@ the host's default-device selection follows.
  }
  
  #if (CFG_TUD_MAX_SPEED == OPT_MODE_HIGH_SPEED)
-@@ -276,7 +290,7 @@
+@@ -281,7 +295,7 @@ static uint16_t runtime_dev_open(uint8_t rhport, tusb_desc_interface_t const *it
  
      // If TinyUSB built-in drivers are enabled, don't claim any interface in the built-in range
      #if USBD_ITF_BUILTIN_MAX > 0
