@@ -139,6 +139,15 @@ class _HIDInterface(HIDInterface):
                 raise OSError("USB HID: the host isn't taking reports")
             time.sleep_ms(1)
         n = len(report)
+        if self.protocol == 0:
+            # Boot protocol (a host's SET_PROTOCOL 0, as a BIOS or a board's
+            # simple host asks for): the boot device's report alone, without
+            # its ID, which is what the host parses; the others aren't sent.
+            if report_id not in self._devices[0].report_ids:
+                return
+            self._tx[0:n] = report
+            self.submit_xfer(self._int_ep, self._txv[:n])
+            return
         self._tx[0] = report_id
         self._tx[1 : n + 1] = report
         self.submit_xfer(self._int_ep, self._txv[: n + 1])

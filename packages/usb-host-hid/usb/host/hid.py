@@ -62,10 +62,14 @@ class Device:
             raise ValueError("no HID interface")
         self.dev = dev
         self.interface, self.protocol, self._in, size, self._out = found[0]
-        self._buf = bytearray(size)
+        self._packet = size
+        self._buf = bytearray(64)
+        self._mv = memoryview(self._buf)
         dev.set_configuration()
-        if boot and self.protocol:
-            self._class_out(_SET_PROTOCOL, 0)
+        # Boot protocol only on a boot interface; its reports fit one packet.
+        self.boot = bool(boot and self.protocol)
+        if self.protocol:
+            self._class_out(_SET_PROTOCOL, 0 if boot else 1)   # boot, or report
         try:
             self._class_out(_SET_IDLE, 0)   # report only on change
         except usb.core.USBError:
@@ -84,11 +88,25 @@ class Device:
     def read(self, timeout=1):
         """The next report, or None if none came within timeout ms. The
         bytes are reused by the next read; copy them to keep them."""
+        # A packet at a time. A report that fills its last packet exactly (a
+        # boot keyboard's 8 bytes) sends no short packet after it, so a read
+        # asking for more would wait for the next report. In boot protocol a
+        # report is one packet. In report protocol one can be longer (with a
+        # report ID, a keyboard's 9 bytes), so after a full packet, a brief
+        # look for the rest.
+        p = self._packet
+        n = 0
         try:
-            n = self.dev.read(self._in, self._buf, timeout)
+            n = self.dev.read(self._in, self._mv[:p], timeout)
+            while not self.boot and n and n % p == 0 and n + p <= len(self._buf):
+                more = self.dev.read(self._in, self._mv[n:n + p], 2)
+                n += more
+                if more < p:
+                    break
         except usb.core.USBTimeoutError:
-            return None
-        return memoryview(self._buf)[:n] if n else None
+            if not n:
+                return None
+        return self._mv[:n] if n else None
 
     def set_leds(self, leds):
         """A keyboard's LEDs: bit 0 Num Lock, 1 Caps Lock, 2 Scroll Lock."""

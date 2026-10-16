@@ -5,7 +5,7 @@ import usb.core
 from usb.host.hid import Device, KEYBOARD, _interfaces
 
 
-def run(seconds=6, vid=0x303A):
+def run(seconds=6, vid=0x303A, boot=True):
     usb.core.start()
     dev = None
     for _ in range(20):
@@ -13,7 +13,7 @@ def run(seconds=6, vid=0x303A):
         if dev:
             break
         time.sleep_ms(250)
-    kbd = Device(dev, KEYBOARD)
+    kbd = Device(dev, KEYBOARD, boot=boot)
     reports = []
     end = time.ticks_add(time.ticks_ms(), int(seconds * 1000))
     while time.ticks_diff(end, time.ticks_ms()) > 0:
