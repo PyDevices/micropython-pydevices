@@ -67,7 +67,9 @@ net.active(True)        # the phone gives the board an address by DHCP
 ```
 
 Sockets, `requests` and `mip` then work over it. On an ESP32-P4 it moves
-about 7 Mbit/s, plugged in directly or through a high-speed hub.
+about 7 Mbit/s, plugged in directly or through a high-speed hub. It speaks
+RNDIS, which Samsung and many other Android phones use. CDC-ECM, CDC-NCM and
+iPhone tethering are not implemented.
 
 The older host API, `usbif.auto` and its class drivers in C, is still here
 while the class packages replace it.

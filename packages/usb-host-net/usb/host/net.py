@@ -16,7 +16,8 @@
 # MAC address, set the packet filter) and brings up a network interface on it,
 # with its address, gateway and DNS from the phone. Frames move in C; DHCP,
 # DNS and sockets are ESP-IDF's, as for Wi-Fi or Ethernet. The phone shares
-# its mobile data, or on many phones its Wi-Fi.
+# its mobile data, or on many phones its Wi-Fi. CDC-ECM, CDC-NCM and iPhone
+# tethering are not implemented.
 import struct
 import time
 
