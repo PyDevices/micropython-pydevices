@@ -16,10 +16,10 @@ import usb.core
 
 
 class Port:
-    def __init__(self, dp=None, dm=None, *, full_speed=False):
+    def __init__(self, dp=None, dm=None, *, full_speed=False, classes=None):
         if dp is not None or dm is not None:
             raise ValueError("the host is this board's native USB port; it takes no pins")
-        usb.core.start(full_speed=full_speed)
+        usb.core.start(full_speed=full_speed, classes=classes)
 
     def deinit(self):
         usb.core.stop()

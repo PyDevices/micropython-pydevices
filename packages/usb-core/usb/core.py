@@ -57,19 +57,29 @@ _started = None
 _full_speed = None
 
 
-def start(full_speed=False):
-    """Start the host port, or restart it if full_speed changed."""
-    global _started, _full_speed
-    if _started is not None and full_speed == _full_speed:
+_classes = None
+
+
+def start(full_speed=False, classes=None):
+    """Start the host port, or restart it if a setting changed.
+
+    ``classes`` names what this session will stream, for the controller's
+    FIFO split, which is fixed while the host runs: ``("uvc",)`` leans to
+    IN for a camera, ``("uac",)`` leaves room for a speaker's periodic OUT.
+    None asks for everything, which leans to IN."""
+    global _started, _full_speed, _classes
+    want = tuple(classes) if classes else _ALL
+    if _started is not None and full_speed == _full_speed and want == _classes:
         return
     if _started is not None:
         _usbif.host_stop()
     try:
-        _usbif.host_start(_ALL, full_speed=full_speed)
+        _usbif.host_start(want + ("other",) if "other" not in want else want, full_speed=full_speed)
     except AttributeError:
         raise NoBackendError("this firmware has no USB host")
     _started = time.ticks_ms()
     _full_speed = full_speed
+    _classes = want
 
 
 def stop():
@@ -77,7 +87,7 @@ def stop():
     global _started, _full_speed
     if _started is not None:
         _usbif.host_stop()
-    _started = _full_speed = None
+    _started = _full_speed = _classes = None
 
 
 def _start():

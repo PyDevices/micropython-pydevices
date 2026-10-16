@@ -1,0 +1,8 @@
+{
+  "urls": [
+    ["usb/host/video.py", "github:PyDevices/usbif/packages/usb-host-video/usb/host/video.py"],
+    ["usb/host/_uvc.py", "github:PyDevices/usbif/packages/usb-host-video/usb/host/_uvc.py"]
+  ],
+  "deps": [["github:PyDevices/usbif/packages/usb-core", "main"]],
+  "version": "0.1.0"
+}
