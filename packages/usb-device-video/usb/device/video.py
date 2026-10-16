@@ -13,7 +13,12 @@
 #     cam = CameraInterface(width=640, height=480, fps=30, format="mjpeg",
 #                           max_frame=60_000)  # each frame a JPEG, any size up to that
 #
-# The computer sees a camera (UVC 1.1, one format, one size, one rate):
+#     cam = CameraInterface(sizes=((640, 480), (320, 240)), format="mjpeg")
+#     ...                                  # the host picks one; cam.width and
+#     ...                                  # cam.height say which, per session
+#
+# The computer sees a camera (UVC 1.1, one format, one rate, one size or a
+# list of them):
 # uncompressed YUY2, or MJPEG, where each frame is a JPEG and so far smaller,
 # which is how a webcam gets a large picture through a full-speed port. When
 # the computer starts watching (selects the streaming alternate setting),
@@ -56,39 +61,51 @@ _PROBE_LEN = const(34)  # UVC 1.1
 
 
 class CameraInterface(Interface):
-    """An uncompressed YUY2 webcam of one size and rate."""
+    """A webcam: YUY2 or MJPEG, one rate, and one size or several for the
+    host to choose from (``sizes``, largest first). The size the host chose
+    is ``width`` x ``height`` while it streams; write frames of that size."""
 
     def __init__(self, *, width=160, height=120, fps=10, format="yuy2", max_frame=None, packet=512,
-                 frames_buffered=2, interface_str=None):
+                 frames_buffered=2, sizes=None, interface_str=None):
         super().__init__()
         if format not in ("yuy2", "mjpeg"):
             raise ValueError("format is 'yuy2' or 'mjpeg'")
-        self.width = width
-        self.height = height
+        self.sizes = tuple(tuple(sz) for sz in (sizes or ((width, height),)))
         self.fps = fps
         self.format = format
         self.packet = packet
         self.mjpeg = format == "mjpeg"
         # YUY2 frames are all one size; a JPEG is as big as the picture makes
-        # it, up to max_frame (a quarter of the raw size by default).
-        self.frame_bytes = (max_frame or width * height // 2) if self.mjpeg else width * height * 2
-        slot = self.frame_bytes + 4 if self.mjpeg else self.frame_bytes
+        # it, up to max_frame for the largest size (a quarter of its raw size
+        # by default), and in proportion for the others.
+        big = self.sizes[0][0] * self.sizes[0][1]
+        cap = max_frame or big // 2
+        self._frame_bytes = tuple(
+            (max(4096, cap * w * h // big) if self.mjpeg else w * h * 2) for w, h in self.sizes)
+        slot = max(self._frame_bytes) + (4 if self.mjpeg else 0)
         self.ring = machine.USBDevice.Ring(slot * frames_buffered)
         self.interface_str = interface_str
         self.alt = 0
         self.ep_in = None
         self._interval = 10_000_000 // fps  # 100 ns units
-        self._probe = self._probe_values()
+        self._probe_index = 1   # the size the host is probing, 1-based
+        self._choose(1)
         self._pending = None
         self._usbd = machine.USBDevice()
 
-    def _probe_values(self):
+    def _choose(self, index):
+        """Make size `index` (1-based) the current one."""
+        self._index = index
+        self.width, self.height = self.sizes[index - 1]
+        self.frame_bytes = self._frame_bytes[index - 1]
+
+    def _probe_values(self, index):
         return struct.pack(
             "<HBBIHHHHHIIIBBBB",
             1,  # bmHint: frame interval fixed
-            1, 1, self._interval,
+            1, index, self._interval,
             0, 0, 0, 0, 0,
-            self.frame_bytes,
+            self._frame_bytes[index - 1],
             self.packet,
             48_000_000,
             0, 0, 0, 0,
@@ -118,17 +135,19 @@ class CameraInterface(Interface):
                     + b"\x00\x00\x00")  # camera terminal, no controls
         desc.extend(struct.pack("<BBBBHBBB", 9, 0x24, 0x03, _OUTPUT_ID, 0x0101, 0, _CAMERA_ID, 0))  # to USB
         desc.extend(bytes((9, 0x04, itf_num + 1, 0, 0, 0x0E, 0x02, 0x00, 0)))  # VideoStreaming alt 0
-        vs_total = 14 + (11 if self.mjpeg else 27) + 30 + 6
+        n = len(self.sizes)
+        vs_total = 14 + (11 if self.mjpeg else 27) + 30 * n + 6
         desc.extend(struct.pack("<BBBBHBBBBBBBB", 14, 0x24, 0x01, 1, vs_total, self.ep_in, 0, _OUTPUT_ID,
                                 0, 0, 0, 1, 0))  # input header
         if self.mjpeg:
-            desc.extend(bytes((11, 0x24, 0x06, 1, 1, 0, 1, 0, 0, 0, 0)))  # format: MJPEG
+            desc.extend(bytes((11, 0x24, 0x06, 1, n, 0, 1, 0, 0, 0, 0)))  # format: MJPEG
         else:
-            desc.extend(struct.pack("<BBBBB", 27, 0x24, 0x04, 1, 1) + _YUY2 + bytes((16, 1, 0, 0, 0, 0)))
-        rate = self.frame_bytes * 8 * self.fps
-        desc.extend(struct.pack("<BBBBBHHIIIIBI", 30, 0x24, 0x07 if self.mjpeg else 0x05, 1, 0, self.width,
-                                self.height, rate, rate, self.frame_bytes, self._interval, 1,
-                                self._interval))  # frame
+            desc.extend(struct.pack("<BBBBB", 27, 0x24, 0x04, 1, n) + _YUY2 + bytes((16, 1, 0, 0, 0, 0)))
+        for i, (w, h) in enumerate(self.sizes):
+            fb = self._frame_bytes[i]
+            rate = fb * 8 * self.fps
+            desc.extend(struct.pack("<BBBBBHHIIIIBI", 30, 0x24, 0x07 if self.mjpeg else 0x05, i + 1, 0, w, h,
+                                    rate, rate, fb, self._interval, 1, self._interval))  # frame
         desc.extend(bytes((6, 0x24, 0x0D, 1, 1, 4)))  # colour matching: BT.709, sRGB
         desc.extend(bytes((9, 0x04, itf_num + 1, 1, 1, 0x0E, 0x02, 0x00, 0)))  # VideoStreaming alt 1
         desc.extend(struct.pack("<BBBBHB", 7, 0x05, self.ep_in, 0x05, self.packet, 1))  # isochronous IN
@@ -163,10 +182,14 @@ class CameraInterface(Interface):
             return False
         if stage == _STAGE_SETUP:
             if bRequest == _SET_CUR:
-                self._pending = bytearray(wLength)
-                return self._pending
-            if bRequest in (_GET_CUR, _GET_MIN, _GET_MAX, _GET_DEF):
-                return self._probe
+                self._pending = (control, bytearray(wLength))
+                return self._pending[1]
+            if bRequest == _GET_CUR:
+                return self._probe_values(self._probe_index if control == _VS_PROBE else self._index)
+            if bRequest in (_GET_MIN, _GET_DEF):
+                return self._probe_values(1)
+            if bRequest == _GET_MAX:
+                return self._probe_values(len(self.sizes))
             if bRequest == _GET_LEN:
                 return struct.pack("<H", _PROBE_LEN)
             if bRequest == _GET_INFO:
@@ -175,9 +198,17 @@ class CameraInterface(Interface):
                 return bytes(_PROBE_LEN)
             return False
         if stage == _STAGE_ACK and self._pending is not None:
-            # One size and one rate: whatever the host proposes, the answer
-            # stays ours, and it reads that back.
+            # The host proposes a size by its frame index (byte 3); one rate,
+            # so the rest of the answer stays ours, and it reads that back.
+            # A commit makes it the size the next session streams.
+            which, data = self._pending
             self._pending = None
+            index = data[3] if len(data) > 3 else 1
+            if not 1 <= index <= len(self.sizes):
+                index = 1
+            self._probe_index = index
+            if which == _VS_COMMIT and not self.alt:
+                self._choose(index)
         return True
 
     def _set_alt(self, alt):

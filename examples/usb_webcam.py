@@ -13,8 +13,9 @@ Needs an ESP32-P4 with a MIPI camera and a board config whose
 jpegio and machine.USBDevice's streaming endpoints, and micropython-lib's
 ``usb-device`` with usbif's ``usb-device-video`` on the board.
 
-MJPEG is the default: 640x480, asking for 15 frames a second on a full-speed
-port (about 12 arrive in a lit room) and 30 on a high-speed one.
+MJPEG is the default, offered at 640x480, 320x240 and 160x120 for the
+computer to choose: 15 frames a second asked on a full-speed port (about 12
+arrive at 640x480 in a lit room) and 30 on a high-speed one.
 ``FORMAT = "yuy2"`` sends uncompressed frames instead, which every host takes
 but which fill a full-speed port at 160x120.
 The REPL's serial port stays up beside the camera. Ctrl-C stops it.
@@ -32,10 +33,13 @@ FORMAT = "mjpeg"
 QUALITY = 70
 
 high_speed = machine.USBDevice().speed() == 2
+# The sizes on offer, largest first; the computer picks one. A host that
+# decodes in software (an ESP32-S3) does better asking for a smaller one.
 if FORMAT == "mjpeg":
-    WIDTH, HEIGHT, FPS = 640, 480, (30 if high_speed else 15)
+    SIZES, FPS = ((640, 480), (320, 240), (160, 120)), (30 if high_speed else 15)
 else:
-    WIDTH, HEIGHT, FPS = (320, 240, 30) if high_speed else (160, 120, 15)
+    SIZES, FPS = (((320, 240), (160, 120)), 30) if high_speed else (((160, 120),), 15)
+WIDTH, HEIGHT = SIZES[0]
 # One isochronous packet a millisecond at full speed, a microframe at high
 # speed. High speed allows 1024 bytes; full speed allows 1023, but the ESP32's
 # full-speed controller has FIFO room for 640 beside the serial port (768
@@ -72,33 +76,35 @@ def main():
 
         encoder = jpegio.JpegEncoder(quality=QUALITY)
         rgb = aligned(WIDTH * HEIGHT * 2)
-        uvc = CameraInterface(width=WIDTH, height=HEIGHT, fps=FPS, format="mjpeg",
-                              max_frame=WIDTH * HEIGHT // 3, packet=PACKET)
+        uvc = CameraInterface(sizes=SIZES, fps=FPS, format="mjpeg", max_frame=WIDTH * HEIGHT // 3, packet=PACKET)
     else:
-        frame = aligned(WIDTH * HEIGHT * 2)[:WIDTH * HEIGHT * 2]
-        uvc = CameraInterface(width=WIDTH, height=HEIGHT, fps=FPS, packet=PACKET)
+        frame = aligned(WIDTH * HEIGHT * 2)
+        uvc = CameraInterface(sizes=SIZES, fps=FPS, packet=PACKET)
     usb.device.get().init(uvc, builtin_driver=True)
-    print("webcam up: %s %dx%d at %d fps; open it on the computer (Ctrl-C stops)" % (FORMAT, WIDTH, HEIGHT, FPS))
+    print("webcam up: %s %s at %d fps; open it on the computer (Ctrl-C stops)"
+          % (FORMAT, " ".join("%dx%d" % sz for sz in SIZES), FPS))
     sent = biggest = 0
     t0 = time.ticks_ms()
     try:
         while True:
             if uvc.streaming and uvc.wants_frame():
+                w, h = uvc.width, uvc.height    # the size this session asked for
                 if FORMAT == "mjpeg":
-                    cam.capture_scaled(rgb, WIDTH, HEIGHT)
-                    jpeg = encoder.encode(rgb, WIDTH, HEIGHT)
+                    cam.capture_scaled(rgb, w, h)
+                    jpeg = encoder.encode(rgb[:w * h * 2], w, h)
                     biggest = max(biggest, len(jpeg))
                     ok = len(jpeg) <= uvc.frame_bytes and uvc.write_frame(jpeg)
                 else:
-                    cam.capture_yuy2(frame, WIDTH, HEIGHT)
-                    ok = uvc.write_frame(frame)
+                    cam.capture_yuy2(frame, w, h)
+                    ok = uvc.write_frame(frame[:w * h * 2])
                 sent += 1 if ok else 0
             else:
                 time.sleep_ms(2)
             if time.ticks_diff(time.ticks_ms(), t0) >= 5000:
                 if sent:
-                    print("%.1f frames/s%s" % (sent * 1000 / time.ticks_diff(time.ticks_ms(), t0),
-                                               ", largest JPEG %d bytes" % biggest if biggest else ""))
+                    print("%dx%d %.1f frames/s%s" % (uvc.width, uvc.height,
+                                                     sent * 1000 / time.ticks_diff(time.ticks_ms(), t0),
+                                                     ", largest JPEG %d bytes" % biggest if biggest else ""))
                 sent = biggest = 0
                 t0 = time.ticks_ms()
     finally:

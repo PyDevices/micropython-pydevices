@@ -53,6 +53,17 @@ INTERVALS = (2000000, 1333333, 1000000, 666666, 333333)   # 5, 7.5, 10, 15, 30 f
 # False tries the uncompressed (YUY2) modes even when jpegio is present.
 PREFER_MJPEG = True
 
+# The picture: the largest frame to ask the camera for, and how many times to
+# enlarge it on the display. None means "what fits the display". A chip that
+# decodes JPEG in software (an ESP32-S3) is quicker asking for a small frame.
+# Measured on a Waveshare ESP32-S3-Touch-LCD-4.3 hosting an MJPEG camera:
+# (320, 240) at UPSCALE = 1, in the middle of the screen, 3.6 frames a second;
+# at UPSCALE = 2, 640x480, 1.7; the camera's 640x480 unscaled, 1.5. Decoding
+# a 320x240 JPEG takes it about 100 ms and show() about 45, so the S3's own
+# work, not USB, sets those numbers.
+MAX_SIZE = None
+UPSCALE = None
+
 try:
     import jpegio
     _HAVE_JPEGIO = PREFER_MJPEG
@@ -129,6 +140,17 @@ def yuy2_row_to_rgb565(src: ptr8, dst: ptr16, width: int, scale: int):  # noqa: 
         j += 4
 
 
+@micropython.viper
+def rgb565_row_upscale(src: ptr16, dst: ptr16, width: int, scale: int):  # noqa: F821
+    """One RGB565 row, each pixel repeated `scale` times, native speed."""
+    o = 0
+    for x in range(width):
+        p = src[x]
+        for _ in range(scale):
+            dst[o] = p
+            o += 1
+
+
 def find_camera(host, timeout_ms=10000):
     """The first device the enumerator classifies as video."""
     deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
@@ -197,6 +219,8 @@ def _offered(formats):
 def _scale_geometry(frame):
     scale = min(display_drv.width // frame.width,
                 display_drv.height // frame.height) or 1
+    if UPSCALE:
+        scale = min(scale, UPSCALE)
     out_w = frame.width * scale
     out_h = frame.height * scale
     x0 = (display_drv.width - out_w) // 2
@@ -216,17 +240,16 @@ else:
     else:
         print("uncompressed YUY2 only (no jpegio, or PREFER_MJPEG is False)")
     blob = host.desc(dev_id)
+    max_w, max_h = MAX_SIZE or (display_drv.width, display_drv.height)
     formats = uvc.formats(blob)
     alts = uvc.alt_settings(blob)
     if not formats:
         print("camera declares no video formats")
     else:
         if _HAVE_JPEGIO:
-            picked = pick_mode(dev_id, formats, alts,
-                               display_drv.width, display_drv.height, True)
+            picked = pick_mode(dev_id, formats, alts, max_w, max_h, True)
         if picked is None:
-            picked = pick_mode(dev_id, formats, alts,
-                               display_drv.width, display_drv.height, False)
+            picked = pick_mode(dev_id, formats, alts, max_w, max_h, False)
         if picked is None:
             print("no mode fits this host's isochronous IN limit")
             _offered(formats)
@@ -295,17 +318,10 @@ if picked is not None:
                 display_drv.blit_rect(rgb, x0, y0, out_w, out_h)
                 _frame_shown()
                 return
-            # Integer upscale row by row into the band, then blit.
+            # Integer upscale row by row into the band, then blit: each row
+            # widened in native code, then copied down for the other rows.
             for sy in range(frame.height):
-                row = rgb_mv[sy * src_stride:(sy + 1) * src_stride]
-                # Expand horizontally into the first band row, then
-                # replicate vertically.
-                o = 0
-                for px in range(0, src_stride, 2):
-                    pix = row[px:px + 2]
-                    for _k in range(scale):
-                        band_mv[o:o + 2] = pix
-                        o += 2
+                rgb565_row_upscale(rgb_mv[sy * src_stride:(sy + 1) * src_stride], band_mv, frame.width, scale)
                 for k in range(1, scale):
                     band_mv[k * band_stride:(k + 1) * band_stride] = \
                         band_mv[0:band_stride]
