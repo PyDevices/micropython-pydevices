@@ -67,7 +67,8 @@ net.active(True)        # the phone gives the board an address by DHCP
 ```
 
 Sockets, `requests` and `mip` then work over it. On an ESP32-P4 it moves
-about 7 Mbit/s, plugged in directly or through a high-speed hub. It speaks
+about 7 Mbit/s, plugged in directly or through a high-speed hub; an
+ESP32-S3, whose host port is full speed, about 1 Mbit/s. It speaks
 RNDIS, which Samsung and many other Android phones use. CDC-ECM, CDC-NCM and
 iPhone tethering are not implemented.
 
