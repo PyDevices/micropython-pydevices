@@ -1,0 +1,7 @@
+{
+  "urls": [
+    ["usb/device/video.py", "github:PyDevices/usbif/packages/usb-device-video/usb/device/video.py"]
+  ],
+  "deps": [["usb-device", "latest"]],
+  "version": "0.1.0"
+}
