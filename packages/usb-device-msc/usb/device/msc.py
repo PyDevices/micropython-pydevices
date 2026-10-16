@@ -117,6 +117,9 @@ class MSCInterface(Interface):
         self.blocks_written = 0
         self.commands = 0
         self.errors = 0
+        #: True once the computer ejected the drive ("safely remove"); the
+        #: medium then reads as absent until :meth:`insert`.
+        self.ejected = False
 
     # -- descriptors
 
@@ -192,7 +195,13 @@ class MSCInterface(Interface):
 
     def _dispatch(self, cb):
         op = cb[0]
-        if op == _TEST_UNIT_READY or op in (_PREVENT_ALLOW, _START_STOP_UNIT, _SYNCHRONIZE_CACHE_10, _VERIFY_10):
+        if op == _START_STOP_UNIT:
+            if cb[4] & 0x02 and not cb[4] & 0x01:  # LoEj and not Start: eject
+                self.ejected = True
+            self._ok()
+        elif self.ejected and op not in (_INQUIRY, _REQUEST_SENSE):
+            self._fail(_SENSE_NOT_READY, _ASC_MEDIUM_NOT_PRESENT)
+        elif op == _TEST_UNIT_READY or op in (_PREVENT_ALLOW, _SYNCHRONIZE_CACHE_10, _VERIFY_10):
             self._ok()
         elif op == _INQUIRY:
             self._send(self._inquiry, 36)
@@ -247,6 +256,10 @@ class MSCInterface(Interface):
             self._write_chunk_arm()
         else:
             self._fail(_SENSE_ILLEGAL_REQUEST, _ASC_INVALID_COMMAND)
+
+    def insert(self):
+        """Present the medium again after an eject."""
+        self.ejected = False
 
     def _blocks(self):
         return self.bdev.ioctl(4, 0)
