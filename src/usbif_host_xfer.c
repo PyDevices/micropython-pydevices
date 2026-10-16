@@ -29,6 +29,7 @@
 
 #if defined(CONFIG_SOC_USB_OTG_SUPPORTED) && CONFIG_SOC_USB_OTG_SUPPORTED
 
+#include <stdint.h>
 #include <string.h>
 
 #include "py/mperrno.h"
@@ -36,6 +37,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "esp_rom_sys.h"
+#include "esp_timer.h"
 #include "usb/usb_host.h"
 #include "usbif_ticks.h"
 
@@ -107,13 +110,34 @@ static int usbif_xfer_status_errno(usb_transfer_status_t status) {
 
 // Wait for a semaphore with the host lock let go, so the host task can
 // deliver the completion. timeout_ms 0 waits for good.
+//
+// The host task paces itself by the FreeRTOS tick, 10 ms on MicroPython's
+// ESP32 ports, so a transfer the bus finishes in a millisecond would wait up
+// to ten for its callback; a SCSI command is three transfers. So for the
+// first USBIF_XFER_SPIN_US the caller pumps the client's events itself,
+// which delivers the callback as soon as the transfer is done, and only then
+// falls back to sleeping by the tick.
+#define USBIF_XFER_SPIN_US (20000)
+
 static bool usbif_xfer_wait(SemaphoreHandle_t sem, uint32_t timeout_ms) {
     int held = usbif_host_lock_suspend();
-    TickType_t ticks = timeout_ms ? USBIF_MS_TICKS(timeout_ms) : portMAX_DELAY;
-    if (timeout_ms && ticks == 0) {
-        ticks = 1;
+    int64_t start = esp_timer_get_time();
+    int64_t limit = timeout_ms ? (int64_t)timeout_ms * 1000 : INT64_MAX;
+    int64_t spin = limit < USBIF_XFER_SPIN_US ? limit : USBIF_XFER_SPIN_US;
+    bool got = false;
+    while (!(got = xSemaphoreTake(sem, 0) == pdTRUE) && esp_timer_get_time() - start < spin) {
+        usbif_host_lock();
+        usb_host_client_handle_events(usbif_host_client_get(), 0);
+        usbif_host_unlock();
+        esp_rom_delay_us(20);
     }
-    bool got = xSemaphoreTake(sem, ticks) == pdTRUE;
+    if (!got) {
+        int64_t left_us = limit - (esp_timer_get_time() - start);
+        if (left_us > 0) {
+            TickType_t ticks = timeout_ms ? USBIF_MS_TICKS((uint32_t)(left_us / 1000)) : portMAX_DELAY;
+            got = xSemaphoreTake(sem, ticks ? ticks : 1) == pdTRUE;
+        }
+    }
     usbif_host_lock_resume(held);
     return got;
 }
@@ -132,6 +156,8 @@ static usbif_xfer_claim_t *usbif_xfer_find_claim(usb_device_handle_t dev, uint8_
 
 static void usbif_xfer_drop_pipes(usb_device_handle_t dev, int itf, bool device_gone);
 
+// 1 for a fresh claim (the host's pipes start at DATA0), 0 when the
+// interface was already claimed at that alternate, or a negative errno.
 int usbif_xfer_claim(uint32_t dev_id, uint8_t itf, uint8_t alt) {
     usbif_host_lock();
     int r = 0;
@@ -142,7 +168,7 @@ int usbif_xfer_claim(uint32_t dev_id, uint8_t itf, uint8_t alt) {
     }
     usbif_xfer_claim_t *c = usbif_xfer_find_claim(dev, itf);
     if (c != NULL && c->alt == alt) {
-        goto out;
+        goto out;   // 0: already ours, pipes and toggles as they were
     }
     if (c != NULL) {
         // Another alternate setting: release and claim again, which is how
@@ -170,6 +196,7 @@ int usbif_xfer_claim(uint32_t dev_id, uint8_t itf, uint8_t alt) {
     c->dev = dev;
     c->itf = itf;
     c->alt = alt;
+    r = 1;          // a fresh claim: new pipes, at DATA0
 out:
     usbif_host_unlock();
     return r;

@@ -1385,12 +1385,14 @@ static mp_obj_t usbif_xfer_check(int r) {
 }
 #endif
 
-// host_claim(dev_id, interface, alternate=0)
+// host_claim(dev_id, interface, alternate=0): True for a fresh claim, whose
+// pipes start at DATA0; False when it was already claimed.
 static mp_obj_t usbif_host_claim_py(size_t n_args, const mp_obj_t *args) {
     #if USBIF_HAVE_HOST
     uint8_t alt = n_args > 2 ? (uint8_t)mp_obj_get_int(args[2]) : 0;
-    usbif_xfer_check(usbif_xfer_claim((uint32_t)mp_obj_get_int(args[0]), (uint8_t)mp_obj_get_int(args[1]), alt));
-    return mp_const_none;
+    int r = usbif_xfer_claim((uint32_t)mp_obj_get_int(args[0]), (uint8_t)mp_obj_get_int(args[1]), alt);
+    usbif_xfer_check(r);
+    return mp_obj_new_bool(r == 1);
     #else
     mp_raise_OSError(MP_EOPNOTSUPP);
     #endif

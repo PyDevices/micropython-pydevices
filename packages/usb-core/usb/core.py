@@ -181,17 +181,19 @@ class Device:
         if self._claims.get(interface) == alt:
             return
         try:
-            _usbif.host_claim(self._id, interface, alt)
+            fresh = _usbif.host_claim(self._id, interface, alt)
         except OSError as e:
             _raise(e)
         self._claims[interface] = alt
-        # A claim gives the host fresh pipes, expecting DATA0, while the
+        # A fresh claim gives the host new pipes, expecting DATA0, while the
         # device's endpoints carry on from wherever their toggles were: a
         # second claim then loses the first packet each way, or a whole
         # reply. CLEAR_FEATURE(ENDPOINT_HALT) puts the device's back to
-        # DATA0 too, as libusb's clear_halt does.
-        for ep in self._endpoints(interface, alt):
-            self.ctrl_transfer(0x02, 0x01, 0, ep, None, 1000)
+        # DATA0 too, as libusb's clear_halt does. An interface another
+        # Device object already claimed keeps its pipes, and its toggles.
+        if fresh:
+            for ep in self._endpoints(interface, alt):
+                self.ctrl_transfer(0x02, 0x01, 0, ep, None, 1000)
 
     def _release(self, interface):
         if self._claims.pop(interface, None) is not None:
