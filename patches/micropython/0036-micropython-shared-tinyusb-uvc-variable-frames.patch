@@ -1,0 +1,105 @@
+From adf7e1505fdfbc61a26ff9df67b0a7a19a50d020 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 10:39:34 -0500
+Subject: [PATCH] shared/tinyusb: UVC frames of any size on a streaming IN
+ endpoint.
+
+stream(ep, ring, packet, frame=-1) sends frames whose size changes frame
+to frame, as MJPEG's do: each is written to the ring led by its length (4
+bytes, little-endian), and C reads that length when the frame starts. A
+frame is still sent only once all of it is in the ring.
+---
+ extmod/machine_usb_device.c      |  2 ++
+ shared/tinyusb/mp_usbd.h         |  3 +++
+ shared/tinyusb/mp_usbd_runtime.c | 25 ++++++++++++++++++++-----
+ 3 files changed, 25 insertions(+), 5 deletions(-)
+
+diff --git a/extmod/machine_usb_device.c b/extmod/machine_usb_device.c
+index 1eadbff1f..7388b107e 100644
+--- a/extmod/machine_usb_device.c
++++ b/extmod/machine_usb_device.c
+@@ -324,6 +324,8 @@ static MP_DEFINE_CONST_FUN_OBJ_1(usb_device_speed_obj, usb_device_speed);
+ // frame > 0 on an IN endpoint sends UVC video: frame-byte frames from the
+ // ring, each packet with its payload header (FID toggled per frame, EOF on a
+ // frame's last packet), a frame started only once the whole of it is there.
++// frame=-1 sends frames of any size (MJPEG), each written to the ring led by
++// its length, 4 bytes little-endian.
+ static mp_obj_t usb_device_stream(size_t n_args, const mp_obj_t *args) {
+     mp_obj_usb_device_t *usbd = MP_OBJ_TO_PTR(args[0]);
+     uint16_t packet = n_args > 3 ? (uint16_t)mp_obj_get_int(args[3]) : 0;
+diff --git a/shared/tinyusb/mp_usbd.h b/shared/tinyusb/mp_usbd.h
+index b4a4de4e8..0f3e30be4 100644
+--- a/shared/tinyusb/mp_usbd.h
++++ b/shared/tinyusb/mp_usbd.h
+@@ -211,6 +211,9 @@ extern const mp_obj_type_t mp_usbd_ring_type;
+ // transfer. Feedback endpoints carry a fixed value instead of a ring.
+ // frame > 0 makes an IN stream a UVC video payload: frame-byte frames from the
+ // ring, each packet with its 2-byte payload header.
++// frame MP_USBD_FRAME_VARIABLE: frames of any size, each led in the ring by
++// its length (4 bytes, little-endian), as MJPEG needs.
++#define MP_USBD_FRAME_VARIABLE (0xFFFFFFFFu)
+ void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t ring, uint16_t packet, uint32_t frame);
+ void mp_usbd_stream_feedback(mp_obj_usb_device_t *usbd, uint8_t ep_addr, const uint8_t *value, size_t len);
+ // Feed an OUT endpoint's packets to sink(ctx, ...) instead (sink NULL stops);
+diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
+index a372c03d1..31980c446 100644
+--- a/shared/tinyusb/mp_usbd_runtime.c
++++ b/shared/tinyusb/mp_usbd_runtime.c
+@@ -560,7 +560,10 @@ typedef struct {
+     bool feedback;
+     volatile bool active;
+     uint16_t packet;            // bytes per transfer
+-    uint32_t frame;             // video: bytes per frame (0: a plain stream)
++    uint32_t frame;             // video: bytes per frame (0: a plain stream,
++                                // MP_USBD_FRAME_VARIABLE: each frame in the
++                                // ring led by its length, 4 bytes little-endian)
++    uint32_t frame_len;         // video: bytes in the frame being sent (0: none yet)
+     mp_usbd_sink_fn sink;       // OUT: a C sink instead of the ring
+     void *sink_ctx;
+     uint32_t frame_pos;         // video: bytes of the current frame sent
+@@ -592,19 +595,30 @@ static MP_USBD_ISR_ATTR void stream_arm(mp_usbd_stream_t *s, bool in_isr) {
+         // A UVC payload: a 2-byte header (length, then FID and, on a frame's
+         // last packet, EOF) and the next part of the frame. A frame starts
+         // only when the whole of it is in the ring, so it can't tear; until
+-        // then the host gets empty packets, which UVC allows.
+-        if (s->frame_pos == 0 && ring_used(s->ring) < s->frame) {
++        // then the host gets empty packets, which UVC allows. A variable
++        // frame (MJPEG) has its length in front of it in the ring.
++        if (s->frame_len == 0) {
++            if (s->frame != MP_USBD_FRAME_VARIABLE) {
++                s->frame_len = s->frame;
++            } else if (ring_used(s->ring) >= 4) {
++                uint8_t h[4];
++                ring_read(s->ring, h, 4);
++                s->frame_len = h[0] | h[1] << 8 | h[2] << 16 | (uint32_t)h[3] << 24;
++            }
++        }
++        if (s->frame_len == 0 || (s->frame_pos == 0 && ring_used(s->ring) < s->frame_len)) {
+             n = 0;
+         } else {
+-            uint32_t left = s->frame - s->frame_pos;
++            uint32_t left = s->frame_len - s->frame_pos;
+             uint32_t chunk = s->packet - 2u < left ? s->packet - 2u : left;
+             ring_read(s->ring, s->pkt + 2, chunk);
+             s->frame_pos += chunk;
+             s->pkt[0] = 2;
+             s->pkt[1] = 0x80 | s->fid;          // EOH, FID
+-            if (s->frame_pos >= s->frame) {
++            if (s->frame_pos >= s->frame_len) {
+                 s->pkt[1] |= 0x02;              // EOF
+                 s->frame_pos = 0;
++                s->frame_len = 0;
+                 s->fid ^= 1;
+             }
+             n = (uint16_t)(chunk + 2);
+@@ -692,6 +706,7 @@ void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t
+     s->packet = packet;
+     s->sink = NULL;
+     s->frame = frame;
++    s->frame_len = 0;
+     s->frame_pos = 0;
+     s->fid = 0;
+     s->feedback = false;
+-- 
+2.43.0
+
