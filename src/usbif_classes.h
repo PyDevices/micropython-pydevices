@@ -14,6 +14,9 @@
 #define USBIF_CLASS_MIDI (1u << 3)
 #define USBIF_CLASS_UAC  (1u << 4)
 #define USBIF_CLASS_UVC  (1u << 5)
+// Any other interface class (vendor-specific, printer, ...): only usb.core
+// drives these, through the generic transfers.
+#define USBIF_CLASS_OTHER (1u << 6)
 
 // Which hosted UAC stream a call means (usbif_host_uac.c keeps one per
 // direction). ANY is the meaning the calls had when there was one stream:

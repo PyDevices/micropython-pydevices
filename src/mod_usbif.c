@@ -152,6 +152,7 @@ static const struct {
     { USBIF_CLASS_MIDI, MP_QSTR_midi },
     { USBIF_CLASS_UAC, MP_QSTR_uac },
     { USBIF_CLASS_UVC, MP_QSTR_uvc },
+    { USBIF_CLASS_OTHER, MP_QSTR_other },
 };
 
 static const qstr usbif_speed_names[] = {
@@ -169,7 +170,7 @@ static const qstr usbif_speed_names[] = {
 static uint16_t usbif_supported_classes(void) {
     #if USBIF_HAVE_HOST
     return USBIF_CLASS_CDC | USBIF_CLASS_HID | USBIF_CLASS_MSC | USBIF_CLASS_MIDI
-        | USBIF_CLASS_UAC | USBIF_CLASS_UVC;
+        | USBIF_CLASS_UAC | USBIF_CLASS_UVC | USBIF_CLASS_OTHER;
     #else
     return 0;
     #endif
@@ -1366,6 +1367,89 @@ static mp_obj_t usbif_host_desc_py(mp_obj_t dev_id_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(usbif_host_desc_obj, usbif_host_desc_py);
 
+// Generic transfers, the C half of usb.core (usbif_host_xfer.c). Each blocks
+// until its transfer completes or times out, and raises OSError with the
+// errno: ETIMEDOUT, EPIPE for a stall, ENODEV once the device is gone,
+// EACCES for an endpoint whose interface isn't claimed.
+#if USBIF_HAVE_HOST
+extern int usbif_xfer_claim(uint32_t dev_id, uint8_t itf, uint8_t alt);
+extern int usbif_xfer_release(uint32_t dev_id, uint8_t itf);
+extern int usbif_xfer_ctrl(uint32_t dev_id, const uint8_t setup[8], uint8_t *data, uint16_t len, uint32_t timeout_ms);
+extern int usbif_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint32_t timeout_ms);
+
+static mp_obj_t usbif_xfer_check(int r) {
+    if (r < 0) {
+        mp_raise_OSError(-r);
+    }
+    return MP_OBJ_NEW_SMALL_INT(r);
+}
+#endif
+
+// host_claim(dev_id, interface, alternate=0)
+static mp_obj_t usbif_host_claim_py(size_t n_args, const mp_obj_t *args) {
+    #if USBIF_HAVE_HOST
+    uint8_t alt = n_args > 2 ? (uint8_t)mp_obj_get_int(args[2]) : 0;
+    usbif_xfer_check(usbif_xfer_claim((uint32_t)mp_obj_get_int(args[0]), (uint8_t)mp_obj_get_int(args[1]), alt));
+    return mp_const_none;
+    #else
+    mp_raise_OSError(MP_EOPNOTSUPP);
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_claim_obj, 2, 3, usbif_host_claim_py);
+
+// host_release(dev_id, interface)
+static mp_obj_t usbif_host_release_py(mp_obj_t dev_id_in, mp_obj_t itf_in) {
+    #if USBIF_HAVE_HOST
+    usbif_xfer_check(usbif_xfer_release((uint32_t)mp_obj_get_int(dev_id_in), (uint8_t)mp_obj_get_int(itf_in)));
+    return mp_const_none;
+    #else
+    mp_raise_OSError(MP_EOPNOTSUPP);
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(usbif_host_release_obj, usbif_host_release_py);
+
+// host_ctrl(dev_id, setup, buf, timeout_ms): setup is the 8-byte SETUP
+// packet; buf receives an IN request's data (wLength bytes) or holds an OUT
+// request's. Returns the bytes moved.
+static mp_obj_t usbif_host_ctrl_py(size_t n_args, const mp_obj_t *args) {
+    #if USBIF_HAVE_HOST
+    mp_buffer_info_t setup, buf = { .buf = NULL, .len = 0 };
+    mp_get_buffer_raise(args[1], &setup, MP_BUFFER_READ);
+    if (setup.len != 8) {
+        mp_raise_ValueError(MP_ERROR_TEXT("a SETUP packet is 8 bytes"));
+    }
+    const uint8_t *sp = setup.buf;
+    uint16_t wlength = (uint16_t)(sp[6] | (sp[7] << 8));
+    if (args[2] != mp_const_none) {
+        mp_get_buffer_raise(args[2], &buf, (sp[0] & 0x80) ? MP_BUFFER_WRITE : MP_BUFFER_READ);
+    }
+    if (buf.len < wlength) {
+        mp_raise_ValueError(MP_ERROR_TEXT("buffer shorter than wLength"));
+    }
+    return usbif_xfer_check(usbif_xfer_ctrl((uint32_t)mp_obj_get_int(args[0]), sp, buf.buf, wlength,
+        (uint32_t)mp_obj_get_int(args[3])));
+    #else
+    mp_raise_OSError(MP_EOPNOTSUPP);
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_ctrl_obj, 4, 4, usbif_host_ctrl_py);
+
+// host_xfer(dev_id, endpoint, buf, timeout_ms): a bulk or interrupt
+// transfer; an IN endpoint reads into buf, an OUT one sends it. Returns the
+// bytes moved. timeout_ms 0 waits for good.
+static mp_obj_t usbif_host_xfer_py(size_t n_args, const mp_obj_t *args) {
+    #if USBIF_HAVE_HOST
+    uint8_t ep = (uint8_t)mp_obj_get_int(args[1]);
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(args[2], &buf, (ep & 0x80) ? MP_BUFFER_WRITE : MP_BUFFER_READ);
+    return usbif_xfer_check(usbif_xfer_ep((uint32_t)mp_obj_get_int(args[0]), ep, buf.buf, buf.len,
+        (uint32_t)mp_obj_get_int(args[3])));
+    #else
+    mp_raise_OSError(MP_EOPNOTSUPP);
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_xfer_obj, 4, 4, usbif_host_xfer_py);
+
 static mp_obj_t usbif_host_midi_open_py(mp_obj_t dev_id_in) {
     #if USBIF_HAVE_HOST
     int rc = usbif_host_midi_open((uint32_t)mp_obj_get_int(dev_id_in));
@@ -1589,6 +1673,10 @@ static const mp_rom_map_elem_t usbif_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_host_stop), MP_ROM_PTR(&usbif_host_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_devices), MP_ROM_PTR(&usbif_host_devices_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_desc), MP_ROM_PTR(&usbif_host_desc_obj) },
+    { MP_ROM_QSTR(MP_QSTR_host_claim), MP_ROM_PTR(&usbif_host_claim_obj) },
+    { MP_ROM_QSTR(MP_QSTR_host_release), MP_ROM_PTR(&usbif_host_release_obj) },
+    { MP_ROM_QSTR(MP_QSTR_host_ctrl), MP_ROM_PTR(&usbif_host_ctrl_obj) },
+    { MP_ROM_QSTR(MP_QSTR_host_xfer), MP_ROM_PTR(&usbif_host_xfer_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_uac_open), MP_ROM_PTR(&usbif_host_uac_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_uac_read), MP_ROM_PTR(&usbif_host_uac_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_uac_write), MP_ROM_PTR(&usbif_host_uac_write_obj) },

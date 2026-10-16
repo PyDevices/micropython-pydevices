@@ -1,0 +1,7 @@
+{
+  "urls": [
+    ["usb/core.py", "github:PyDevices/usbif/packages/usb-core/usb/core.py"],
+    ["usb/util.py", "github:PyDevices/usbif/packages/usb-core/usb/util.py"]
+  ],
+  "version": "0.1.0"
+}
