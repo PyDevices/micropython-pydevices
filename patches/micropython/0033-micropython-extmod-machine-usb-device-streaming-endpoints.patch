@@ -1,0 +1,497 @@
+From 748304140f3711a5c6bdf816a5379b40598221ac Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 05:16:40 -0500
+Subject: [PATCH] extmod/machine_usb_device: streaming endpoints for
+ isochronous audio and video.
+
+An isochronous endpoint gets a packet every frame and can't wait for the
+scheduler to reach Python. USBDevice.stream(ep, ring, packet) attaches a
+USBDevice.Ring (a single-producer, single-consumer byte ring in C) to an
+endpoint; from then on the runtime driver's new xfer_isr moves that
+endpoint's packets from TinyUSB's transfer interrupt: an OUT packet into the
+ring and the endpoint re-armed, an IN packet from the ring (short or empty
+when it runs dry). USBDevice.feedback(ep, value) keeps an explicit-feedback
+endpoint resending the value Python last set. stream_stats(ep) counts
+packets, bytes and drops; Ring.stats() counts overflows and underflows. A
+bus reset stops every stream. Endpoints without a stream reach Python as
+before.
+---
+ extmod/machine_usb_device.c      |  53 ++++++
+ shared/tinyusb/mp_usbd.h         |  16 ++
+ shared/tinyusb/mp_usbd_runtime.c | 313 +++++++++++++++++++++++++++++++
+ 3 files changed, 382 insertions(+)
+
+diff --git a/extmod/machine_usb_device.c b/extmod/machine_usb_device.c
+index e527ed775..1970e6193 100644
+--- a/extmod/machine_usb_device.c
++++ b/extmod/machine_usb_device.c
+@@ -57,6 +57,10 @@ static mp_obj_t usb_device_make_new(const mp_obj_type_t *type, size_t n_args, si
+         o->base.type = &machine_usb_device_type;
+         o->desc_dev = mp_const_none;
+         o->desc_cfg = mp_const_none;
++        for (int i = 0; i < MP_USBD_STREAMS; i++) {
++            o->stream_objs[i][0] = mp_const_none;
++            o->stream_objs[i][1] = mp_const_none;
++        }
+         #if CFG_TUD_MAX_SPEED == OPT_MODE_HIGH_SPEED
+         o->desc_cfg_hs = mp_const_none;
+         #endif
+@@ -312,6 +316,51 @@ static mp_obj_t usb_device_speed(mp_obj_t self_in) {
+ }
+ static MP_DEFINE_CONST_FUN_OBJ_1(usb_device_speed_obj, usb_device_speed);
+ 
++// USBDevice.stream(ep, ring, packet): from now on C moves this endpoint's
++// packets, to or from ring (a USBDevice.Ring), from the transfer interrupt;
++// packet is the bytes per transfer. stream(ep, None) stops it. For the
++// isochronous endpoints of audio and video, started when the host selects
++// the streaming alternate setting and stopped when it goes back to zero.
++static mp_obj_t usb_device_stream(size_t n_args, const mp_obj_t *args) {
++    mp_obj_usb_device_t *usbd = MP_OBJ_TO_PTR(args[0]);
++    uint16_t packet = n_args > 3 ? (uint16_t)mp_obj_get_int(args[3]) : 0;
++    mp_usbd_stream_attach(usbd, (uint8_t)mp_obj_get_int(args[1]), args[2], packet);
++    return mp_const_none;
++}
++static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usb_device_stream_obj, 3, 4, usb_device_stream);
++
++// USBDevice.feedback(ep, value): keep an explicit-feedback endpoint sending
++// value (3 bytes, 10.14 at full speed; 4 bytes, 16.16 at high speed) on
++// every poll; call again to change it, with None to stop.
++static mp_obj_t usb_device_feedback(mp_obj_t self_in, mp_obj_t ep_in, mp_obj_t value_in) {
++    mp_obj_usb_device_t *usbd = MP_OBJ_TO_PTR(self_in);
++    if (value_in == mp_const_none) {
++        mp_usbd_stream_feedback(usbd, (uint8_t)mp_obj_get_int(ep_in), NULL, 0);
++    } else {
++        mp_buffer_info_t bi;
++        mp_get_buffer_raise(value_in, &bi, MP_BUFFER_READ);
++        mp_usbd_stream_feedback(usbd, (uint8_t)mp_obj_get_int(ep_in), bi.buf, bi.len);
++    }
++    return mp_const_none;
++}
++static MP_DEFINE_CONST_FUN_OBJ_3(usb_device_feedback_obj, usb_device_feedback);
++
++// USBDevice.stream_stats(ep): (packets, bytes, drops), or None if no stream.
++static mp_obj_t usb_device_stream_stats(mp_obj_t self_in, mp_obj_t ep_in) {
++    (void)self_in;
++    uint32_t packets, bytes, drops;
++    if (!mp_usbd_stream_stats((uint8_t)mp_obj_get_int(ep_in), &packets, &bytes, &drops)) {
++        return mp_const_none;
++    }
++    mp_obj_t items[3] = {
++        mp_obj_new_int_from_uint(packets),
++        mp_obj_new_int_from_uint(bytes),
++        mp_obj_new_int_from_uint(drops),
++    };
++    return mp_obj_new_tuple(3, items);
++}
++static MP_DEFINE_CONST_FUN_OBJ_2(usb_device_stream_stats_obj, usb_device_stream_stats);
++
+ static const MP_DEFINE_BYTES_OBJ(builtin_default_desc_dev_obj,
+     &mp_usbd_builtin_desc_dev, sizeof(tusb_desc_device_t));
+ 
+@@ -387,6 +436,10 @@ static const mp_rom_map_elem_t usb_device_locals_dict_table[] = {
+     { MP_ROM_QSTR(MP_QSTR_stall), MP_ROM_PTR(&usb_device_stall_obj) },
+     { MP_ROM_QSTR(MP_QSTR_remote_wakeup), MP_ROM_PTR(&usb_remote_wakeup_obj) },
+     { MP_ROM_QSTR(MP_QSTR_speed), MP_ROM_PTR(&usb_device_speed_obj) },
++    { MP_ROM_QSTR(MP_QSTR_stream), MP_ROM_PTR(&usb_device_stream_obj) },
++    { MP_ROM_QSTR(MP_QSTR_feedback), MP_ROM_PTR(&usb_device_feedback_obj) },
++    { MP_ROM_QSTR(MP_QSTR_stream_stats), MP_ROM_PTR(&usb_device_stream_stats_obj) },
++    { MP_ROM_QSTR(MP_QSTR_Ring), MP_ROM_PTR(&mp_usbd_ring_type) },
+     { MP_ROM_QSTR(MP_QSTR_SPEED_FULL), MP_ROM_INT(TUSB_SPEED_FULL) },
+     { MP_ROM_QSTR(MP_QSTR_SPEED_HIGH), MP_ROM_INT(TUSB_SPEED_HIGH) },
+ 
+diff --git a/shared/tinyusb/mp_usbd.h b/shared/tinyusb/mp_usbd.h
+index 05abbb8e4..5f6b9ab59 100644
+--- a/shared/tinyusb/mp_usbd.h
++++ b/shared/tinyusb/mp_usbd.h
+@@ -153,6 +153,13 @@ const char *mp_usbd_runtime_string_cb(uint8_t index);
+ // Maximum number of pending exceptions per single TinyUSB task execution
+ #define MP_USBD_MAX_PEND_EXCS 2
+ 
++// Streaming endpoints: an isochronous endpoint whose packets C moves to or
++// from a ring (USBDevice.Ring) straight from the transfer interrupt, so audio
++// and video don't wait on the scheduler. USBDevice.stream() attaches one.
++#ifndef MP_USBD_STREAMS
++#define MP_USBD_STREAMS (4)
++#endif
++
+ typedef struct {
+     mp_obj_base_t base;
+ 
+@@ -177,6 +184,8 @@ typedef struct {
+     // Temporary pointers for xfer data in progress on each endpoint
+     // Ensuring they aren't garbage collected until the xfer completes
+     mp_obj_t xfer_data[CFG_TUD_ENDPPOINT_MAX][2];
++    // Streaming endpoints keep their ring and bounce buffer reachable here.
++    mp_obj_t stream_objs[MP_USBD_STREAMS][2];
+ 
+     // Pointer to a memoryview that is reused to refer to various pieces of
+     // control transfer data that are pushed to USB control transfer
+@@ -190,6 +199,13 @@ typedef struct {
+     mp_obj_t pend_excs[MP_USBD_MAX_PEND_EXCS];
+ } mp_obj_usb_device_t;
+ 
++extern const mp_obj_type_t mp_usbd_ring_type;
++// Attach a ring to an endpoint (ring None detaches); packet is the bytes per
++// transfer. Feedback endpoints carry a fixed value instead of a ring.
++void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t ring, uint16_t packet);
++void mp_usbd_stream_feedback(mp_obj_usb_device_t *usbd, uint8_t ep_addr, const uint8_t *value, size_t len);
++bool mp_usbd_stream_stats(uint8_t ep_addr, uint32_t *packets, uint32_t *bytes, uint32_t *drops);
++
+ // Built-in constant objects, possible values of builtin_driver
+ //
+ // (Currently not possible to change built-in drivers at runtime, just enable/disable.)
+diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
+index 862d8ec42..4c098d921 100644
+--- a/shared/tinyusb/mp_usbd_runtime.c
++++ b/shared/tinyusb/mp_usbd_runtime.c
+@@ -25,6 +25,7 @@
+  * THE SOFTWARE.
+  */
+ #include <stdlib.h>
++#include <string.h>
+ 
+ #include "mp_usbd.h"
+ #include "py/mpconfig.h"
+@@ -190,6 +191,8 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_requ
+ static void runtime_dev_init(void) {
+ }
+ 
++static void mp_usbd_streams_reset(mp_obj_usb_device_t *usbd);
++
+ static void runtime_dev_reset(uint8_t rhport) {
+     mp_obj_usb_device_t *usbd = MP_OBJ_TO_PTR(MP_STATE_VM(usbd));
+     if (!usbd) {
+@@ -202,6 +205,10 @@ static void runtime_dev_reset(uint8_t rhport) {
+         }
+     }
+ 
++    // A bus reset ends every stream: the host configures afresh and the
++    // class starts them again when it selects the streaming alternate.
++    mp_usbd_streams_reset(usbd);
++
+     if (mp_obj_is_callable(usbd->reset_cb)) {
+         usbd_callback_function_n(usbd->reset_cb, 0, NULL);
+     }
+@@ -402,6 +409,311 @@ static bool runtime_dev_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t r
+     return cb_res != MP_OBJ_NULL && mp_obj_is_true(cb_res);
+ }
+ 
++
++// --- Streaming endpoints ------------------------------------------------------
++//
++// An isochronous endpoint can't wait for the scheduler: a packet arrives every
++// frame, and Python can't be relied on to re-arm the endpoint inside one. So
++// USBDevice.stream() attaches a ring to an endpoint, and from then on its
++// transfers are handled here, from TinyUSB's transfer interrupt (xfer_isr):
++// an OUT packet is copied into the ring and the endpoint re-armed; an IN
++// packet is filled from the ring (a short or empty packet when the ring runs
++// dry, which USB allows for isochronous IN); a feedback endpoint resends the
++// value Python last set. Python never sees these transfers.
++
++#if defined(ESP_PLATFORM)
++#include "esp_attr.h"
++#define MP_USBD_ISR_ATTR IRAM_ATTR
++#else
++#define MP_USBD_ISR_ATTR
++#endif
++
++typedef struct _mp_usbd_ring_obj_t {
++    mp_obj_base_t base;
++    uint8_t *buf;
++    uint32_t mask;              // size - 1; size is a power of two
++    volatile uint32_t head;     // free-running: the producer's count
++    volatile uint32_t tail;     // free-running: the consumer's count
++    volatile uint32_t overflows;    // writes refused for want of room
++    volatile uint32_t underflows;   // reads that found less than asked
++} mp_usbd_ring_obj_t;
++
++static MP_USBD_ISR_ATTR uint32_t ring_used(mp_usbd_ring_obj_t *r) {
++    return r->head - r->tail;
++}
++
++// Copy n bytes in, all or nothing. Single producer.
++static MP_USBD_ISR_ATTR bool ring_write(mp_usbd_ring_obj_t *r, const uint8_t *src, uint32_t n) {
++    uint32_t size = r->mask + 1;
++    if (size - ring_used(r) < n) {
++        r->overflows++;
++        return false;
++    }
++    uint32_t at = r->head & r->mask;
++    uint32_t first = n < size - at ? n : size - at;
++    memcpy(r->buf + at, src, first);
++    memcpy(r->buf, src + first, n - first);
++    __sync_synchronize();
++    r->head += n;
++    return true;
++}
++
++// Copy up to n bytes out. Single consumer.
++static MP_USBD_ISR_ATTR uint32_t ring_read(mp_usbd_ring_obj_t *r, uint8_t *dst, uint32_t n) {
++    uint32_t avail = ring_used(r);
++    if (avail < n) {
++        r->underflows++;
++        n = avail;
++    }
++    uint32_t size = r->mask + 1;
++    uint32_t at = r->tail & r->mask;
++    uint32_t first = n < size - at ? n : size - at;
++    memcpy(dst, r->buf + at, first);
++    memcpy(dst + first, r->buf, n - first);
++    __sync_synchronize();
++    r->tail += n;
++    return n;
++}
++
++// USBDevice.Ring(nbytes): rounded up to a power of two.
++static mp_obj_t mp_usbd_ring_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
++    mp_arg_check_num(n_args, n_kw, 1, 1, false);
++    mp_int_t want = mp_obj_get_int(args[0]);
++    if (want < 2 || want > (1 << 24)) {
++        mp_raise_ValueError(MP_ERROR_TEXT("ring size"));
++    }
++    uint32_t size = 2;
++    while (size < (uint32_t)want) {
++        size <<= 1;
++    }
++    mp_usbd_ring_obj_t *self = mp_obj_malloc(mp_usbd_ring_obj_t, type);
++    self->buf = m_new(uint8_t, size);
++    self->mask = size - 1;
++    self->head = self->tail = self->overflows = self->underflows = 0;
++    return MP_OBJ_FROM_PTR(self);
++}
++
++// ring.any(): bytes waiting.
++static mp_obj_t mp_usbd_ring_any(mp_obj_t self_in) {
++    mp_usbd_ring_obj_t *self = MP_OBJ_TO_PTR(self_in);
++    return mp_obj_new_int_from_uint(ring_used(self));
++}
++static MP_DEFINE_CONST_FUN_OBJ_1(mp_usbd_ring_any_obj, mp_usbd_ring_any);
++
++// ring.readinto(buf[, nbytes]): bytes taken (0 when empty, never blocks).
++static mp_obj_t mp_usbd_ring_readinto(size_t n_args, const mp_obj_t *args) {
++    mp_usbd_ring_obj_t *self = MP_OBJ_TO_PTR(args[0]);
++    mp_buffer_info_t bi;
++    mp_get_buffer_raise(args[1], &bi, MP_BUFFER_WRITE);
++    uint32_t n = bi.len;
++    if (n_args > 2) {
++        mp_int_t lim = mp_obj_get_int(args[2]);
++        if (lim >= 0 && (uint32_t)lim < n) {
++            n = lim;
++        }
++    }
++    uint32_t avail = ring_used(self);
++    return mp_obj_new_int_from_uint(ring_read(self, bi.buf, n < avail ? n : avail));
++}
++static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_usbd_ring_readinto_obj, 2, 3, mp_usbd_ring_readinto);
++
++// ring.write(buf): bytes taken, all of buf or none (0 when it won't fit).
++static mp_obj_t mp_usbd_ring_write(mp_obj_t self_in, mp_obj_t buf_in) {
++    mp_usbd_ring_obj_t *self = MP_OBJ_TO_PTR(self_in);
++    mp_buffer_info_t bi;
++    mp_get_buffer_raise(buf_in, &bi, MP_BUFFER_READ);
++    return MP_OBJ_NEW_SMALL_INT(ring_write(self, bi.buf, bi.len) ? (mp_int_t)bi.len : 0);
++}
++static MP_DEFINE_CONST_FUN_OBJ_2(mp_usbd_ring_write_obj, mp_usbd_ring_write);
++
++// ring.stats(): (size, waiting, overflows, underflows).
++static mp_obj_t mp_usbd_ring_stats(mp_obj_t self_in) {
++    mp_usbd_ring_obj_t *self = MP_OBJ_TO_PTR(self_in);
++    mp_obj_t items[4] = {
++        mp_obj_new_int_from_uint(self->mask + 1),
++        mp_obj_new_int_from_uint(ring_used(self)),
++        mp_obj_new_int_from_uint(self->overflows),
++        mp_obj_new_int_from_uint(self->underflows),
++    };
++    return mp_obj_new_tuple(4, items);
++}
++static MP_DEFINE_CONST_FUN_OBJ_1(mp_usbd_ring_stats_obj, mp_usbd_ring_stats);
++
++static const mp_rom_map_elem_t mp_usbd_ring_locals_dict_table[] = {
++    { MP_ROM_QSTR(MP_QSTR_any), MP_ROM_PTR(&mp_usbd_ring_any_obj) },
++    { MP_ROM_QSTR(MP_QSTR_readinto), MP_ROM_PTR(&mp_usbd_ring_readinto_obj) },
++    { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&mp_usbd_ring_write_obj) },
++    { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&mp_usbd_ring_stats_obj) },
++};
++static MP_DEFINE_CONST_DICT(mp_usbd_ring_locals_dict, mp_usbd_ring_locals_dict_table);
++
++MP_DEFINE_CONST_OBJ_TYPE(
++    mp_usbd_ring_type,
++    MP_QSTR_Ring,
++    MP_TYPE_FLAG_NONE,
++    make_new, mp_usbd_ring_make_new,
++    locals_dict, &mp_usbd_ring_locals_dict
++    );
++
++typedef struct {
++    uint8_t ep;                 // 0: this slot is free
++    bool feedback;
++    volatile bool active;
++    uint16_t packet;            // bytes per transfer
++    mp_usbd_ring_obj_t *ring;   // data streams
++    uint8_t *pkt;               // the transfer's buffer
++    uint8_t fb_len;
++    uint8_t fb[4];              // feedback streams: the value to send
++    volatile uint32_t packets, bytes, drops;
++} mp_usbd_stream_t;
++
++static mp_usbd_stream_t mp_usbd_streams[MP_USBD_STREAMS];
++
++static MP_USBD_ISR_ATTR mp_usbd_stream_t *stream_find(uint8_t ep_addr) {
++    for (int i = 0; i < MP_USBD_STREAMS; i++) {
++        if (mp_usbd_streams[i].ep == ep_addr) {
++            return &mp_usbd_streams[i];
++        }
++    }
++    return NULL;
++}
++
++static MP_USBD_ISR_ATTR void stream_arm(mp_usbd_stream_t *s, bool in_isr) {
++    uint16_t n = s->packet;
++    if (s->feedback) {
++        memcpy(s->pkt, s->fb, s->fb_len);
++        n = s->fb_len;
++    } else if (tu_edpt_dir(s->ep) == TUSB_DIR_IN) {
++        n = (uint16_t)ring_read(s->ring, s->pkt, s->packet);
++    }
++    if (!usbd_edpt_xfer(RHPORT, s->ep, s->pkt, n, in_isr)) {
++        s->drops++;
++    }
++}
++
++// From TinyUSB's interrupt: true when the endpoint is a stream (handled
++// here), false to let the scheduler hand it to Python as usual.
++static MP_USBD_ISR_ATTR bool runtime_dev_xfer_isr(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes) {
++    (void)rhport;
++    mp_usbd_stream_t *s = stream_find(ep_addr);
++    if (s == NULL) {
++        return false;
++    }
++    if (result == XFER_RESULT_SUCCESS) {
++        s->packets++;
++        s->bytes += xferred_bytes;
++        if (!s->feedback && tu_edpt_dir(ep_addr) == TUSB_DIR_OUT && xferred_bytes) {
++            if (!ring_write(s->ring, s->pkt, xferred_bytes)) {
++                s->drops++;
++            }
++        }
++    }
++    if (s->active) {
++        stream_arm(s, true);
++    }
++    return true;
++}
++
++static mp_usbd_stream_t *stream_slot(mp_obj_usb_device_t *usbd, uint8_t ep_addr, int *index) {
++    for (int i = 0; i < MP_USBD_STREAMS; i++) {
++        if (mp_usbd_streams[i].ep == ep_addr) {
++            *index = i;
++            return &mp_usbd_streams[i];
++        }
++    }
++    for (int i = 0; i < MP_USBD_STREAMS; i++) {
++        if (mp_usbd_streams[i].ep == 0) {
++            *index = i;
++            return &mp_usbd_streams[i];
++        }
++    }
++    mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("no free stream"));
++}
++
++static void stream_release(mp_obj_usb_device_t *usbd, int i) {
++    mp_usbd_stream_t *s = &mp_usbd_streams[i];
++    s->active = false;
++    s->ep = 0;
++    usbd->stream_objs[i][0] = mp_const_none;
++    usbd->stream_objs[i][1] = mp_const_none;
++}
++
++void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t ring, uint16_t packet) {
++    int i;
++    mp_usbd_stream_t *s = stream_slot(usbd, ep_addr, &i);
++    if (ring == mp_const_none) {
++        if (s->ep == ep_addr) {
++            stream_release(usbd, i);
++        }
++        return;
++    }
++    if (!mp_obj_is_type(ring, &mp_usbd_ring_type)) {
++        mp_raise_TypeError(MP_ERROR_TEXT("expected USBDevice.Ring"));
++    }
++    if (packet == 0) {
++        mp_raise_ValueError(MP_ERROR_TEXT("packet"));
++    }
++    s->active = false;
++    mp_obj_t pkt = mp_obj_new_bytearray_by_ref(packet, m_new(uint8_t, packet));
++    usbd->stream_objs[i][0] = ring;
++    usbd->stream_objs[i][1] = pkt;
++    s->ring = MP_OBJ_TO_PTR(ring);
++    s->pkt = ((mp_obj_array_t *)MP_OBJ_TO_PTR(pkt))->items;
++    s->packet = packet;
++    s->feedback = false;
++    s->packets = s->bytes = s->drops = 0;
++    s->ep = ep_addr;
++    s->active = true;
++    stream_arm(s, false);
++}
++
++void mp_usbd_stream_feedback(mp_obj_usb_device_t *usbd, uint8_t ep_addr, const uint8_t *value, size_t len) {
++    int i;
++    mp_usbd_stream_t *s = stream_slot(usbd, ep_addr, &i);
++    if (value == NULL) {
++        if (s->ep == ep_addr) {
++            stream_release(usbd, i);
++        }
++        return;
++    }
++    if (len < 3 || len > 4) {
++        mp_raise_ValueError(MP_ERROR_TEXT("feedback is 3 or 4 bytes"));
++    }
++    bool started = s->ep == ep_addr && s->feedback;
++    // The value changes under the interrupt's feet; a torn read of three or
++    // four bytes is one wrong feedback sample, which the host smooths over.
++    memcpy(s->fb, value, len);
++    s->fb_len = (uint8_t)len;
++    if (!started) {
++        mp_obj_t pkt = mp_obj_new_bytearray_by_ref(4, m_new(uint8_t, 4));
++        usbd->stream_objs[i][0] = mp_const_none;
++        usbd->stream_objs[i][1] = pkt;
++        s->pkt = ((mp_obj_array_t *)MP_OBJ_TO_PTR(pkt))->items;
++        s->feedback = true;
++        s->packets = s->bytes = s->drops = 0;
++        s->ep = ep_addr;
++        s->active = true;
++        stream_arm(s, false);
++    }
++}
++
++bool mp_usbd_stream_stats(uint8_t ep_addr, uint32_t *packets, uint32_t *bytes, uint32_t *drops) {
++    mp_usbd_stream_t *s = stream_find(ep_addr);
++    if (s == NULL) {
++        return false;
++    }
++    *packets = s->packets;
++    *bytes = s->bytes;
++    *drops = s->drops;
++    return true;
++}
++
++static void mp_usbd_streams_reset(mp_obj_usb_device_t *usbd) {
++    for (int i = 0; i < MP_USBD_STREAMS; i++) {
++        stream_release(usbd, i);
++    }
++}
++
+ static usbd_class_driver_t const _runtime_dev_driver =
+ {
+     #if CFG_TUSB_DEBUG >= 2
+@@ -412,6 +724,7 @@ static usbd_class_driver_t const _runtime_dev_driver =
+     .open = runtime_dev_open,
+     .control_xfer_cb = runtime_dev_control_xfer_cb,
+     .xfer_cb = runtime_dev_xfer_cb,
++    .xfer_isr = runtime_dev_xfer_isr,
+     .sof = NULL
+ };
+ 
+-- 
+2.43.0
+
