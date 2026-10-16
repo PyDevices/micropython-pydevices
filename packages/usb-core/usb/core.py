@@ -261,8 +261,8 @@ class Device:
 
     def read(self, endpoint, size_or_buffer, timeout=None):
         """Read from a bulk or interrupt IN endpoint: into a buffer, giving
-        the count, or up to a size, giving an array. timeout None waits for
-        data, a quarter-second at a time so Ctrl-C still works."""
+        the count, or up to a size, giving an array. timeout None or 0 waits
+        for data, a quarter-second at a time so Ctrl-C still works."""
         self._claim(self._interface_of(endpoint))
         into = None
         if isinstance(size_or_buffer, int):
@@ -274,7 +274,7 @@ class Device:
                 n = _usbif.host_xfer(self._id, endpoint, buf, timeout or 250)
                 break
             except OSError as e:
-                if timeout is None and e.errno == errno.ETIMEDOUT:
+                if not timeout and e.errno == errno.ETIMEDOUT:
                     continue
                 _raise(e)
         if into is not None:
