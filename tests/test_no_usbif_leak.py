@@ -115,16 +115,6 @@ class FacadeWithoutTheModuleTests(unittest.TestCase):
         "hid_open", "hid_read", "hid_close",
     )
 
-    DEVICE_METHODS = (
-        "state", "reinit", "pid", "desc_check", "builtin_desc_cfg",
-        "functions", "functions_available",
-        "uac_enable", "uac_pump_start", "uac_pump_stop", "uac_pump_stats",
-        "uac_pump_rate",
-        "uac_available", "uac_volume", "uac_read", "uac_stats",
-        "uvc_format", "uvc_reset", "uvc_streaming", "uvc_ready",
-        "uvc_submit", "uvc_stats",
-    )
-
     def setUp(self):
         if native_usb._usbif is not None:  # pragma: no cover - on-target only
             self.skipTest("the C module is present; this asserts its absence")
@@ -138,9 +128,6 @@ class FacadeWithoutTheModuleTests(unittest.TestCase):
     def test_every_host_method_raises_importerror(self):
         self._assert_raises_importerror(native_usb.NativeHost(), self.HOST_METHODS)
 
-    def test_every_device_method_raises_importerror(self):
-        self._assert_raises_importerror(native_usb.NativeDevice(), self.DEVICE_METHODS)
-
     def test_the_wrapper_lists_cover_the_classes(self):
         """The two lists above must not drift behind the classes they check.
 
@@ -152,7 +139,6 @@ class FacadeWithoutTheModuleTests(unittest.TestCase):
             # arguments and has its own case below.
             (native_usb.NativeHost, self.HOST_METHODS,
              ("capabilities", "started", "partition")),
-            (native_usb.NativeDevice, self.DEVICE_METHODS, ()),
         ):
             public = {
                 n for n in vars(cls)

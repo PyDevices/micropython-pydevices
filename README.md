@@ -1,103 +1,71 @@
 # usbif
 
-Native USB for MicroPython: a board that a computer sees as a sound card, a
-MIDI instrument or a webcam, and — on the same board — a USB host that a
-keyboard, thumb drive, MIDI controller or camera plugs into.
+Native USB for MicroPython, both ways round. As a **device**, a board is what
+a computer plugs into: a sound card, a webcam, a drive, a keyboard, a MIDI
+instrument, through class packages on MicroPython's own `machine.USBDevice`.
+As a **host**, it is what a keyboard, thumb drive, MIDI controller, speaker
+or camera plugs into, through `usb.core` in PyUSB's and CircuitPython's
+shape.
 
-New here? Read the [newcomer's guide](docs/newcomers.md) for USB identity,
-host sessions, event delivery, and the firmware integration boundary.
-
-`usbif` is one of the PyDevices `*if` modules, with
-[`displayif`](https://github.com/PyDevices/displayif),
-[`audioif`](https://github.com/PyDevices/audioif) and
-[`cameraif`](https://github.com/PyDevices/cameraif): a native C module with a
-thin, stable Python surface that higher-level packages build on. The portable
-API lives here too, in `lib/usbif`, frozen with the C module by `manifest.py`,
-and is implemented twice — once by this module and once by desktop backends
-over OS services. That
-portability covers enumeration, device identity and hot-plug events today, so
-an application that observes devices runs unchanged on a workstation; the
-streaming surfaces (the audio pump, the video endpoint) are methods on the
-object `usbif.auto` hands back, and have no desktop counterpart yet.
+New here? Read the [newcomer's guide](docs/newcomers.md).
 
 ## Status: early development
 
-**Nothing is released. Working today: sound card, MIDI instrument, HID
-keyboard and mouse, removable drive, and a USB host that enumerates devices
-and speaks CDC, HID, and MSC — with the board's USB identity chosen at
-runtime from Python, in any of thirty-one combinations.**
+**Nothing is released.** The packages below work on ESP32-S3 and ESP32-P4
+boards, at full speed and (on the P4) high speed.
 
-The flagship demo, real and audible: one ESP32 board on one cable was
-simultaneously the MIDI keyboard driving a DAW **and** the sound card
-playing that DAW's output -- first and last device in the signal chain at
-once, REPL riding the same connector.
+### The board as a USB device
 
-An ESP32-P4 running this enumerates on a PC as a class-compliant USB Audio
-device — no driver installed — alongside its CDC REPL on the same connector,
-plays audio out of the board's codec, and is **opt-in**: at boot the board is
-a plain CDC device, and the audio function appears only when Python asks for
-it. A host cannot be wedged by a board nobody is pumping.
-
-MicroPython's own runtime USB device works beside a costume. micropython-lib's
-`usb-device` packages (`usb-device-mouse`, `-keyboard`, `-midi`, your own
-interfaces) add their interfaces after the costume's, so
-`usb.device.get().init(mouse, builtin_driver=True)` on a board wearing the CDC
-costume gives a console and a mouse on one cable.
-[tests/hardware/usbdevice_runtime_check.py](tests/hardware/usbdevice_runtime_check.py)
-checks it on a board.
-
-The board's USB identity is a Python decision, not a build option: every
-function is compiled in, and the application chooses which the host sees.
+MicroPython's `machine.USBDevice` with micropython-lib's `usb-device`
+packages, plus ours in [`packages/`](packages): `usb-device-audio` (a UAC2
+speaker), `usb-device-video` (a UVC webcam, YUY2 or MJPEG, at the sizes you
+offer), `usb-device-msc` (a drive), and `usb_hid` (CircuitPython's `usb_hid`,
+so `adafruit_hid` drives it). MIDI is `midiports.usb_device`, in the
+`pydevices` repository. Audio and video stream through endpoints that move
+their packets in C, from the USB interrupt: a firmware needs the PyDevices
+MicroPython overlay for that (`USBDevice.Ring`, `USBDevice.stream()`).
 
 ```python
-import usbif.auto
+import usb.device
+from usb.device.audio import SpeakerInterface
 
-dev = usbif.auto.device()
-dev.functions("cdc", "uac")      # a console and a sound card
-dev.functions("midi")            # a bare MIDI instrument, interface 0
-dev.functions()                  # -> frozenset({'midi'})
-
-dev.uac_pump_start(bclk, ws, dout, rate=24000, bits=16, channels=1)
+spk = SpeakerInterface()                       # 48 kHz stereo 16-bit
+usb.device.get().init(spk, builtin_driver=True)  # the REPL stays on the cable
 ```
 
-Each call re-enumerates -- USB has no way to change identity in place -- and
-the configuration descriptor is assembled at that moment, with interfaces
-and endpoints renumbered and the device class set to match what was actually
-emitted.
+[`examples/usb_soundcard.py`](examples/usb_soundcard.py) plays what the
+computer sends on the board's codec through audiodsp's pump, following the
+computer's volume; [`examples/usb_webcam.py`](examples/usb_webcam.py) streams
+an ESP32-P4's camera.
 
-Endpoints are numbered per costume because the controller's budget is small.
-The ESP32-S2 and S3 drive IN endpoints 1 to 4 only (their transmit FIFOs stop
-there, and TinyUSB gives an IN endpoint the FIFO of its own number), and
-every function brings at least one: CDC two, MSC, audio, MIDI, HID and video
-one each. A costume that needs more than the chip has is refused by
-`functions()` with a `ValueError` rather than worn with an endpoint that
-swallows one transfer and never completes another (usbif#23 was that, with
-HID at a fixed endpoint 6). `examples/costume_selftest.py` lists which
-combinations the board you run it on can wear. The P4's high-speed
-controller drives IN endpoints 1 to 7, so every combination fits there.
+### The board as a USB host
 
-To show what the sound card is playing as a spectrum, attach audiodsp's
-[`audiometer`](https://github.com/PyDevices/audiodsp/tree/main/src/audiometer)
-to it: `audiometer.Meter(32).attach(audiometer.UAC)`, then read `levels()` at
-your frame rate. The pump feeds the meter in C, on its own core, after the
-host's volume and mute, so it shows what plays at any slider position on
-every host. This was
-`uac_pump_meter()` and `uac_pump_levels()` until the meter moved to audiodsp;
-usbif finds it through a weak symbol, so a firmware without audiodsp still
-builds and pumps.
+[`packages/usb-core`](packages/usb-core) gives `usb.core`, `usb.util` and
+`usb_host`; the class packages build on it: `usb-host-msc` (mount a drive),
+`usb-host-hid` (keyboards and mice), `usb-host-cdc` (a USB serial device),
+`usb-host-audio` (a speaker or microphone) and `usb-host-video` (a webcam).
+MIDI is `midiports.usb_host`. Adafruit's `adafruit_usb_host_midi` runs on it
+unchanged.
+
+```python
+import usb.core
+from usb.host.msc import Drive
+import vfs
+
+drive = Drive(usb.core.find(custom_match=Drive.match))
+vfs.mount(vfs.VfsFat(drive), "/usb")
+```
+
+The older host API, `usbif.auto` and its class drivers in C, is still here
+while the class packages replace it.
 
 Also working, and the foundation the rest builds on:
 
 - the portable API and its Linux and Windows desktop backends, in `lib/usbif`,
   with one conformance suite run against every backend
 - the event transport in C (`src/shared/usbif_ringbuf.c`), with host-side tests
-- a structural validator for the descriptor assembler
-  (`examples/costume_selftest.py`), which checks every costume the firmware
-  can wear without a host in the loop
-- four small patches to MicroPython (`patches/`), each with provenance: a
-  `tusb_config.h` hook, a configuration-descriptor hook, three weak hooks that
-  let this module vary what it advertises at runtime, and an esp32 helper that
-  lets it borrow the OTG controller for host duty
+- one small patch to MicroPython (`patches/`), with provenance: an esp32
+  helper that lets the host borrow the OTG controller
 
 **Working now, and new:** external hubs, and more than one device at once --
 two devices behind a powered hub enumerated together, the module's first
@@ -115,9 +83,7 @@ channel-10 drums -- with zero bytes dropped.
 **Video and host audio, both directions, proven:** a USB webcam hosted on an
 ESP32-S3 with its picture on the board's own panel (`src/usbif_host_uvc.c`,
 `examples/uvc_display.py`), and the board seen as a webcam by Windows
-(`src/usbif_uvc_dev.c`, `examples/usbif_webcam.py`) -- sourcing real frames
-from a camera where the board has one, colour bars where it does not. Host
-audio plays too: the isochronous stall that blocked it was a
+(`usb-device-video`, `examples/usb_webcam.py`). Host audio plays too: the isochronous stall that blocked it was a
 `pdMS_TO_TICKS()` rounding to zero ticks at `CONFIG_FREERTOS_HZ=100`, so a
 delay that read as 5 ms never yielded at all. If your app feeds a hosted
 speaker from the interpreter thread while it also draws or talks to the
@@ -141,22 +107,9 @@ tier](https://github.com/PyDevices/.github/blob/main/docs/platform-support-tiers
 no Mac is on this project's bench, `auto.py` returns a null backend there
 rather than pretending, and a report from the field is what promotes it.
 
-**Real-storage MSC (`msc_attach_blockdev`), proven on the ESP32-P4.** A device-side drive can now be backed by any
-MicroPython block-device object -- an SD card, a flash partition -- not just
-a buffer: the read10/write10 callbacks call the object's
-`readblocks`/`writeblocks` directly, safe on this port because TinyUSB's
-device task runs through MicroPython's own scheduler (the same mechanism
-upstream's `machine.USBDevice` runtime already uses to call Python from
-inside a TinyUSB callback), so there is no foreign-thread hazard, only a
-latency cost stated in the code. A 32 GB card in an ESP32-P4 panel
-enumerated on Windows as `MicroPy Mass Storage`, 32,094,814,208 bytes --
-exactly its 62685184 blocks x 512 -- with the MBR parsed and a partition
-mapped to a drive letter, and **488 block ranges served with zero errors**.
-What is *not* yet exercised is the write path against a host, and the card
-used carries no filesystem Windows can mount, so Explorer shows no files
-on it; both wait on formatting a card, which destroys data and so waits on
-a decision rather than being assumed. The P4's `machine.SDCard()` needs
-explicit pins, and card initialisation has two rough edges.
+**A drive from any block device.** `usb-device-msc` serves a RAM disk, an SD
+card or a flash partition: anything with `readblocks`, `writeblocks` and
+`ioctl`. When the computer ejects it, the board can mount it again.
 
 And the working host side carries honest limits for now: the controller's
 FIFO split is fixed when the host starts, so `host(classes=...)` chooses it
@@ -210,15 +163,7 @@ in the intersection arithmetic and against a live device (excluded from a
 class tuple, it is invisible to `host_devices()`; included, it attaches) --
 and `capabilities()` reports the true built set (`{'cdc', 'hid', 'msc'}` on
 the S3 bench build) rather than the empty set it silently returned since
-Phase 1. One board-configuration finding worth restating here, now
-resolved: the stock `ESP32_GENERIC_S3` board build did not enable
-`MICROPY_HW_USB_MSC`, so a first pass of testing found the S3 could only
-reach fifteen of the thirty-one costumes (missing MSC) -- a
-board-configuration gap, not a module limitation, exactly like the same
-distinction already drawn for the P4. The S3 board-header patch in the build
-workspace's `patches/usbif-NN-*` series now enables it too (matching the P4's
-own patch), and
-`examples/costume_selftest.py` confirms **31 of 31** on the S3 as well.
+Phase 1.
 The API design is in [`docs/api-sketch.md`](docs/api-sketch.md).
 
 What's planned next is in [ROADMAP.md](ROADMAP.md).
@@ -342,27 +287,24 @@ instead, which does not inherit the variable.
 
 | File | Role | What it shows |
 |---|---|---|
-| [`soundcard.py`](examples/soundcard.py) | device | Class-compliant UAC sound card (C pump). Pair with `usb_speaker.py` |
-| [`uac_pump.py`](examples/uac_pump.py) | device | Python FIFO pump -- inspectable path, not the shipping card |
+| [`usb_soundcard.py`](examples/usb_soundcard.py) | device | The board as a USB sound card, played through audiodsp's pump |
+| [`usb_webcam.py`](examples/usb_webcam.py) | device | The board's camera as a USB webcam, MJPEG at the size the computer picks |
 | [`hid_keyboard.py`](examples/hid_keyboard.py) | device | Board types into the host |
 | [`hid_mouse.py`](examples/hid_mouse.py) | device | Board moves the host cursor |
-| [`ram_drive.py`](examples/ram_drive.py) | device | RAM disk via `msc_attach` |
-| [`sd_drive.py`](examples/sd_drive.py) | device | SD card as a USB drive via `msc_attach_blockdev` |
-| [`usbif_webcam.py`](examples/usbif_webcam.py) | device | Board is a UVC webcam (`cameraif` when present) |
+| [`ram_drive.py`](examples/ram_drive.py) | device | A RAM disk as a USB drive (`usb-device-msc`) |
+| [`sd_drive.py`](examples/sd_drive.py) | device | An SD card as a USB drive (`usb-device-msc`) |
 | [`midi_harmonizer.py`](examples/midi_harmonizer.py) | device | MIDI effect: melody in, triads out |
 | [`midi_harmonizer_ui.py`](examples/midi_harmonizer_ui.py) | device | Harmonizer with a touchscreen chord picker |
 | [`midi_device_in.py`](examples/midi_device_in.py) | device | Prove the board receives MIDI from a host |
-| [`midi_latency.py`](examples/midi_latency.py) | device | MIDI-to-audio round-trip timing |
 | [`host_enum.py`](examples/host_enum.py) | host | Attach/detach via the portable API (board or desktop) |
 | [`hid_host.py`](examples/hid_host.py) | host | USB keyboard → PyDevices key events (M1) |
 | [`usb_serial.py`](examples/usb_serial.py) | host | CDC read/write to a USB-serial device |
-| [`usb_speaker.py`](examples/usb_speaker.py) | host | Play through a hosted USB speaker / `soundcard.py` |
+| [`usb_speaker.py`](examples/usb_speaker.py) | host | Play through a hosted USB speaker, or a board running `usb_soundcard.py` |
 | [`usb_mic.py`](examples/usb_mic.py) | host | Capture from a hosted USB microphone |
 | [`usb_drive_mount.py`](examples/usb_drive_mount.py) | host | Mount a flash drive and list files |
 | [`usb_drive_log.py`](examples/usb_drive_log.py) | host | Append sensor lines to a hosted stick |
 | [`midi_host.py`](examples/midi_host.py) | host | Host a MIDI keyboard; send a chord back |
 | [`uvc_display.py`](examples/uvc_display.py) | host | Hosted webcam on the board's panel (MJPEG via `jpegio` when present) |
-| [`costume_selftest.py`](examples/costume_selftest.py) | — | Validate every costume's descriptors without a host |
 
 Board-to-board pairings, VBUS warnings, and firmware holes (by issue number)
 live in [`examples/README.md`](examples/README.md).

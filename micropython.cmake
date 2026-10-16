@@ -36,8 +36,6 @@ add_library(usermod_usbif INTERFACE)
 
 target_sources(usermod_usbif INTERFACE
     ${USBIF_SRC_DIR}/mod_usbif.c
-    ${USBIF_SRC_DIR}/usbif_uac.c
-    ${USBIF_SRC_DIR}/usbif_i2s.c
     ${USBIF_SRC_DIR}/usbif_host.c
     ${USBIF_SRC_DIR}/usbif_host_cdc.c
     ${USBIF_SRC_DIR}/usbif_host_xfer.c
@@ -46,8 +44,6 @@ target_sources(usermod_usbif INTERFACE
     ${USBIF_SRC_DIR}/usbif_host_midi.c
     ${USBIF_SRC_DIR}/usbif_host_uac.c
     ${USBIF_SRC_DIR}/usbif_host_uvc.c
-    ${USBIF_SRC_DIR}/usbif_desc.c
-    ${USBIF_SRC_DIR}/usbif_uvc_dev.c
     ${USBIF_SRC_DIR}/shared/usbif_ringbuf.c
     ${USBIF_SRC_DIR}/shared/usbif_byte_ring.c
     ${USBIF_SRC_DIR}/shared/usbif_pcm_sink.c
@@ -58,37 +54,21 @@ target_include_directories(usermod_usbif INTERFACE
     ${USBIF_SRC_DIR}
 )
 
-# MicroPython compiles the TinyUSB component against its own tusb_config.h,
-# whose extension hook includes a header from this repo. The component's
-# include path must therefore reach src/ -- the same arrangement the esp32
-# port already makes for shared/tinyusb.
 if(ESP_PLATFORM)
     idf_component_get_property(usbif_tusb_lib espressif__tinyusb COMPONENT_LIB)
     if(usbif_tusb_lib)
-        target_include_directories(${usbif_tusb_lib} PRIVATE ${USBIF_SRC_DIR})
-        # Spike: the audio receive path in IRAM (src/usbif_isr_iram.lf).
+        # TinyUSB's device controller and core in IRAM (src/usbif_isr_iram.lf),
+        # so machine.USBDevice's streaming endpoints keep running through a
+        # flash write.
         __ldgen_add_fragment_files("${USBIF_SRC_DIR}/usbif_isr_iram.lf")
     endif()
     # The IDF defines ESP_PLATFORM for its own components but not for a user C
     # module, and FreeRTOS's ESP-IDF trace-macro defaults sit behind it: on the
-    # S3 (Xtensa) portYIELD_FROM_ISR in usbif_i2s.c then fails to compile with
+    # S3 (Xtensa) portYIELD_FROM_ISR then fails to compile with
     # an implicit traceISR_EXIT_TO_SCHEDULER. Kitchen-sink builds never saw it
     # because another module's glue defines it; usbif built on its own did.
     target_compile_definitions(usermod_usbif INTERFACE ESP_PLATFORM=1)
 
-    # Extend TinyUSB's device configuration (descriptor and class config come
-    # from this module). Mass storage is usb-device-msc on machine.USBDevice
-    # now, so MicroPython's built-in MSC stays off. These
-    # were a board header's lines until 2026-10-05; as compile definitions any
-    # board can build usbif with no header of its own. Both halves need them:
-    # MicroPython's sources (through usermod) and the TinyUSB component, which
-    # compiles MicroPython's tusb_config.h but never sees the board's -D list.
-    set(USBIF_TUSB_DEFS
-        MICROPY_HW_USB_EXT_TUSB_CONFIG="usbif_tusb_ext.h")
-    target_compile_definitions(usermod_usbif INTERFACE ${USBIF_TUSB_DEFS})
-    if(usbif_tusb_lib)
-        target_compile_definitions(${usbif_tusb_lib} PRIVATE ${USBIF_TUSB_DEFS})
-    endif()
 endif()
 
 target_link_libraries(usermod INTERFACE usermod_usbif)

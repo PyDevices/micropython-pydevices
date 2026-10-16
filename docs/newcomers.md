@@ -1,59 +1,53 @@
 # Newcomer's guide to usbif
 
-`usbif` gives a MicroPython board a native USB device and host surface. A board can appear to a computer as a sound card, MIDI device, keyboard, drive, or webcam; it can also host keyboards, drives, MIDI controllers, cameras, and audio devices.
+`usbif` gives a MicroPython board USB both ways round. As a device, a board appears to a computer as a sound card, webcam, drive, keyboard or MIDI instrument. As a host, it drives keyboards, drives, MIDI controllers, serial devices, speakers, microphones and cameras.
 
-It is a native firmware module. Its portable Python API, in `lib/usbif/`, also has Linux and Windows backends for enumeration and hot-plug observation, while device streaming remains board-native.
+## The board as a device
 
-## Start by choosing the board's USB identity
+Device classes are Python packages on MicroPython's own `machine.USBDevice`, with micropython-lib's `usb-device` core:
 
 ```python
-import usbif.auto
+import usb.device
+from usb.device.audio import SpeakerInterface
 
-dev = usbif.auto.device()
-dev.functions("cdc", "uac")  # console plus sound card
-dev.uac_pump_start(bclk, ws, dout, rate=24000, bits=16, channels=1)
+spk = SpeakerInterface()                         # a 48 kHz stereo speaker
+usb.device.get().init(spk, builtin_driver=True)  # beside the board's console
 ```
 
-Calling `functions()` re-enumerates the board because USB identity cannot change in place. The descriptor is assembled from the selected functions at that point; endpoint limits are checked before the board advertises an impossible costume.
+`init()` re-enumerates the board, because a USB device can't change what it is in place. Put several interfaces in one `init()` to present them together. A controller has a fixed number of endpoints (the ESP32-S3 drives IN endpoints 1 to 4), and `machine.USBDevice` refuses a set that doesn't fit with a `ValueError` naming the endpoint.
 
-For USB host work, start with [the examples](../examples/README.md), especially `host_enum.py`, then request the host classes your application needs.
+Audio and video move their packets in C, from the USB interrupt, through `USBDevice.Ring` and `USBDevice.stream()`. A firmware needs the PyDevices MicroPython overlay for those.
 
-## The mental model
+## The board as a host
 
-```text
-Python chooses device functions or host classes
-              |
-              v
-runtime descriptor / host session
-              |
-              v
-TinyUSB callbacks -> C ring buffer -> Python poll()
-              |
-              v
-application events, audio pump, storage, MIDI, or video
+Host classes are Python packages on `usb.core`:
+
+```python
+import usb.core
+from usb.host.hid import Device, KEYBOARD
+
+kbd = Device(usb.core.find(custom_match=Device.match(KEYBOARD)))
+report = kbd.read()
 ```
 
-Events are drained by Python polling rather than delivered directly in callbacks. Long-running Python or native work can starve scheduled callbacks, whereas the C ring preserves events until the application polls and reports overflow explicitly.
+Start the host with the classes you'll stream (`usb.core.start(classes=("uvc",))` for a camera, `("uac",)` for a speaker): the controller's FIFO split is fixed while the host runs.
+
+The older host API, `usbif.auto` with its class drivers in C, is still in `lib/usbif/` while the packages replace it.
 
 ## Repository map
 
 | Path | Purpose |
 |---|---|
-| `src/mod_usbif.c` | Native module entrypoint and Python surface. |
-| `src/usbif_{hid,msc,uvc}_dev.c`, `src/usbif_uac.c`, `src/usbif_desc.c` | Device-side HID, storage, video, audio, and the runtime descriptor. Device MIDI lives in `src/mod_usbif.c`. |
-| `src/usbif_host*.c` | Host enumeration plus CDC, HID, MSC, MIDI, UAC, and UVC support. |
-| `src/shared/` | Event ring and USB-MIDI packet code. |
-| `lib/usbif/` | Portable API and desktop backends, frozen with the C module by `manifest.py`. |
-| `patches/` | Required MicroPython TinyUSB and ESP32 host integration patches. |
-| `examples/` | Device and host demonstrations, including costume validation. |
-| `tests/` | Native ring, leak, and API tests. |
-
-## Firmware boundary
-
-First apply the repository-owned patches, then configure the board extension header and build with `micropython.cmake` as `USER_C_MODULES`. The root [README](../README.md#building) has the required order. Omitting either integration step can produce a successful build whose USB functions are silently absent.
-
-Build targets have real resource limits. Device functions consume endpoint capacity, and host sessions consume controller channels; ask for a smaller function/class set when the selected combination cannot fit. `examples/costume_selftest.py` verifies every device identity the current firmware can advertise without requiring a host.
+| `packages/` | The class packages: `usb-device-audio`, `usb-device-video`, `usb-device-msc`, `usb-hid`, `usb-core`, `usb-host-*`. |
+| `src/mod_usbif.c` | The C module: the host session and its transfers. |
+| `src/usbif_host*.c` | The host core, the generic transfer layer under `usb.core`, and the older class drivers. |
+| `src/shared/` | Event ring, PCM sink and USB-MIDI packet code. |
+| `lib/usbif/` | The older portable host API and its desktop backends. |
+| `patches/` | The ESP32 patch that lets the host borrow the OTG controller. |
+| `examples/` | Device and host examples. |
+| `tools/` | The device proof matrix and the stream and host checks. |
+| `tests/` | Native ring, leak and API tests. |
 
 ## Safe first contributions
 
-Start with a host or device example, a descriptor validation case, or a focused ring-buffer test. Do not add Python callbacks directly from TinyUSB context. USB identity, endpoint allocation, and host channel budgeting are native correctness boundaries; read [the API sketch](api-sketch.md) and the root README before changing them.
+Start with an example or a focused test. Don't call Python from a USB interrupt: streams stay in C, and everything else reaches Python through the scheduler or a poll.

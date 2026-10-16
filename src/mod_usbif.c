@@ -28,20 +28,6 @@
 #include "usbif_classes.h"
 #include "pcm_c_sink.h"
 
-// From usbif_desc.c, present on any build with the TinyUSB extension
-// header. The USB identity is chosen at runtime from these bits.
-#if defined(MICROPY_HW_USB_EXT_TUSB_CONFIG) && MICROPY_HW_ENABLE_USBDEV
-#define USBIF_HAVE_FN (1)
-extern uint16_t usbif_fn_get(void);
-extern uint16_t usbif_fn_built(void);
-extern int usbif_fn_set(uint16_t mask);
-extern int usbif_desc_check(void);
-#define USBIF_FN_CDC   (1u << 0)
-#define USBIF_FN_AUDIO (1u << 2)
-#else
-#define USBIF_HAVE_FN (0)
-#endif
-
 // Host engine availability: the IDF USB Host Library, on chips with an OTG
 // controller. The same gate guards usbif_host.c; elsewhere the host_* calls
 // keep their Phase-1 stub behaviour (an honest empty capability set).
@@ -327,319 +313,6 @@ static mp_obj_t usbif_host_drain(mp_obj_t limit_in) {
     return mp_obj_new_tuple(2, result);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(usbif_host_drain_obj, usbif_host_drain);
-
-// Debug aid: hand back the built-in configuration descriptor exactly as the
-// host receives it, plus the length the build computed for it. A descriptor
-// whose declared wTotalLength disagrees with the bytes actually emitted is
-// the classic cause of a function that enumerates and then refuses to start,
-// and it is invisible from the host side -- Windows reports "cannot start"
-// either way.
-static mp_obj_t usbif_builtin_desc_cfg(void) {
-    // Only USB-device ports have a built-in descriptor to show; on desktop
-    // backends (unix, windows) the honest answer is None, same shape as the
-    // other capability-gated accessors. Unguarded, this reference broke
-    // every desktop build in the workspace -- caught by the first unix
-    // engine rebuild after usbif joined the USER_C_MODULES glob.
-    #if MICROPY_HW_ENABLE_USBDEV
-    mp_obj_t items[2] = {
-        mp_obj_new_bytes(mp_usbd_builtin_desc_cfg, MP_USBD_BUILTIN_DESC_CFG_LEN),
-        MP_OBJ_NEW_SMALL_INT(MP_USBD_BUILTIN_DESC_CFG_LEN),
-    };
-    return mp_obj_new_tuple(2, items);
-    #else
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_builtin_desc_cfg_obj, usbif_builtin_desc_cfg);
-
-#if CFG_TUD_AUDIO
-extern uint32_t usbif_uac_get_reqs, usbif_uac_set_reqs, usbif_uac_itf_sets, usbif_uac_unhandled;
-extern uint32_t usbif_uac_overflows;
-extern bool usbif_uac_is_streaming(void);
-extern uint32_t usbif_uac_current_rate(void);
-extern bool usbif_uac_is_muted(void);
-extern int usbif_uac_volume_db256(void);
-extern uint32_t usbif_uac_gain(void);
-
-extern void usbif_uac_note_read(void);
-extern int usbif_pump_start(int i2s_id, int bclk, int ws, int dout, int mclk,
-    uint32_t rate, int bits, int channels, int mclk_multiple);
-extern void usbif_pump_stop(void);
-extern bool usbif_pump_is_running(void);
-extern uint32_t usbif_pump_bytes, usbif_pump_idle, usbif_pump_timeouts, usbif_pump_shed;
-extern uint32_t usbif_pump_retunes;
-extern uint32_t usbif_pump_wire_rate(void);
-extern volatile uint32_t usbif_pump_dma_bytes, usbif_pump_dma_starved;
-extern int64_t usbif_pump_dma_elapsed_us(void);
-extern volatile bool usbif_fb_enabled;
-extern volatile uint32_t usbif_fb_value;
-extern volatile int32_t usbif_fb_ppm, usbif_fb_level_bytes;
-extern const int16_t *usbif_pump_tap(uint32_t *n);
-extern bool usbif_pump_tap_arm(void);
-extern uint32_t usbif_uac_rx_packets, usbif_uac_rx_bytes;
-#endif
-
-// Diagnostic: what the host has actually asked the audio function for.
-static mp_obj_t usbif_uac_stats(void) {
-    #if CFG_TUD_AUDIO
-    mp_obj_t items[7] = {
-        mp_obj_new_int_from_uint(usbif_uac_get_reqs),
-        mp_obj_new_int_from_uint(usbif_uac_set_reqs),
-        mp_obj_new_int_from_uint(usbif_uac_itf_sets),
-        mp_obj_new_int_from_uint(usbif_uac_unhandled),
-        mp_obj_new_bool(usbif_uac_is_streaming()),
-        mp_obj_new_int_from_uint(usbif_uac_current_rate()),
-        mp_obj_new_int_from_uint(usbif_uac_overflows),
-    };
-    return mp_obj_new_tuple(7, items);
-    #else
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_uac_stats_obj, usbif_uac_stats);
-
-// --- UAC playback: move received audio out of TinyUSB's FIFO.
-//
-// The isochronous endpoint itself is serviced entirely in C, on TinyUSB's
-// task, whatever Python is doing -- that is the whole point of the split.
-// What Python does here is move already-buffered blocks on to an audio sink,
-// a soft deadline governed by FIFO depth rather than a per-frame one.
-
-static mp_obj_t usbif_uac_available(void) {
-    #if defined(CFG_TUD_AUDIO) && CFG_TUD_AUDIO
-    return mp_obj_new_int_from_uint(tud_audio_available());
-    #else
-    return MP_OBJ_NEW_SMALL_INT(0);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_uac_available_obj, usbif_uac_available);
-
-// Read up to len(buf) bytes of received PCM into a writable buffer, returning
-// the byte count. Returns 0 rather than blocking when the host is not
-// streaming, so a caller can poll it from an ordinary loop.
-static mp_obj_t usbif_uac_read(mp_obj_t buf_in) {
-    #if defined(CFG_TUD_AUDIO) && CFG_TUD_AUDIO
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_WRITE);
-    // Records that a consumer is alive, so the C side stops discarding.
-    usbif_uac_note_read();
-    uint16_t count = tud_audio_read(buf.buf, (uint16_t)MIN(buf.len, UINT16_MAX));
-    // Host volume and mute, same as the C pump applies, so the two pump
-    // paths sound identical. Whole samples only: a trailing odd byte means
-    // the stream is misframed and scaling half a sample cannot help it.
-    uint32_t gain = usbif_uac_gain();
-    if (gain != 65536u) {
-        int16_t *s = (int16_t *)buf.buf;
-        for (uint16_t i = 0; i < count / 2; i++) {
-            s[i] = (int16_t)(((int64_t)s[i] * gain) >> 16);
-        }
-    }
-    return mp_obj_new_int_from_uint(count);
-    #else
-    (void)buf_in;
-    return MP_OBJ_NEW_SMALL_INT(0);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_uac_read_obj, usbif_uac_read);
-
-// The host's own volume and mute, so a board can follow the slider on the PC
-// instead of ignoring it. Returned raw (1/256 dB, and a mute flag) because
-// mapping decibels onto a particular codec's scale is the board's business.
-static mp_obj_t usbif_uac_volume(void) {
-    #if defined(CFG_TUD_AUDIO) && CFG_TUD_AUDIO
-    mp_obj_t items[2] = {
-        mp_obj_new_bool(usbif_uac_is_muted()),
-        MP_OBJ_NEW_SMALL_INT(usbif_uac_volume_db256()),
-    };
-    return mp_obj_new_tuple(2, items);
-    #else
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_uac_volume_obj, usbif_uac_volume);
-
-// Advertise the audio function to the host, or stop advertising it. The board
-// re-enumerates either way -- USB has no way to change identity in place.
-static mp_obj_t usbif_uac_enable(size_t n_args, const mp_obj_t *args) {
-    #if USBIF_HAVE_FN
-    // Compatibility surface over the general one: "the audio function, on
-    // or off, leaving every other function as it is."
-    if (n_args) {
-        uint16_t mask = usbif_fn_get();
-        if (mp_obj_is_true(args[0])) {
-            mask |= (uint16_t)USBIF_FN_AUDIO;
-            mask &= usbif_fn_built();
-        } else {
-            mask &= (uint16_t) ~USBIF_FN_AUDIO;
-        }
-        usbif_fn_set(mask);
-    }
-    return mp_obj_new_bool((usbif_fn_get() & USBIF_FN_AUDIO) != 0);
-    #else
-    (void)n_args;
-    (void)args;
-    return mp_const_false;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_uac_enable_obj, 0, 1, usbif_uac_enable);
-
-// Start moving received audio to I2S from a C task, taking the interpreter
-// out of the isochronous path entirely. Pins and format are supplied by the
-// caller: they are board facts, and usbif has no business guessing them.
-// The codec itself stays Python's to bring up.
-static mp_obj_t usbif_uac_pump_start(size_t n_args, const mp_obj_t *pos_args,
-    mp_map_t *kw_args) {
-    #if defined(CFG_TUD_AUDIO) && CFG_TUD_AUDIO
-    enum { ARG_bclk, ARG_ws, ARG_dout, ARG_mclk, ARG_rate, ARG_bits, ARG_channels,
-           ARG_i2s_id, ARG_mclk_multiple };
-    static const mp_arg_t allowed[] = {
-        { MP_QSTR_bclk, MP_ARG_REQUIRED | MP_ARG_INT, { .u_int = -1 } },
-        { MP_QSTR_ws, MP_ARG_REQUIRED | MP_ARG_INT, { .u_int = -1 } },
-        { MP_QSTR_dout, MP_ARG_REQUIRED | MP_ARG_INT, { .u_int = -1 } },
-        // Give the I2S peripheral the MCLK pin so every clock the codec sees
-        // comes from one divider. -1 leaves MCLK to whatever else drives it.
-        { MP_QSTR_mclk, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = -1 } },
-        // The board's I2S rate while the host runs its default 48 kHz. It
-        // must divide every offered host rate; the wire follows the host's
-        // choice at the same ratio (24000 here is 22050 at 44.1 kHz).
-        { MP_QSTR_rate, MP_ARG_KW_ONLY | MP_ARG_INT,
-          { .u_int = USBIF_UAC_DEFAULT_RATE } },
-        { MP_QSTR_bits, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 16 } },
-        { MP_QSTR_channels, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 1 } },
-        { MP_QSTR_i2s_id, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 0 } },
-        // 0 means "the sensible default", which is 256fs -- what the board's
-        // AUDIO_OUT.wire.mck_fs publishes. Pass that rather than assuming.
-        { MP_QSTR_mclk_multiple, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 0 } },
-    };
-    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
-    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
-
-    int err = usbif_pump_start(args[ARG_i2s_id].u_int, args[ARG_bclk].u_int,
-        args[ARG_ws].u_int, args[ARG_dout].u_int, args[ARG_mclk].u_int,
-        (uint32_t)args[ARG_rate].u_int, args[ARG_bits].u_int,
-        args[ARG_channels].u_int, args[ARG_mclk_multiple].u_int);
-    if (err != 0) {
-        mp_raise_OSError(err);
-    }
-    usbif_arm_soft_reset();
-    return mp_const_none;
-    #else
-    (void)n_args;
-    (void)pos_args;
-    (void)kw_args;
-    mp_raise_NotImplementedError(MP_ERROR_TEXT("usbif built without audio"));
-    #endif
-}
-// Minimum 0 positional: MP_ARG_REQUIRED still enforces that bclk/ws/dout are
-// supplied, but they may be given by keyword, which reads far better at a call
-// site naming three GPIO numbers.
-static MP_DEFINE_CONST_FUN_OBJ_KW(usbif_uac_pump_start_obj, 0, usbif_uac_pump_start);
-
-static mp_obj_t usbif_uac_pump_stop(void) {
-    #if defined(CFG_TUD_AUDIO) && CFG_TUD_AUDIO
-    usbif_pump_stop();
-    #endif
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_uac_pump_stop_obj, usbif_uac_pump_stop);
-
-// (running, bytes moved, idle polls, sink timeouts)
-static mp_obj_t usbif_uac_pump_stats(void) {
-    #if defined(CFG_TUD_AUDIO) && CFG_TUD_AUDIO
-    mp_obj_t items[5] = {
-        mp_obj_new_bool(usbif_pump_is_running()),
-        mp_obj_new_int_from_uint(usbif_pump_bytes),
-        mp_obj_new_int_from_uint(usbif_pump_idle),
-        mp_obj_new_int_from_uint(usbif_pump_timeouts),
-        mp_obj_new_int_from_uint(usbif_pump_shed),
-    };
-    return mp_obj_new_tuple(5, items);
-    #else
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_uac_pump_stats_obj, usbif_uac_pump_stats);
-
-// (host rate, wire rate, retunes): what the host chose, what the I2S wire is
-// clocked at (0 with no pump), and how often the pump has followed a change.
-// Its own call rather than two more fields on uac_pump_stats, whose five-tuple
-// callers unpack.
-static mp_obj_t usbif_uac_pump_rate(void) {
-    #if defined(CFG_TUD_AUDIO) && CFG_TUD_AUDIO
-    mp_obj_t items[3] = {
-        mp_obj_new_int_from_uint(usbif_uac_current_rate()),
-        mp_obj_new_int_from_uint(usbif_pump_wire_rate()),
-        mp_obj_new_int_from_uint(usbif_pump_retunes),
-    };
-    return mp_obj_new_tuple(3, items);
-    #else
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_uac_pump_rate_obj, usbif_uac_pump_rate);
-
-// Diagnostic for usbif#37: (usb packets, usb bytes, i2s dma bytes, i2s
-// starved buffers, microseconds since the pump opened I2S).
-static mp_obj_t usbif_uac_pump_clock(void) {
-    #if defined(CFG_TUD_AUDIO) && CFG_TUD_AUDIO
-    mp_obj_t items[8] = {
-        mp_obj_new_int_from_uint(usbif_uac_rx_packets),
-        mp_obj_new_int_from_uint(usbif_uac_rx_bytes),
-        mp_obj_new_int_from_uint(usbif_pump_dma_bytes),
-        mp_obj_new_int_from_uint(usbif_pump_dma_starved),
-        mp_obj_new_int_from_ll(usbif_pump_dma_elapsed_us()),
-        // The explicit feedback (usbif#40): the value last sent, in 16.16
-        // samples per (micro)frame (0 when off), its offset from nominal in
-        // ppm, and the last measured consumed/delivered rate error in ppm.
-        mp_obj_new_int_from_uint(usbif_fb_value),
-        mp_obj_new_int(usbif_fb_ppm),
-        mp_obj_new_int(usbif_fb_level_bytes),
-    };
-    return mp_obj_new_tuple(8, items);
-    #else
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_uac_pump_clock_obj, usbif_uac_pump_clock);
-
-// uac_feedback(): whether the sound card sends explicit feedback (usbif#40).
-// uac_feedback(False) sends none, so the host plays at its nominal rate.
-static mp_obj_t usbif_uac_feedback(size_t n_args, const mp_obj_t *args) {
-    #if defined(CFG_TUD_AUDIO) && CFG_TUD_AUDIO
-    if (n_args) {
-        usbif_fb_enabled = mp_obj_is_true(args[0]);
-    }
-    return mp_obj_new_bool(usbif_fb_enabled);
-    #else
-    (void)n_args;
-    (void)args;
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_uac_feedback_obj, 0, 1, usbif_uac_feedback);
-
-// uac_pump_tap(): the samples last captured going to I2S, as bytes (int16
-// mono), or None while a capture is still filling. uac_pump_tap(True) arms a
-// new capture.
-static mp_obj_t usbif_uac_pump_tap(size_t n_args, const mp_obj_t *args) {
-    #if defined(CFG_TUD_AUDIO) && CFG_TUD_AUDIO
-    if (n_args && mp_obj_is_true(args[0])) {
-        if (!usbif_pump_tap_arm()) {
-            mp_raise_type(&mp_type_MemoryError);
-        }
-        return mp_const_none;
-    }
-    uint32_t n;
-    const int16_t *p = usbif_pump_tap(&n);
-    if (!p) {
-        return mp_const_none;
-    }
-    return mp_obj_new_bytes((const byte *)p, n * 2);
-    #else
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_uac_pump_tap_obj, 0, 1, usbif_uac_pump_tap);
 
 // Diagnostic: (running, attaches, detaches, errors, lib_devices, lib_clients).
 static mp_obj_t usbif_host_stats(void) {
@@ -1225,131 +898,6 @@ static mp_obj_t usbif_host_uvc_close_py(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_uvc_close_obj, usbif_host_uvc_close_py);
 
-// --- UVC device: the board as a webcam ------------------------------------
-
-// Guarded for the same reason every other class-conditional binding here is:
-// usbif_uvc_dev.c is compiled only by the CMake ports, so on a Makefile port
-// (unix, and anything else building through micropython.mk) these symbols do
-// not exist. Referencing them unconditionally linked fine on esp32 and broke
-// the unix build with five undefined references -- a shape worth
-// remembering, because the port that fails is the one the module is not
-// really "for", and so is the one nobody runs first.
-#if defined(CFG_TUD_VIDEO) && CFG_TUD_VIDEO
-extern int usbif_uvc_dev_streaming(void);
-extern int usbif_uvc_dev_ready(void);
-extern int usbif_uvc_dev_frame_bytes(void);
-extern void usbif_uvc_dev_size(int *width, int *height);
-extern int usbif_uvc_dev_submit(const uint8_t *data, size_t len);
-extern void usbif_uvc_dev_stats(uint32_t *frames, uint32_t *completed,
-    uint32_t *refused, uint32_t *streaming);
-extern void usbif_uvc_dev_reset(void);
-#endif
-
-// (width, height, frame_bytes) for the format the descriptor advertises.
-// Fixed at build time, because a UVC device declares its formats in
-// descriptors the host reads once at enumeration -- changing it is a
-// reflash, which is a property of the class and not of this module.
-static mp_obj_t usbif_uvc_dev_format_py(void) {
-    #if defined(CFG_TUD_VIDEO) && CFG_TUD_VIDEO
-    int w = 0, h = 0;
-    usbif_uvc_dev_size(&w, &h);
-    mp_obj_t items[3] = {
-        MP_OBJ_NEW_SMALL_INT(w),
-        MP_OBJ_NEW_SMALL_INT(h),
-        MP_OBJ_NEW_SMALL_INT(usbif_uvc_dev_frame_bytes()),
-    };
-    return mp_obj_new_tuple(3, items);
-    #else
-    // A firmware built without the video function answers honestly rather
-    // than raising: a caller asking "what can you show?" deserves "nothing",
-    // not an exception to catch.
-    mp_obj_t items[3] = { MP_OBJ_NEW_SMALL_INT(0), MP_OBJ_NEW_SMALL_INT(0),
-                          MP_OBJ_NEW_SMALL_INT(0) };
-    return mp_obj_new_tuple(3, items);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_uvc_dev_format_obj, usbif_uvc_dev_format_py);
-
-// True once the host has opened the stream and committed a format.
-static mp_obj_t usbif_uvc_dev_streaming_py(void) {
-    #if defined(CFG_TUD_VIDEO) && CFG_TUD_VIDEO
-    return mp_obj_new_bool(usbif_uvc_dev_streaming());
-    #else
-    return mp_const_false;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_uvc_dev_streaming_obj, usbif_uvc_dev_streaming_py);
-
-// True when a frame may be written. Deliberately distinct from streaming():
-// a caller that cannot tell "nobody is watching" from "watching, but the
-// last frame has not gone yet" either spins or drops frames, and those want
-// opposite responses.
-static mp_obj_t usbif_uvc_dev_ready_py(void) {
-    #if defined(CFG_TUD_VIDEO) && CFG_TUD_VIDEO
-    return mp_obj_new_bool(usbif_uvc_dev_ready());
-    #else
-    return mp_const_false;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_uvc_dev_ready_obj, usbif_uvc_dev_ready_py);
-
-// Hand one whole frame to the bus. Returns bytes accepted, or 0 when the
-// host is not streaming or the previous frame is still in flight. Raises on
-// a wrong-sized frame rather than padding it: a UVC frame is a fixed size
-// for its format, and a silently padded one tears in a way that reads as a
-// bus fault rather than a caller mistake.
-static mp_obj_t usbif_uvc_dev_submit_py(mp_obj_t buf_in) {
-    #if defined(CFG_TUD_VIDEO) && CFG_TUD_VIDEO
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_READ);
-    int n = usbif_uvc_dev_submit((const uint8_t *)buf.buf, buf.len);
-    if (n == -1) {
-        mp_raise_msg_varg(&mp_type_ValueError,
-            MP_ERROR_TEXT("frame must be exactly %d bytes"),
-            usbif_uvc_dev_frame_bytes());
-    }
-    if (n == -3) {
-        mp_raise_OSError(MP_EOPNOTSUPP);
-    }
-    if (n < 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    return MP_OBJ_NEW_SMALL_INT(n);
-    #else
-    (void)buf_in;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_uvc_dev_submit_obj, usbif_uvc_dev_submit_py);
-
-// (frames, completed, refused, streaming). frames counts what was handed to
-// the bus and completed what the bus confirmed sent; a gap between them is
-// the host not collecting. refused counts frames offered while the previous
-// one was still going -- a caller running ahead of the frame rate, which is
-// a different fault from either.
-static mp_obj_t usbif_uvc_dev_stats_py(void) {
-    uint32_t frames = 0, completed = 0, refused = 0, streaming = 0;
-    #if defined(CFG_TUD_VIDEO) && CFG_TUD_VIDEO
-    usbif_uvc_dev_stats(&frames, &completed, &refused, &streaming);
-    #endif
-    mp_obj_t items[4] = {
-        mp_obj_new_int_from_uint(frames),
-        mp_obj_new_int_from_uint(completed),
-        mp_obj_new_int_from_uint(refused),
-        mp_obj_new_bool(streaming),
-    };
-    return mp_obj_new_tuple(4, items);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_uvc_dev_stats_obj, usbif_uvc_dev_stats_py);
-
-static mp_obj_t usbif_uvc_dev_reset_py(void) {
-    #if defined(CFG_TUD_VIDEO) && CFG_TUD_VIDEO
-    usbif_uvc_dev_reset();
-    #endif
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_uvc_dev_reset_obj, usbif_uvc_dev_reset_py);
-
 static mp_obj_t usbif_host_desc_py(mp_obj_t dev_id_in) {
     #if USBIF_HAVE_HOST
     const uint8_t *desc = NULL;
@@ -1539,106 +1087,6 @@ static mp_obj_t usbif_host_msc_close_py(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_msc_close_obj, usbif_host_msc_close_py);
 
 
-// Device-side USB state, straight from TinyUSB: (connected, mounted,
-// suspended). connected = a host's bus reset was seen; mounted = the host
-// configured us. The first question when nothing enumerates is which of
-// those never happened.
-static mp_obj_t usbif_dev_state(void) {
-    #if MICROPY_HW_ENABLE_USBDEV
-    mp_obj_t items[3] = {
-        mp_obj_new_bool(tud_connected()),
-        mp_obj_new_bool(tud_mounted()),
-        mp_obj_new_bool(tud_suspended()),
-    };
-    return mp_obj_new_tuple(3, items);
-    #else
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_dev_state_obj, usbif_dev_state);
-
-// (was_inited, init_ok): whether TinyUSB was already up, and what a fresh
-// tusb_init() says. Distinguishes "boot init silently failed" from
-// "initialised but no bus".
-static mp_obj_t usbif_dev_reinit(void) {
-    #if MICROPY_HW_ENABLE_USBDEV
-    bool was = tud_inited();
-    bool ok = tusb_init();
-    tud_connect();
-    mp_obj_t items[2] = { mp_obj_new_bool(was), mp_obj_new_bool(ok) };
-    return mp_obj_new_tuple(2, items);
-    #else
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_dev_reinit_obj, usbif_dev_reinit);
-
-// The USB identity, as a bitmask of functions. Called with no argument it
-// reports what is advertised; with an argument it re-enumerates the board
-// wearing exactly that set. Asking for a function this firmware was not
-// built with is an error rather than a silent omission.
-static mp_obj_t usbif_dev_functions(size_t n_args, const mp_obj_t *args) {
-    #if USBIF_HAVE_FN
-    if (n_args) {
-        mp_int_t mask = mp_obj_get_int(args[0]);
-        if (mask == 0) {
-            mp_raise_ValueError(MP_ERROR_TEXT("a device must present at least one function"));
-        }
-        const int err = mask < 0 ? -1 : usbif_fn_set((uint16_t)mask);
-        if (err == -3) {
-            mp_raise_ValueError(MP_ERROR_TEXT("costume needs more IN endpoints than this controller has"));
-        }
-        if (err != 0) {
-            mp_raise_ValueError(MP_ERROR_TEXT("function not built into this firmware"));
-        }
-    }
-    return mp_obj_new_int_from_uint(usbif_fn_get());
-    #else
-    (void)n_args;
-    (void)args;
-    return MP_OBJ_NEW_SMALL_INT(0);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_dev_functions_obj, 0, 1, usbif_dev_functions);
-
-// Which functions this firmware can advertise at all.
-static mp_obj_t usbif_dev_functions_built(void) {
-    #if USBIF_HAVE_FN
-    return mp_obj_new_int_from_uint(usbif_fn_built());
-    #else
-    return MP_OBJ_NEW_SMALL_INT(0);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_dev_functions_built_obj, usbif_dev_functions_built);
-
-
-// Structural check of the descriptor the current costume produces: 0 when
-// sound, or a negative code naming the fault. A host finds these by
-// refusing the device; this finds them in microseconds.
-static mp_obj_t usbif_dev_desc_check(void) {
-    #if USBIF_HAVE_FN
-    return MP_OBJ_NEW_SMALL_INT(usbif_desc_check());
-    #else
-    return MP_OBJ_NEW_SMALL_INT(0);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_dev_desc_check_obj, usbif_dev_desc_check);
-
-// The product id the current costume presents. Each combination of
-// functions is its own product, so a host's cached driver set always
-// matches what it is looking at.
-static mp_obj_t usbif_dev_pid(void) {
-    #if USBIF_HAVE_FN
-    extern uint16_t usbif_desc_pid(void);
-    return mp_obj_new_int_from_uint(usbif_desc_pid());
-    #else
-    return MP_OBJ_NEW_SMALL_INT(0);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_dev_pid_obj, usbif_dev_pid);
-
-
-
 // _usbif.__revision__: which usbif this firmware was built from. The build
 // passes USBIF_REVISION (git describe) as a compile definition; a build with no
 // git says "unknown" rather than guessing.
@@ -1649,26 +1097,9 @@ static const MP_DEFINE_STR_OBJ(_usbif_revision_obj, USBIF_REVISION);
 
 static const mp_rom_map_elem_t usbif_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___revision__), MP_ROM_PTR(&_usbif_revision_obj) },
-    { MP_ROM_QSTR(MP_QSTR_dev_pid), MP_ROM_PTR(&usbif_dev_pid_obj) },
-    { MP_ROM_QSTR(MP_QSTR_dev_desc_check), MP_ROM_PTR(&usbif_dev_desc_check_obj) },
-    { MP_ROM_QSTR(MP_QSTR_dev_functions), MP_ROM_PTR(&usbif_dev_functions_obj) },
-    { MP_ROM_QSTR(MP_QSTR_dev_functions_built), MP_ROM_PTR(&usbif_dev_functions_built_obj) },
     { MP_ROM_QSTR(MP_QSTR_FN_CDC), MP_ROM_INT(1) },
     { MP_ROM_QSTR(MP_QSTR_FN_AUDIO), MP_ROM_INT(4) },
     { MP_ROM_QSTR(MP_QSTR_FN_VIDEO), MP_ROM_INT(32) },
-    { MP_ROM_QSTR(MP_QSTR_uac_enable), MP_ROM_PTR(&usbif_uac_enable_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uac_pump_start), MP_ROM_PTR(&usbif_uac_pump_start_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uac_pump_stop), MP_ROM_PTR(&usbif_uac_pump_stop_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uac_pump_stats), MP_ROM_PTR(&usbif_uac_pump_stats_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uac_pump_rate), MP_ROM_PTR(&usbif_uac_pump_rate_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uac_pump_clock), MP_ROM_PTR(&usbif_uac_pump_clock_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uac_feedback), MP_ROM_PTR(&usbif_uac_feedback_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uac_pump_tap), MP_ROM_PTR(&usbif_uac_pump_tap_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uac_available), MP_ROM_PTR(&usbif_uac_available_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uac_volume), MP_ROM_PTR(&usbif_uac_volume_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uac_read), MP_ROM_PTR(&usbif_uac_read_obj) },
-    { MP_ROM_QSTR(MP_QSTR_builtin_desc_cfg), MP_ROM_PTR(&usbif_builtin_desc_cfg_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uac_stats), MP_ROM_PTR(&usbif_uac_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR__usbif) },
     { MP_ROM_QSTR(MP_QSTR_capabilities), MP_ROM_PTR(&usbif_capabilities_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_start), MP_ROM_PTR(&usbif_host_start_obj) },
@@ -1695,12 +1126,6 @@ static const mp_rom_map_elem_t usbif_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_host_uvc_frame_ready), MP_ROM_PTR(&usbif_host_uvc_frame_ready_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_uvc_stats), MP_ROM_PTR(&usbif_host_uvc_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_uvc_close), MP_ROM_PTR(&usbif_host_uvc_close_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uvc_dev_format), MP_ROM_PTR(&usbif_uvc_dev_format_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uvc_dev_streaming), MP_ROM_PTR(&usbif_uvc_dev_streaming_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uvc_dev_ready), MP_ROM_PTR(&usbif_uvc_dev_ready_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uvc_dev_submit), MP_ROM_PTR(&usbif_uvc_dev_submit_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uvc_dev_stats), MP_ROM_PTR(&usbif_uvc_dev_stats_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uvc_dev_reset), MP_ROM_PTR(&usbif_uvc_dev_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_drain), MP_ROM_PTR(&usbif_host_drain_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_stats), MP_ROM_PTR(&usbif_host_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_port_cycle), MP_ROM_PTR(&usbif_host_port_cycle_obj) },
@@ -1724,8 +1149,6 @@ static const mp_rom_map_elem_t usbif_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_host_midi_close), MP_ROM_PTR(&usbif_host_midi_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_midi_dropped), MP_ROM_PTR(&usbif_host_midi_dropped_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_msc_close), MP_ROM_PTR(&usbif_host_msc_close_obj) },
-    { MP_ROM_QSTR(MP_QSTR_dev_state), MP_ROM_PTR(&usbif_dev_state_obj) },
-    { MP_ROM_QSTR(MP_QSTR_dev_reinit), MP_ROM_PTR(&usbif_dev_reinit_obj) },
 };
 static MP_DEFINE_CONST_DICT(usbif_module_globals, usbif_module_globals_table);
 
@@ -1750,10 +1173,6 @@ static MP_DEFINE_CONST_DICT(usbif_module_globals, usbif_module_globals_table);
 // finalises it, made the first time a program starts something. Finalisers
 // run before the heap's blocks are freed, so the drive's buffer is still
 // intact while the drive detaches.
-//
-// The USB device functions (usbif_fn_set(), the sound card's costume) are
-// left as they are: changing them re-enumerates the board, and the REPL a
-// soft reset is typed into would go with it.
 
 static void usbif_soft_reset_teardown(void) {
     #if USBIF_HAVE_HOST
@@ -1762,11 +1181,6 @@ static void usbif_soft_reset_teardown(void) {
     usbif_host_stop_c();
     #endif
     usbif_host_running = false;
-    #if defined(CFG_TUD_AUDIO) && CFG_TUD_AUDIO
-    // Stops the pump task and deletes its I2S channel, so uac_pump_start()
-    // and machine.I2S can have the peripheral again.
-    usbif_pump_stop();
-    #endif
     // The guard is being swept with the rest of the heap. Its root has to go
     // too, or the next program's first start would find it still set and
     // never make a live guard, leaving the soft reset after that with nothing

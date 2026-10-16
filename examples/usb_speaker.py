@@ -1,12 +1,12 @@
 """Play a tone through a hosted USB speaker -- the S3 half of the sound card.
 
 A commercial USB audio interface, a headset, or a PyDevices board running
-``soundcard.py`` all look the same here: ``usbif.uac_audio.output`` returns an
+``usb_soundcard.py`` all look the same here: ``usbif.uac_audio.output`` returns an
 ordinary ``audiodev.PCMOutput``. The application never knows a bus is involved.
 
     mpftp run -d COM49 examples/usb_speaker.py
 
-**Headline pairing.** P4 runs ``soundcard.py`` (device, C pump into its ES8311).
+**Headline pairing.** P4 runs ``usb_soundcard.py`` (device, audiodsp's pump into its ES8311).
 This script on an S3 hosts that P4 and plays through it. A PC hosting the P4
 works too -- standard classes are the protocol.
 
@@ -65,7 +65,7 @@ def main():
     dev_id, outs = find_speaker(host)
     if dev_id is None:
         print("no USB audio output found")
-        print("attach a speaker, headset, or a board running soundcard.py")
+        print("attach a speaker, headset, or a board running usb_soundcard.py")
         host.stop()
         return
 

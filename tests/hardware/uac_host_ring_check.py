@@ -1,7 +1,7 @@
 """UAC host ring check (usbif#36). Run on the HOST board.
 
 The host board plays to a hosted USB speaker (a P4 running
-``examples/soundcard.py`` on the bench) from the interpreter thread, the way an
+``examples/usb_soundcard.py`` on the bench) from the interpreter thread, the way an
 app with a UI does, while stalls are injected into that thread:
 
 - **long Python work**: a busy loop of ``WORK_MS`` every ``WORK_EVERY_MS``;

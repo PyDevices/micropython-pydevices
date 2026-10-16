@@ -25,14 +25,15 @@ satisfy:
                                 ``(kind, device_tuple)``; returns
                                 ``(events, overflowed)``.
 ``_usbif.capabilities()``       class names this firmware was built with.
-``_usbif.dev_functions([mask])`` report or choose the device functions this
-                               board presents; setting re-enumerates.
-``_usbif.dev_functions_built()`` the functions this firmware could present.
+
+The board as a USB device is machine.USBDevice with micropython-lib's
+usb-device packages (usb-device-audio, usb-device-video, usb-device-msc,
+usb_hid, midiports.usb_device), not this module.
 """
 
 import events
 
-from . import Device, DeviceInfo, Host
+from . import DeviceInfo, Host
 
 try:
     import _usbif
@@ -226,141 +227,6 @@ class NativeHost(Host):
         return _require().host_hid_close(*args)
 
 
-class NativeDevice(Device):
-    """The board as a USB peripheral, with its identity chosen at runtime.
-
-    Every function this firmware was built with is present in the binary;
-    which ones the host is shown is a Python decision, taken here.
-    """
-
-    # Portable names to the C module's bitmask. Kept here rather than in the
-    # C module so the names stay the portable API's, not the firmware's --
-    # hence "uac" for FN_AUDIO and "uvc" for FN_VIDEO.
-    _BITS = {"cdc": 1, "uac": 4, "uvc": 32}
-
-    def _mask_to_names(self, mask):
-        return frozenset(n for n, b in self._BITS.items() if mask & b)
-
-    def _names_to_mask(self, names):
-        mask = 0
-        for n in names:
-            try:
-                mask |= self._BITS[n]
-            except KeyError:
-                raise ValueError("unknown USB function: {}".format(n))
-        return mask
-
-    def functions(self, *names):
-        usbif = _require()
-        if not names:
-            return self._mask_to_names(usbif.dev_functions())
-        wanted = self._names_to_mask(names)
-        if not wanted:
-            # Presenting nothing is a legitimate wish, but USB expresses it
-            # by detaching, not by an empty configuration -- a descriptor
-            # with no interfaces is malformed and hosts flag the device.
-            raise ValueError("a device must present at least one function")
-        missing = self._mask_to_names(wanted & ~usbif.dev_functions_built())
-        if missing:
-            # Explicit rather than silent: a firmware that cannot present a
-            # function should say so, not enumerate without it.
-            raise ValueError(
-                "not built into this firmware: {}".format(", ".join(sorted(missing)))
-            )
-        usbif.dev_functions(wanted)
-        return self._mask_to_names(usbif.dev_functions())
-
-    def functions_available(self):
-        return self._mask_to_names(_require().dev_functions_built())
-
-    # -- The board as a peripheral -----------------------------------------
-    #
-    # As on NativeHost, thin forwards so that an application holds one object
-    # and never names ``_usbif``. The C names carry a ``dev_`` or ``uvc_dev_``
-    # prefix that distinguishes the device role from the host role inside a
-    # flat C namespace; on an object that *is* the device, that prefix says
-    # nothing, so it is dropped here.
-
-    def state(self, *args):
-        """``(connected, mounted, suspended)`` as the host currently sees us."""
-        return _require().dev_state(*args)
-
-    def reinit(self, *args):
-        """Tear the USB stack down and bring it back up on the same costume."""
-        return _require().dev_reinit(*args)
-
-    def pid(self, *args):
-        """The product id this costume enumerates with."""
-        return _require().dev_pid(*args)
-
-    def desc_check(self, *args):
-        """Validate the descriptor set this costume would present."""
-        return _require().dev_desc_check(*args)
-
-    def builtin_desc_cfg(self, *args):
-        """The configuration descriptor the firmware would send, as bytes."""
-        return _require().builtin_desc_cfg(*args)
-
-    # -- UAC: the board as a sound card -------------------------------------
-    def uac_enable(self, *args):
-        return _require().uac_enable(*args)
-
-    def uac_pump_start(self, *args, **kwargs):
-        return _require().uac_pump_start(*args, **kwargs)
-
-    def uac_pump_stop(self, *args):
-        return _require().uac_pump_stop(*args)
-
-    def uac_pump_stats(self, *args):
-        return _require().uac_pump_stats(*args)
-
-    def uac_pump_rate(self, *args):
-        """``(host_rate, wire_rate, retunes)``: the rate the host chose, the
-        rate the pump's I2S wire is clocked at, and how often it followed."""
-        return _require().uac_pump_rate(*args)
-
-    # uac_available() and uac_read() take fixed arguments, unlike the
-    # wrappers around them: they are what a Python pump polls every
-    # millisecond, and `*args` builds a tuple per call. That garbage forces a
-    # collection every so often, which on a large heap stalls the pump for
-    # longer than the 4.7 ms the full-speed FIFO holds.
-    def uac_available(self):
-        return _require().uac_available()
-
-    def uac_volume(self, *args):
-        """The host's playback volume and mute, as the host set them."""
-        return _require().uac_volume(*args)
-
-    def uac_read(self, buf=None):
-        return _require().uac_read(buf)
-
-    def uac_stats(self, *args):
-        return _require().uac_stats(*args)
-
-    # -- UVC: the board as a webcam ----------------------------------------
-    def uvc_format(self, *args):
-        """``(width, height, frame_bytes)`` the host negotiated."""
-        return _require().uvc_dev_format(*args)
-
-    def uvc_reset(self, *args):
-        return _require().uvc_dev_reset(*args)
-
-    def uvc_streaming(self, *args):
-        """True while the host has the video interface on an active alt setting."""
-        return _require().uvc_dev_streaming(*args)
-
-    def uvc_ready(self, *args):
-        return _require().uvc_dev_ready(*args)
-
-    def uvc_submit(self, *args):
-        return _require().uvc_dev_submit(*args)
-
-    def uvc_stats(self, *args):
-        return _require().uvc_dev_stats(*args)
-
-
-
-
 class MscPartition:
     """One partition of a hosted MSC device, as a MicroPython block device.
 
@@ -450,4 +316,4 @@ class MscPartition:
         return 0
 
 
-__all__ = ("NativeHost", "NativeDevice", "MscPartition")
+__all__ = ("NativeHost", "MscPartition")

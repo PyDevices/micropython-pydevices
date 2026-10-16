@@ -21,7 +21,7 @@ here and blitted to ``display_drv``.
 factor is a few instructions per pixel and needs no line buffer beyond one
 row. Anything smoother is a real resampler, which is a different example.
 
-**Pairing.** A PyDevices board presenting as a webcam (``usbif_webcam.py`` on
+**Pairing.** A PyDevices board presenting as a webcam (``usb_webcam.py`` on
 a P4) is a valid camera for this script on an S3, the same way a Logitech is.
 A P4 can be the host too, on a port that supplies 5 V: the
 ESP32-P4-WIFI6-DEV-KIT's direct Type-A socket streams a webcam this way.

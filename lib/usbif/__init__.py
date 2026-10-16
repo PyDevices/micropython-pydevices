@@ -1,6 +1,6 @@
-"""Portable USB host and device contracts for MicroPython and CPython.
+"""Portable USB host contracts for MicroPython and CPython.
 
-Backends subclass :class:`Host` and :class:`Device`. Optional host selection
+Backends subclass :class:`Host`. Optional host selection
 lives in :mod:`usbif.auto` and is never imported from here, matching
 ``audiodev`` and ``displaydev``.
 
@@ -13,8 +13,8 @@ the VM cannot promise that (see the transport note below).
 
 **Capabilities are discovered, never assumed.** The same import succeeds on a
 board with a full host stack, on a desktop where the OS owns the bus, and on a
-port with no USB at all. What differs is what :meth:`Host.capabilities` and
-:meth:`Device.capabilities` return, so application code branches on a
+port with no USB at all. What differs is what :meth:`Host.capabilities`
+returns, so application code branches on a
 frozenset rather than on ``ImportError`` or a chip name.
 
 Transport, and why events arrive by draining rather than by callback: on ESP32
@@ -472,56 +472,6 @@ class Host(_Role):
         return tuple(self._drain())
 
 
-class Device(_Role):
-    """The board presents itself to a computer as a USB peripheral.
-
-    Configuration only: the classes that move isochronous bytes (UAC, UVC) run
-    entirely in C and are observed from Python, never fed by it.
-    """
-
-    role = "device"
-
-    # The functions a board can present. Which of them a given firmware can
-    # actually offer is reported by ``functions_available()``; what it is
-    # presenting right now is ``functions()``.
-    # Portable names, which are not the C module's: the C constants are
-    # FN_AUDIO and FN_VIDEO, the portable names are "uac" and "uvc" -- matching
-    # the usbif.uvc module and what host_start() already takes.
-    FUNCTIONS = ("cdc", "uac", "uvc")
-
-    def _drain(self):
-        return ()
-
-    def poll(self):
-        self.start()
-        self._overflowed = False
-        return tuple(self._drain())
-
-    def functions(self, *names):
-        """Report or choose the USB functions this board presents.
-
-        Called with no arguments, returns the frozenset currently
-        advertised. Called with names, the board re-enumerates presenting
-        exactly those -- USB has no way to change identity in place, so the
-        host sees a detach and a fresh attach.
-
-            dev.functions()                  # -> frozenset({'cdc'})
-            dev.functions("cdc", "uac")      # a console and a sound card
-            dev.functions("uvc")             # a bare webcam
-
-        MIDI, HID, mass storage and extra serial ports are micropython-lib's
-        usb-device packages (and midiports, usb_hid, usb-device-msc) on
-        machine.USBDevice, beside whatever this presents.
-
-        A backend without runtime selection reports what it was built with
-        and raises on any attempt to change it.
-        """
-        raise NotImplementedError
-
-    def functions_available(self):
-        """The functions this firmware could present if asked."""
-        raise NotImplementedError
-
 
 class NullHost(Host):
     """A host that offers nothing, for ports without USB host support.
@@ -564,7 +514,6 @@ __all__ = (
     "MSC",
     "UAC",
     "UVC",
-    "Device",
     "DeviceInfo",
     "Host",
     "NullHost",

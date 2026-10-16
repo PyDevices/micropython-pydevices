@@ -9,5 +9,4 @@ entries:
     dcd_dwc2 (noflash)
     dwc2_common (noflash)
     usbd (noflash)
-    audio_device (noflash)
     tusb_fifo (noflash)

@@ -8,14 +8,13 @@ pairing is the same scripts on two boards, not a special `pair_*` file.
 
 | Class | Device (board presents as…) | Host (board drives…) |
 |---|---|---|
-| **UAC** | [`soundcard.py`](soundcard.py) (C pump); [`uac_pump.py`](uac_pump.py) (Python FIFO) | [`usb_speaker.py`](usb_speaker.py), [`usb_mic.py`](usb_mic.py) |
-| **UVC** | [`usbif_webcam.py`](usbif_webcam.py) | [`uvc_display.py`](uvc_display.py) (MJPEG via `jpegio` when present) |
-| **MIDI** | [`midi_harmonizer.py`](midi_harmonizer.py), [`midi_harmonizer_ui.py`](midi_harmonizer_ui.py), [`midi_device_in.py`](midi_device_in.py), [`midi_latency.py`](midi_latency.py) | [`midi_host.py`](midi_host.py) |
+| **UAC** | [`usb_soundcard.py`](usb_soundcard.py) (through audiodsp's pump) | [`usb_speaker.py`](usb_speaker.py), [`usb_mic.py`](usb_mic.py) |
+| **UVC** | [`usb_webcam.py`](usb_webcam.py) (MJPEG or YUY2, at the size the host picks) | [`uvc_display.py`](uvc_display.py) (MJPEG via `jpegio` when present) |
+| **MIDI** | [`midi_harmonizer.py`](midi_harmonizer.py), [`midi_harmonizer_ui.py`](midi_harmonizer_ui.py), [`midi_device_in.py`](midi_device_in.py) | [`midi_host.py`](midi_host.py) |
 | **HID** | [`hid_keyboard.py`](hid_keyboard.py), [`hid_mouse.py`](hid_mouse.py) | [`hid_host.py`](hid_host.py) |
 | **MSC** | [`sd_drive.py`](sd_drive.py), [`ram_drive.py`](ram_drive.py) | [`usb_drive_mount.py`](usb_drive_mount.py), [`usb_drive_read.py`](usb_drive_read.py), [`usb_drive_log.py`](usb_drive_log.py) |
-| **CDC** | built-in MicroPython console / costume bit | [`usb_serial.py`](usb_serial.py) |
+| **CDC** | MicroPython's own console | [`usb_serial.py`](usb_serial.py) |
 | **enum** | — | [`host_enum.py`](host_enum.py) (portable API; board or desktop) |
-| **self-test** | [`costume_selftest.py`](costume_selftest.py) | — |
 
 ## Board-to-board pairings
 
@@ -27,8 +26,8 @@ power in, so it can't host without 5 V from outside.
 
 | Device board | Script | Host board | Script | What is lent |
 |---|---|---|---|---|
-| **P4** | `soundcard.py` | **S3** | `usb_speaker.py` | Sound output -- the headline offload |
-| **P4** | `usbif_webcam.py` | **S3** | `uvc_display.py` | Camera → panel |
+| **P4** | `usb_soundcard.py` | **S3** | `usb_speaker.py` | Sound output -- the headline offload |
+| **P4** | `usb_webcam.py` | **S3** | `uvc_display.py` | Camera → panel |
 | **P4** | `sd_drive.py` | **S3** | `usb_drive_mount.py`, `usb_drive_read.py` | Shared storage |
 | **P4** / **S3** | `midi_harmonizer.py` | **S3** | `midi_host.py` | MIDI effect / instrument |
 | **S3** | `hid_keyboard.py` | **S3** | `hid_host.py` | Control surface (needs two S3s, or S3-device + PC) |
@@ -38,8 +37,8 @@ A PC can replace either end. That is the point of standard classes.
 ### Headline: P4 as a USB sound card for an S3
 
 1. Console on each board's **UART bridge**, not on the OTG port under test.
-2. P4: `mpftp run examples/soundcard.py` -- enumerates as Speakers, C pump
-   into the ES8311.
+2. P4: `mpftp run examples/usb_soundcard.py` -- enumerates as Speakers, played
+   by audiodsp's pump into the ES8311.
 3. S3: OTG adapter or powered hub on the host port (the Waveshare S3 touch
    boards do not switch VBUS; see also [usbif#5](https://github.com/PyDevices/usbif/issues/5)).
 4. S3: `mpftp run examples/usb_speaker.py` -- finds the P4, plays a 440 Hz tone.
@@ -63,10 +62,9 @@ wedged board.
 ## Conventions
 
 - Headers name the use, the board role, the other end, and whether UART must
-  hold the REPL (any costume that drops CDC cuts a native-USB session).
-- Reach the hardware through `usbif.auto` and never through `_usbif`. The
-  C module is package-internal; `usbif.auto.host()`, `.device()` and
-  `.open_midi()` hand back objects that carry the whole surface, streaming
-  included. `tests/test_no_usbif_leak.py` enforces it.
+  hold the REPL (a device setup without the console cuts a native-USB session).
+- Device examples use `machine.USBDevice` and the class packages; host
+  examples use `usb.core` and its class packages, or the older `usbif.auto`.
+  Never `_usbif` directly: the C module is package-internal. `tests/test_no_usbif_leak.py` enforces it.
 - No measured fps or latency numbers are claimed in headers for scripts that
   have not been re-run in this pass -- cite prior evidence or stay quiet.
