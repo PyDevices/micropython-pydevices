@@ -56,13 +56,31 @@ PREFER_MJPEG = True
 # The picture: the largest frame to ask the camera for, and how many times to
 # enlarge it on the display. None means "what fits the display". A chip that
 # decodes JPEG in software (an ESP32-S3) is quicker asking for a small frame.
-# Measured on a Waveshare ESP32-S3-Touch-LCD-4.3 hosting an MJPEG camera:
-# (320, 240) at UPSCALE = 1, in the middle of the screen, 3.6 frames a second;
-# at UPSCALE = 2, 640x480, 1.7; the camera's 640x480 unscaled, 1.5. Decoding
-# a 320x240 JPEG takes it about 100 ms and show() about 45, so the S3's own
-# work, not USB, sets those numbers.
+# Measured on a Waveshare ESP32-S3-Touch-LCD-4.3 hosting a 320x240 MJPEG
+# camera, frames a second:
+#
+#                          TEAR_FREE = True    TEAR_FREE = False
+#   UPSCALE = 1, foreground       7.8                 9.9
+#   UPSCALE = 2, foreground       3.2                 3.5
+#   UPSCALE = 1, BACKGROUND       4.4                 5.0
+#   UPSCALE = 2, BACKGROUND       2.6                 2.9
+#
+# The S3 decodes a 320x240 JPEG in about 90 ms; the panel's refresh wait is
+# what TEAR_FREE = False saves, and the timer what the foreground loop saves.
 MAX_SIZE = None
 UPSCALE = None
+
+# Decode straight into the display's framebuffer when it shares one (an RGB
+# panel's DotClockFramebuffer does): no intermediate picture, no blit. With
+# TEAR_FREE each frame goes to the back buffer and show() swaps on the panel's
+# next refresh; False paints the buffer on screen and skips the wait, which
+# is faster and can show a seam where a new frame meets the old.
+TEAR_FREE = True
+
+# True runs the frame loop on the App's 10 ms timer, so the REPL stays usable
+# while it plays; False runs it in the foreground until Ctrl-C, which on an
+# ESP32-S3 shows about half as many frames again.
+BACKGROUND = True
 
 try:
     import jpegio
@@ -141,14 +159,37 @@ def yuy2_row_to_rgb565(src: ptr8, dst: ptr16, width: int, scale: int):  # noqa: 
 
 
 @micropython.viper
-def rgb565_row_upscale(src: ptr16, dst: ptr16, width: int, scale: int):  # noqa: F821
-    """One RGB565 row, each pixel repeated `scale` times, native speed."""
-    o = 0
-    for x in range(width):
-        p = src[x]
-        for _ in range(scale):
-            dst[o] = p
-            o += 1
+def rgb565_row_upscale(src: ptr16, dst: ptr16, width: int, scale: int, stride: int):  # noqa: F821
+    """One RGB565 row enlarged `scale` times both ways: `scale` output rows,
+    `stride` pixels apart, each source pixel repeated `scale` times. All in
+    native code; a memoryview slice copied from another slice of the same
+    buffer costs about 40 ms per row on an ESP32-S3."""
+    r = 0
+    while r < scale:
+        o = r * stride
+        x = 0
+        while x < width:
+            p = src[x]
+            k = 0
+            while k < scale:
+                dst[o] = p
+                o += 1
+                k += 1
+            x += 1
+        r += 1
+
+
+@micropython.viper
+def rgb565_copy_down(buf: ptr16, width: int, rows: int):  # noqa: F821
+    """Copy a band's first row of `width` pixels into the next `rows - 1`."""
+    r = 1
+    while r < rows:
+        o = r * width
+        x = 0
+        while x < width:
+            buf[o + x] = buf[x]
+            x += 1
+        r += 1
 
 
 def find_camera(host, timeout_ms=10000):
@@ -266,13 +307,26 @@ if picked is not None:
     src = bytearray(frame_bytes)
     host.uvc_open(dev_id, fmt.interface, alt.alt, alt.endpoint,
                   alt.max_packet, frame_bytes)
-    display_drv.fill(0)
+    # This loop presents its own frames: the App's refresh timer would also
+    # call show(), waiting on the panel and swapping buffers under it.
+    _refresh_claim = app.pause_refresh()
+    # Nor does it read touch: the App's 10 ms service tick polling the touch
+    # controller over I2C would take its share of every frame.
+    _polling_claim = app.pause_polling()
+    # Black behind the picture, in both of a double-buffered panel's buffers
+    # (the direct paint below may not present again).
+    for _ in range(2):
+        display_drv.fill(0)
+        display_drv.show()
     _shown = 0
     _t0 = time.ticks_ms()
 
     def _frame_shown():
-        global _shown
         display_drv.show()
+        _count_frame()
+
+    def _count_frame():
+        global _shown
         _shown += 1
         if _shown % 25 == 0:
             dt = time.ticks_diff(time.ticks_ms(), _t0)
@@ -298,6 +352,32 @@ if picked is not None:
         rgb_mv = memoryview(rgb)
         src_stride = frame.width * 2
 
+        # Paint the panel's own buffer when it lets us, and the pixels need
+        # no byte swap on the way.
+        direct = [getattr(display_drv, "share_framebuffer", False)
+                  and not getattr(display_drv, "_requires_byteswap", False)
+                  and hasattr(display_drv, "framebuffers")]
+
+        def _target():
+            back, front, _, stride = display_drv.framebuffers()
+            return (back if TEAR_FREE or front is None else front), stride // 2
+
+        def _direct(n):
+            fbuf, stride = _target()
+            if scale == 1:
+                decoder.decode(fbuf, 0, x0, y0, stride=stride)
+            else:
+                decoder.decode(rgb, scale=0)
+                fmv = memoryview(fbuf)
+                row = stride * 2
+                for sy in range(frame.height):
+                    at = (y0 + sy * scale) * row + x0 * 2
+                    rgb565_row_upscale(rgb_mv[sy * src_stride:(sy + 1) * src_stride], fmv[at:],
+                                       frame.width, scale, stride)
+            if TEAR_FREE:
+                display_drv.show()
+            _count_frame()
+
         def _tick(_=None):
             n = host.uvc_read_frame(src)
             if n <= 0:
@@ -308,6 +388,16 @@ if picked is not None:
                 return
             if decoder.width != frame.width or decoder.height != frame.height:
                 return
+            if direct[0]:
+                try:
+                    _direct(n)
+                    return
+                except (OSError, ValueError, TypeError) as e:
+                    # A decoder or buffer that won't take it (hardware decode
+                    # wanting its own buffer): the blit path from now on.
+                    print("direct paint off:", e)
+                    direct[0] = False
+                    decoder.open(memoryview(src)[:n])
             try:
                 decoder.decode(rgb, scale=0)
             except Exception:
@@ -321,10 +411,7 @@ if picked is not None:
             # Integer upscale row by row into the band, then blit: each row
             # widened in native code, then copied down for the other rows.
             for sy in range(frame.height):
-                rgb565_row_upscale(rgb_mv[sy * src_stride:(sy + 1) * src_stride], band_mv, frame.width, scale)
-                for k in range(1, scale):
-                    band_mv[k * band_stride:(k + 1) * band_stride] = \
-                        band_mv[0:band_stride]
+                rgb565_row_upscale(rgb_mv[sy * src_stride:(sy + 1) * src_stride], band_mv, frame.width, scale, out_w)
                 display_drv.blit_rect(band, x0, y0 + sy * scale, out_w, scale)
             _frame_shown()
 
@@ -363,12 +450,17 @@ if picked is not None:
             for sy in range(frame.height):
                 yuy2_row_to_rgb565(src_mv[sy * src_stride:], band,
                                    frame.width, scale)
-                for k in range(1, scale):
-                    band_mv[k * band_stride:(k + 1) * band_stride] = \
-                        band_mv[0:band_stride]
+                rgb565_copy_down(band, out_w, scale)
                 display_drv.blit_rect(band, x0, y0 + sy * scale, out_w, scale)
             _frame_shown()
 
     # 10 ms. Frames arrive every 200 ms at 5 fps, so nearly every tick returns
     # immediately.
-    app.every(_tick, period=10)
+    if BACKGROUND:
+        app.every(_tick, period=10)
+    else:
+        try:
+            while True:
+                _tick()
+        finally:
+            host.uvc_close()

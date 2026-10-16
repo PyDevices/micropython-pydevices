@@ -8,7 +8,7 @@ from usbif import uvc
 IN_LIMIT = 600
 
 
-def run(seconds=6):
+def run(seconds=6, max_w=10000, max_h=10000):
     host = usbif.auto.host(classes=("uvc",)).start()
     dev_id = None
     end = time.ticks_add(time.ticks_ms(), 15000)
@@ -25,6 +25,8 @@ def run(seconds=6):
     picked = None
     for fmt in formats:
         for frame in fmt.frames:
+            if frame.width > max_w or frame.height > max_h:
+                continue
             for interval in (frame.intervals or [0]):
                 payload, frame_bytes = host.uvc_negotiate(dev_id, fmt.interface, fmt.index, frame.index, interval)
                 alt = uvc.alt_for_payload(alts, payload) if payload <= IN_LIMIT else None
