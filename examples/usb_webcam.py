@@ -14,8 +14,9 @@ jpegio and machine.USBDevice's streaming endpoints, and micropython-lib's
 ``usb-device`` with usbif's ``usb-device-video`` on the board.
 
 MJPEG is the default: 640x480, asking for 15 frames a second on a full-speed
-port (about 12 arrive in a lit room) and 30 on a high-speed one. ``FORMAT = "yuy2"`` sends uncompressed frames
-instead, which every host takes but which fill a full-speed port at 160x120.
+port (about 12 arrive in a lit room) and 30 on a high-speed one.
+``FORMAT = "yuy2"`` sends uncompressed frames instead, which every host takes
+but which fill a full-speed port at 160x120.
 The REPL's serial port stays up beside the camera. Ctrl-C stops it.
 """
 
