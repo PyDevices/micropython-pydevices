@@ -4,3 +4,4 @@ metadata(
 )
 
 package("usb")
+module("usb_host.py")

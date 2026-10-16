@@ -72,6 +72,14 @@ def start(full_speed=False):
     _full_speed = full_speed
 
 
+def stop():
+    """Stop the host port; the next find() or start() starts it again."""
+    global _started, _full_speed
+    if _started is not None:
+        _usbif.host_stop()
+    _started = _full_speed = None
+
+
 def _start():
     if _started is None:
         start()
