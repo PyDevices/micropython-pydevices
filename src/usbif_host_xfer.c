@@ -378,8 +378,13 @@ int usbif_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint32
     }
     if (!usbif_xfer_wait(pipe->done, timeout_ms)) {
         usbif_xfer_retire(pipe);
-        r = -MP_ETIMEDOUT;
-        goto out;
+        // Data can land between the timeout and the halt: a MIDI note
+        // arriving as a poll gives up. Hand it over rather than drop it.
+        if (pipe->busy || x->actual_num_bytes <= 0 || !in) {
+            r = -MP_ETIMEDOUT;
+            goto out;
+        }
+        x->status = USB_TRANSFER_STATUS_COMPLETED;
     }
     r = usbif_xfer_status_errno(x->status);
     if (r == 0) {
