@@ -17,6 +17,13 @@ CI runs it with no modules present, so it checks the overlay alone.
 
 Every patch applies to the whole tree, whichever port you build: a prepared
 tree serves every port and every module set.
+
+patches/micropython-lib/ holds fixes micropython-lib has made since the
+commit MicroPython's lib/micropython-lib submodule points at. They go onto
+the submodule's working tree after every update, not into the local commit,
+and a patch the submodule already has (applied before, or upstream's own
+after a pin move) is skipped. Every package a firmware freezes and every
+copy staged from the submodule for a board's /lib then carries them.
 """
 
 import hashlib
@@ -27,6 +34,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 OVERLAY = REPO / "patches" / "micropython"
+LIB_OVERLAY = REPO / "patches" / "micropython-lib"
+LIB = Path("lib") / "micropython-lib"
 MODULES = REPO / "modules"
 
 
@@ -48,6 +57,47 @@ def series():
         for module in sorted(MODULES.iterdir()):
             patches += sorted((module / "patches").glob("*.patch"))
     return patches
+
+
+def lib_series():
+    """The micropython-lib patches, in order."""
+    return sorted(LIB_OVERLAY.glob("*.patch"))
+
+
+def _quiet(repo, *args):
+    return subprocess.run(["git", "-C", str(repo), *args], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+
+
+def lib_applied(lib, patch):
+    """True when micropython-lib's tree at `lib` already has the patch."""
+    return _quiet(lib, "apply", "--reverse", "--check", str(patch)) == 0
+
+
+def lib_files(patches):
+    """The files the micropython-lib patches touch."""
+    files = set()
+    for patch in patches:
+        out = subprocess.run(["git", "apply", "--numstat", str(patch)], check=True, text=True, capture_output=True).stdout
+        files.update(line.split("\t", 2)[2] for line in out.splitlines() if line.count("\t") >= 2)
+    return sorted(files)
+
+
+def apply_lib(lib, patches):
+    for patch in patches:
+        name = patch.relative_to(REPO)
+        if lib_applied(lib, patch):
+            print(f"already in micropython-lib: {name}", flush=True)
+        elif git(lib, "apply", str(patch), check=False) != 0:
+            sys.exit(f"apply_patches: {name} does not apply to {LIB}")
+        else:
+            print(f"applied {name}", flush=True)
+
+
+def lib_record(mp):
+    """micropython-lib's commit and the patches of ours its tree carries, for a build's record."""
+    lib = Path(mp) / LIB
+    commit = git(lib, "rev-parse", "--short=12", "HEAD", capture=True)
+    return {"commit": commit, "patches": [p.name for p in lib_series() if lib_applied(lib, p)]}
 
 
 def series_id(patches):
@@ -75,6 +125,9 @@ def check(mp, upstream, patches):
         git(mp, "worktree", "add", "--quiet", "--detach", str(tree), upstream)
         try:
             apply(tree, patches)
+            if lib_series():
+                git(tree, "submodule", "update", "--init", "--depth", "1", "--quiet", str(LIB))
+                apply_lib(tree / LIB, lib_series())
         finally:
             git(mp, "worktree", "remove", "--force", str(tree), check=False)
     print(f"the series applies clean to {upstream}", flush=True)
@@ -119,8 +172,15 @@ def prepare(mp, upstream, patches, refresh=False):
         print(f"overlay applied: {head} on {upstream}", flush=True)
     # Every manifest require()s from micropython-lib, so a clone without it
     # cannot even list its C modules. A port's other submodules come from
-    # `make submodules`, the upstream way.
-    git(mp, "submodule", "update", "--init", "--quiet", "lib/micropython-lib")
+    # `make submodules`, the upstream way. Our micropython-lib patches come
+    # off first, so an update to another commit isn't refused over them, and
+    # go back on after.
+    lib = Path(mp) / LIB
+    lib_patches = lib_series()
+    if lib_patches and (lib / ".git").exists():
+        git(lib, "checkout", "--quiet", "--", *lib_files(lib_patches), check=False)
+    git(mp, "submodule", "update", "--init", "--quiet", str(LIB))
+    apply_lib(lib, lib_patches)
 
 
 def main(argv):

@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Angus Gratton <angus@redyak.com.au>
+Date: Wed, 16 Sep 2026 11:08:59 +1000
+Subject: [PATCH 2/2] usb-device-midi: Resume RX endpoint transfer after
+ handling callback.
+
+If the _rx buffer is full then no OUT transfer is submitted to TinyUSB.
+
+This meant that completely filling the RX buffer could permanently stall
+the OUT direction endpoint, as the scheduled callback handler wouldn't
+re-queue it.
+
+Signed-off-by: Angus Gratton <angus@redyak.com.au>
+---
+ micropython/usb/usb-device-midi/usb/device/midi.py | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/micropython/usb/usb-device-midi/usb/device/midi.py b/micropython/usb/usb-device-midi/usb/device/midi.py
+index 8c99da0..f484a07 100644
+--- a/micropython/usb/usb-device-midi/usb/device/midi.py
++++ b/micropython/usb/usb-device-midi/usb/device/midi.py
+@@ -181,6 +181,7 @@ class MIDIInterface(Interface):
+             self.on_midi_event(cin, m[i + 1], m[i + 2], m[i + 3])
+             i += 4
+         self._rx.finish_read(i)
++        self._rx_xfer()  # resume xfer if needed because _rx buffer was previously full
+ 
+     def desc_cfg(self, desc, itf_num, ep_num, strs):
+         # Start by registering a USB Audio Control interface, that is required to point to the
+-- 
+2.43.0
+

@@ -1349,6 +1349,7 @@ def main():
         rec["rp2_storage_bytes"] = rp2_storage
     rec["micropython"] = git_out(mp, "describe", "--always", "--abbrev=12")
     rec["module_revisions"] = revisions
+    rec["micropython_lib"] = apply_patches.lib_record(mp)
     if port == "esp32" and tinyusb:
         rec["tinyusb"] = git_out(tinyusb, "describe", "--tags", "--always")
     rec_path.write_text(json.dumps(rec, indent=1) + "\n")
