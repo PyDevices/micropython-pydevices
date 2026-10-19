@@ -399,7 +399,7 @@ the house idiom for an application with input; the rest are plain scripts
 because they have nothing to schedule.
 
 USB webcam (the board presenting as UVC) lives in
-[`usbif`](https://github.com/PyDevices/usbif)'s `examples/usbif_webcam.py`,
+usbhost's [`examples/usb_webcam.py`](../usbhost/examples/usb_webcam.py),
 which sources frames from this module when a camera is present.
 
 `available()` answers whether this firmware can open a camera at all: it is

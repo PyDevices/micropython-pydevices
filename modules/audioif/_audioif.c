@@ -28,7 +28,7 @@
 // mode weak binding has, and the one that would leave the default winning
 // silently. `audiopump.driver()` is the run-time check that says it worked.
 //
-// The module is private by convention -- the way usbif ships a C `_usbif`
+// The module is private by convention -- the way usbhost ships a C `_usbhost`
 // under a Python package. `audiodev` is the public face.
 
 #include <stdint.h>
@@ -1335,7 +1335,7 @@ const audiodsp_port_ops_t *audiodsp_port_driver(void) {
 // --- the I2S sink and source, opened from Python ---------------------------
 //
 // Pins, rate and slot mode are board facts, and board facts stay in Python
-// beside every other board decision -- exactly as usbif_i2s.c does it.
+// beside every other board decision -- as the board configs do.
 
 #if AUDIOIF_DRV_ESP
 static uint32_t audiopump_i2s_open_raw(const audiopump_i2s_cfg_t *cfg);

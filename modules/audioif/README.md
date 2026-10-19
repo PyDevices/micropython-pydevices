@@ -4,8 +4,8 @@ The audio hardware layer for PyDevices firmware: the platform drivers under the
 audio pump. It is one C module, `_audioif`, and a CircuitPython-shaped
 `audiobusio.I2SOut` on top of it — the part that knows what a thread is, what a
 mutex is, where the clock comes from and where the audio goes. It sits beside
-[`displayif`](https://github.com/PyDevices/displayif) and
-[`usbif`](https://github.com/PyDevices/usbif), and under `audiodev` in
+[`displayif`](../displayif) and
+[`usbhost`](../usbhost), and under `audiodev` in
 [pydevices](https://github.com/PyDevices/pydevices).
 
 New here? Read the [newcomer's guide](docs/newcomers.md) for the portable
@@ -117,7 +117,7 @@ two-slot wire gets the same signal in both slots and has no answer here.
 
 ## `_audioif` — the module this half publishes
 
-Private by convention, the way `usbif` ships a C `_usbif` under a Python
+Private by convention, the way `usbhost` ships a C `_usbhost` under a Python
 package; `audiodev` is the public face. It carries the hardware and nothing
 else. The engine's counters — `lock_stats`, `lock_reset`, `fault` — stayed on
 `audiopump`, because they are the engine's.
