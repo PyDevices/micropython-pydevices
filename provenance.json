@@ -115,6 +115,9 @@
   },
   "0039-micropython-esp32-otg-phy-handoff-for-host-mode.patch": {
    "sha256": "ca4a89342bfa8ea42cde9526bedbf43f33c614754f67c21a6cbfc66d2d7d9507"
+  },
+  "0040-micropython-py-mk-search-each-user-c-module-in-its-own-directory-first.patch": {
+   "sha256": "92300314c6d0f502c7d37ba08a95a0308b526b9f4db4d77cc19222f232fbd56d"
   }
  },
  "tinyusb_patches": {

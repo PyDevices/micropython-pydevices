@@ -2,9 +2,9 @@
 against what's plugged into it. Runs in WSL; drives the host board (and a
 peer board, if one is given) over ``mpftp hold``. One command, one verdict:
 
-    python3 tools/matrix/run_host.py --host COM49                    # LCD-4.3 #1 and its hub
-    python3 tools/matrix/run_host.py --host COM49 --plant all        # every check shown failing
-    python3 tools/matrix/run_host.py --host COM49 --peer COM31       # with a board on the hub
+    python3 tools/matrix/run_host.py --host COM49 --peer COM31       # LCD-4.3 #1 with a board on its hub: all 8 checks
+    python3 tools/matrix/run_host.py --host COM49 --host-only        # no peer: the 3 checks that need none
+    python3 tools/matrix/run_host.py --host COM49 --peer COM31 --plant all   # every check shown failing
 
 The host board needs usbhost's firmware, usb-core and the usb-host-*
 packages, midiports and adafruit_midi in /lib. The runner copies
@@ -36,9 +36,16 @@ DEV-KIT's H2 on LCD-4.3 #1's hub) and whose console is ``--peer``. It needs
 micropython-lib's usb-device-cdc and -midi, ``usb_hid``, ``adafruit_hid``,
 ``midiports``, and for audio and video usbhost's ``usb-device-audio`` and
 ``usb-device-video`` with a firmware that streams; the runner copies the
-scripts it runs. Without ``--peer`` the checks that need one say
-"skipped, needs ..." and don't count against the verdict. The runner never
-touches a board on the port (Espressif's VID) unless it is the peer.
+scripts it runs. The runner never touches a board on the port (Espressif's
+VID) unless it is the peer.
+
+A pass means every check ran. Give neither ``--peer`` nor ``--host-only`` and
+the runner stops before it touches a board. ``--host-only`` is the explicit
+way to run enumerate, msc and hid alone: the five checks that need a peer are
+named as skipped, and the verdict says so, ``HOST LEG PASS 3 of 3 (host-only;
+5 need --peer)``. Any other skip, such as hid finding no keyboard on the port,
+fails the run: ``HOST LEG FAIL 2 of 3 (host-only; 5 need --peer; unexpected
+skip: hid)``.
 
 ``--plant all`` (or a comma list) turns on each check's planted fault: the
 drive missing from the list, a byte of the file corrupted on the way, the
@@ -48,7 +55,7 @@ header lost. Each planted check must fail; the run ends ``HOST LEG FAIL``
 and ``PLANTS CAUGHT n of n``.
 
 Prints one JSON line per check and ends with ``HOST LEG PASS`` or
-``HOST LEG FAIL``. Exit 0 on pass, 1 on fail; in a planted run, exit 0 only
+``HOST LEG FAIL``. Exit 0 on pass, 1 on fail, 2 on a bad command line; in a planted run, exit 0 only
 if every plant was caught.
 """
 import argparse
@@ -235,15 +242,44 @@ def with_peer(peer, name, host, call, timeout, plant):
     return r
 
 
+def verdict(results, host_only):
+    """The last line and the exit status for a list of check rows.
+
+    A pass is every selected check run and passed. A row with ``skipped`` is
+    expected only when ``--host-only`` was given and the check needs a peer;
+    any other skip is a failure."""
+    ran = [r for r in results if "pass" in r]
+    expected = [r["check"] for r in results if r.get("skipped") and host_only and r["check"] in NEEDS_PEER]
+    unexpected = [r["check"] for r in results if r.get("skipped") and r["check"] not in expected]
+    good = bool(ran) and all(r["pass"] for r in ran) and not unexpected
+    notes = []
+    if host_only:
+        notes.append("host-only")
+    if expected:
+        notes.append("%d need --peer" % len(expected))
+    if unexpected:
+        notes.append("unexpected skip: " + ", ".join(unexpected))
+    tail = " (%s)" % "; ".join(notes) if notes else ""
+    line = "HOST LEG %s %d of %d%s" % ("PASS" if good else "FAIL", sum(r["pass"] for r in ran), len(ran) + len(unexpected), tail)
+    return good, line
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--host", required=True, help="the host board's console (a UART, or ws://HOST)")
     ap.add_argument("--peer", help="a peer board's console; its device port is on the host's port")
+    ap.add_argument("--host-only", action="store_true",
+                    help="no peer: run only the checks that need none, and say so in the verdict")
     ap.add_argument("--expect", default="msc,hid", help="classes that must be on the port (default msc,hid)")
     ap.add_argument("--only", help="comma list of checks to run")
     ap.add_argument("--plant", help="'all' or a comma list of checks whose planted fault is on")
     ap.add_argument("--no-put", action="store_true", help="the board files are already in place")
     args = ap.parse_args()
+    if args.peer and args.host_only:
+        ap.error("--peer and --host-only contradict each other")
+    if not args.peer and not args.host_only:
+        ap.error("name a --peer, or say --host-only to run just the checks that need none "
+                 "(a pass means every check ran)")
 
     only = args.only.split(",") if args.only else CHECKS
     plants = set(CHECKS if args.plant == "all" else (args.plant.split(",") if args.plant else ()))
@@ -298,10 +334,8 @@ def main():
     if peer:
         peer.stop()
     ran = [r for r in results if "pass" in r]
-    skipped = [r["check"] for r in results if "skipped" in r]
-    good = bool(ran) and all(r["pass"] for r in ran)
-    tail = " (%d skipped: %s)" % (len(skipped), ", ".join(skipped)) if skipped else ""
-    print("HOST LEG", "PASS" if good else "FAIL", "%d of %d%s" % (sum(r["pass"] for r in ran), len(ran), tail))
+    good, line = verdict(results, args.host_only)
+    print(line)
     if plants:
         tried = [r for r in ran if r.get("planted")]
         caught = [r for r in tried if not r["pass"]]
