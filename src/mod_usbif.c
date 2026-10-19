@@ -868,12 +868,14 @@ static mp_obj_t usbif_host_net_stop_py(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_net_stop_obj, usbif_host_net_stop_py);
 
+#if USBIF_HAVE_HOST
 static mp_obj_t usbif_ip_str(uint32_t a) {
     char buf[16];
     snprintf(buf, sizeof(buf), "%u.%u.%u.%u", (unsigned)(a & 0xff), (unsigned)((a >> 8) & 0xff),
         (unsigned)((a >> 16) & 0xff), (unsigned)(a >> 24));
     return mp_obj_new_str(buf, strlen(buf));
 }
+#endif
 
 // host_net_info(): (up, (ip, netmask, gateway, dns), (rx, tx, rx dropped,
 // tx dropped, rx errors)), or None when no interface is up.
