@@ -30,7 +30,6 @@ import argparse
 import itertools
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -196,7 +195,6 @@ def main():
     for f in ("rawinput_count.py", "cdc_echo.py", "usb_desc.py"):
         sh(["cp", os.path.join(HERE, f), WIN_TMP])
     sh(["cp", os.path.expanduser("~/gh/pydevices/.toolbox/scripts/midi_roundtrip.py"), WIN_TMP])
-    lib = os.path.join(WIN_TMP, "lib")
     if not os.path.isdir(os.path.join(WIN_TMP, "midiports")):
         sh(["cp", "-r", os.path.expanduser("~/gh/pydevices/pydevices/midiports/midiports"), WIN_TMP])
         sh(["cp", os.path.expanduser("~/gh/pydevices/pydevices/utils/uwin32.py"), WIN_TMP])

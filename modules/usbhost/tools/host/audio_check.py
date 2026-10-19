@@ -17,7 +17,6 @@ def run(seconds=3, hz=440, amp=0.3):
             break
         time.sleep_ms(250)
     spk = Speaker(dev, rate=48000, channels=2, bits=16, ring_ms=200)
-    period = 48000 // hz if 48000 % hz == 0 else 48000 // hz
     one = bytearray(4 * 1200)            # 25 ms of tone, a whole number of 440 Hz cycles near enough
     for i in range(1200):
         v = int(amp * 32767 * math.sin(2 * math.pi * hz * i / 48000))

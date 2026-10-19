@@ -19,7 +19,6 @@ def start(ring_bytes=16384):
 def run(seconds):
     """Drain the ring for this long; returns what came, and its loudest sample."""
     buf = bytearray(1024)
-    mv = memoryview(buf)
     got = 0
     peak = 0
     streamed_ms = 0
