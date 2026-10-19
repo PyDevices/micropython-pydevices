@@ -1852,10 +1852,10 @@ index 76785c4a0..d234e1470 100644
          print("EINPROGRESS")
  
 diff --git a/tests/run-tests.py b/tests/run-tests.py
-index 593f82c0b..4372dacef 100755
+index 31b7ec2a6..e72310925 100755
 --- a/tests/run-tests.py
 +++ b/tests/run-tests.py
-@@ -944,6 +944,12 @@ def run_tests(pyb, tests, args, result_dir, num_threads=1):
+@@ -879,6 +879,12 @@ def run_tests(pyb, tests, args, result_dir, num_threads=1):
          if not sysconfig.get_platform().startswith("mingw"):
              # Works but CPython uses '\' path separator
              skip_tests.add("import/import_file.py")

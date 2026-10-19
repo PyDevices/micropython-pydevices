@@ -9,15 +9,11 @@
 # modules/.lvgl-bindings (a sibling checkout is linked there instead) and
 # hands it to lvgl-micropython, whose own LVGL_BINDINGS_COMMIT then goes unused.
 audiocomponents   https://github.com/PyDevices/audiocomponents.git    b2ebc92c77276229a40d7c279c0a321550a68103
-audiodsp          https://github.com/PyDevices/audiodsp.git           faa8289e23be3f8bbc9d22971641c36a909c9a77
-audioif           https://github.com/PyDevices/audioif.git            7f1cd3723f8dde185717e2643e1580e1f5ee53ef
-cameraif          https://github.com/PyDevices/cameraif.git           d1a7aa8e9fa2a07578095d7ce9b626d0f7f4183f
-displayif         https://github.com/PyDevices/displayif.git          be7669ebd3cb1e603d0a9f6b1aba94fa1140ac2c
+audiodsp          https://github.com/PyDevices/audiodsp.git           c23f67a3b5f8ab9b4450b4bb49777782d9537f9d
 lvgl-bindings     https://github.com/PyDevices/lvgl-bindings.git      7740c2fae0daa10992f5f8fe54acf670a70e2d3b
 lvgl-micropython  https://github.com/PyDevices/lvgl-micropython.git   05adf2a70532c5d521c086b880a65382626790cf
 palettes          https://github.com/PyDevices/palettes.git           f3dfad0bac281f1e8816b30861445498b4137de6
 pdwidgets         https://github.com/PyDevices/pdwidgets.git          e92267f2ef938b60ba3b97177ceb2bd0e0d402d3
-pydevices         https://github.com/PyDevices/pydevices.git          81290b13573b51889def33e65559fe64fb5471c1
+pydevices         https://github.com/PyDevices/pydevices.git          323c97ff98da112154fb0f2672671470a0fc23b7
 pygraphics        https://github.com/PyDevices/pygraphics.git         2d7ca35847db78d450428cdc0cb5aa69ab81c809
 ulab              https://github.com/v923z/micropython-ulab.git       1d3ddd8f5228e2c7335dac71f4846e6abb0ec9f9
-usbif             https://github.com/PyDevices/usbif.git              d8252b64764d68792c7daf3a8e13ac3270dd06e3

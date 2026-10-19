@@ -37,7 +37,7 @@ Unchanged on upstream v1.29.0.
  1 file changed, 29 insertions(+)
 
 diff --git a/py/mkrules.cmake b/py/mkrules.cmake
-index 0903f81..976ebdc 100644
+index 0903f81d8..8929db70f 100644
 --- a/py/mkrules.cmake
 +++ b/py/mkrules.cmake
 @@ -66,8 +66,35 @@ endif()

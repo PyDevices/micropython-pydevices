@@ -54,9 +54,10 @@ Based-on: micropython 0fd6c573e (tag v1.29.0)
  1 file changed, 9 insertions(+), 2 deletions(-)
 
 diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
+index 4a1de4079..a20a1b26b 100644
 --- a/shared/tinyusb/mp_usbd_runtime.c
 +++ b/shared/tinyusb/mp_usbd_runtime.c
-@@ -484,10 +484,17 @@
+@@ -484,10 +484,17 @@ static void mp_usbd_disconnect(mp_obj_usb_device_t *usbd) {
      }
  
      #if MICROPY_HW_USB_CDC

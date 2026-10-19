@@ -86,6 +86,10 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
 - [`patches/tinyusb/`](patches/tinyusb/) — patches to the TinyUSB the esp32 port builds on the
   S2, S3 and P4, which `build_mp.py` applies to `deps/espressif__tinyusb`
   (at its `deps.lock` tag) and builds in place of the port's own copy.
+- [`patches/micropython-lib/`](patches/micropython-lib/) — micropython-lib's own fixes from
+  after the commit MicroPython's `lib/micropython-lib` points at, which `apply_patches.py`
+  puts on the submodule after every update. A firmware that freezes those packages, and
+  a board whose `/lib` you fill from the submodule, both get them.
 - [`variants/`](variants/) — our variants: `unix/` and `windows/` (`pydevices`,
   `vst3-engine`), and `webassembly/` (`pydevices`, with the `wasmbridge`
   module and a Fetch-backed `requests`), and `esp32/`: the sdkconfig

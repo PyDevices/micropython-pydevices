@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 12:00:00 -0500
+Subject: [PATCH] lib/oofatfs: names on the API are UTF-8, so non-ASCII
+ filenames work.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+FatFs was built with FF_LFN_UNICODE 0, which makes its API take and
+return names in the OEM code page (437 by default) while MicroPython's
+str is UTF-8. On a card written by a PC, a long name like "Boléro.mid"
+comes back from os.listdir(b"/sd") as b"Bol\x82ro.mid", os.listdir("/sd")
+raises UnicodeError, and open("/sd/Boléro.mid") gives ENOENT. A name
+with a character code page 437 lacks ("Dvořák.mid") is reachable only
+by its short name. Going the other way, a file MicroPython creates as
+"Boléro.mid" appears on the PC as "Bol├⌐ro.mid".
+
+FF_LFN_UNICODE now follows MICROPY_FATFS_LFN_UNICODE and defaults to 2,
+UTF-8 on the API, so any name FAT can store works through os and open.
+It only takes effect where LFN is enabled; FF_CODE_PAGE still decides
+how short names are made. A port can set MICROPY_FATFS_LFN_UNICODE to 0
+for the old behaviour.
+
+A UTF-8 name longer than FF_LFN_BUF (255) bytes is listed by its short
+name, as before for names the code page couldn't hold.
+
+Cost: 472 bytes of code on the unix port (x86-64), no RAM.
+---
+ lib/oofatfs/ffconf.h | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/lib/oofatfs/ffconf.h b/lib/oofatfs/ffconf.h
+index 4a8015668..2146d84a8 100644
+--- a/lib/oofatfs/ffconf.h
++++ b/lib/oofatfs/ffconf.h
+@@ -164,7 +164,13 @@
+ /  ff_memfree() in ffsystem.c, need to be added to the project. */
+ 
+ 
+-#define FF_LFN_UNICODE  0
++#ifdef MICROPY_FATFS_LFN_UNICODE
++#define FF_LFN_UNICODE  (MICROPY_FATFS_LFN_UNICODE)
++#else
++#define FF_LFN_UNICODE  2
++#endif
++/* MicroPython's str is UTF-8, so the API takes and returns UTF-8 names by
++/  default; FF_CODE_PAGE then only matters for short names. */
+ /* This option switches the character encoding on the API when LFN is enabled.
+ /
+ /   0: ANSI/OEM in current CP (TCHAR = char)

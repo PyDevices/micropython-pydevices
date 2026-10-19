@@ -4,7 +4,7 @@
 #
 # The kit wires the high-speed controller only to its USB-A sockets, which
 # source 5 V, so it can't be a device port there. As a USB host it can, and
-# usbif's host runs on it. The full-speed controller's pins, GPIO26 (D-) and
+# usbhost's host runs on it. The full-speed controller's pins, GPIO26 (D-) and
 # GPIO27 (D+), reach header P6 at pins 32 and 37 and nothing else, so a USB-C
 # socket wired there (5.1 kOhm from each CC pin to GND, VBUS left open) is the
 # device port, and the board is host and device at once. The REPL is on the

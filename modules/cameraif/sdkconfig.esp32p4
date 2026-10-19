@@ -1,0 +1,24 @@
+# cameraif on the ESP32-P4: the OV5647 driver (the Waveshare panel's MIPI-CSI
+# camera), appended to every P4 build that selects cameraif.
+#
+# Two options, needed together, failing differently when absent. Without
+# CONFIG_CAMERA_OV5647 the driver is not compiled. Without the AUTO_DETECT
+# option it is compiled but its probe is dropped by --gc-sections, because
+# esp_cam_sensor's detection walks a linker section rather than calling a
+# symbol. Either way the detect array is empty and the camera reports as
+# absent on the bus -- a wiring-shaped error with a build-configuration
+# cause, which cost an hour to see because the message names SCCB.
+CONFIG_CAMERA_OV5647=y
+CONFIG_CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
+
+# Every mode the driver has, so Camera(format=...) can open any of them: the
+# windows (800x800, 800x640, 800x1280, RAW8 at 50 fps), 1920x1080 RAW10 at 30,
+# and the whole sensor 2x2 binned, 1280x960 RAW10 at 45 -- the one whose flip
+# and mirror turn the same picture over, and the quietest in a dim room. The
+# default stays 800x800; each mode costs only its register table.
+CONFIG_CAMERA_OV5647_MIPI_RAW8_800X800_50FPS=y
+CONFIG_CAMERA_OV5647_MIPI_RAW8_800X640_50FPS=y
+CONFIG_CAMERA_OV5647_MIPI_RAW8_800X1280_50FPS=y
+CONFIG_CAMERA_OV5647_MIPI_RAW10_1920X1080_30FPS=y
+CONFIG_CAMERA_OV5647_MIPI_RAW10_1280X960_BINNING_45FPS=y
+CONFIG_CAMERA_OV5647_MIPI_DEFAULT_FMT_RAW8_800X800_50FPS=y

@@ -27,7 +27,7 @@ modules. Unchanged on upstream v1.29.0.
  2 files changed, 22 insertions(+), 1 deletion(-)
 
 diff --git a/py/makeqstrdefs.py b/py/makeqstrdefs.py
-index 628fbe6..f34eaaa 100644
+index 628fbe631..f34eaaa3e 100644
 --- a/py/makeqstrdefs.py
 +++ b/py/makeqstrdefs.py
 @@ -222,7 +222,17 @@ if __name__ == "__main__":
@@ -49,7 +49,7 @@ index 628fbe6..f34eaaa 100644
                  current_tok = arg
              else:
 diff --git a/py/mkrules.mk b/py/mkrules.mk
-index a04cd14..788f1f9 100644
+index a04cd1419..788f1f99b 100644
 --- a/py/mkrules.mk
 +++ b/py/mkrules.mk
 @@ -139,6 +139,17 @@ $(BUILD)/%.o: $(BUILD)/%.c

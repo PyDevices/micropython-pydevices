@@ -1,0 +1,201 @@
+From 72725453f5a512f7b441c5906ea39b6527976ad2 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 03:47:28 -0500
+Subject: [PATCH] extmod/machine_usb_device: a high-speed descriptor, speed(),
+ an IN endpoint check.
+
+A package builds its configuration descriptor for full speed: 64-byte bulk
+endpoints and interrupt intervals in milliseconds. At high speed USB 2.0
+requires 512-byte bulk endpoints and counts intervals in microframes, so
+config() keeps a high-speed copy beside the descriptor and the runtime
+serves whichever matches the link it is on, for micropython-lib's packages
+and anyone else's alike.
+
+USBDevice.speed() says the speed the link runs at once a host has
+configured the device, and until then the fastest the controller can run.
+
+On the ESP32-S2/S3 (and the P4's full-speed controller) only IN endpoints
+up to 4 have a transmit FIFO; one numbered higher opens and never
+completes a transfer. config() now refuses such a descriptor with a
+ValueError that names the endpoint (MICROPY_HW_USB_EP_IN_MAX).
+---
+ extmod/machine_usb_device.c      | 79 ++++++++++++++++++++++++++++++++
+ ports/esp32/mpconfigport.h       | 10 ++++
+ shared/tinyusb/mp_usbd.h         |  3 ++
+ shared/tinyusb/mp_usbd_runtime.c |  5 ++
+ 4 files changed, 97 insertions(+)
+
+diff --git a/extmod/machine_usb_device.c b/extmod/machine_usb_device.c
+index 474da8a2f..5a06908c7 100644
+--- a/extmod/machine_usb_device.c
++++ b/extmod/machine_usb_device.c
+@@ -57,6 +57,9 @@ static mp_obj_t usb_device_make_new(const mp_obj_type_t *type, size_t n_args, si
+         o->base.type = &machine_usb_device_type;
+         o->desc_dev = mp_const_none;
+         o->desc_cfg = mp_const_none;
++        #if CFG_TUD_MAX_SPEED == OPT_MODE_HIGH_SPEED
++        o->desc_cfg_hs = mp_const_none;
++        #endif
+         o->desc_strs = mp_const_none;
+         o->open_itf_cb = mp_const_none;
+         o->reset_cb = mp_const_none;
+@@ -192,6 +195,56 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usb_device_stall_obj, 2, 3, usb_devic
+ 
+ // Configure the singleton USB device with all of the relevant transfer and descriptor
+ // callbacks for dynamic devices.
++// Walk a configuration descriptor's endpoint descriptors.
++#define USBD_FOR_EACH_EP(buf, len, p) \
++    for (uint8_t *p = (buf), *p_end_ = (buf) + (len); p + 2 <= p_end_ && p[0] >= 2; p += p[0]) \
++        if (p[1] == TUSB_DESC_ENDPOINT && p[0] >= 7 && p + 7 <= p_end_)
++
++#ifdef MICROPY_HW_USB_EP_IN_MAX
++// A controller whose IN endpoints above some number have no transmit FIFO
++// (the ESP32-S2/S3's above 4) opens such an endpoint and never completes a
++// transfer on it, so refuse the descriptor instead.
++static void usb_device_check_in_endpoints(mp_obj_t desc_cfg) {
++    mp_buffer_info_t bi;
++    mp_get_buffer_raise(desc_cfg, &bi, MP_BUFFER_READ);
++    USBD_FOR_EACH_EP((uint8_t *)bi.buf, bi.len, p) {
++        if ((p[2] & TUSB_DIR_IN_MASK) && (p[2] & 0x7f) > MICROPY_HW_USB_EP_IN_MAX) {
++            mp_raise_msg_varg(&mp_type_ValueError,
++                MP_ERROR_TEXT("IN endpoint %d: this controller has IN endpoints up to %d"),
++                p[2] & 0x7f, MICROPY_HW_USB_EP_IN_MAX);
++        }
++    }
++}
++#endif
++
++#if CFG_TUD_MAX_SPEED == OPT_MODE_HIGH_SPEED
++// The descriptor a high-speed link gets: a package builds it for full speed,
++// so bulk endpoints go to 512 bytes, which USB 2.0 requires at high speed,
++// and interrupt intervals from milliseconds to 2^(n-1) microframes.
++static mp_obj_t usb_device_desc_cfg_high_speed(mp_obj_t desc_cfg) {
++    mp_buffer_info_t bi;
++    mp_get_buffer_raise(desc_cfg, &bi, MP_BUFFER_READ);
++    mp_obj_t copy = mp_obj_new_bytearray(bi.len, bi.buf);
++    mp_get_buffer_raise(copy, &bi, MP_BUFFER_RW);
++    USBD_FOR_EACH_EP((uint8_t *)bi.buf, bi.len, p) {
++        uint8_t xfer = p[3] & 3;
++        uint16_t mps = p[4] | (p[5] << 8);
++        if (xfer == TUSB_XFER_BULK && mps < 512) {
++            p[4] = 512 & 0xff;
++            p[5] = 512 >> 8;
++        } else if (xfer == TUSB_XFER_INTERRUPT) {
++            uint32_t uframes = 8u * (p[6] ? p[6] : 1);
++            uint8_t n = 1;
++            while (n < 16 && (1u << (n - 1)) < uframes) {
++                n++;
++            }
++            p[6] = n;
++        }
++    }
++    return copy;
++}
++#endif
++
+ static mp_obj_t usb_device_config(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+     mp_obj_usb_device_t *self = (mp_obj_usb_device_t *)MP_OBJ_TO_PTR(pos_args[0]);
+ 
+@@ -224,8 +277,15 @@ static mp_obj_t usb_device_config(size_t n_args, const mp_obj_t *pos_args, mp_ma
+         mp_raise_ValueError(MP_ERROR_TEXT("desc_strs"));
+     }
+ 
++    #ifdef MICROPY_HW_USB_EP_IN_MAX
++    usb_device_check_in_endpoints(desc_cfg);
++    #endif
++
+     self->desc_dev = desc_dev;
+     self->desc_cfg = desc_cfg;
++    #if CFG_TUD_MAX_SPEED == OPT_MODE_HIGH_SPEED
++    self->desc_cfg_hs = usb_device_desc_cfg_high_speed(desc_cfg);
++    #endif
+     self->desc_strs = desc_strs;
+     self->open_itf_cb = args[ARG_open_itf_cb].u_obj;
+     self->reset_cb = args[ARG_reset_cb].u_obj;
+@@ -236,6 +296,22 @@ static mp_obj_t usb_device_config(size_t n_args, const mp_obj_t *pos_args, mp_ma
+ }
+ static MP_DEFINE_CONST_FUN_OBJ_KW(usb_device_config_obj, 1, usb_device_config);
+ 
++// USBDevice.speed(): the speed the link runs at once a host has configured the
++// device, and until then the fastest this controller can run, which is what a
++// package sizes its descriptors for. 0 is full speed, 2 high speed.
++static mp_obj_t usb_device_speed(mp_obj_t self_in) {
++    (void)self_in;
++    if (tud_mounted()) {
++        return MP_OBJ_NEW_SMALL_INT(tud_speed_get());
++    }
++    #if CFG_TUD_MAX_SPEED == OPT_MODE_HIGH_SPEED
++    return MP_OBJ_NEW_SMALL_INT(TUSB_SPEED_HIGH);
++    #else
++    return MP_OBJ_NEW_SMALL_INT(TUSB_SPEED_FULL);
++    #endif
++}
++static MP_DEFINE_CONST_FUN_OBJ_1(usb_device_speed_obj, usb_device_speed);
++
+ static const MP_DEFINE_BYTES_OBJ(builtin_default_desc_dev_obj,
+     &mp_usbd_builtin_desc_dev, sizeof(tusb_desc_device_t));
+ 
+@@ -285,6 +361,9 @@ static const mp_rom_map_elem_t usb_device_locals_dict_table[] = {
+     { MP_ROM_QSTR(MP_QSTR_active), MP_ROM_PTR(&usb_device_active_obj) },
+     { MP_ROM_QSTR(MP_QSTR_stall), MP_ROM_PTR(&usb_device_stall_obj) },
+     { MP_ROM_QSTR(MP_QSTR_remote_wakeup), MP_ROM_PTR(&usb_remote_wakeup_obj) },
++    { MP_ROM_QSTR(MP_QSTR_speed), MP_ROM_PTR(&usb_device_speed_obj) },
++    { MP_ROM_QSTR(MP_QSTR_SPEED_FULL), MP_ROM_INT(TUSB_SPEED_FULL) },
++    { MP_ROM_QSTR(MP_QSTR_SPEED_HIGH), MP_ROM_INT(TUSB_SPEED_HIGH) },
+ 
+     // Built-in driver constants
+     { MP_ROM_QSTR(MP_QSTR_BUILTIN_NONE), MP_ROM_PTR(&mp_type_usb_device_builtin_none) },
+diff --git a/ports/esp32/mpconfigport.h b/ports/esp32/mpconfigport.h
+index e146ef2bc..bb4022dff 100644
+--- a/ports/esp32/mpconfigport.h
++++ b/ports/esp32/mpconfigport.h
+@@ -305,6 +305,16 @@
+ #endif
+ #endif
+ 
++// The highest IN endpoint number with a transmit FIFO: the P4's high-speed
++// controller has them up to 7, the S2/S3's and the P4's full-speed one up to 4.
++#ifndef MICROPY_HW_USB_EP_IN_MAX
++#if CONFIG_IDF_TARGET_ESP32P4 && MICROPY_HW_USB_HS
++#define MICROPY_HW_USB_EP_IN_MAX (7)
++#else
++#define MICROPY_HW_USB_EP_IN_MAX (4)
++#endif
++#endif
++
+ #endif // MICROPY_HW_ENABLE_USBDEV
+ 
+ // Enable stdio over native USB peripheral CDC via TinyUSB
+diff --git a/shared/tinyusb/mp_usbd.h b/shared/tinyusb/mp_usbd.h
+index e2343e542..acf12ecaf 100644
+--- a/shared/tinyusb/mp_usbd.h
++++ b/shared/tinyusb/mp_usbd.h
+@@ -134,6 +134,9 @@ typedef struct {
+ 
+     mp_obj_t desc_dev; // Device descriptor bytes
+     mp_obj_t desc_cfg; // Configuration descriptor bytes
++    #if CFG_TUD_MAX_SPEED == OPT_MODE_HIGH_SPEED
++    mp_obj_t desc_cfg_hs; // The same at high speed: bulk at 512, intervals in microframes
++    #endif
+     mp_obj_t desc_strs; // List/dict/similar to look up string descriptors by index
+ 
+     // Runtime device driver callback functions
+diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
+index a20a1b26b..ef9ea04fe 100644
+--- a/shared/tinyusb/mp_usbd_runtime.c
++++ b/shared/tinyusb/mp_usbd_runtime.c
+@@ -121,6 +121,11 @@ const uint8_t *tud_descriptor_configuration_cb(uint8_t index) {
+     mp_obj_usb_device_t *usbd = MP_OBJ_TO_PTR(MP_STATE_VM(usbd));
+     const void *result = NULL;
+     if (usbd) {
++        #if CFG_TUD_MAX_SPEED == OPT_MODE_HIGH_SPEED
++        if (tud_speed_get() == TUSB_SPEED_HIGH && usbd->desc_cfg_hs != mp_const_none) {
++            result = usbd_get_buffer_in_cb(usbd->desc_cfg_hs, MP_BUFFER_READ);
++        } else
++        #endif
+         result = usbd_get_buffer_in_cb(usbd->desc_cfg, MP_BUFFER_READ);
+     }
+     return result ? result : &mp_usbd_builtin_desc_cfg;
+-- 
+2.43.0
+

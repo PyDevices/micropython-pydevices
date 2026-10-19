@@ -267,8 +267,8 @@ in this order:
    wants. The S3's PSRAM, Wi-Fi and lwIP tuning and the P4's BLE-over-C6
    settings are here.
 2. The same two names at the root of each module you selected: what that
-   module needs. usbif's USB host settings and cameraif's OV5647 driver live
-   in their own repos.
+   module needs. usbhost's USB host settings and cameraif's OV5647 driver live
+   in their own module directories.
 3. `variants/esp32/<BOARD>/<VARIANT>/sdkconfig`: what's left that is one
    board's alone. A variant dir of ours also holds an `mpconfigvariant.cmake`
    that includes the upstream variant it builds on, which is how `LCD_7`

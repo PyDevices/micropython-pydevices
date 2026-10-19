@@ -37,16 +37,18 @@ micropython-pydevices/
 │   ├── all/manifest.py      tracked: every sibling with a root manifest.py, except opt-in ones
 │   ├── castif/              tracked: lives only here (moves from usermods/); ESP32-P4 only
 │   ├── jpegio/              tracked: lives only here (moved from displayif, 2026-10-06); every port
+│   ├── usbhost/             tracked: lives only here (moved from usbif, 2026-10-19, history kept); ESP32-S2, S3 and P4
 │   ├── mdns/                tracked: lives only here; esp32, rp2, unix, windows
+│   ├── audioif/, cameraif/, displayif/  tracked: moved here 2026-10-19 from their own repos, history kept
 │   ├── audiodsp -> ../../audiodsp          ignored symlinks to sibling checkouts,
-│   ├── audioif  -> ../../audioif           clones at the modules.lock commit anywhere else
-│   ├── audiocomponents, cameraif, displayif, lvgl-micropython, palettes,
-│   ├── pdwidgets, pydevices, pygraphics, ulab, usbif
+│   ├── audiocomponents -> ...               clones at the modules.lock commit anywhere else
+│   ├── lvgl-micropython, palettes,
+│   ├── pdwidgets, pydevices, pygraphics, ulab
 │   ├── .lvgl-bindings       ignored: what lvgl-micropython compiles; a link, or a sparse fetch at its modules.lock commit
 │   └── jpegio                later: see "Open"
 ├── patches/
 │   ├── apply_patches.py     the overlay and the modules' own patches, applied once as one local commit
-│   ├── micropython/         0001-…patch to 0030-…patch (no 0026)
+│   ├── micropython/         0001-…patch to 0038-…patch (no 0026)
 │   └── tinyusb/             patches to the TinyUSB the esp32 port builds (S2, S3, P4)
 ├── variants/                only where a board truly differs from upstream
 │   ├── unix/  windows/      pydevices/, vst3-engine/ (as today)
@@ -108,15 +110,18 @@ for every esp32 build, `sdkconfig.<chip>` (the chip read from the board's
    Wi-Fi, lwIP and PSRAM settings and the P4's NimBLE-over-C6 and
    cache-writeback settings live here.
 2. Each selected module's root, in the order you listed them: what that
-   module needs. usbif's USB host settings and cameraif's OV5647 driver live
-   in their own repos.
+   module needs. usbhost's USB host settings and cameraif's OV5647 driver live
+   in their own module directories.
 3. `variants/esp32/<BOARD>/<VARIANT>/`: what's left that really is the board,
    such as the LCD-7's cache tuning. A variant of ours there carries an
    `mpconfigvariant.cmake` that includes the upstream variant it builds on,
    and may carry an `mpconfigboard.h`, included before the board's own, for
    a C define the ESP-IDF components read too (they see the board header
    but not `MICROPY_DEF_BOARD`; `WIFI6_DEV_KIT`'s `MICROPY_HW_USB_HS` is
-   one).
+   one). It may also carry a `manifest.py`, which the build freezes instead
+   of `modules/manifest.py`: it includes that file and adds what only this
+   board freezes. `WIFI6_DEV_KIT_H2`'s adds pydevices' USB packages and
+   midiports, so its apps run without a mip install.
 
 On the S2, S3 and P4 the build also patches TinyUSB, which the port takes
 from the IDF component manager and so the overlay can't reach. It checks out

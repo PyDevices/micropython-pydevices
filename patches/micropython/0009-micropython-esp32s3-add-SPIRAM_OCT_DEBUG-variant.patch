@@ -1,5 +1,5 @@
 diff --git a/ports/esp32/boards/ESP32_GENERIC_S3/board.json b/ports/esp32/boards/ESP32_GENERIC_S3/board.json
-index b383dfa06..e762e6449 100644
+index b383dfa06..d6b1f8682 100644
 --- a/ports/esp32/boards/ESP32_GENERIC_S3/board.json
 +++ b/ports/esp32/boards/ESP32_GENERIC_S3/board.json
 @@ -21,9 +21,13 @@

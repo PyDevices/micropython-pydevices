@@ -7,6 +7,10 @@
 !/modules/manifest.py
 !/modules/all/
 !/modules/castif/
+!/modules/usbhost/
+!/modules/audioif/
+!/modules/cameraif/
+!/modules/displayif/
 !/modules/h264enc/
 !/modules/tsmux/
 !/modules/ppa/

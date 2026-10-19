@@ -246,7 +246,7 @@ index 92a5ebe9b..80903e488 100644
  
      i2s_std_config_t std_cfg = {
 diff --git a/ports/esp32/mpconfigport.h b/ports/esp32/mpconfigport.h
-index 00ac47613..945c14244 100644
+index 6a6ebff25..e146ef2bc 100644
 --- a/ports/esp32/mpconfigport.h
 +++ b/ports/esp32/mpconfigport.h
 @@ -163,6 +163,11 @@

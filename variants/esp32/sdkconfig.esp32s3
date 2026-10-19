@@ -37,11 +37,14 @@ CONFIG_HEAP_POISONING_LIGHT=y
 # TCP over a weak link. The port defaults gave lwIP a 5760-byte receive window
 # and a 1.5 s minimum RTO; on the T-Embed at -77 dBm a burst of losses backed the
 # retransmit timer off until chunk data stopped for 40 s at a time (2026-09-16
-# 22:00, ring log). A 32 KB window, selective ACK and a 1 s RTO, with the WiFi
-# and lwIP buffers taken from PSRAM so internal DRAM is not the price.
-CONFIG_LWIP_TCP_WND_DEFAULT=32768
-CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
-CONFIG_LWIP_TCP_RECVMBOX_SIZE=16
+# 22:00, ring log). Selective ACK and a 1 s RTO, with the WiFi and lwIP buffers
+# taken from PSRAM so internal DRAM is not the price. The window is the P4's
+# 64 KB: at 32 KB a download through a phone's USB tethering, whose Wi-Fi
+# round trips run 20-300 ms, moved at 1.07 Mbit/s; at 64 KB, 4.37.
+CONFIG_LWIP_TCP_WND_DEFAULT=65534
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65534
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
 CONFIG_LWIP_TCP_RTO_TIME=1000
 CONFIG_LWIP_TCP_SACK_OUT=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y

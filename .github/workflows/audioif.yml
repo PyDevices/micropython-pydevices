@@ -1,0 +1,71 @@
+# audioif on the unix port beside audiodsp: the driver binds with a thread, each probe's planted fault fails first, then the probes and CircuitPython's own I2SOut example pass. (These checks moved here with audioif from its own repository, 2026-10-19.)
+name: audioif
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/audioif/**'
+      - 'build_mp.py'
+      - 'modules.lock'
+      - 'patches/**'
+      - '.github/workflows/audioif.yml'
+  pull_request:
+    paths:
+      - 'modules/audioif/**'
+      - 'build_mp.py'
+      - 'modules.lock'
+      - 'patches/**'
+      - '.github/workflows/audioif.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unix-driver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the unix port's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev pkg-config
+      # audiodsp comes at its modules.lock commit; audioif's glue finds it
+      # as its sibling in modules/.
+      - name: Build the unix port with audiodsp and audioif
+        run: python3 build_mp.py --port unix --modules audiodsp,audioif
+
+      - name: The driver bound, and it has a thread
+        run: |
+          ./builds/unix/standard/micropython -c "
+          import audiopump, audiobusio
+          name = audiopump.driver()
+          assert name == 'pthread', 'driver() says %r' % name
+          assert audiopump.threaded(), 'a bound driver with no thread'
+          print('driver:', name, 'threaded:', audiopump.threaded())"
+
+      # A probe whose failing mode is never exercised is not a gate.
+      - name: The probes, and proof each one can fail
+        run: |
+          MP=./builds/unix/standard/micropython
+          TMP="${RUNNER_TEMP:-/tmp}"
+          run () { "$MP" -X heapsize=256M "modules/audioif/tests/$@"; }
+          for planted in "busio_probe.py $TMP --fault deaf" \
+                         "sink_probe.py $TMP --fault flip" \
+                         "sink_probe.py $TMP --fault truncate"; do
+            if run $planted > /dev/null; then
+              echo "the planted fault passed: $planted" >&2
+              exit 1
+            fi
+          done
+          run sink_probe.py "$TMP"
+          run busio_probe.py "$TMP"
+
+      - name: CircuitPython's documented example, unmodified
+        run: |
+          OUT="${RUNNER_TEMP:-/tmp}/cp_example.raw"
+          ./builds/unix/standard/micropython -X heapsize=256M modules/audioif/tests/cp_example_probe.py "$OUT"
+          test -s "$OUT" || { echo "the example played nothing" >&2; exit 1; }
+          echo "$(stat -c%s "$OUT") bytes out of the docstring example"

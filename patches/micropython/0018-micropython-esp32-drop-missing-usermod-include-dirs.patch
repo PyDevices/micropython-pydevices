@@ -22,7 +22,7 @@ Unchanged on upstream master as of 2026-10-06.
  1 file changed, 14 insertions(+)
 
 diff --git a/ports/esp32/esp32_common.cmake b/ports/esp32/esp32_common.cmake
-index fee776f..5076feb 100644
+index 248c3c8d3..dc1f92265 100644
 --- a/ports/esp32/esp32_common.cmake
 +++ b/ports/esp32/esp32_common.cmake
 @@ -220,6 +220,20 @@ if (UPDATE_SUBMODULES)

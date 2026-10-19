@@ -11,10 +11,10 @@ keep runPython synchronous for callers that do not suspend.
  1 file changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/ports/webassembly/api.js b/ports/webassembly/api.js
-index 60d2e82c4..e50c7d6b1 100644
+index 0718d13d6..8e15438d1 100644
 --- a/ports/webassembly/api.js
 +++ b/ports/webassembly/api.js
-@@ -147,7 +147,7 @@ export async function loadMicroPython(options) {
+@@ -147,16 +147,17 @@ export async function loadMicroPython(options) {
              Module._free(buf);
              return proxy_convert_mp_to_js_obj_jsside_with_free(value);
          },
@@ -23,7 +23,6 @@ index 60d2e82c4..e50c7d6b1 100644
              const len = Module.lengthBytesUTF8(code);
              const buf = Module._malloc(len + 1);
              Module.stringToUTF8(code, buf, len + 1);
-@@ -154,7 +154,8 @@ export async function loadMicroPython(options) {
              const value = Module._malloc(3 * 4);
 -            Module.ccall(
 +            await Module.ccall(

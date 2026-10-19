@@ -26,7 +26,7 @@ Unchanged on upstream v1.29.0.
  1 file changed, 11 insertions(+), 1 deletion(-)
 
 diff --git a/py/mkrules.mk b/py/mkrules.mk
-index 788f1f9..19acea6 100644
+index 788f1f99b..19acea62e 100644
 --- a/py/mkrules.mk
 +++ b/py/mkrules.mk
 @@ -253,11 +253,21 @@ endif

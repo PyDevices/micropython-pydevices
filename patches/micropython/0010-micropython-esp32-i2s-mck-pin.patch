@@ -70,7 +70,7 @@ index 27b70f1c8..92a5ebe9b 100644
              .ws = self->ws,
              .invert_flags = {
 diff --git a/ports/esp32/mpconfigport.h b/ports/esp32/mpconfigport.h
-index 45d789f46..2762708db 100644
+index 16e0bab0e..6342aa6e6 100644
 --- a/ports/esp32/mpconfigport.h
 +++ b/ports/esp32/mpconfigport.h
 @@ -160,6 +160,7 @@

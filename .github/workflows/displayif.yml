@@ -1,0 +1,57 @@
+# displayif on the unix port: every qstr reachable on every port that compiles it, usdl2 opens a window headless, the lifecycle API, and the packed fill in C. (These checks moved here with displayif from its own repository, 2026-10-19.)
+name: displayif
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/displayif/**'
+      - 'build_mp.py'
+      - 'modules.lock'
+      - 'patches/**'
+      - '.github/workflows/displayif.yml'
+  pull_request:
+    paths:
+      - 'modules/displayif/**'
+      - 'build_mp.py'
+      - 'modules.lock'
+      - 'patches/**'
+      - '.github/workflows/displayif.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unix-usdl2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Every qstr is reachable on every port that compiles it
+        run: python3 modules/displayif/tools/check_qstr_reachability.py
+      - name: The packed framebuffer fill, every depth
+        working-directory: modules/displayif
+        run: cc -I src/include -o /tmp/t tests/test_fb_fill_packed.c && /tmp/t
+      - name: Install SDL2 and the unix port's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libffi-dev pkg-config
+      - name: Build the unix port with displayif
+        run: python3 build_mp.py --port unix --modules displayif
+      - name: Smoke the result (usdl2 import + window init, headless)
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          ./builds/unix/standard/micropython -c "
+          import usdl2
+          assert usdl2.SDL_Init(usdl2.SDL_INIT_VIDEO) == 0, usdl2.SDL_GetError()
+          win = usdl2.SDL_CreateWindow(
+              'displayif smoke', usdl2.SDL_WINDOWPOS_UNDEFINED, usdl2.SDL_WINDOWPOS_UNDEFINED,
+              320, 240, usdl2.SDL_WINDOW_SHOWN)
+          assert win, usdl2.SDL_GetError()
+          print('displayif OK: usdl2 window created:', win)
+          usdl2.SDL_DestroyWindow(win)
+          usdl2.SDL_Quit()"
+      - name: tests/test_lifecycle_api.py under the built interpreter
+        run: ./builds/unix/standard/micropython modules/displayif/tests/test_lifecycle_api.py

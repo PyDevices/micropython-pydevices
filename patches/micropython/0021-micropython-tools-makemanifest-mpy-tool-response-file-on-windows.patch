@@ -23,7 +23,7 @@ Unchanged on upstream v1.29.0.
  2 files changed, 14 insertions(+), 2 deletions(-)
 
 diff --git a/tools/makemanifest.py b/tools/makemanifest.py
-index 5f7903d..3f05a30 100644
+index 5f7903d2f..3f05a3022 100644
 --- a/tools/makemanifest.py
 +++ b/tools/makemanifest.py
 @@ -245,6 +245,14 @@ def main():
@@ -51,7 +51,7 @@ index 5f7903d..3f05a30 100644
          if res != 0:
              print("error freezing mpy {}:".format(mpy_files))
 diff --git a/tools/mpy-tool.py b/tools/mpy-tool.py
-index efe9bfe..811d76d 100755
+index ee9e58c1e..34644d4b0 100755
 --- a/tools/mpy-tool.py
 +++ b/tools/mpy-tool.py
 @@ -2088,7 +2088,11 @@ def main(args=None):

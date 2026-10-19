@@ -167,5 +167,76 @@ class LvglBindings(unittest.TestCase):
             self.assertIn("full 40-character commit", str(cm.exception))
 
 
+class FrozenManifest(unittest.TestCase):
+    """A variant of ours, of a port or of a board, may bring its own manifest."""
+
+    def test_variant_manifests(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            variants, modules = root / "variants", root / "modules"
+            board = variants / "esp32" / "BOARD" / "WITH"
+            board.mkdir(parents=True)
+            (board / "mpconfigvariant.cmake").write_text("")
+            (board / "manifest.py").write_text("")
+            plain = variants / "esp32" / "BOARD" / "WITHOUT"
+            plain.mkdir(parents=True)
+            (plain / "mpconfigvariant.cmake").write_text("")
+            port = variants / "unix" / "pydevices"
+            port.mkdir(parents=True)
+            (port / "manifest.py").write_text("")
+            saved = build_mp.VARIANTS_DIR, build_mp.MODULES_DIR
+            build_mp.VARIANTS_DIR, build_mp.MODULES_DIR = variants, modules
+            try:
+                fm = build_mp.frozen_manifest
+                self.assertEqual(fm("esp32", "BOARD", "WITH"), board / "manifest.py")
+                self.assertEqual(fm("esp32", "BOARD", "WITHOUT"), modules / "manifest.py")
+                self.assertEqual(fm("esp32", "BOARD", None), modules / "manifest.py")
+                self.assertEqual(fm("esp32", "OTHER", "WITH"), modules / "manifest.py")
+                self.assertEqual(fm("unix", None, "pydevices"), port / "manifest.py")
+                self.assertEqual(fm("unix", None, None), modules / "manifest.py")
+            finally:
+                build_mp.VARIANTS_DIR, build_mp.MODULES_DIR = saved
+
+
+class MicropythonLibPatches(unittest.TestCase):
+    """patches/micropython-lib/ goes onto the submodule once, and a second pass leaves it be."""
+
+    def test_applies_once(self):
+        import apply_patches
+
+        patches = apply_patches.lib_series()
+        self.assertTrue(patches)
+        files = apply_patches.lib_files(patches)
+        self.assertIn("micropython/usb/usb-device-midi/usb/device/midi.py", files)
+        pin = "ee4bb8ff139e24c42b739935fbd8ec7c4d061e02"  # the submodule at b70ae1aca
+        mp = Path(build_mp.__file__).resolve().parent / "micropython"
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = Path(tmp)
+
+            def git(*args, repo=lib):
+                return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True).stdout
+
+            git("init", "-q")
+            for f in files:
+                (lib / f).parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    (lib / f).write_bytes(git("show", f"{pin}:{f}", repo=mp / "lib" / "micropython-lib"))
+                except subprocess.CalledProcessError:
+                    self.skipTest("no micropython-lib checkout at the pin")
+            git("add", "-A")
+            git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "pin")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                apply_patches.apply_lib(lib, patches)
+            self.assertEqual(out.getvalue().count("applied "), len(patches))
+            midi = (lib / "micropython/usb/usb-device-midi/usb/device/midi.py").read_text()
+            self.assertIn("_on_rx_schedule", midi)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                apply_patches.apply_lib(lib, patches)
+            self.assertEqual(out.getvalue().count("already in micropython-lib"), len(patches))
+            self.assertEqual((lib / "micropython/usb/usb-device-midi/usb/device/midi.py").read_text(), midi)
+
+
 if __name__ == "__main__":
     unittest.main()
