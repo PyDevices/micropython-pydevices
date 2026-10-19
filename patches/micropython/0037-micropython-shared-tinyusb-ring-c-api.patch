@@ -1,0 +1,103 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 22:00:00 -0500
+Subject: [PATCH] shared/tinyusb: USBDevice.Ring from C.
+
+A USB host's isochronous streams (another C module) move packets into and
+out of the same USBDevice.Ring a device-side stream uses, so the ring gets
+a C surface in mp_usbd.h: its size and level, an all-or-nothing put, a get,
+and a staged write with a commit, so a producer building a record in pieces
+(a video frame from many packets) publishes it whole or not at all.
+MP_USBD_HAS_RING_API says it is there.
+---
+ shared/tinyusb/mp_usbd.h         | 21 ++++++++++++++++++++
+ shared/tinyusb/mp_usbd_runtime.c | 41 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 62 insertions(+)
+
+diff --git a/shared/tinyusb/mp_usbd.h b/shared/tinyusb/mp_usbd.h
+index 29f2615a3..b0bddca5a 100644
+--- a/shared/tinyusb/mp_usbd.h
++++ b/shared/tinyusb/mp_usbd.h
+@@ -197,6 +197,27 @@ void mp_usbd_stream_feedback(mp_obj_usb_device_t *usbd, uint8_t ep_addr, const u
+ void mp_usbd_stream_sink(uint8_t ep_addr, mp_usbd_sink_fn sink, void *ctx, mp_obj_t owner, uint16_t packet);
+ bool mp_usbd_stream_stats(uint8_t ep_addr, uint32_t *packets, uint32_t *bytes, uint32_t *drops);
+ 
++// A USBDevice.Ring from C, for a producer or consumer in another module (a
++// USB host's isochronous streams). One producer and one consumer, on any
++// task or core; none of these allocate, raise or block. `ring` is the
++// object's pointer (MP_OBJ_TO_PTR of a USBDevice.Ring).
++#define MP_USBD_HAS_RING_API (1)
++uint32_t mp_usbd_ring_size(void *ring);
++uint32_t mp_usbd_ring_used(void *ring);
++// n bytes in, all or nothing (false, and an overflow counted, when they
++// don't fit). Producer.
++bool mp_usbd_ring_put(void *ring, const uint8_t *src, uint32_t n);
++// Up to n bytes out; the count. Consumer.
++uint32_t mp_usbd_ring_get(void *ring, uint8_t *dst, uint32_t n);
++// A record built in pieces: stage() copies n bytes to `offset` past the
++// producer's position without publishing them (false when that passes the
++// free space), and commit() publishes the first n staged bytes at once, so
++// the consumer only ever sees whole records. Producer.
++bool mp_usbd_ring_stage(void *ring, uint32_t offset, const uint8_t *src, uint32_t n);
++void mp_usbd_ring_commit(void *ring, uint32_t n);
++// Count an overflow the producer decided on itself (a record dropped).
++void mp_usbd_ring_overflow(void *ring);
++
+ // Built-in constant objects, possible values of builtin_driver
+ //
+ // (Currently not possible to change built-in drivers at runtime, just enable/disable.)
+diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
+index 08d509b4a..5a28be55c 100644
+--- a/shared/tinyusb/mp_usbd_runtime.c
++++ b/shared/tinyusb/mp_usbd_runtime.c
+@@ -457,6 +457,47 @@ static MP_USBD_ISR_ATTR uint32_t ring_read(mp_usbd_ring_obj_t *r, uint8_t *dst,
+     return n;
+ }
+ 
++// The ring from C (mp_usbd.h), for another module's producer or consumer.
++uint32_t mp_usbd_ring_size(void *ring) {
++    return ((mp_usbd_ring_obj_t *)ring)->mask + 1;
++}
++
++uint32_t mp_usbd_ring_used(void *ring) {
++    return ring_used(ring);
++}
++
++bool mp_usbd_ring_put(void *ring, const uint8_t *src, uint32_t n) {
++    return ring_write(ring, src, n);
++}
++
++uint32_t mp_usbd_ring_get(void *ring, uint8_t *dst, uint32_t n) {
++    uint32_t avail = ring_used(ring);
++    return ring_read(ring, dst, n < avail ? n : avail);
++}
++
++bool mp_usbd_ring_stage(void *ring, uint32_t offset, const uint8_t *src, uint32_t n) {
++    mp_usbd_ring_obj_t *r = ring;
++    uint32_t size = r->mask + 1;
++    if (offset > size - ring_used(r) || n > size - ring_used(r) - offset) {
++        return false;
++    }
++    uint32_t at = (r->head + offset) & r->mask;
++    uint32_t first = n < size - at ? n : size - at;
++    memcpy(r->buf + at, src, first);
++    memcpy(r->buf, src + first, n - first);
++    return true;
++}
++
++void mp_usbd_ring_commit(void *ring, uint32_t n) {
++    mp_usbd_ring_obj_t *r = ring;
++    __sync_synchronize();
++    r->head += n;
++}
++
++void mp_usbd_ring_overflow(void *ring) {
++    ((mp_usbd_ring_obj_t *)ring)->overflows++;
++}
++
+ // USBDevice.Ring(nbytes): rounded up to a power of two.
+ static mp_obj_t mp_usbd_ring_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+     mp_arg_check_num(n_args, n_kw, 1, 1, false);
+-- 
+2.43.0
+
