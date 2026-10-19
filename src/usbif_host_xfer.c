@@ -418,7 +418,10 @@ int usbif_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint32
         }
         x->callback = usbif_xfer_cb;
         x->context = pipe;
-        x->timeout_ms = timeout_ms;
+        // A kept poll waits for data however long it takes: the library's
+        // own timeout would complete it as TIMED_OUT, and the next poll
+        // would find an error rather than a transfer still armed.
+        x->timeout_ms = (keep && in) ? 0 : timeout_ms;
         xSemaphoreTake(pipe->done, 0);
         pipe->busy = true;
         if (usb_host_transfer_submit(x) != ESP_OK) {
@@ -444,6 +447,10 @@ int usbif_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint32
         x->status = USB_TRANSFER_STATUS_COMPLETED;
     }
     r = usbif_xfer_status_errno(x->status);
+    if (r == -MP_ETIMEDOUT && keep && in) {
+        r = 0;      // a poll, timed out by the library after all: nothing yet
+        goto out;
+    }
     if (r == 0) {
         r = x->actual_num_bytes;
         if (in) {
