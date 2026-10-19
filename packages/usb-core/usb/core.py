@@ -90,6 +90,30 @@ def stop():
     _started = _full_speed = _classes = None
 
 
+def running():
+    """Whether the host port is running: True from start() (or the first
+    find()) until stop(), as the C host reports it."""
+    if _started is None:
+        return False
+    st = _usbif.host_stats()
+    return bool(st and st[0])
+
+
+def stats():
+    """The host's counters, as a dict: ``running``, ``attaches``,
+    ``detaches``, ``errors`` (enumeration failures), ``devices`` open in
+    the host library, and the ``full_speed`` and ``classes`` it was started
+    with. None when this firmware has no USB host."""
+    try:
+        st = _usbif.host_stats()
+    except AttributeError:
+        return None
+    if not st:
+        return None
+    return {"running": bool(st[0]) and _started is not None, "attaches": st[1], "detaches": st[2],
+            "errors": st[3], "devices": st[4], "full_speed": bool(_full_speed), "classes": _classes}
+
+
 def _start():
     if _started is None:
         start()
@@ -124,6 +148,7 @@ class Device:
         self.idProduct = row[2]
         self.speed = _SPEEDS.get(row[6], 0)
         self._claims = {}       # interface -> alternate setting
+        self._ep_itf = {}       # endpoint -> its interface, read once
         self._alts = {}         # alternates chosen by set_interface_altsetting
         self._desc = None
         self._strings = {}
@@ -182,8 +207,13 @@ class Device:
             raise USBError(errno.EOPNOTSUPP, "only the first configuration is supported")
 
     def set_interface_altsetting(self, interface=0, alternate_setting=0):
+        """Select an alternate setting, as PyUSB does: the host claims the
+        interface at it (its endpoints become usable here) and the device is
+        told with SET_INTERFACE, which ESP-IDF's host never sends itself. An
+        audio or video interface streams only on a nonzero alternate."""
         self._alts[interface] = alternate_setting
         self._claim(interface)
+        self.ctrl_transfer(0x01, 0x0B, alternate_setting, interface, None, 3000)
 
     def is_kernel_driver_active(self, interface):
         return False
@@ -237,6 +267,12 @@ class Device:
         return eps
 
     def _interface_of(self, endpoint):
+        itf = self._ep_itf.get(endpoint)
+        if itf is None:
+            itf = self._ep_itf[endpoint] = self._find_interface(endpoint)
+        return itf
+
+    def _find_interface(self, endpoint):
         cfg = self.configuration_descriptor()
         i, itf = cfg[0], None
         while i + 2 <= len(cfg) and cfg[i] >= 2:
@@ -279,16 +315,29 @@ class Device:
         except OSError as e:
             _raise(e)
 
-    def read(self, endpoint, size_or_buffer, timeout=None):
+    def read(self, endpoint, size_or_buffer, timeout=None, *, raise_on_timeout=True):
         """Read from a bulk or interrupt IN endpoint: into a buffer, giving
         the count, or up to a size, giving an array. timeout None or 0 waits
-        for data, a quarter-second at a time so Ctrl-C still works."""
+        for data, a quarter-second at a time so Ctrl-C still works.
+
+        With ``raise_on_timeout=False`` (as in CircuitPython), a timeout
+        returns 0 instead of raising USBTimeoutError, and a read into a
+        buffer allocates nothing: poll an interrupt endpoint with a short
+        timeout and "no report yet" costs no garbage. The transfer stays
+        armed between such reads, so a report that lands in between is
+        kept for the next one."""
         self._claim(self._interface_of(endpoint))
         into = None
         if isinstance(size_or_buffer, int):
             into = buf = bytearray(size_or_buffer)
         else:
             buf = size_or_buffer
+        if not raise_on_timeout and timeout:
+            try:
+                n = _usbif.host_xfer(self._id, endpoint, buf, timeout, False)
+            except OSError as e:
+                _raise(e)
+            return util._array(into, n) if into is not None else n
         while True:
             try:
                 n = _usbif.host_xfer(self._id, endpoint, buf, timeout or 250)

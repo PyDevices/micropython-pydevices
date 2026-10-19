@@ -69,30 +69,6 @@ extern int usbif_msc_read_block(uint32_t lba, uint8_t *out, size_t max);
 extern int usbif_msc_write_block(uint32_t lba, const uint8_t *data, size_t len);
 extern int usbif_msc_provoke_error(void);
 extern int usbif_host_desc_get(uint32_t dev_id, const uint8_t **out, uint16_t *len);
-extern int usbif_host_uac_clock_ranges(uint32_t dev_id, uint8_t control_itf, uint8_t clock_id,
-    uint32_t *out, int max_triplets);
-extern int usbif_host_uac_open(uint32_t dev_id, uint8_t itf, uint8_t alt, uint8_t ep,
-    uint16_t mps, uint32_t rate, uint8_t clock, uint8_t control, uint16_t frame,
-    uint32_t ring_bytes);
-extern int usbif_host_uac_read(uint8_t *out, size_t max);
-extern int usbif_host_uac_write(const uint8_t *data, size_t len);
-extern int usbif_host_uac_queued(int dir);
-extern int usbif_host_uac_space(int dir);
-extern int usbif_host_uac_capacity(int dir);
-extern int usbif_host_uac_c_sink(pcm_c_sink_t *out, uint32_t channels, uint32_t bits);
-extern void usbif_host_uac_stats(int dir, uint32_t *packets, uint32_t *bytes, uint32_t *dropped,
-    uint32_t *starved, uint32_t *errors, uint32_t *empty);
-extern void usbif_host_uac_close(int dir);
-extern int usbif_host_uvc_negotiate(uint32_t dev_id, uint8_t itf, uint8_t format_index,
-    uint8_t frame_index, uint32_t interval, uint32_t *payload_out, uint32_t *frame_out);
-extern int usbif_host_uvc_open(uint32_t dev_id, uint8_t itf, uint8_t alt, uint8_t ep,
-    uint16_t packet, uint32_t frame_bytes);
-extern int usbif_host_uvc_read_frame(uint8_t *out, size_t max);
-extern int usbif_host_uvc_frame_ready(void);
-extern void usbif_host_uvc_stats(uint32_t *frames, uint32_t *packets, uint32_t *bytes,
-    uint32_t *dropped_full, uint32_t *dropped_torn, uint32_t *dropped_big,
-    uint32_t *errors, uint32_t *empty);
-extern void usbif_host_uvc_close(void);
 extern int usbif_host_midi_open(uint32_t dev_id);
 extern int usbif_host_midi_read(uint8_t *out, size_t max);
 extern int usbif_host_midi_write(const uint8_t *data, size_t len);
@@ -150,8 +126,9 @@ static const qstr usbif_speed_names[] = {
 // pending class drivers; CDC, HID and MSC host drivers now exist (unconditionally,
 // under the same USBIF_HAVE_HOST gate), so an honest answer names those three --
 // MIDI joined them (usbif_host_midi.c) once it became clear nobody upstream
-// supplies one, UAC joined them with usbif_host_uac.c, and UVC with
-// usbif_host_uvc.c. capabilities() reports what can actually be driven, not
+// supplies one, and UAC and UVC with the isochronous host streams
+// (usbif_host_stream.c, under usb.host.audio and usb.host.video).
+// capabilities() reports what can actually be driven, not
 // what the enumerator can name -- so a bit appears here only once a driver
 // behind it exists.
 static uint16_t usbif_supported_classes(void) {
@@ -264,9 +241,17 @@ static mp_obj_t usbif_host_start(size_t n_args, const mp_obj_t *pos_args, mp_map
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(usbif_host_start_obj, 1, usbif_host_start);
 
+// A running host stream's ring, kept reachable here so a collection can't
+// free it under the transfers. Index = the stream's slot (USBIF_HOST_STREAMS).
+MP_REGISTER_ROOT_POINTER(mp_obj_t usbif_stream_owner[4]);
+#if USBIF_HAVE_HOST
+static void usbif_stream_release_owners(void);
+#endif
+
 static mp_obj_t usbif_host_stop(void) {
     #if USBIF_HAVE_HOST
     usbif_host_stop_c();
+    usbif_stream_release_owners();
     #endif
     usbif_host_running = false;
     return mp_const_none;
@@ -563,342 +548,6 @@ static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_msc_provoke_obj, usbif_host_msc_prov
 // settings, endpoints, and the class-specific descriptors that carry audio
 // formats and video frame tables. Returned whole so the parsing happens in
 // Python, where a wrong guess costs a re-run rather than a reflash.
-// --- UAC host ---------------------------------------------------------
-// The stream to open is chosen in Python by usbif.uac, which reads the whole
-// descriptor and picks an alternate setting; these arguments are that answer.
-// Deliberately not rediscovered here: a UAC device can offer two dozen
-// formats, and choosing among them is configuration, not byte movement.
-static mp_obj_t usbif_host_uac_open_py(size_t n_args, const mp_obj_t *args) {
-    #if USBIF_HAVE_HOST
-    int rc = usbif_host_uac_open(
-        (uint32_t)mp_obj_get_int(args[0]),
-        (uint8_t)mp_obj_get_int(args[1]),
-        (uint8_t)mp_obj_get_int(args[2]),
-        (uint8_t)mp_obj_get_int(args[3]),
-        (uint16_t)mp_obj_get_int(args[4]),
-        n_args > 5 ? (uint32_t)mp_obj_get_int(args[5]) : 0,
-        n_args > 6 ? (uint8_t)mp_obj_get_int(args[6]) : 0,    // 2.0 clock source id
-        n_args > 7 ? (uint8_t)mp_obj_get_int(args[7]) : 0,    // its AudioControl interface
-        n_args > 8 ? (uint16_t)mp_obj_get_int(args[8]) : 0,   // bytes per audio frame
-        n_args > 9 ? (uint32_t)mp_obj_get_int(args[9]) : 0);  // ring bytes, 0 = 8 KB
-    if (rc != 0) {
-        // Carry the driver's own code: -1 a stream in this direction is
-        // already open, -2 bad packet size, -3 no such device, -4 alt 0
-        // carries no endpoint, -5 claim refused, -6 transfer alloc failed,
-        // -7 nothing submitted, -8 no memory for the ring, -9 ring size out
-        // of range (two packets to 4 MB), -10 the other direction's stream
-        // already holds this interface.
-        if (rc == -5) {
-            // IDF answers ESP_ERR_NOT_SUPPORTED to a claim whose endpoint
-            // packet exceeds the FIFO the host was installed with, and says
-            // nothing about packets; the usual reason on this bench.
-            mp_raise_msg(&mp_type_OSError,
-                MP_ERROR_TEXT("host_uac_open failed (-5): interface claim refused -- "
-                              "usually the stream's packet exceeds the host FIFO split; "
-                              "start the host for 'uac' without 'uvc'"));
-        }
-        mp_raise_msg_varg(&mp_type_OSError,
-            MP_ERROR_TEXT("host_uac_open failed (%d)"), rc);
-    }
-    return mp_const_none;
-    #else
-    (void)n_args; (void)args;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_uac_open_obj, 5, 10, usbif_host_uac_open_py);
-
-// The calls below act on one of the two streams the driver keeps, one per
-// direction. Each takes the stream's endpoint address, optionally: bit 7
-// picks it, as on the wire. Without one they mean what they meant when there
-// was a single stream: whichever is open, playback first; close() closes both.
-// read() and write() need no address: only capture reads, only playback writes.
-#if USBIF_HAVE_HOST
-static int usbif_host_uac_dir(size_t n_args, const mp_obj_t *args) {
-    if (n_args == 0 || args[0] == mp_const_none) {
-        return USBIF_HOST_UAC_ANY;
-    }
-    return (mp_obj_get_int(args[0]) & 0x80) ? USBIF_HOST_UAC_IN : USBIF_HOST_UAC_OUT;
-}
-#endif
-
-static mp_obj_t usbif_host_uac_read_py(mp_obj_t buf_in) {
-    #if USBIF_HAVE_HOST
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_WRITE);
-    int n = usbif_host_uac_read((uint8_t *)buf.buf, buf.len);
-    if (n < 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    return MP_OBJ_NEW_SMALL_INT(n);
-    #else
-    (void)buf_in;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_host_uac_read_obj, usbif_host_uac_read_py);
-
-static mp_obj_t usbif_host_uac_write_py(mp_obj_t buf_in) {
-    #if USBIF_HAVE_HOST
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_READ);
-    int n = usbif_host_uac_write((const uint8_t *)buf.buf, buf.len);
-    if (n < 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    return MP_OBJ_NEW_SMALL_INT(n);
-    #else
-    (void)buf_in;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_host_uac_write_obj, usbif_host_uac_write_py);
-
-static mp_obj_t usbif_host_uac_queued_py(size_t n_args, const mp_obj_t *args) {
-    #if USBIF_HAVE_HOST
-    return MP_OBJ_NEW_SMALL_INT(usbif_host_uac_queued(usbif_host_uac_dir(n_args, args)));
-    #else
-    (void)n_args; (void)args;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_uac_queued_obj, 0, 1, usbif_host_uac_queued_py);
-
-// Free room and total size of the stream's ring, in bytes; -1 when no stream
-// is open. A caller that must not block asks space() before it writes
-// (usbif#36), rather than hardcoding a size the ring no longer has.
-static mp_obj_t usbif_host_uac_space_py(size_t n_args, const mp_obj_t *args) {
-    #if USBIF_HAVE_HOST
-    return MP_OBJ_NEW_SMALL_INT(usbif_host_uac_space(usbif_host_uac_dir(n_args, args)));
-    #else
-    (void)n_args; (void)args;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_uac_space_obj, 0, 1, usbif_host_uac_space_py);
-
-static mp_obj_t usbif_host_uac_capacity_py(size_t n_args, const mp_obj_t *args) {
-    #if USBIF_HAVE_HOST
-    return MP_OBJ_NEW_SMALL_INT(usbif_host_uac_capacity(usbif_host_uac_dir(n_args, args)));
-    #else
-    (void)n_args; (void)args;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_uac_capacity_obj, 0, 1, usbif_host_uac_capacity_py);
-
-// host_uac_c_sink(channels, bits) -> bytes: the open playback stream's
-// pcm_c_sink_t, by value (usbif#43). Another native module copies it with
-// pcm_c_sink_copy() and writes to the stream from its own task. By value so
-// nothing a usermod keeps points into this heap; the sink's lifetime is the
-// stream's, enforced in C (shared/usbif_pcm_sink.h). OSError(EIO) when no
-// playback stream is open.
-static mp_obj_t usbif_host_uac_c_sink_py(mp_obj_t channels_in, mp_obj_t bits_in) {
-    #if USBIF_HAVE_HOST
-    pcm_c_sink_t sink;
-    if (usbif_host_uac_c_sink(&sink, (uint32_t)mp_obj_get_int(channels_in),
-        (uint32_t)mp_obj_get_int(bits_in)) != 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    return mp_obj_new_bytes((const byte *)&sink, sizeof(sink));
-    #else
-    (void)channels_in; (void)bits_in;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(usbif_host_uac_c_sink_obj, usbif_host_uac_c_sink_py);
-
-// (packets, bytes, dropped, starved, errors). When a stream sounds wrong the
-// first question is whether bytes are being lost and where, and these
-// separate the three answers: the ring overflowed because Python was late
-// (dropped), the ring was empty when the bus asked (starved), or the bus
-// itself reported a bad packet (errors).
-static mp_obj_t usbif_host_uac_stats_py(size_t n_args, const mp_obj_t *args) {
-    #if USBIF_HAVE_HOST
-    uint32_t packets = 0, bytes = 0, dropped = 0, starved = 0, errors = 0, empty = 0;
-    usbif_host_uac_stats(usbif_host_uac_dir(n_args, args),
-        &packets, &bytes, &dropped, &starved, &errors, &empty);
-    mp_obj_t items[6] = {
-        mp_obj_new_int_from_uint(packets),
-        mp_obj_new_int_from_uint(bytes),
-        mp_obj_new_int_from_uint(dropped),
-        mp_obj_new_int_from_uint(starved),
-        mp_obj_new_int_from_uint(errors),
-        mp_obj_new_int_from_uint(empty),
-    };
-    return mp_obj_new_tuple(6, items);
-    #else
-    (void)n_args; (void)args;
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_uac_stats_obj, 0, 1, usbif_host_uac_stats_py);
-
-// (dev_id, control_itf, clock_id) -> a flat tuple of (min, max, res) triplets
-// from a USB Audio 2.0 clock source; usbif.uac.rates_from_ranges() reads it.
-static mp_obj_t usbif_host_uac_clock_ranges_py(mp_obj_t dev_in, mp_obj_t itf_in, mp_obj_t clock_in) {
-    #if USBIF_HAVE_HOST
-    uint32_t triplets[3 * 8];
-    int n = usbif_host_uac_clock_ranges((uint32_t)mp_obj_get_int(dev_in),
-        (uint8_t)mp_obj_get_int(itf_in), (uint8_t)mp_obj_get_int(clock_in), triplets, 8);
-    if (n < 0) {
-        mp_raise_msg_varg(&mp_type_OSError,
-            MP_ERROR_TEXT("host_uac_clock_ranges failed (%d): -1 no such device, -2 request refused, -3 short answer"), n);
-    }
-    mp_obj_t items[3 * 8];
-    for (int i = 0; i < 3 * n; i++) {
-        items[i] = mp_obj_new_int_from_uint(triplets[i]);
-    }
-    return mp_obj_new_tuple((size_t)(3 * n), items);
-    #else
-    (void)dev_in; (void)itf_in; (void)clock_in;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(usbif_host_uac_clock_ranges_obj, usbif_host_uac_clock_ranges_py);
-
-static mp_obj_t usbif_host_uac_close_py(size_t n_args, const mp_obj_t *args) {
-    #if USBIF_HAVE_HOST
-    usbif_host_uac_close(usbif_host_uac_dir(n_args, args));
-    #else
-    (void)n_args; (void)args;
-    #endif
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_uac_close_obj, 0, 1, usbif_host_uac_close_py);
-
-// --- UVC host -----------------------------------------------------------
-
-// Negotiate a mode, and return what the device agreed to as
-// (payload_bytes, frame_bytes). Both numbers come from the camera, not from
-// us: payload_bytes selects the alternate setting and frame_bytes sizes the
-// assembly buffers, and a host that guesses either gets torn frames.
-static mp_obj_t usbif_host_uvc_negotiate_py(size_t n_args, const mp_obj_t *args) {
-    #if USBIF_HAVE_HOST
-    uint32_t payload = 0, frame = 0;
-    int rc = usbif_host_uvc_negotiate(
-        (uint32_t)mp_obj_get_int(args[0]),
-        (uint8_t)mp_obj_get_int(args[1]),
-        (uint8_t)mp_obj_get_int(args[2]),
-        (uint8_t)mp_obj_get_int(args[3]),
-        n_args > 4 ? (uint32_t)mp_obj_get_int(args[4]) : 0,
-        &payload, &frame);
-    if (rc != 0) {
-        // -1 no such device, -2 PROBE set refused, -3 PROBE read refused,
-        // -4 COMMIT refused.
-        mp_raise_msg_varg(&mp_type_OSError,
-            MP_ERROR_TEXT("host_uvc_negotiate failed (%d)"), rc);
-    }
-    mp_obj_t items[2] = {
-        mp_obj_new_int_from_uint(payload),
-        mp_obj_new_int_from_uint(frame),
-    };
-    return mp_obj_new_tuple(2, items);
-    #else
-    (void)n_args; (void)args;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_uvc_negotiate_obj, 4, 5, usbif_host_uvc_negotiate_py);
-
-static mp_obj_t usbif_host_uvc_open_py(size_t n_args, const mp_obj_t *args) {
-    #if USBIF_HAVE_HOST
-    (void)n_args;
-    int rc = usbif_host_uvc_open(
-        (uint32_t)mp_obj_get_int(args[0]),
-        (uint8_t)mp_obj_get_int(args[1]),
-        (uint8_t)mp_obj_get_int(args[2]),
-        (uint8_t)mp_obj_get_int(args[3]),
-        (uint16_t)mp_obj_get_int(args[4]),
-        (uint32_t)mp_obj_get_int(args[5]));
-    if (rc != 0) {
-        // -1 already open, -2 bad packet size or alt 0, -3 no such device,
-        // -4 frame buffers would not allocate, -5 claim refused,
-        // -6 transfer alloc failed, -7 nothing submitted.
-        mp_raise_msg_varg(&mp_type_OSError,
-            MP_ERROR_TEXT("host_uvc_open failed (%d)"), rc);
-    }
-    return mp_const_none;
-    #else
-    (void)n_args; (void)args;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_uvc_open_obj, 6, 6, usbif_host_uvc_open_py);
-
-// One whole frame or nothing. A partial frame is never returned: the caller
-// cannot tell a truncated JPEG from a complete one, so it is not offered.
-// Raises ENOBUFS rather than truncating if the buffer is too small, and
-// leaves the frame in place to be retried.
-static mp_obj_t usbif_host_uvc_read_frame_py(mp_obj_t buf_in) {
-    #if USBIF_HAVE_HOST
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_WRITE);
-    int n = usbif_host_uvc_read_frame((uint8_t *)buf.buf, buf.len);
-    if (n == -2) {
-        mp_raise_OSError(MP_ENOBUFS);
-    }
-    if (n < 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    return MP_OBJ_NEW_SMALL_INT(n);
-    #else
-    (void)buf_in;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_host_uvc_read_frame_obj, usbif_host_uvc_read_frame_py);
-
-// Bytes in the waiting frame, or 0. Lets a caller size a buffer before asking
-// for the frame rather than guessing and catching EMSGSIZE.
-static mp_obj_t usbif_host_uvc_frame_ready_py(void) {
-    #if USBIF_HAVE_HOST
-    return MP_OBJ_NEW_SMALL_INT(usbif_host_uvc_frame_ready());
-    #else
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_uvc_frame_ready_obj, usbif_host_uvc_frame_ready_py);
-
-// (frames, packets, bytes, dropped_full, dropped_torn, dropped_big, errors,
-// empty). Three separate drop causes because they call for three different
-// fixes: the consumer is too slow (full), the bus lost a packet mid-frame
-// (torn), or the frame buffer was sized smaller than the camera's frames
-// (big) -- which is our mistake, not the bus's, and would otherwise hide
-// inside a single "dropped" number.
-static mp_obj_t usbif_host_uvc_stats_py(void) {
-    #if USBIF_HAVE_HOST
-    uint32_t frames = 0, packets = 0, bytes = 0, full = 0, torn = 0, big = 0;
-    uint32_t errors = 0, empty = 0;
-    usbif_host_uvc_stats(&frames, &packets, &bytes, &full, &torn, &big,
-        &errors, &empty);
-    mp_obj_t items[8] = {
-        mp_obj_new_int_from_uint(frames),
-        mp_obj_new_int_from_uint(packets),
-        mp_obj_new_int_from_uint(bytes),
-        mp_obj_new_int_from_uint(full),
-        mp_obj_new_int_from_uint(torn),
-        mp_obj_new_int_from_uint(big),
-        mp_obj_new_int_from_uint(errors),
-        mp_obj_new_int_from_uint(empty),
-    };
-    return mp_obj_new_tuple(8, items);
-    #else
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_uvc_stats_obj, usbif_host_uvc_stats_py);
-
-static mp_obj_t usbif_host_uvc_close_py(void) {
-    #if USBIF_HAVE_HOST
-    usbif_host_uvc_close();
-    return mp_const_none;
-    #else
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_uvc_close_obj, usbif_host_uvc_close_py);
-
 static mp_obj_t usbif_host_desc_py(mp_obj_t dev_id_in) {
     #if USBIF_HAVE_HOST
     const uint8_t *desc = NULL;
@@ -924,7 +573,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(usbif_host_desc_obj, usbif_host_desc_py);
 extern int usbif_xfer_claim(uint32_t dev_id, uint8_t itf, uint8_t alt);
 extern int usbif_xfer_release(uint32_t dev_id, uint8_t itf);
 extern int usbif_xfer_ctrl(uint32_t dev_id, const uint8_t setup[8], uint8_t *data, uint16_t len, uint32_t timeout_ms);
-extern int usbif_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint32_t timeout_ms);
+extern int usbif_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint32_t timeout_ms, bool keep);
 
 static mp_obj_t usbif_xfer_check(int r) {
     if (r < 0) {
@@ -985,21 +634,203 @@ static mp_obj_t usbif_host_ctrl_py(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_ctrl_obj, 4, 4, usbif_host_ctrl_py);
 
-// host_xfer(dev_id, endpoint, buf, timeout_ms): a bulk or interrupt
-// transfer; an IN endpoint reads into buf, an OUT one sends it. Returns the
-// bytes moved. timeout_ms 0 waits for good.
+// host_xfer(dev_id, endpoint, buf, timeout_ms, raise_on_timeout=True): a
+// bulk or interrupt transfer; an IN endpoint reads into buf, an OUT one sends
+// it. Returns the bytes moved. timeout_ms 0 waits for good. With
+// raise_on_timeout False, an IN read that times out returns 0, allocating
+// nothing, and leaves its transfer armed for the next read to collect.
 static mp_obj_t usbif_host_xfer_py(size_t n_args, const mp_obj_t *args) {
     #if USBIF_HAVE_HOST
     uint8_t ep = (uint8_t)mp_obj_get_int(args[1]);
     mp_buffer_info_t buf;
     mp_get_buffer_raise(args[2], &buf, (ep & 0x80) ? MP_BUFFER_WRITE : MP_BUFFER_READ);
+    bool keep = n_args > 4 && !mp_obj_is_true(args[4]);
     return usbif_xfer_check(usbif_xfer_ep((uint32_t)mp_obj_get_int(args[0]), ep, buf.buf, buf.len,
-        (uint32_t)mp_obj_get_int(args[3])));
+        (uint32_t)mp_obj_get_int(args[3]), keep));
     #else
     mp_raise_OSError(MP_EOPNOTSUPP);
     #endif
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_xfer_obj, 4, 4, usbif_host_xfer_py);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_xfer_obj, 4, 5, usbif_host_xfer_py);
+
+// Isochronous host streams (usbif_host_stream.c): an endpoint's packets moved
+// to or from a ring in C, for usb.host.audio and usb.host.video. The ring is
+// a machine.USBDevice.Ring, the same one a device-side stream uses, or, for
+// a capture stream, an audiodsp audiopump.Ring the pump plays from.
+#if USBIF_HAVE_HOST
+#include "usbif_host_stream.h"
+
+#if defined(__has_include)
+#if __has_include("audiopump/audiopump_ring.h")
+#include "audiopump/audiopump_ring.h"
+#endif
+#endif
+
+static void usbif_stream_release_owners(void) {
+    uint32_t free_slots = usbif_stream_free_slots();
+    for (int i = 0; i < USBIF_HOST_STREAMS; i++) {
+        if (free_slots & (1u << i)) {
+            MP_STATE_VM(usbif_stream_owner)[i] = MP_OBJ_NULL;
+        }
+    }
+}
+
+#if defined(MP_USBD_HAS_RING_API)
+static uint32_t usbif_ring_put(void *r, const uint8_t *src, uint32_t n) {
+    return mp_usbd_ring_put(r, src, n) ? n : 0;
+}
+#endif
+#endif
+
+// host_stream(dev_id, ep, ring, packet=0, *, rate=0, frame=0, video=False,
+// max_frame=0): start moving ep's packets to (IN) or from (OUT) ring. The
+// endpoint's interface must be claimed at its streaming alternate setting.
+// rate and frame pace a PCM OUT stream; video assembles UVC frames, each led
+// in the ring by its 4-byte length. host_stream(dev_id, ep, None) stops it.
+static mp_obj_t usbif_host_stream_py(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_dev, ARG_ep, ARG_ring, ARG_packet, ARG_rate, ARG_frame, ARG_video, ARG_max_frame };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_dev, MP_ARG_REQUIRED | MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_ep, MP_ARG_REQUIRED | MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_ring, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
+        { MP_QSTR_packet, MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_rate, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_frame, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_video, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
+        { MP_QSTR_max_frame, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
+    #if USBIF_HAVE_HOST
+    uint32_t dev_id = (uint32_t)args[ARG_dev].u_int;
+    uint8_t ep = (uint8_t)args[ARG_ep].u_int;
+    mp_obj_t ring = args[ARG_ring].u_obj;
+    if (ring == mp_const_none) {
+        int r = usbif_stream_close(dev_id, ep);
+        usbif_stream_release_owners();
+        if (r < 0 && r != -MP_ENOENT) {
+            mp_raise_OSError(-r);
+        }
+        return mp_const_none;
+    }
+    usbif_stream_cfg_t cfg = {
+        .packet = (uint16_t)args[ARG_packet].u_int,
+        .rate = (uint32_t)args[ARG_rate].u_int,
+        .frame = (uint16_t)args[ARG_frame].u_int,
+        .video = args[ARG_video].u_bool,
+        .max_frame = (uint32_t)args[ARG_max_frame].u_int,
+    };
+    void *ptr = MP_OBJ_TO_PTR(ring);
+    bool known = false;
+    #if defined(MP_USBD_HAS_RING_API)
+    if (mp_obj_is_type(ring, &mp_usbd_ring_type)) {
+        cfg.ring = (usbif_stream_ring_t) {
+            .ctx = ptr, .put = usbif_ring_put, .get = mp_usbd_ring_get,
+            .used = mp_usbd_ring_used, .size = mp_usbd_ring_size,
+            .stage = mp_usbd_ring_stage, .commit = mp_usbd_ring_commit,
+            .overflow = mp_usbd_ring_overflow,
+        };
+        known = true;
+    }
+    #endif
+    #if defined(AUDIOPUMP_RING_HAS_SINK_WRITE)
+    if (mp_obj_is_type(ring, &audiopump_ring_type)) {
+        if (!(ep & 0x80) || cfg.video) {
+            mp_raise_ValueError(MP_ERROR_TEXT("an audiopump.Ring takes a capture (IN) stream"));
+        }
+        cfg.ring = (usbif_stream_ring_t) { .ctx = ptr, .put = audiopump_ring_sink_write };
+        known = true;
+    }
+    #endif
+    if (!known) {
+        mp_raise_TypeError(MP_ERROR_TEXT("ring must be a machine.USBDevice.Ring or an audiopump.Ring"));
+    }
+    int slot = usbif_stream_open(dev_id, ep, &cfg);
+    if (slot < 0) {
+        if (slot == -MP_EACCES) {
+            mp_raise_msg(&mp_type_OSError,
+                MP_ERROR_TEXT("claim the endpoint's interface at its streaming alternate setting first"));
+        }
+        if (slot == -MP_ENOMEM) {
+            mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("no free stream, or no memory for its transfers"));
+        }
+        mp_raise_OSError(-slot);
+    }
+    usbif_stream_release_owners();
+    MP_STATE_VM(usbif_stream_owner)[slot] = ring;
+    return mp_const_none;
+    #else
+    mp_raise_OSError(MP_EOPNOTSUPP);
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(usbif_host_stream_obj, 3, usbif_host_stream_py);
+
+// host_stream_stats(dev_id, ep): (packets, bytes, dropped, starved, errors,
+// empty, frames, torn, big), or None when ep has no stream.
+static mp_obj_t usbif_host_stream_stats_py(mp_obj_t dev_in, mp_obj_t ep_in) {
+    #if USBIF_HAVE_HOST
+    usbif_stream_stats_t st;
+    if (usbif_stream_stats((uint32_t)mp_obj_get_int(dev_in), (uint8_t)mp_obj_get_int(ep_in), &st) < 0) {
+        return mp_const_none;
+    }
+    const uint32_t v[9] = { st.packets, st.bytes, st.dropped, st.starved, st.errors, st.empty,
+                            st.frames, st.torn, st.big };
+    mp_obj_t items[9];
+    for (int i = 0; i < 9; i++) {
+        items[i] = mp_obj_new_int_from_uint(v[i]);
+    }
+    return mp_obj_new_tuple(9, items);
+    #else
+    (void)dev_in;
+    (void)ep_in;
+    return mp_const_none;
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(usbif_host_stream_stats_obj, usbif_host_stream_stats_py);
+
+// host_stream_write(dev_id, ep, buf): queue PCM on an OUT stream; the bytes
+// taken, whole frames, 0 when the ring is full. Through the same gate as a
+// C sink's writes, so the two never race on the ring.
+static mp_obj_t usbif_host_stream_write_py(mp_obj_t dev_in, mp_obj_t ep_in, mp_obj_t buf_in) {
+    #if USBIF_HAVE_HOST
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_READ);
+    return usbif_xfer_check(usbif_stream_write((uint32_t)mp_obj_get_int(dev_in),
+        (uint8_t)mp_obj_get_int(ep_in), buf.buf, buf.len));
+    #else
+    mp_raise_OSError(MP_EOPNOTSUPP);
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(usbif_host_stream_write_obj, usbif_host_stream_write_py);
+
+// host_stream_space(dev_id, ep): bytes a write can take now, whole frames.
+static mp_obj_t usbif_host_stream_space_py(mp_obj_t dev_in, mp_obj_t ep_in) {
+    #if USBIF_HAVE_HOST
+    return usbif_xfer_check(usbif_stream_space((uint32_t)mp_obj_get_int(dev_in), (uint8_t)mp_obj_get_int(ep_in)));
+    #else
+    mp_raise_OSError(MP_EOPNOTSUPP);
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(usbif_host_stream_space_obj, usbif_host_stream_space_py);
+
+// host_stream_c_sink(dev_id, ep, channels, bits) -> bytes: the OUT stream's
+// pcm_c_sink_t by value (pcm_c_sink.h), for another native module to copy
+// and write to from its own task. Dead (-1 from both calls) once the stream
+// stops; a new stream issues a new one.
+static mp_obj_t usbif_host_stream_c_sink_py(size_t n_args, const mp_obj_t *args) {
+    #if USBIF_HAVE_HOST
+    pcm_c_sink_t sink;
+    int r = usbif_stream_c_sink((uint32_t)mp_obj_get_int(args[0]), (uint8_t)mp_obj_get_int(args[1]), &sink,
+        (uint32_t)mp_obj_get_int(args[2]), (uint32_t)mp_obj_get_int(args[3]));
+    if (r < 0) {
+        mp_raise_OSError(-r);
+    }
+    return mp_obj_new_bytes((const byte *)&sink, sizeof(sink));
+    #else
+    mp_raise_OSError(MP_EOPNOTSUPP);
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbif_host_stream_c_sink_obj, 4, 4, usbif_host_stream_c_sink_py);
 
 // A hosted network adapter (usb.host.net) as an ESP-IDF network interface,
 // in usbif_host_net.c: Python does the control side, this moves the frames.
@@ -1186,26 +1017,15 @@ static const mp_rom_map_elem_t usbif_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_host_release), MP_ROM_PTR(&usbif_host_release_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_ctrl), MP_ROM_PTR(&usbif_host_ctrl_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_xfer), MP_ROM_PTR(&usbif_host_xfer_obj) },
+    { MP_ROM_QSTR(MP_QSTR_host_stream), MP_ROM_PTR(&usbif_host_stream_obj) },
+    { MP_ROM_QSTR(MP_QSTR_host_stream_stats), MP_ROM_PTR(&usbif_host_stream_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_host_stream_write), MP_ROM_PTR(&usbif_host_stream_write_obj) },
+    { MP_ROM_QSTR(MP_QSTR_host_stream_space), MP_ROM_PTR(&usbif_host_stream_space_obj) },
+    { MP_ROM_QSTR(MP_QSTR_host_stream_c_sink), MP_ROM_PTR(&usbif_host_stream_c_sink_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_net_start), MP_ROM_PTR(&usbif_host_net_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_net_stop), MP_ROM_PTR(&usbif_host_net_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_net_info), MP_ROM_PTR(&usbif_host_net_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_net_default), MP_ROM_PTR(&usbif_host_net_default_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uac_open), MP_ROM_PTR(&usbif_host_uac_open_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uac_read), MP_ROM_PTR(&usbif_host_uac_read_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uac_write), MP_ROM_PTR(&usbif_host_uac_write_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uac_queued), MP_ROM_PTR(&usbif_host_uac_queued_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uac_space), MP_ROM_PTR(&usbif_host_uac_space_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uac_capacity), MP_ROM_PTR(&usbif_host_uac_capacity_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uac_c_sink), MP_ROM_PTR(&usbif_host_uac_c_sink_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uac_stats), MP_ROM_PTR(&usbif_host_uac_stats_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uac_clock_ranges), MP_ROM_PTR(&usbif_host_uac_clock_ranges_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uac_close), MP_ROM_PTR(&usbif_host_uac_close_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uvc_negotiate), MP_ROM_PTR(&usbif_host_uvc_negotiate_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uvc_open), MP_ROM_PTR(&usbif_host_uvc_open_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uvc_read_frame), MP_ROM_PTR(&usbif_host_uvc_read_frame_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uvc_frame_ready), MP_ROM_PTR(&usbif_host_uvc_frame_ready_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uvc_stats), MP_ROM_PTR(&usbif_host_uvc_stats_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_uvc_close), MP_ROM_PTR(&usbif_host_uvc_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_drain), MP_ROM_PTR(&usbif_host_drain_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_stats), MP_ROM_PTR(&usbif_host_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_port_cycle), MP_ROM_PTR(&usbif_host_port_cycle_obj) },
@@ -1259,6 +1079,7 @@ static void usbif_soft_reset_teardown(void) {
     // Closes whatever class drivers the program left open, then stops the
     // host task and uninstalls the host library: host_start() starts fresh.
     usbif_host_stop_c();
+    usbif_stream_release_owners();
     #endif
     usbif_host_running = false;
     // The guard is being swept with the rest of the heap. Its root has to go

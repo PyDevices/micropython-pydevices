@@ -39,10 +39,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "shared/usbif_byte_ring.h"
+// The ring the gate feeds, as two calls on the owner's ring: the bytes it
+// has room for, and a push of n bytes that fit (the bytes taken). Any
+// single-producer ring will do: usbif's byte ring in the tests, a
+// USBDevice.Ring under a USB host's playback stream.
+typedef struct {
+    uint32_t (*room)(void *ring);
+    uint32_t (*push)(void *ring, const uint8_t *src, uint32_t n);
+} usbif_pcm_ring_ops_t;
 
 typedef struct {
-    usbif_byte_ring_t *ring;    // the ring this feeds; the owner's storage
+    const usbif_pcm_ring_ops_t *ops;
+    void *ring;                 // the ring this feeds; the owner's storage
     uint32_t frame;             // writes are cut to whole frames of this
     uint32_t live;              // open generation, 0 while closed
     uint32_t users;             // write/space calls in progress
@@ -53,7 +61,11 @@ typedef struct {
 
 // Once, before anything else. `wait` is called in close()'s loop; it must let
 // a task on the same core run (a tick's sleep, a yield).
-void usbif_pcm_sink_init(usbif_pcm_sink_t *s, usbif_byte_ring_t *ring, void (*wait)(void));
+void usbif_pcm_sink_init(usbif_pcm_sink_t *s, const usbif_pcm_ring_ops_t *ops, void *ring,
+    void (*wait)(void));
+
+// Point the gate at another ring, while it is closed (before open()).
+void usbif_pcm_sink_set_ring(usbif_pcm_sink_t *s, void *ring);
 
 // The ring is initialised and ready: start accepting writes, and return the
 // new stream's generation (never 0). The owner hands it out as the sink's ctx.

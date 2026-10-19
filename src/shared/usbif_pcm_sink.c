@@ -10,7 +10,9 @@
 #define USBIF_PCM_SINK_INSIDE_HOOK() do { } while (0)
 #endif
 
-void usbif_pcm_sink_init(usbif_pcm_sink_t *s, usbif_byte_ring_t *ring, void (*wait)(void)) {
+void usbif_pcm_sink_init(usbif_pcm_sink_t *s, const usbif_pcm_ring_ops_t *ops, void *ring,
+    void (*wait)(void)) {
+    s->ops = ops;
     s->ring = ring;
     s->frame = 0;
     s->live = 0;
@@ -18,6 +20,10 @@ void usbif_pcm_sink_init(usbif_pcm_sink_t *s, usbif_byte_ring_t *ring, void (*wa
     s->busy = 0;
     s->last_gen = 0;
     s->wait = wait;
+}
+
+void usbif_pcm_sink_set_ring(usbif_pcm_sink_t *s, void *ring) {
+    s->ring = ring;
 }
 
 uint32_t usbif_pcm_sink_open(usbif_pcm_sink_t *s, uint32_t frame) {
@@ -73,13 +79,13 @@ int usbif_pcm_sink_write(usbif_pcm_sink_t *s, uint32_t gen, const uint8_t *data,
     #else
     {
     #endif
-        uint32_t room = usbif_byte_ring_free(s->ring);
+        uint32_t room = s->ops->room(s->ring);
         uint32_t n = len < room ? (uint32_t)len : room;
         if (s->frame) {
             n -= n % s->frame;
         }
         if (n) {
-            taken = (int)usbif_byte_ring_push(s->ring, data, n);
+            taken = (int)s->ops->push(s->ring, data, n);
         }
         __atomic_store_n(&s->busy, 0, __ATOMIC_RELEASE);
     }
@@ -92,7 +98,7 @@ int usbif_pcm_sink_space(usbif_pcm_sink_t *s, uint32_t gen) {
     if (!usbif_pcm_sink_enter(s, gen)) {
         return -1;
     }
-    uint32_t room = usbif_byte_ring_free(s->ring);
+    uint32_t room = s->ops->room(s->ring);
     if (s->frame) {
         room -= room % s->frame;
     }

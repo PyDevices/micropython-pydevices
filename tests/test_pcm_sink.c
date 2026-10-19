@@ -50,6 +50,7 @@ static void inside_hook(void) {
 }
 
 #define USBIF_PCM_SINK_INSIDE_HOOK() inside_hook()
+#include "shared/usbif_byte_ring.h"
 #include "shared/usbif_pcm_sink.c"
 #include "pcm_c_sink.h"
 
@@ -66,9 +67,19 @@ static void yield_wait(void) {
     sched_yield();
 }
 
-// --- the published struct, wired as usbif_host_uac.c wires it -------------
+// --- the published struct, wired as usbif_host_stream.c wires it ----------
 
 static usbif_byte_ring_t ring;
+
+static uint32_t ring_room(void *r) {
+    return usbif_byte_ring_free(r);
+}
+
+static uint32_t ring_push(void *r, const uint8_t *src, uint32_t n) {
+    return usbif_byte_ring_push(r, src, n);
+}
+
+static const usbif_pcm_ring_ops_t ring_ops = { ring_room, ring_push };
 static usbif_pcm_sink_t gate;
 
 static int sink_write(void *ctx, const uint8_t *data, size_t len) {
@@ -93,7 +104,7 @@ static pcm_c_sink_t make_sink(uint32_t gen) {
 static void test_sequential(void) {
     static uint8_t store[64];
     usbif_byte_ring_init(&ring, store, sizeof(store));
-    usbif_pcm_sink_init(&gate, &ring, yield_wait);
+    usbif_pcm_sink_init(&gate, &ring_ops, &ring, yield_wait);
     storage_live = 1;
 
     CHECK(usbif_pcm_sink_current(&gate) == 0);
@@ -189,7 +200,7 @@ static void *writer(void *arg) {
 }
 
 static void test_race(void) {
-    usbif_pcm_sink_init(&gate, &ring, yield_wait);
+    usbif_pcm_sink_init(&gate, &ring_ops, &ring, yield_wait);
     usbif_byte_ring_init(&ring, NULL, 0);
     storage_live = 0;
     inside_violations = 0;
@@ -261,7 +272,7 @@ static void *producer(void *arg) {
 static void test_two_producers(void) {
     static uint8_t store[4096];
     usbif_byte_ring_init(&ring, store, sizeof(store));
-    usbif_pcm_sink_init(&gate, &ring, yield_wait);
+    usbif_pcm_sink_init(&gate, &ring_ops, &ring, yield_wait);
     __atomic_store_n(&storage_live, 1, __ATOMIC_SEQ_CST);
     usbif_pcm_sink_open(&gate, 4);
 

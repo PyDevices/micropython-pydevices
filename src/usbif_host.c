@@ -525,8 +525,7 @@ extern void usbif_cdc_close_for_host_stop(void);
 extern void usbif_hid_close_for_host_stop(void);
 extern void usbif_host_midi_close_for_host_stop(void);
 extern void usbif_msc_close_for_host_stop(void);
-extern void usbif_host_uac_close_for_host_stop(void);
-extern void usbif_host_uvc_close_for_host_stop(void);
+extern void usbif_stream_close_all(void);
 
 extern void usbif_xfer_on_dev_gone(usb_device_handle_t dev);
 extern void usbif_xfer_close(void);
@@ -822,9 +821,8 @@ static void usbif_host_task(void *arg) {
             usbif_host_midi_close_for_host_stop();
             printf("usbif_host: closing msc\n");
             usbif_msc_close_for_host_stop();
-            printf("usbif_host: closing uac\n");
-            usbif_host_uac_close_for_host_stop();
-            usbif_host_uvc_close_for_host_stop();
+            printf("usbif_host: closing streams\n");
+            usbif_stream_close_all();
             #if USBIF_HOST_RELEASE_ABANDONED_CTRL
             // A control transfer a driver gave up on is still queued on EP0.
             // Closing the device now would free it with that transfer on the
@@ -1121,8 +1119,6 @@ restore_device:
 
 // The plain closes Python calls, for usbif_host_stop_c() below.
 extern void usbif_host_midi_close(void);
-extern void usbif_host_uac_close(int dir);
-extern void usbif_host_uvc_close(void);
 
 void usbif_host_stop_c(void) {
     if (usbif_host_task_handle == NULL) {
@@ -1138,13 +1134,12 @@ void usbif_host_stop_c(void) {
     // host came back wedged until a hard reset. A soft reset reaches here
     // with whatever the program had open, so this is the path that matters.
     usbif_net_stop();
+    usbif_stream_close_all();
     usbif_xfer_close();
     usbif_cdc_close();
     usbif_hid_close();
     usbif_host_midi_close();
     usbif_msc_close();
-    usbif_host_uac_close(USBIF_HOST_UAC_ANY);
-    usbif_host_uvc_close();
     usbif_host_task_running = false;
     // Bounded in milliseconds, not ticks: see USBIF_HOST_STOP_WAIT_MS.
     const TickType_t stop_limit = USBIF_MS_TICKS(USBIF_HOST_STOP_WAIT_MS);

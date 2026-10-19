@@ -15,13 +15,40 @@
 # a stream is chosen (the rate, channels and bits you ask for, or its best
 # offer), a 2.0 device's clock is asked its rates, and the samples move over
 # isochronous transfers in C, through a ring between your writes and the bus.
+# A microphone can also feed audiodsp's pump straight from the bus:
+# mic.start(ring) with an audiopump.Ring.
 #
 # Start the host with classes=("uac",): the controller's FIFO split is fixed
 # while it runs, and one set up for video has no room for a speaker's
 # periodic OUT packets.
 import _usbif
 
+from machine import USBDevice
+
 from . import _uac
+
+_SET_CUR = 0x01
+_RANGE = 0x02
+_SAM_FREQ = 0x0100          # SAMPLING_FREQ_CONTROL << 8, both versions
+_CTRL_MS = 3000
+_MAX_SUBRANGES = 8
+_DEFAULT_RING = 8192        # about 43 ms of 48 kHz stereo
+
+
+def _clock_ranges(dev, control, clock):
+    """A 2.0 clock source's RANGE answer, as flat (min, max, res) triplets."""
+    buf = bytearray(2 + 12 * _MAX_SUBRANGES)
+    n = dev.ctrl_transfer(0xA1, _RANGE, _SAM_FREQ, (clock << 8) | control, buf, _CTRL_MS)
+    if n < 2:
+        raise OSError("short RANGE answer")
+    out = []
+    for i in range(min(buf[0] | buf[1] << 8, _MAX_SUBRANGES)):
+        at = 2 + 12 * i
+        if at + 12 > n:
+            break
+        for k in range(3):
+            out.append(int.from_bytes(buf[at + 4 * k:at + 4 * k + 4], "little"))
+    return out
 
 
 def _streams(dev):
@@ -36,7 +63,7 @@ def _streams(dev):
         key = (s.control, s.clock)
         if key not in asked:
             try:
-                asked[key] = _uac.rates_from_ranges(_usbif.host_uac_clock_ranges(dev._id, s.control, s.clock))
+                asked[key] = _uac.rates_from_ranges(_clock_ranges(dev, s.control, s.clock))
             except OSError:
                 asked[key] = ()
         fields = list(s)
@@ -73,32 +100,81 @@ class _Stream:
         self.channels = s.channels
         self.bits = s.bits
         self.frame_bytes = s.channels * s.frame_bytes
-        self._ring = 0
+        self._ring_bytes = _DEFAULT_RING
         if ring_ms:
-            self._ring = max(1, (self.rate * ring_ms + 999) // 1000) * self.frame_bytes
+            self._ring_bytes = max(1, (self.rate * ring_ms + 999) // 1000) * self.frame_bytes
+        self._ring = None
         self._open = False
+        self._last = (0, 0, 0, 0, 0, 0)
+
+    def _set_rate(self):
+        # Advisory: a device with one fixed rate may refuse (stall) it.
+        s = self.stream
+        try:
+            if s.clock:     # 2.0: CUR on the clock source, four bytes
+                self.dev.ctrl_transfer(0x21, _SET_CUR, _SAM_FREQ, (s.clock << 8) | s.control,
+                                       self.rate.to_bytes(4, "little"), _CTRL_MS)
+            else:           # 1.0: an endpoint control, three bytes
+                self.dev.ctrl_transfer(0x22, _SET_CUR, _SAM_FREQ, s.endpoint,
+                                       self.rate.to_bytes(3, "little"), _CTRL_MS)
+        except OSError:
+            pass
+
+    def _park(self):
+        # Back to alternate 0, the zero-bandwidth setting, and let go: the
+        # device stops streaming and stops reserving the bus.
+        itf = self.stream.interface
+        try:
+            self.dev.set_interface_altsetting(itf, 0)
+        except OSError:
+            pass
+        try:
+            self.dev._release(itf)
+        except OSError:
+            pass
+
+    def _start(self, ring, rate):
+        s = self.stream
+        try:
+            self.dev.set_interface_altsetting(s.interface, s.alt)
+        except OSError as e:
+            raise OSError("the interface claim was refused (%s); for a speaker, start the host with "
+                          "usb.core.start(classes=(\"uac\",))" % e)
+        self._set_rate()
+        try:
+            _usbif.host_stream(self._id, s.endpoint, ring, s.max_packet & 0x7FF, rate=rate,
+                               frame=self.frame_bytes)
+        except BaseException:
+            self._park()
+            raise
+        self._ring = ring
+        self._open = True
 
     def start(self):
         if not self._open:
-            s = self.stream
-            _usbif.host_uac_open(self._id, s.interface, s.alt, s.endpoint, s.max_packet, self.rate,
-                                 s.clock, s.control, self.frame_bytes, self._ring)
-            self._open = True
+            self._start(USBDevice.Ring(max(self._ring_bytes, 2 * (self.stream.max_packet & 0x7FF))), 0)
 
     def stop(self):
         if self._open:
-            _usbif.host_uac_close(self.stream.endpoint)
+            self._last = self.stats()
+            _usbif.host_stream(self._id, self.stream.endpoint, None)
             self._open = False
+            self._ring = None
+            self._park()
 
     def capacity(self):
         """The ring's size in bytes; 0 while stopped."""
-        return max(0, _usbif.host_uac_capacity(self.stream.endpoint))
+        return self._ring.stats()[0] if self._open and isinstance(self._ring, USBDevice.Ring) else 0
 
     def stats(self):
         """(packets, bytes, dropped, starved, errors, empty): ``dropped``
         means Python was late, ``starved`` that the ring was empty when the
-        bus asked, ``errors`` bad packets on the bus."""
-        return _usbif.host_uac_stats(self.stream.endpoint)
+        bus asked, ``errors`` bad packets on the bus. After stop(), the
+        stream's last."""
+        if not self._open:
+            return self._last
+        st = _usbif.host_stream_stats(self._id, self.stream.endpoint)
+        return tuple(st[:6]) if st else self._last
 
     def __enter__(self):
         self.start()
@@ -113,18 +189,30 @@ class Speaker(_Stream):
 
     _direction = _uac.OUT
 
+    def start(self):
+        if not self._open:
+            self._start(USBDevice.Ring(max(self._ring_bytes, 2 * (self.stream.max_packet & 0x7FF))), self.rate)
+
     def write(self, buf):
         """Queue PCM; returns the bytes taken, whole frames, maybe fewer
         than given when the ring is full."""
-        return _usbif.host_uac_write(buf)
+        return _usbif.host_stream_write(self._id, self.stream.endpoint, buf)
 
     def space(self):
         """Bytes a write can take right now."""
-        return _usbif.host_uac_space(self.stream.endpoint)
+        return _usbif.host_stream_space(self._id, self.stream.endpoint)
 
     def queued(self):
         """Bytes written and not yet sent."""
-        return _usbif.host_uac_queued(self.stream.endpoint)
+        return self._ring.any() if self._open else 0
+
+    def c_sink(self):
+        """The playing stream as a C sink (pcm_c_sink.h), by value: for
+        another native module to write PCM from its own task, the
+        interpreter out of the path. Starts the stream if it isn't running.
+        The sink dies when the stream stops; ask again after a restart."""
+        self.start()
+        return _usbif.host_stream_c_sink(self._id, self.stream.endpoint, self.channels, self.bits)
 
 
 class Microphone(_Stream):
@@ -132,10 +220,27 @@ class Microphone(_Stream):
 
     _direction = _uac.IN
 
+    def start(self, ring=None):
+        """Start recording. ``ring``, an audiodsp ``audiopump.Ring`` (16-bit,
+        at this stream's rate and channels), takes the samples straight from
+        the bus for the pump to play; read() then has nothing."""
+        if not self._open:
+            if ring is None:
+                ring = USBDevice.Ring(max(self._ring_bytes, 2 * (self.stream.max_packet & 0x7FF)))
+            elif self.bits != 16:
+                raise ValueError("an audiopump.Ring takes 16-bit audio; this stream is %d-bit" % self.bits)
+            self._start(ring, 0)
+
     def read(self, buf):
         """Recorded PCM into buf; returns the bytes read, 0 when none yet."""
-        return _usbif.host_uac_read(buf)
+        r = self._ring
+        if not self._open or not isinstance(r, USBDevice.Ring):
+            return 0
+        n = min(len(buf), r.any())
+        n -= n % self.frame_bytes
+        return r.readinto(buf, n) if n else 0
 
     def queued(self):
         """Bytes recorded and not yet read."""
-        return _usbif.host_uac_queued(self.stream.endpoint)
+        r = self._ring
+        return r.any() if self._open and isinstance(r, USBDevice.Ring) else 0

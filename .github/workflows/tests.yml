@@ -29,7 +29,7 @@ jobs:
           cc -std=c11 -Wall -Wextra -Werror -Isrc \
              -o /tmp/test_ringbuf tests/test_ringbuf.c src/shared/usbif_ringbuf.c
           /tmp/test_ringbuf
-      - name: Build and run the UAC host byte ring tests
+      - name: Build and run the byte ring tests (the C sink tests' ring)
         run: |
           cc -std=c11 -Wall -Wextra -Werror -Isrc \
              -o /tmp/test_byte_ring tests/test_byte_ring.c src/shared/usbif_byte_ring.c
@@ -68,11 +68,26 @@ jobs:
              -o /tmp/test_midi_packets tests/test_midi_packets.c \
              src/shared/usbif_midi_packet.c
           /tmp/test_midi_packets
-      - name: Build and run the UVC host queue-size tests
+      - name: Build and run the host stream queue-size tests
         run: |
           cc -std=c11 -Wall -Wextra -Werror -Isrc \
-             -o /tmp/test_uvc_queue tests/test_uvc_queue.c
-          /tmp/test_uvc_queue
+             -o /tmp/test_iso_queue tests/test_iso_queue.c
+          /tmp/test_iso_queue
+      - name: Build and run the host stream pacing and UVC framing tests
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -Isrc \
+             -o /tmp/test_iso_stream tests/test_iso_stream.c
+          /tmp/test_iso_stream
+      - name: The pacing and framing tests can fail (planted faults must be caught)
+        run: |
+          for fault in USBIF_UVC_FRAME_PLANT_NO_SYNC USBIF_ISO_PACE_PLANT_DROP_REMAINDER; do
+            cc -std=c11 -Wall -Wextra -Werror -Isrc -D$fault -o /tmp/test_iso_planted tests/test_iso_stream.c
+            if /tmp/test_iso_planted > /tmp/planted.log 2>&1; then
+              cat /tmp/planted.log
+              echo "planted fault $fault was NOT caught"; exit 1
+            fi
+            echo "planted fault $fault caught:"; grep FAIL /tmp/planted.log | head -3
+          done
       - name: Build and run the sound card pump block tests (the meter reads what plays)
         run: |
           cc -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -Isrc \
@@ -171,7 +186,7 @@ jobs:
           make -C micropython/ports/unix submodules
           make -C micropython/ports/unix -j4 \
             USER_C_MODULES="$GITHUB_WORKSPACE/usbif" MICROPY_PY_SSL=0
-      - name: Run the c_sink surface check
+      - name: Run the no-allocation polling read check (usb.core)
         env:
-          MICROPYPATH: ${{ github.workspace }}/usbif/lib:${{ github.workspace }}/pydevices/lib:${{ github.workspace }}/pydevices/utils
-        run: micropython/ports/unix/build-standard/micropython usbif/tests/unix_c_sink.py
+          MICROPYPATH: ${{ github.workspace }}/usbif/packages/usb-core
+        run: micropython/ports/unix/build-standard/micropython usbif/tests/unix_core_poll.py

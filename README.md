@@ -45,7 +45,10 @@ an ESP32-P4's camera.
 `usb-host-hid` (keyboards and mice), `usb-host-cdc` (a USB serial device),
 `usb-host-audio` (a speaker or microphone), `usb-host-video` (a webcam) and
 `usb-host-net` (the internet through a phone's USB tethering). MIDI is `midiports.usb_host`. Adafruit's `adafruit_usb_host_midi` runs on it
-unchanged.
+unchanged. A loop that polls an endpoint every frame can read with
+`dev.read(ep, buf, timeout=1, raise_on_timeout=False)`, as on CircuitPython:
+"nothing yet" returns 0 and allocates nothing. `usb.core.running()` and
+`usb.core.stats()` say whether the host is up and what it has seen.
 
 ```python
 import usb.core
@@ -97,23 +100,24 @@ notes with velocity, pitch bend across its full range, several CCs, and
 channel-10 drums -- with zero bytes dropped.
 
 **Video and host audio, both directions, proven:** a USB webcam hosted on an
-ESP32-S3 with its picture on the board's own panel (`src/usbif_host_uvc.c`,
+ESP32-S3 with its picture on the board's own panel (`usb-host-video`,
 `examples/uvc_display.py`), and the board seen as a webcam by Windows
 (`usb-device-video`, `examples/usb_webcam.py`). Host audio plays too: the isochronous stall that blocked it was a
 `pdMS_TO_TICKS()` rounding to zero ticks at `CONFIG_FREERTOS_HZ=100`, so a
 delay that read as 5 ms never yielded at all. If your app feeds a hosted
 speaker from the interpreter thread while it also draws or talks to the
-network, open it with `uac_audio.output(dev, ring_ms=2000)` and write what
+network, open it with `Speaker(dev, ring_ms=2000)` and write what
 `space()` says fits: a 2 s ring (in PSRAM) rode out 1.2 s stalls on an S3
 with no gap, where the default 8 KB ring gapped 5,300 times in 20 s
 ([#36](https://github.com/PyDevices/usbif/issues/36)). If the audio is made
 in C by another native module, the interpreter need not carry it at all:
-`UacHostOutput.c_sink()` hands that module a sink it writes from its own
+`Speaker.c_sink()` hands that module a sink it writes from its own
 task, described in [src/pcm_c_sink.h](src/pcm_c_sink.h)
-([#43](https://github.com/PyDevices/usbif/issues/43)). Not yet run on
-hardware. A hosted device can play and record at once: open
-`uac_audio.output(dev)` and `uac_audio.input(dev)` side by side, on one
-device or two. On an ESP32-P4 hosting a USB-C headset dongle with its output
+([#43](https://github.com/PyDevices/usbif/issues/43)). A microphone can skip
+the interpreter too: `Microphone.start(ring)` with an audiodsp
+`audiopump.Ring` feeds the pump straight from the bus. A hosted device can
+play and record at once: open a `Speaker` and a `Microphone` side by side,
+on one device or two. On an ESP32-P4 hosting a USB-C headset dongle with its output
 looped into its mic, both ran 30 s with not one packet lost either way
 ([tests/hardware/uac_duplex_loopback.py](tests/hardware/uac_duplex_loopback.py)).
 

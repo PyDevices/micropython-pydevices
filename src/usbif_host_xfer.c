@@ -4,7 +4,8 @@
 // claims an interface, then moves data with blocking control, bulk and
 // interrupt transfers, the way PyUSB and CircuitPython's usb.core do. The
 // class drivers that used to be C here (CDC, HID, MSC, MIDI) become Python
-// packages over these calls; isochronous audio and video stay in C.
+// packages over these calls. Isochronous endpoints are streams instead
+// (usbif_host_stream.c), opened on interfaces claimed here.
 //
 // Errors come back as negative MicroPython errno values (py/mperrno.h), for
 // the binding to raise as OSError.
@@ -41,6 +42,7 @@
 #include "esp_timer.h"
 #include "usb/usb_host.h"
 #include "usbif_ticks.h"
+#include "usbif_host_stream.h"
 
 extern usb_host_client_handle_t usbif_host_client_get(void);
 extern void usbif_host_lock(void);
@@ -72,6 +74,11 @@ typedef struct {
     usb_transfer_t *xfer;
     SemaphoreHandle_t done;
     volatile bool busy;
+    // A poll that timed out (raise_on_timeout=False) leaves its IN transfer
+    // armed rather than retiring it: the next read of this endpoint collects
+    // it, so polling an interrupt endpoint costs neither a halt and flush
+    // each time nor a report that lands between polls.
+    bool kept;
 } usbif_xfer_pipe_t;
 
 static usbif_xfer_claim_t usbif_xfer_claims[USBIF_XFER_MAX_CLAIMS];
@@ -273,6 +280,42 @@ static uint16_t usbif_xfer_ep_mps(usb_device_handle_t dev, uint8_t ep, int *itf_
     return first;
 }
 
+// An isochronous endpoint of a claimed interface, for a stream: its raw
+// wMaxPacketSize (mult bits included), bInterval and interface. 0, or
+// -ENOENT when the configuration has no such endpoint, -EACCES when its
+// interface isn't claimed at an alternate setting that carries it, -EINVAL
+// when it isn't isochronous. With the host lock held.
+int usbif_xfer_iso_ep(usb_device_handle_t dev, uint8_t ep, uint16_t *wmax, uint8_t *interval, uint8_t *itf_out) {
+    const usb_config_desc_t *cfg;
+    if (usb_host_get_active_config_descriptor(dev, &cfg) != ESP_OK) {
+        return -MP_ENODEV;
+    }
+    const uint8_t *p = (const uint8_t *)cfg;
+    const uint8_t *end = p + cfg->wTotalLength;
+    int itf = -1, alt = -1, r = -MP_ENOENT;
+    p += cfg->bLength;
+    while (p + 2 <= end && p[0] >= 2 && p + p[0] <= end) {
+        if (p[1] == USB_B_DESCRIPTOR_TYPE_INTERFACE && p[0] >= 9) {
+            itf = p[2];
+            alt = p[3];
+        } else if (p[1] == USB_B_DESCRIPTOR_TYPE_ENDPOINT && p[0] >= 7 && p[2] == ep && itf >= 0) {
+            usbif_xfer_claim_t *c = usbif_xfer_find_claim(dev, (uint8_t)itf);
+            if (c != NULL && c->alt == alt) {
+                if ((p[3] & 0x03) != 0x01) {
+                    return -MP_EINVAL;
+                }
+                *wmax = (uint16_t)(p[4] | (p[5] << 8));
+                *interval = p[6];
+                *itf_out = (uint8_t)itf;
+                return 0;
+            }
+            r = -MP_EACCES;
+        }
+        p += p[0];
+    }
+    return r;
+}
+
 static usbif_xfer_pipe_t *usbif_xfer_pipe(usb_device_handle_t dev, uint8_t ep, size_t len, int *err) {
     usbif_xfer_pipe_t *pipe = NULL, *free_slot = NULL;
     for (int i = 0; i < USBIF_XFER_MAX_PIPES; i++) {
@@ -285,9 +328,12 @@ static usbif_xfer_pipe_t *usbif_xfer_pipe(usb_device_handle_t dev, uint8_t ep, s
             free_slot = p;
         }
     }
-    if (pipe != NULL && pipe->busy) {
+    if (pipe != NULL && pipe->busy && !pipe->kept) {
         *err = -MP_EBUSY;      // the last one timed out and hasn't retired yet
         return NULL;
+    }
+    if (pipe != NULL && pipe->busy) {
+        return pipe;           // a kept poll, still armed: the caller waits on it
     }
     int itf;
     uint16_t mps = usbif_xfer_ep_mps(dev, ep, &itf);
@@ -343,7 +389,10 @@ static void usbif_xfer_retire(usbif_xfer_pipe_t *pipe) {
     usb_host_endpoint_clear(pipe->dev, pipe->ep);
 }
 
-int usbif_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint32_t timeout_ms) {
+// `keep`: an IN transfer that times out stays armed and this returns 0, for
+// a poll that treats "nothing yet" as normal (usb.core's read with
+// raise_on_timeout=False). A later call on the endpoint picks it up.
+int usbif_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint32_t timeout_ms, bool keep) {
     usbif_host_lock();
     int r;
     usb_device_handle_t dev;
@@ -357,26 +406,34 @@ int usbif_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint32
     }
     usb_transfer_t *x = pipe->xfer;
     bool in = (ep & 0x80) != 0;
-    if (!in) {
-        memcpy(x->data_buffer, data, len);
+    if (!pipe->busy) {
+        if (!in) {
+            memcpy(x->data_buffer, data, len);
+        }
+        x->device_handle = dev;
+        x->bEndpointAddress = ep;
+        x->num_bytes = in ? (int)((len + pipe->mps - 1) / pipe->mps * pipe->mps) : (int)len;
+        if (in && x->num_bytes == 0) {
+            x->num_bytes = pipe->mps;
+        }
+        x->callback = usbif_xfer_cb;
+        x->context = pipe;
+        x->timeout_ms = timeout_ms;
+        xSemaphoreTake(pipe->done, 0);
+        pipe->busy = true;
+        if (usb_host_transfer_submit(x) != ESP_OK) {
+            pipe->busy = false;
+            r = -MP_EIO;
+            goto out;
+        }
     }
-    x->device_handle = dev;
-    x->bEndpointAddress = ep;
-    x->num_bytes = in ? (int)((len + pipe->mps - 1) / pipe->mps * pipe->mps) : (int)len;
-    if (in && x->num_bytes == 0) {
-        x->num_bytes = pipe->mps;
-    }
-    x->callback = usbif_xfer_cb;
-    x->context = pipe;
-    x->timeout_ms = timeout_ms;
-    xSemaphoreTake(pipe->done, 0);
-    pipe->busy = true;
-    if (usb_host_transfer_submit(x) != ESP_OK) {
-        pipe->busy = false;
-        r = -MP_EIO;
-        goto out;
-    }
+    pipe->kept = false;
     if (!usbif_xfer_wait(pipe->done, timeout_ms)) {
+        if (keep && in) {
+            pipe->kept = true;
+            r = 0;
+            goto out;
+        }
         usbif_xfer_retire(pipe);
         // Data can land between the timeout and the halt: a MIDI note
         // arriving as a poll gives up. Hand it over rather than drop it.
@@ -410,6 +467,9 @@ out:
 // before the transfers are freed; a gone device has nothing to halt, and
 // its callbacks are already queued with NO_DEVICE.
 static void usbif_xfer_drop_pipes(usb_device_handle_t dev, int itf, bool device_gone) {
+    // A stream on these interfaces goes first: its transfers hold the
+    // endpoints the release is about to give up.
+    usbif_stream_stop_itf(dev, itf, device_gone);
     for (int i = 0; i < USBIF_XFER_MAX_PIPES; i++) {
         usbif_xfer_pipe_t *p = &usbif_xfer_pipes[i];
         if (!p->in_use || p->dev != dev) {
