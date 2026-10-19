@@ -9,15 +9,12 @@ This completes the other half of the MIDI story. `midi_harmonizer.py` has
 the board as a MIDI *device* being driven by a host; here the roles are
 reversed. Both directions use the same plain MIDI byte stream, so code
 that parses or generates MIDI does not care which end it is on -- the
-USB-MIDI 32-bit packet framing lives in C and never reaches Python.
+USB-MIDI 32-bit packet framing never reaches you.
 
-**Proven on hardware.** A Donner keyboard delivered 989 channel messages
-(notes with velocity, pitch bend across its range, CCs, channel-10 drums)
-with zero bytes dropped. Host MIDI OUT was closed on a DIN loopback through
-an M-Audio interface: all eight sent messages returned byte-exact, median
-5 ms round trip. Nobody upstream ships an IDF MIDI host driver, so this one
-is ours (`src/usbif_host_midi.c`); the numbers above are why the status line
-no longer says "compile-verified only".
+The ports come from ``midiports.usb_host``, part of pydevices (install it
+with mip): a hosted MIDI device as a ``(midi_in, midi_out)`` pair on
+``usb.core``, the same pair ``adafruit_midi`` reads and writes on any other
+MIDI transport.
 
 **Behind a hub on an ESP32-P4,** set ``FULL_SPEED = True`` below. A
 keyboard is a full-speed device, and the P4's high-speed port can't reach one
@@ -27,8 +24,8 @@ At full speed the hub passes it straight through.
 
 import time
 
-import usbif
-import usbif.auto
+import usb.core
+from midiports import message_length, usb_host
 
 # True when the device is behind a hub on an ESP32-P4: the host then runs at
 # full speed, so the hub passes a full-speed device through. Plugged straight
@@ -59,56 +56,83 @@ def describe(status, d1, d2):
     return "status {:02x} {} {}".format(status, d1, d2)
 
 
+class Messages:
+    """Splits the port's bytes into ``(status, data)`` messages.
+
+    ``midi_in`` hands out whole messages, each starting with its status
+    byte, but one read can end partway through one. The bytes so far are
+    kept for the next read rather than guessed at. A SysEx is skipped to
+    its 0xF7.
+    """
+
+    def __init__(self):
+        self._msg = []
+        self._need = 0
+        self._sysex = False
+
+    def feed(self, data):
+        out = []
+        for b in data:
+            if b >= 0xF8:
+                out.append((b, b""))         # realtime
+            elif self._sysex:
+                self._sysex = b != 0xF7
+            elif b == 0xF0:
+                self._sysex = True
+            elif b >= 0x80:
+                self._msg = [b]
+                self._need = message_length(b)
+                if not self._need:
+                    out.append((b, b""))
+            elif self._msg:
+                self._msg.append(b)
+                if len(self._msg) == self._need + 1:
+                    out.append((self._msg[0], bytes(self._msg[1:])))
+                    self._msg = []
+        return out
+
+
+def find_midi(timeout_ms=10000):
+    deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
+    while time.ticks_diff(deadline, time.ticks_ms()) > 0:
+        dev = usb.core.find(custom_match=usb_host.is_midi)
+        if dev is not None:
+            return dev
+        time.sleep_ms(250)
+    return None
+
+
 def main():
-    host = usbif.auto.host(classes=("midi",), full_speed=FULL_SPEED).start()
-    print("started ->", tuple(sorted(host.started)))
-
-    dev = None
-    for _ in range(20):
-        time.sleep_ms(500)
-        devs = host.devices()
-        if devs:
-            dev = devs[0]
-            break
-
+    usb.core.start(full_speed=FULL_SPEED, classes=("midi",))
+    dev = find_midi()
     if dev is None:
         print("no MIDI device attached")
-        print("stats", host.stats())
-        host.stop()
+        print("stats", usb.core.stats())
+        usb.core.stop()
         return
 
-    print("device {:04x}:{:04x} classes={} speed={}".format(
-        dev.vid, dev.pid, dev.classes, dev.speed))
-    if "midi" not in dev.classes:
-        print("not a MIDI device; nothing to do")
-        host.stop()
-        return
-
-    # The hosted device as a MidiPort: the same object the board's own MIDI
-    # function gives, so the parsing and generating below is role-agnostic.
-    port = usbif.auto.open_midi("host:{}".format(dev.id))
+    midi_in, midi_out = usb_host.ports(dev)
+    print("device {:04x}:{:04x} {} {}".format(
+        dev.idVendor, dev.idProduct, dev.manufacturer, dev.product))
     print("opened -- play something (30 s)")
 
     # Send a chord first: on a sound module this is audible proof the OUT
     # pipe works before a single key is pressed.
-    try:
-        n = port.write(bytes([_NOTE_ON, _CHORD[0], 100,
-                              _NOTE_ON, _CHORD[1], 100]))
-        print("sent a chord,", n, "bytes accepted")
-    except OSError as exc:
+    if midi_out is None:
         # A keyboard with no OUT pipe is a legitimate device, not a failure.
-        print("no OUT pipe on this device (receive-only):", exc)
+        print("no OUT pipe on this device (receive-only)")
+    else:
+        n = midi_out.write(bytes([_NOTE_ON, _CHORD[0], 100,
+                                  _NOTE_ON, _CHORD[1], 100]))
+        print("sent a chord,", n, "bytes accepted")
 
     buf = bytearray(64)
-    # usbif.MidiParser keeps a partial message across reads rather than
-    # guessing at it, and counts any byte it cannot place.
-    parser = usbif.MidiParser()
+    messages = Messages()
     t0 = time.ticks_ms()
     while time.ticks_diff(time.ticks_ms(), t0) < 30000:
-        n = port.read(buf)
+        n = midi_in.readinto(buf)
         if n:
-            parser.feed(buf, n)
-            for status, data in parser.drain():
+            for status, data in messages.feed(buf[:n]):
                 if status >= 0xF8:
                     continue                # realtime clock/sense: not worth printing
                 d1 = data[0] if data else 0
@@ -117,24 +141,18 @@ def main():
         else:
             time.sleep_ms(5)
 
-    try:
-        port.write(bytes([_NOTE_OFF, _CHORD[0], 0,
-                          _NOTE_OFF, _CHORD[1], 0]))
-    except OSError:
-        pass
+    if midi_out is not None:
+        try:
+            midi_out.write(bytes([_NOTE_OFF, _CHORD[0], 0,
+                                  _NOTE_OFF, _CHORD[1], 0]))
+        except usb.core.USBError:
+            pass
 
-    if parser.desync:
-        print("desync:", parser.desync, "byte(s) arrived with no status")
-    # (rx_dropped, release_failed), not a single count -- and a 2-tuple is
-    # always truthy, so testing the tuple itself reported a drop on every
-    # clean run.
-    rx_dropped, release_failed = port.dropped()
-    if rx_dropped:
-        print("rx dropped:", rx_dropped, "bytes (ring overflowed)")
-    if release_failed:
-        print("transfer releases failed:", release_failed)
-    port.close()
-    host.stop()
+    if midi_in.desync:
+        print("desync:", midi_in.desync, "byte(s) arrived with no status")
+    print("stats", usb.core.stats())
+    midi_in.close()
+    usb.core.stop()
     print("done")
 
 

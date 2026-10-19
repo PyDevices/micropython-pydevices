@@ -9,52 +9,58 @@ protocol.
 
 **Pairing.** Device side is ordinary CDC (MicroPython's built-in console, or
 ``dev.functions("cdc")``). Host side is this script on an S3.
+
+``BAUDRATE`` is sent to the device as its line coding, which a USB-serial
+adapter needs to talk to whatever is on its far side; a microcontroller's own
+console ignores it. Set it to ``None`` to send none.
 """
 
 import time
 
-import usbif.auto
+import usb.core
+from usb.host.cdc import Serial
+
+BAUDRATE = 115200
 
 
-def find_cdc(host, timeout_ms=15000):
+def find_cdc(timeout_ms=15000):
     deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
     while time.ticks_diff(deadline, time.ticks_ms()) > 0:
-        found = host.find("cdc")
-        if found:
-            return found[0].id
+        dev = usb.core.find(custom_match=Serial.match)
+        if dev is not None:
+            return dev
         time.sleep_ms(250)
     return None
 
 
 def main(seconds=15):
-    host = usbif.auto.host(classes=("cdc",)).start()
-    dev_id = find_cdc(host)
-    if dev_id is None:
+    usb.core.start(classes=("cdc",))
+    dev = find_cdc()
+    if dev is None:
         print("no CDC device found")
-        host.stop()
+        usb.core.stop()
         return
 
-    print("CDC device", dev_id)
-    host.cdc_open(dev_id)
-    msg = b"hello from usbif host\r\n"
-    n = host.cdc_write(msg)
+    print("CDC device {:04x}:{:04x} {} {}".format(
+        dev.idVendor, dev.idProduct, dev.manufacturer, dev.product))
+    # A read waits up to 20 ms for its first byte, then takes what's there.
+    port = Serial(dev, baudrate=BAUDRATE, timeout=20)
+    msg = b"hello from the USB host\r\n"
+    n = port.write(msg)
     print("wrote", n, "bytes:", msg)
 
-    buf = bytearray(256)
     t0 = time.ticks_ms()
     total = 0
     try:
         while time.ticks_diff(time.ticks_ms(), t0) < seconds * 1000:
-            got = host.cdc_read(buf)
+            got = port.read(256)
             if got:
-                total += got
-                print("rx:", bytes(buf[:got]))
-            else:
-                time.sleep_ms(20)
+                total += len(got)
+                print("rx:", got)
     finally:
         print("total bytes read:", total)
-        host.cdc_close()
-        host.stop()
+        port.close()
+        usb.core.stop()
 
 
 if __name__ == "__main__":

@@ -4,51 +4,45 @@
 
 The datalogger case: a board writing what it produced onto a stick, then
 carrying on. Mounts the stick's FAT filesystem read-write, appends to a
-log file, unmounts to flush, and remounts to read the lines back -- so the
-proof is that the bytes reached the medium, not a cache.
+log file, unmounts to flush, and remounts read-only to read the lines back
+-- so the proof is that the bytes reached the medium, not a cache.
 
 The one-writer rule applies here exactly as it does on the device side: a
 filesystem with two writers is a corrupted filesystem, so nothing else
 should hold this stick while the board has it.
 
-The block device is ``host.partition(..., readonly=False)`` -- read-only is
-the default, because the safe answer to "may I write to the drive somebody
-just plugged in" is no, and this is the case that deliberately says yes.
-
-Verified against a commodity PNY 8 GB stick formatted FAT32 on a PC.
+``usb.host.msc.Drive`` writes with SCSI WRITE(10); whether a mount may write
+is the mount's choice. The other drive examples pass ``readonly=True``,
+because the safe answer to "may I write to the drive somebody just plugged
+in" is no. This is the case that deliberately says yes.
 """
 import os
 import time
 
-import usbif.auto
+import usb.core
+import vfs
+from usb.host.msc import Drive
 
-host = usbif.auto.host(classes=("msc",)).start()
-print("started ->", tuple(sorted(host.started)))
+usb.core.start(classes=("msc",))
 
 dev = None
 for _ in range(20):
-    time.sleep_ms(500)
-    devs = host.devices()
-    if devs:
-        dev = devs[0]
+    dev = usb.core.find(custom_match=Drive.match)
+    if dev is not None:
         break
+    time.sleep_ms(500)
 
 if dev is None:
-    print("no device attached")
-    host.stop()
+    print("no drive attached")
+    usb.core.stop()
 else:
-    print("msc_open ->", host.msc_open(dev.id))
-    blocks, bs, inquiry = host.msc_info()
-    print("drive:", repr(inquiry))
+    print("drive: {:04x}:{:04x} {} {}".format(
+        dev.idVendor, dev.idProduct, dev.manufacturer, dev.product))
+    drive = Drive(dev)
 
-    mbr = bytearray(bs)
-    host.msc_read(0, mbr)
-    e = 446
-    start = int.from_bytes(mbr[e + 8:e + 12], "little")
-    count = int.from_bytes(mbr[e + 12:e + 16], "little")
-
-    part = host.partition(start, count, readonly=False)
-    os.mount(part, "/usb")          # read-write this time
+    # The whole drive goes to VfsFat: on a partitioned stick it finds the
+    # first FAT partition itself.
+    vfs.mount(vfs.VfsFat(drive), "/usb")        # read-write this time
     print("mounted /usb read-write")
     print("before:", os.listdir("/usb"))
 
@@ -59,19 +53,18 @@ else:
             f.write("t={} reading={}\n".format(time.ticks_ms(), 20 + i))
     print("appended 5 lines")
 
-    os.umount("/usb")
+    vfs.umount("/usb")
     print("unmounted (flushed)")
 
     # Remount and read it back -- proving the bytes reached the medium and
     # not just a cache.
-    os.mount(part, "/usb", readonly=True)
+    vfs.mount(vfs.VfsFat(drive), "/usb", readonly=True)
     print("after:", os.listdir("/usb"))
     with open("/usb/SENSOR.LOG") as f:
         data = f.read()
     print("--- SENSOR.LOG ({} bytes) ---".format(len(data)))
     print(data)
-    os.umount("/usb")
+    vfs.umount("/usb")
 
-    host.msc_close()
-    host.stop()
+    usb.core.stop()
     print("done")

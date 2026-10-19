@@ -14,7 +14,7 @@ pairing is the same scripts on two boards, not a special `pair_*` file.
 | **HID** | [`hid_keyboard.py`](hid_keyboard.py), [`hid_mouse.py`](hid_mouse.py) | [`hid_host.py`](hid_host.py) |
 | **MSC** | [`sd_drive.py`](sd_drive.py), [`ram_drive.py`](ram_drive.py) | [`usb_drive_mount.py`](usb_drive_mount.py), [`usb_drive_read.py`](usb_drive_read.py), [`usb_drive_log.py`](usb_drive_log.py) |
 | **CDC** | MicroPython's own console | [`usb_serial.py`](usb_serial.py) |
-| **enum** | — | [`host_enum.py`](host_enum.py) (portable API; board or desktop) |
+| **enum** | — | [`host_enum.py`](host_enum.py) (lists what is plugged in, watches attach and detach) |
 
 ## Board-to-board pairings
 
@@ -56,15 +56,15 @@ wedged board.
 | Hole | Issue | Consequence for examples |
 |---|---|---|
 | Device UAC is speaker-only (no mic endpoint) | [usbif#7](https://github.com/PyDevices/usbif/issues/7) | `usb_mic.py` hosts a commercial mic; no device-side capture script |
-| P4 behind a hub reaches full-speed devices only at full speed | [usbif#15](https://github.com/PyDevices/usbif/issues/15) | A keyboard or MIDI controller behind a hub needs `host(..., full_speed=True)`; plugged straight into the port it needs nothing |
-| Host FIFO split is per session | [usbif#2](https://github.com/PyDevices/usbif/issues/2) | `host(classes=...)` decides it: `uvc` leans IN (600 B), `uac` without `uvc` gives periodic OUT 200 B and IN 528 B on an S3, four times that on a P4 (800 B and 2136 B); a camera and a 2.0 speaker cannot share one `start()` |
+| P4 behind a hub reaches full-speed devices only at full speed | [usbif#15](https://github.com/PyDevices/usbif/issues/15) | A keyboard or MIDI controller behind a hub needs `usb.core.start(full_speed=True)` (`FULL_SPEED = True` in `hid_host.py`, `midi_host.py` and `host_enum.py`); plugged straight into the port it needs nothing |
+| Host FIFO split is per session | [usbif#2](https://github.com/PyDevices/usbif/issues/2) | `usb.core.start(classes=...)` decides it: `uvc` leans IN (600 B), `uac` without `uvc` gives periodic OUT 200 B and IN 528 B on an S3, four times that on a P4 (800 B and 2136 B); a camera and a 2.0 speaker cannot share one `start()` |
 
 ## Conventions
 
 - Headers name the use, the board role, the other end, and whether UART must
   hold the REPL (a device setup without the console cuts a native-USB session).
 - Device examples use `machine.USBDevice` and the class packages; host
-  examples use `usb.core` and its class packages, or the older `usbif.auto`.
-  Never `_usbif` directly: the C module is package-internal. `tests/test_no_usbif_leak.py` enforces it.
+  examples use `usb.core` and its class packages.
+  Never `_usbif` directly: the C module is the packages' own. `tests/test_no_usbif_leak.py` enforces it.
 - No measured fps or latency numbers are claimed in headers for scripts that
   have not been re-run in this pass -- cite prior evidence or stay quiet.

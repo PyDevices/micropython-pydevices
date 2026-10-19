@@ -32,6 +32,9 @@ _usbif.host_net_stop = lambda: started.append("stop")
 _usbif.host_net_info = lambda: (1, ("192.168.42.7", "255.255.255.0", "192.168.42.129", "192.168.42.129"), (3, 4, 0, 0, 0))
 _usbif.host_net_default = lambda: None
 sys.modules["_usbif"] = _usbif
+# Other test modules install their own usb packages under these names.
+for _name in [m for m in sys.modules if m == "usb" or m.startswith("usb.")]:
+    del sys.modules[_name]
 core = types.ModuleType("usb.core")
 core.USBError = OSError
 usb = types.ModuleType("usb")
