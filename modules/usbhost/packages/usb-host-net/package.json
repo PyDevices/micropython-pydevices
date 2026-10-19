@@ -1,0 +1,7 @@
+{
+  "urls": [
+    ["usb/host/net.py", "github:PyDevices/usbif/packages/usb-host-net/usb/host/net.py"]
+  ],
+  "deps": [["github:PyDevices/usbif/packages/usb-core", "main"]],
+  "version": "0.1.0"
+}
