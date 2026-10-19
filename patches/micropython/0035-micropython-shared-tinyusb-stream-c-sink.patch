@@ -15,10 +15,10 @@ MP_USBD_HAS_SINK says the hook is there.
  2 files changed, 51 insertions(+), 1 deletion(-)
 
 diff --git a/shared/tinyusb/mp_usbd.h b/shared/tinyusb/mp_usbd.h
-index 5ee4d2eab..b4a4de4e8 100644
+index b7a5ff708..b61da0fec 100644
 --- a/shared/tinyusb/mp_usbd.h
 +++ b/shared/tinyusb/mp_usbd.h
-@@ -160,6 +160,13 @@ const char *mp_usbd_runtime_string_cb(uint8_t index);
+@@ -136,6 +136,13 @@ const char *mp_usbd_runtime_string_cb(uint8_t index);
  #define MP_USBD_STREAMS (4)
  #endif
  
@@ -32,7 +32,7 @@ index 5ee4d2eab..b4a4de4e8 100644
  typedef struct {
      mp_obj_base_t base;
  
-@@ -206,6 +213,9 @@ extern const mp_obj_type_t mp_usbd_ring_type;
+@@ -182,6 +189,9 @@ extern const mp_obj_type_t mp_usbd_ring_type;
  // ring, each packet with its 2-byte payload header.
  void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t ring, uint16_t packet, uint32_t frame);
  void mp_usbd_stream_feedback(mp_obj_usb_device_t *usbd, uint8_t ep_addr, const uint8_t *value, size_t len);
@@ -43,10 +43,10 @@ index 5ee4d2eab..b4a4de4e8 100644
  
  // Built-in constant objects, possible values of builtin_driver
 diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
-index fe0a22d09..a372c03d1 100644
+index 67d2ae9dd..82066ec2c 100644
 --- a/shared/tinyusb/mp_usbd_runtime.c
 +++ b/shared/tinyusb/mp_usbd_runtime.c
-@@ -561,6 +561,8 @@ typedef struct {
+@@ -543,6 +543,8 @@ typedef struct {
      volatile bool active;
      uint16_t packet;            // bytes per transfer
      uint32_t frame;             // video: bytes per frame (0: a plain stream)
@@ -55,7 +55,7 @@ index fe0a22d09..a372c03d1 100644
      uint32_t frame_pos;         // video: bytes of the current frame sent
      uint8_t fid;                // video: the frame ID bit, toggled per frame
      mp_usbd_ring_obj_t *ring;   // data streams
-@@ -627,7 +629,11 @@ static MP_USBD_ISR_ATTR bool runtime_dev_xfer_isr(uint8_t rhport, uint8_t ep_add
+@@ -609,7 +611,11 @@ static MP_USBD_ISR_ATTR bool runtime_dev_xfer_isr(uint8_t rhport, uint8_t ep_add
          s->packets++;
          s->bytes += xferred_bytes;
          if (!s->feedback && tu_edpt_dir(ep_addr) == TUSB_DIR_OUT && xferred_bytes) {
@@ -68,7 +68,7 @@ index fe0a22d09..a372c03d1 100644
                  s->drops++;
              }
          }
-@@ -684,6 +690,7 @@ void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t
+@@ -666,6 +672,7 @@ void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t
      s->ring = MP_OBJ_TO_PTR(ring);
      s->pkt = ((mp_obj_array_t *)MP_OBJ_TO_PTR(pkt))->items;
      s->packet = packet;
@@ -76,7 +76,7 @@ index fe0a22d09..a372c03d1 100644
      s->frame = frame;
      s->frame_pos = 0;
      s->fid = 0;
-@@ -725,6 +732,39 @@ void mp_usbd_stream_feedback(mp_obj_usb_device_t *usbd, uint8_t ep_addr, const u
+@@ -707,6 +714,39 @@ void mp_usbd_stream_feedback(mp_obj_usb_device_t *usbd, uint8_t ep_addr, const u
      }
  }
  

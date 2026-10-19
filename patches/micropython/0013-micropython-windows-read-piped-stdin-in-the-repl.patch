@@ -26,7 +26,7 @@ diff --git a/ports/windows/windows_mphal.c b/ports/windows/windows_mphal.c
 index 50b7a40bf..4825d935f 100644
 --- a/ports/windows/windows_mphal.c
 +++ b/ports/windows/windows_mphal.c
-@@ -186,6 +186,44 @@
+@@ -186,6 +186,44 @@ static int esc_seq_chr() {
      return 0;
  }
  
@@ -71,7 +71,7 @@ index 50b7a40bf..4825d935f 100644
  int mp_hal_stdin_rx_chr(void) {
      // currently processing escape seq?
      const int ret = esc_seq_chr();
-@@ -193,8 +231,13 @@
+@@ -193,8 +231,13 @@ int mp_hal_stdin_rx_chr(void) {
          return ret;
      }
  
@@ -86,7 +86,7 @@ index 50b7a40bf..4825d935f 100644
      BOOL status;
      DWORD num_read;
      INPUT_RECORD rec;
-@@ -203,7 +246,9 @@
+@@ -203,7 +246,9 @@ int mp_hal_stdin_rx_chr(void) {
          status = ReadConsoleInput(std_in, &rec, 1, &num_read);
          MP_THREAD_GIL_ENTER();
          if (!status || !num_read) {

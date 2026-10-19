@@ -18,7 +18,7 @@ Unchanged on upstream v1.29.0.
  1 file changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/tools/makemanifest.py b/tools/makemanifest.py
-index a149755..5f7903d 100644
+index a149755c8..5f7903d2f 100644
 --- a/tools/makemanifest.py
 +++ b/tools/makemanifest.py
 @@ -176,7 +176,9 @@ def main():

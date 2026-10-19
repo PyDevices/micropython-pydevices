@@ -19,10 +19,10 @@ check it, going inert - cleared-timer semantics - when their interpreter
 is gone.
 
 diff --git a/ports/webassembly/objpyproxy.js b/ports/webassembly/objpyproxy.js
-index 64703d78a..e15fc8eab 100644
+index 6b132e19d..3b0096e02 100644
 --- a/ports/webassembly/objpyproxy.js
 +++ b/ports/webassembly/objpyproxy.js
-@@ -231,9 +231,20 @@ const py_proxy_handler = {
+@@ -223,9 +223,20 @@ const py_proxy_handler = {
  class PyProxyThenable {
      constructor(ref) {
          this._ref = ref;

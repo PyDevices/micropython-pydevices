@@ -1,8 +1,8 @@
 diff --git a/ports/esp32/main/idf_component.yml b/ports/esp32/main/idf_component.yml
-index 47ae737b3..2468146a7 100644
+index 3c352a833..dbcdf47f4 100644
 --- a/ports/esp32/main/idf_component.yml
 +++ b/ports/esp32/main/idf_component.yml
-@@ -15,6 +15,14 @@ dependencies:
+@@ -21,6 +21,14 @@ dependencies:
      rules:
        - if: "target == esp32p4"
      version: "0.15.2"

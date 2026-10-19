@@ -59,7 +59,7 @@ source is. Without the lockfile change a target would quietly go on
 building 0.18.
 ---
 diff --git a/ports/esp32/lockfiles/dependencies.lock.esp32p4 b/ports/esp32/lockfiles/dependencies.lock.esp32p4
-index a338b20..cc6e557 100644
+index 18b3ddd4b..cd372e135 100644
 --- a/ports/esp32/lockfiles/dependencies.lock.esp32p4
 +++ b/ports/esp32/lockfiles/dependencies.lock.esp32p4
 @@ -64,7 +64,7 @@ dependencies:
@@ -82,7 +82,7 @@ index a338b20..cc6e557 100644
      source:
        type: idf
 diff --git a/ports/esp32/lockfiles/dependencies.lock.esp32s2 b/ports/esp32/lockfiles/dependencies.lock.esp32s2
-index ba79ccc..65b20d0 100644
+index fac133418..fd18f806e 100644
 --- a/ports/esp32/lockfiles/dependencies.lock.esp32s2
 +++ b/ports/esp32/lockfiles/dependencies.lock.esp32s2
 @@ -10,7 +10,7 @@ dependencies:
@@ -105,7 +105,7 @@ index ba79ccc..65b20d0 100644
      source:
        type: idf
 diff --git a/ports/esp32/lockfiles/dependencies.lock.esp32s3 b/ports/esp32/lockfiles/dependencies.lock.esp32s3
-index a57ac9a..7bc077a 100644
+index a325e38d9..16b46383e 100644
 --- a/ports/esp32/lockfiles/dependencies.lock.esp32s3
 +++ b/ports/esp32/lockfiles/dependencies.lock.esp32s3
 @@ -10,7 +10,7 @@ dependencies:
@@ -128,7 +128,7 @@ index a57ac9a..7bc077a 100644
      source:
        type: idf
 diff --git a/ports/esp32/main/idf_component.yml b/ports/esp32/main/idf_component.yml
-index ddd7cb2..3c352a8 100644
+index ddd7cb2c4..3c352a833 100644
 --- a/ports/esp32/main/idf_component.yml
 +++ b/ports/esp32/main/idf_component.yml
 @@ -5,10 +5,14 @@ dependencies:

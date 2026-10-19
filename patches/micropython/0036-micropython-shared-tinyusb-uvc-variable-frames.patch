@@ -15,7 +15,7 @@ frame is still sent only once all of it is in the ring.
  3 files changed, 25 insertions(+), 5 deletions(-)
 
 diff --git a/extmod/machine_usb_device.c b/extmod/machine_usb_device.c
-index 1eadbff1f..7388b107e 100644
+index 99bdecc0b..91a60e2c7 100644
 --- a/extmod/machine_usb_device.c
 +++ b/extmod/machine_usb_device.c
 @@ -324,6 +324,8 @@ static MP_DEFINE_CONST_FUN_OBJ_1(usb_device_speed_obj, usb_device_speed);
@@ -28,10 +28,10 @@ index 1eadbff1f..7388b107e 100644
      mp_obj_usb_device_t *usbd = MP_OBJ_TO_PTR(args[0]);
      uint16_t packet = n_args > 3 ? (uint16_t)mp_obj_get_int(args[3]) : 0;
 diff --git a/shared/tinyusb/mp_usbd.h b/shared/tinyusb/mp_usbd.h
-index b4a4de4e8..0f3e30be4 100644
+index b61da0fec..29f2615a3 100644
 --- a/shared/tinyusb/mp_usbd.h
 +++ b/shared/tinyusb/mp_usbd.h
-@@ -211,6 +211,9 @@ extern const mp_obj_type_t mp_usbd_ring_type;
+@@ -187,6 +187,9 @@ extern const mp_obj_type_t mp_usbd_ring_type;
  // transfer. Feedback endpoints carry a fixed value instead of a ring.
  // frame > 0 makes an IN stream a UVC video payload: frame-byte frames from the
  // ring, each packet with its 2-byte payload header.
@@ -42,10 +42,10 @@ index b4a4de4e8..0f3e30be4 100644
  void mp_usbd_stream_feedback(mp_obj_usb_device_t *usbd, uint8_t ep_addr, const uint8_t *value, size_t len);
  // Feed an OUT endpoint's packets to sink(ctx, ...) instead (sink NULL stops);
 diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
-index a372c03d1..31980c446 100644
+index 82066ec2c..08d509b4a 100644
 --- a/shared/tinyusb/mp_usbd_runtime.c
 +++ b/shared/tinyusb/mp_usbd_runtime.c
-@@ -560,7 +560,10 @@ typedef struct {
+@@ -542,7 +542,10 @@ typedef struct {
      bool feedback;
      volatile bool active;
      uint16_t packet;            // bytes per transfer
@@ -57,7 +57,7 @@ index a372c03d1..31980c446 100644
      mp_usbd_sink_fn sink;       // OUT: a C sink instead of the ring
      void *sink_ctx;
      uint32_t frame_pos;         // video: bytes of the current frame sent
-@@ -592,19 +595,30 @@ static MP_USBD_ISR_ATTR void stream_arm(mp_usbd_stream_t *s, bool in_isr) {
+@@ -574,19 +577,30 @@ static MP_USBD_ISR_ATTR void stream_arm(mp_usbd_stream_t *s, bool in_isr) {
          // A UVC payload: a 2-byte header (length, then FID and, on a frame's
          // last packet, EOF) and the next part of the frame. A frame starts
          // only when the whole of it is in the ring, so it can't tear; until
@@ -92,7 +92,7 @@ index a372c03d1..31980c446 100644
                  s->fid ^= 1;
              }
              n = (uint16_t)(chunk + 2);
-@@ -692,6 +706,7 @@ void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t
+@@ -674,6 +688,7 @@ void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t
      s->packet = packet;
      s->sink = NULL;
      s->frame = frame;

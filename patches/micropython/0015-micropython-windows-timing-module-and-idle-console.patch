@@ -43,7 +43,7 @@ Based-on: micropython 0fd6c573e (tag v1.29.0)
  5 files changed, 247 insertions(+), 2 deletions(-)
 
 diff --git a/ports/windows/Makefile b/ports/windows/Makefile
-index 4b6b18270..5f90114bf 100644
+index c6a8ec8b3..561e17e3f 100644
 --- a/ports/windows/Makefile
 +++ b/ports/windows/Makefile
 @@ -47,7 +47,7 @@ INC += -I$(VARIANT_DIR)

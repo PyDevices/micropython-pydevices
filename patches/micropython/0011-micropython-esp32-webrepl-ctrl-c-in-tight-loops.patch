@@ -122,10 +122,10 @@ index f5fd96422..9fc6fe2a2 100644
  
  static inline void check_for_exceptions(void) {
 diff --git a/ports/esp32/mpconfigport.h b/ports/esp32/mpconfigport.h
-index 45d789f46..191d9918c 100644
+index 6342aa6e6..6a6ebff25 100644
 --- a/ports/esp32/mpconfigport.h
 +++ b/ports/esp32/mpconfigport.h
-@@ -342,6 +342,14 @@ void *esp_native_code_commit(void *, size_t, void *);
+@@ -329,6 +329,14 @@ void *esp_native_code_commit(void *, size_t, void *);
  
  #if MICROPY_PY_SOCKET_EVENTS
  #define MICROPY_PY_SOCKET_EVENTS_HANDLER extern void socket_events_handler(void); socket_events_handler();

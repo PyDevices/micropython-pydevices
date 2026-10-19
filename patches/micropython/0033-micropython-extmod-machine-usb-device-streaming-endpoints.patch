@@ -22,7 +22,7 @@ before.
  3 files changed, 382 insertions(+)
 
 diff --git a/extmod/machine_usb_device.c b/extmod/machine_usb_device.c
-index e527ed775..1970e6193 100644
+index 5a06908c7..c17f4ef00 100644
 --- a/extmod/machine_usb_device.c
 +++ b/extmod/machine_usb_device.c
 @@ -57,6 +57,10 @@ static mp_obj_t usb_device_make_new(const mp_obj_type_t *type, size_t n_args, si
@@ -88,7 +88,7 @@ index e527ed775..1970e6193 100644
  static const MP_DEFINE_BYTES_OBJ(builtin_default_desc_dev_obj,
      &mp_usbd_builtin_desc_dev, sizeof(tusb_desc_device_t));
  
-@@ -387,6 +436,10 @@ static const mp_rom_map_elem_t usb_device_locals_dict_table[] = {
+@@ -362,6 +411,10 @@ static const mp_rom_map_elem_t usb_device_locals_dict_table[] = {
      { MP_ROM_QSTR(MP_QSTR_stall), MP_ROM_PTR(&usb_device_stall_obj) },
      { MP_ROM_QSTR(MP_QSTR_remote_wakeup), MP_ROM_PTR(&usb_remote_wakeup_obj) },
      { MP_ROM_QSTR(MP_QSTR_speed), MP_ROM_PTR(&usb_device_speed_obj) },
@@ -100,10 +100,10 @@ index e527ed775..1970e6193 100644
      { MP_ROM_QSTR(MP_QSTR_SPEED_HIGH), MP_ROM_INT(TUSB_SPEED_HIGH) },
  
 diff --git a/shared/tinyusb/mp_usbd.h b/shared/tinyusb/mp_usbd.h
-index 05abbb8e4..5f6b9ab59 100644
+index acf12ecaf..b0c309d9f 100644
 --- a/shared/tinyusb/mp_usbd.h
 +++ b/shared/tinyusb/mp_usbd.h
-@@ -153,6 +153,13 @@ const char *mp_usbd_runtime_string_cb(uint8_t index);
+@@ -129,6 +129,13 @@ const char *mp_usbd_runtime_string_cb(uint8_t index);
  // Maximum number of pending exceptions per single TinyUSB task execution
  #define MP_USBD_MAX_PEND_EXCS 2
  
@@ -117,7 +117,7 @@ index 05abbb8e4..5f6b9ab59 100644
  typedef struct {
      mp_obj_base_t base;
  
-@@ -177,6 +184,8 @@ typedef struct {
+@@ -153,6 +160,8 @@ typedef struct {
      // Temporary pointers for xfer data in progress on each endpoint
      // Ensuring they aren't garbage collected until the xfer completes
      mp_obj_t xfer_data[CFG_TUD_ENDPPOINT_MAX][2];
@@ -126,7 +126,7 @@ index 05abbb8e4..5f6b9ab59 100644
  
      // Pointer to a memoryview that is reused to refer to various pieces of
      // control transfer data that are pushed to USB control transfer
-@@ -190,6 +199,13 @@ typedef struct {
+@@ -166,6 +175,13 @@ typedef struct {
      mp_obj_t pend_excs[MP_USBD_MAX_PEND_EXCS];
  } mp_obj_usb_device_t;
  
@@ -141,7 +141,7 @@ index 05abbb8e4..5f6b9ab59 100644
  //
  // (Currently not possible to change built-in drivers at runtime, just enable/disable.)
 diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
-index 862d8ec42..4c098d921 100644
+index ef9ea04fe..7bd8d62e5 100644
 --- a/shared/tinyusb/mp_usbd_runtime.c
 +++ b/shared/tinyusb/mp_usbd_runtime.c
 @@ -25,6 +25,7 @@
@@ -152,7 +152,7 @@ index 862d8ec42..4c098d921 100644
  
  #include "mp_usbd.h"
  #include "py/mpconfig.h"
-@@ -190,6 +191,8 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_requ
+@@ -172,6 +173,8 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_requ
  static void runtime_dev_init(void) {
  }
  
@@ -161,7 +161,7 @@ index 862d8ec42..4c098d921 100644
  static void runtime_dev_reset(uint8_t rhport) {
      mp_obj_usb_device_t *usbd = MP_OBJ_TO_PTR(MP_STATE_VM(usbd));
      if (!usbd) {
-@@ -202,6 +205,10 @@ static void runtime_dev_reset(uint8_t rhport) {
+@@ -184,6 +187,10 @@ static void runtime_dev_reset(uint8_t rhport) {
          }
      }
  
@@ -172,7 +172,7 @@ index 862d8ec42..4c098d921 100644
      if (mp_obj_is_callable(usbd->reset_cb)) {
          usbd_callback_function_n(usbd->reset_cb, 0, NULL);
      }
-@@ -402,6 +409,311 @@ static bool runtime_dev_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t r
+@@ -384,6 +391,311 @@ static bool runtime_dev_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t r
      return cb_res != MP_OBJ_NULL && mp_obj_is_true(cb_res);
  }
  
@@ -484,7 +484,7 @@ index 862d8ec42..4c098d921 100644
  static usbd_class_driver_t const _runtime_dev_driver =
  {
      #if CFG_TUSB_DEBUG >= 2
-@@ -412,6 +724,7 @@ static usbd_class_driver_t const _runtime_dev_driver =
+@@ -394,6 +706,7 @@ static usbd_class_driver_t const _runtime_dev_driver =
      .open = runtime_dev_open,
      .control_xfer_cb = runtime_dev_control_xfer_cb,
      .xfer_cb = runtime_dev_xfer_cb,

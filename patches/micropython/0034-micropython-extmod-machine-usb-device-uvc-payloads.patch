@@ -15,7 +15,7 @@ ring, so a slow producer gives empty packets, never a torn frame.
  3 files changed, 40 insertions(+), 6 deletions(-)
 
 diff --git a/extmod/machine_usb_device.c b/extmod/machine_usb_device.c
-index 1970e6193..1eadbff1f 100644
+index c17f4ef00..99bdecc0b 100644
 --- a/extmod/machine_usb_device.c
 +++ b/extmod/machine_usb_device.c
 @@ -316,18 +316,22 @@ static mp_obj_t usb_device_speed(mp_obj_t self_in) {
@@ -45,10 +45,10 @@ index 1970e6193..1eadbff1f 100644
  // USBDevice.feedback(ep, value): keep an explicit-feedback endpoint sending
  // value (3 bytes, 10.14 at full speed; 4 bytes, 16.16 at high speed) on
 diff --git a/shared/tinyusb/mp_usbd.h b/shared/tinyusb/mp_usbd.h
-index 5f6b9ab59..5ee4d2eab 100644
+index b0c309d9f..b7a5ff708 100644
 --- a/shared/tinyusb/mp_usbd.h
 +++ b/shared/tinyusb/mp_usbd.h
-@@ -202,7 +202,9 @@ typedef struct {
+@@ -178,7 +178,9 @@ typedef struct {
  extern const mp_obj_type_t mp_usbd_ring_type;
  // Attach a ring to an endpoint (ring None detaches); packet is the bytes per
  // transfer. Feedback endpoints carry a fixed value instead of a ring.
@@ -60,10 +60,10 @@ index 5f6b9ab59..5ee4d2eab 100644
  bool mp_usbd_stream_stats(uint8_t ep_addr, uint32_t *packets, uint32_t *bytes, uint32_t *drops);
  
 diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
-index 4c098d921..fe0a22d09 100644
+index 7bd8d62e5..67d2ae9dd 100644
 --- a/shared/tinyusb/mp_usbd_runtime.c
 +++ b/shared/tinyusb/mp_usbd_runtime.c
-@@ -560,6 +560,9 @@ typedef struct {
+@@ -542,6 +542,9 @@ typedef struct {
      bool feedback;
      volatile bool active;
      uint16_t packet;            // bytes per transfer
@@ -73,7 +73,7 @@ index 4c098d921..fe0a22d09 100644
      mp_usbd_ring_obj_t *ring;   // data streams
      uint8_t *pkt;               // the transfer's buffer
      uint8_t fb_len;
-@@ -583,6 +586,27 @@ static MP_USBD_ISR_ATTR void stream_arm(mp_usbd_stream_t *s, bool in_isr) {
+@@ -565,6 +568,27 @@ static MP_USBD_ISR_ATTR void stream_arm(mp_usbd_stream_t *s, bool in_isr) {
      if (s->feedback) {
          memcpy(s->pkt, s->fb, s->fb_len);
          n = s->fb_len;
@@ -101,7 +101,7 @@ index 4c098d921..fe0a22d09 100644
      } else if (tu_edpt_dir(s->ep) == TUSB_DIR_IN) {
          n = (uint16_t)ring_read(s->ring, s->pkt, s->packet);
      }
-@@ -638,7 +662,7 @@ static void stream_release(mp_obj_usb_device_t *usbd, int i) {
+@@ -620,7 +644,7 @@ static void stream_release(mp_obj_usb_device_t *usbd, int i) {
      usbd->stream_objs[i][1] = mp_const_none;
  }
  
@@ -110,7 +110,7 @@ index 4c098d921..fe0a22d09 100644
      int i;
      mp_usbd_stream_t *s = stream_slot(usbd, ep_addr, &i);
      if (ring == mp_const_none) {
-@@ -650,7 +674,7 @@ void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t
+@@ -632,7 +656,7 @@ void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t
      if (!mp_obj_is_type(ring, &mp_usbd_ring_type)) {
          mp_raise_TypeError(MP_ERROR_TEXT("expected USBDevice.Ring"));
      }
@@ -119,7 +119,7 @@ index 4c098d921..fe0a22d09 100644
          mp_raise_ValueError(MP_ERROR_TEXT("packet"));
      }
      s->active = false;
-@@ -660,6 +684,9 @@ void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t
+@@ -642,6 +666,9 @@ void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t
      s->ring = MP_OBJ_TO_PTR(ring);
      s->pkt = ((mp_obj_array_t *)MP_OBJ_TO_PTR(pkt))->items;
      s->packet = packet;
@@ -129,7 +129,7 @@ index 4c098d921..fe0a22d09 100644
      s->feedback = false;
      s->packets = s->bytes = s->drops = 0;
      s->ep = ep_addr;
-@@ -690,6 +717,7 @@ void mp_usbd_stream_feedback(mp_obj_usb_device_t *usbd, uint8_t ep_addr, const u
+@@ -672,6 +699,7 @@ void mp_usbd_stream_feedback(mp_obj_usb_device_t *usbd, uint8_t ep_addr, const u
          usbd->stream_objs[i][1] = pkt;
          s->pkt = ((mp_obj_array_t *)MP_OBJ_TO_PTR(pkt))->items;
          s->feedback = true;

@@ -19,9 +19,10 @@ A fragment on the P4 common config rather than on one variant, because the
 CSI controller is a property of the chip, not of which radio is attached.
 
 diff --git a/ports/esp32/boards/mpconfigboard_esp32p4_common.cmake b/ports/esp32/boards/mpconfigboard_esp32p4_common.cmake
+index 876a186de..d61916f2a 100644
 --- a/ports/esp32/boards/mpconfigboard_esp32p4_common.cmake
 +++ b/ports/esp32/boards/mpconfigboard_esp32p4_common.cmake
-@@ -3,4 +3,5 @@
+@@ -3,4 +3,5 @@ set(IDF_TARGET esp32p4)
  set(SDKCONFIG_DEFAULTS
      boards/sdkconfig.base
      boards/sdkconfig.p4
@@ -29,6 +30,7 @@ diff --git a/ports/esp32/boards/mpconfigboard_esp32p4_common.cmake b/ports/esp32
  )
 diff --git a/ports/esp32/boards/sdkconfig.p4_camera b/ports/esp32/boards/sdkconfig.p4_camera
 new file mode 100644
+index 000000000..2d31a8aee
 --- /dev/null
 +++ b/ports/esp32/boards/sdkconfig.p4_camera
 @@ -0,0 +1,11 @@

@@ -27,10 +27,10 @@ stack is deinitialised and the PHY released, and the board returns to
 enumerating as a CDC device after the module hands the controller back.
 
 diff --git a/ports/esp32/usb.c b/ports/esp32/usb.c
-index bca2305f1..b3b35ba8a 100644
+index 654e7275f..fbc8fd1b3 100644
 --- a/ports/esp32/usb.c
 +++ b/ports/esp32/usb.c
-@@ -62,6 +62,24 @@ void usb_usj_mode(void) {
+@@ -67,6 +67,24 @@ void usb_usj_mode(void) {
      };
      usb_new_phy(&phy_conf, &phy_hdl);
  }

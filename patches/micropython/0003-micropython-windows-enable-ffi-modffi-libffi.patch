@@ -223,10 +223,10 @@ index e22ea225d..c6a8ec8b3 100644
  # - mingw64-x86_64 gcc builds will pass the math_domain_special test
  # - mingw64-ucrt64 gcc builds will pass all of the below tests
 diff --git a/ports/windows/mpconfigport.h b/ports/windows/mpconfigport.h
-index 935212455..d0c24e5c0 100644
+index 8f167a0d0..4b6b96d1b 100644
 --- a/ports/windows/mpconfigport.h
 +++ b/ports/windows/mpconfigport.h
-@@ -150,6 +150,12 @@
+@@ -152,6 +152,12 @@
  #define MICROPY_PY_TIME_CUSTOM_SLEEP (1)
  #define MICROPY_PY_TIME_INCLUDEFILE "ports/unix/modtime.c"
  #define MICROPY_PY_ERRNO            (1)

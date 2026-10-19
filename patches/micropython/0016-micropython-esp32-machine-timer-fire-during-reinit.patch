@@ -45,7 +45,7 @@ it.
 Based-on: micropython 0fd6c573e (tag v1.29.0)
 ---
 diff --git a/ports/esp32/machine_timer.c b/ports/esp32/machine_timer.c
-index a41f006..a6ff4b9 100644
+index a41f006f4..a6ff4b961 100644
 --- a/ports/esp32/machine_timer.c
 +++ b/ports/esp32/machine_timer.c
 @@ -60,19 +60,33 @@ uint32_t machine_timer_freq_hz(machine_timer_obj_t *self) {

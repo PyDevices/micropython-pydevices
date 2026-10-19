@@ -26,7 +26,7 @@ ValueError that names the endpoint (MICROPY_HW_USB_EP_IN_MAX).
  4 files changed, 97 insertions(+)
 
 diff --git a/extmod/machine_usb_device.c b/extmod/machine_usb_device.c
-index b1e1b948f..e527ed775 100644
+index 474da8a2f..5a06908c7 100644
 --- a/extmod/machine_usb_device.c
 +++ b/extmod/machine_usb_device.c
 @@ -57,6 +57,9 @@ static mp_obj_t usb_device_make_new(const mp_obj_type_t *type, size_t n_args, si
@@ -135,7 +135,7 @@ index b1e1b948f..e527ed775 100644
  static const MP_DEFINE_BYTES_OBJ(builtin_default_desc_dev_obj,
      &mp_usbd_builtin_desc_dev, sizeof(tusb_desc_device_t));
  
-@@ -310,6 +386,9 @@ static const mp_rom_map_elem_t usb_device_locals_dict_table[] = {
+@@ -285,6 +361,9 @@ static const mp_rom_map_elem_t usb_device_locals_dict_table[] = {
      { MP_ROM_QSTR(MP_QSTR_active), MP_ROM_PTR(&usb_device_active_obj) },
      { MP_ROM_QSTR(MP_QSTR_stall), MP_ROM_PTR(&usb_device_stall_obj) },
      { MP_ROM_QSTR(MP_QSTR_remote_wakeup), MP_ROM_PTR(&usb_remote_wakeup_obj) },
@@ -167,10 +167,10 @@ index e146ef2bc..bb4022dff 100644
  
  // Enable stdio over native USB peripheral CDC via TinyUSB
 diff --git a/shared/tinyusb/mp_usbd.h b/shared/tinyusb/mp_usbd.h
-index f57861211..05abbb8e4 100644
+index e2343e542..acf12ecaf 100644
 --- a/shared/tinyusb/mp_usbd.h
 +++ b/shared/tinyusb/mp_usbd.h
-@@ -158,6 +158,9 @@ typedef struct {
+@@ -134,6 +134,9 @@ typedef struct {
  
      mp_obj_t desc_dev; // Device descriptor bytes
      mp_obj_t desc_cfg; // Configuration descriptor bytes
@@ -181,7 +181,7 @@ index f57861211..05abbb8e4 100644
  
      // Runtime device driver callback functions
 diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
-index e340e7cbc..862d8ec42 100644
+index a20a1b26b..ef9ea04fe 100644
 --- a/shared/tinyusb/mp_usbd_runtime.c
 +++ b/shared/tinyusb/mp_usbd_runtime.c
 @@ -121,6 +121,11 @@ const uint8_t *tud_descriptor_configuration_cb(uint8_t index) {
