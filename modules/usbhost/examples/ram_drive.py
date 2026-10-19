@@ -7,7 +7,7 @@ something to read. Contrast with ``sd_drive.py``, which serves a real card.
     mpftp run -d COM49 examples/ram_drive.py
 
 Install the package first on a firmware that doesn't freeze it:
-``mip.install("github:PyDevices/usbif/packages/usb-device-msc")``.
+``mip.install("github:PyDevices/pydevices/usb-device-msc")``.
 
 **One writer.** While the computer has the drive, don't mount the same block
 device on the board: two filesystems caching one disk corrupt it. Eject it on

@@ -1,6 +1,6 @@
-# usbif API Sketch — v0
+# usbhost API Sketch — v0
 
-**Status:** Gate 1 deliverable for review, kept as history. The API that shipped is `usb.core` and the class packages in [`packages/`](../packages); this sketch's `usbif.*` surface was retired.
+**Status:** Gate 1 deliverable for review, kept as history. The API that shipped is `usb.core` and the class packages in [`packages/`](../packages); this sketch's `usbhost.*` surface was retired.
 
 The sketch is written against all backends at once — the ESP native module, the desktop backends, and the hypothetical RP2350 TinyUSB backend of the vision's Appendix A — because the surface must not leak any one stack's assumptions. CircuitPython's `usb_host`/`usb_hid`/`usb_midi` family was studied for shape; names differ where PyDevices conventions differ.
 
@@ -13,14 +13,14 @@ The sketch is written against all backends at once — the ESP native module, th
 
 ## Package shape
 
-`usbif` is a provider package in `pydevices/lib`, beside `audiodev` and `displaydev`, selecting a backend the same way: the native `_usbif` C module where present, an OS-service backend on desktop. Both halves are always importable; emptiness is expressed through capabilities, not absence:
+`usbhost` is a provider package in `pydevices/lib`, beside `audiodev` and `displaydev`, selecting a backend the same way: the native `_usbhost` C module where present, an OS-service backend on desktop. Both halves are always importable; emptiness is expressed through capabilities, not absence:
 
 ```python
-import usbif
+import usbhost
 
-usbif.host.capabilities()    # e.g. frozenset({"hid", "msc", "cdc", "midi"}) — S3 host build
-usbif.device.capabilities()  # e.g. frozenset({"uac", "midi", "hid", "cdc", "msc"})
-usbif.host.capabilities()    # frozenset() — desktop device role, wasm, unsupported port
+usbhost.host.capabilities()    # e.g. frozenset({"hid", "msc", "cdc", "midi"}) — S3 host build
+usbhost.device.capabilities()  # e.g. frozenset({"uac", "midi", "hid", "cdc", "msc"})
+usbhost.host.capabilities()    # frozenset() — desktop device role, wasm, unsupported port
 ```
 
 ## Events
@@ -28,7 +28,7 @@ usbif.host.capabilities()    # frozenset() — desktop device role, wasm, unsupp
 Attach and detach are ordinary PyDevices events, delivered through the same polled queue the event system already uses:
 
 ```python
-# event.type in (usbif.ATTACH, usbif.DETACH); event.device is a DeviceInfo
+# event.type in (usbhost.ATTACH, usbhost.DETACH); event.device is a DeviceInfo
 DeviceInfo: id, vid, pid, product, serial, classes (frozenset), speed
 ```
 
@@ -37,12 +37,12 @@ HID keyboards and mice are auto-routed through the shared policy into standard k
 ## Host surface
 
 ```python
-usbif.host.start()        # daemon + class tasks; idempotent
-usbif.host.stop()
-usbif.host.devices()      # tuple[DeviceInfo] currently attached
+usbhost.host.start()        # daemon + class tasks; idempotent
+usbhost.host.stop()
+usbhost.host.devices()      # tuple[DeviceInfo] currently attached
 ```
 
-Per class, everything hangs off `usbif.host.<class>` and takes a `DeviceInfo.id`:
+Per class, everything hangs off `usbhost.host.<class>` and takes a `DeviceInfo.id`:
 
 | Class | Surface | Notes |
 |---|---|---|
@@ -58,13 +58,13 @@ Per class, everything hangs off `usbif.host.<class>` and takes a `DeviceInfo.id`
 Device-role classes compose with `machine.USBDevice`'s runtime model as additional built-in interfaces, so they coexist with CDC, MSC, and Python-defined interfaces. Configuration happens before the device (re)activates; the boot-ordering contract will be documented, not discovered.
 
 ```python
-snd = usbif.device.uac(sample_rate=48000, channels=2, bits=16, mic=False)
+snd = usbhost.device.uac(sample_rate=48000, channels=2, bits=16, mic=False)
 snd.sink          # an audiodsp-compatible output; audiodsp plays, C streams
 snd.active        # is the host streaming?  (observe, don't pump)
 
-cam = usbif.device.uvc(size=(640, 480), format="mjpeg", source=frame_source)
+cam = usbhost.device.uvc(size=(640, 480), format="mjpeg", source=frame_source)
 
-usbif.device.midi() / .hid(...) / .cdc() / .msc(...)
+usbhost.device.midi() / .hid(...) / .cdc() / .msc(...)
 # thin re-exports of machine.USBDevice + micropython-lib usb-device-* packages,
 # under portable names, so host vs device is configuration rather than a
 # different library
@@ -79,6 +79,6 @@ The desktop backend implements the same names; `capabilities()` tells the truth 
 1. Event payload shape under MicroPython memory pressure: allocate `DeviceInfo` objects, or interned tuples with accessor helpers?
 2. `asyncio` integration: expose streams and awaitables directly, or keep the polled model and let `aiorepl`-style wrappers grow on top?
 3. Automount default for MSC: on (friendly) or off (predictable)?
-4. Should `uac` host selection live entirely in `audiodev` (as sketched) or mirror a minimal listing under `usbif` for symmetry with the other classes?
-5. Error model: plain `OSError` with errno discipline, or a `usbif.Error` hierarchy?
+4. Should `uac` host selection live entirely in `audiodev` (as sketched) or mirror a minimal listing under `usbhost` for symmetry with the other classes?
+5. Error model: plain `OSError` with errno discipline, or a `usbhost.Error` hierarchy?
 6. Naming of the auto-routing switch (`hid.claim(id)` vs `hid.raw(id)` implying the claim)?

@@ -10,8 +10,8 @@ volume and mute.
     mpftp run -d COM4 examples/usb_soundcard.py
 
 Needs a firmware with machine.USBDevice's streaming endpoints, audiodsp and
-audioif (``build_mp.py --modules pydevices,usbif,audiodsp,audioif``),
-micropython-lib's ``usb-device`` and usbif's ``usb-device-audio`` package on
+audioif (``build_mp.py --modules pydevices,usbhost,audiodsp,audioif``),
+micropython-lib's ``usb-device`` and usbhost's ``usb-device-audio`` package on
 the board, and a board config whose ``pcm_out`` reaches an I2S codec.
 
 The computer's volume slider runs from -50 dB to 0 dB; it moves the board's

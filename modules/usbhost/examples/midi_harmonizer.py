@@ -30,7 +30,7 @@ HARMONY = (4, 7)
 
 # The board's own USB MIDI function, as adafruit_midi's two ports. The same
 # loop drives a hosted controller by opening other ports (midiports.uart for
-# a 5-pin cable, midiports.usbif_shim for a keyboard on the board's USB host).
+# a 5-pin cable, midiports.usbhost_shim for a keyboard on the board's USB host).
 midi_in, midi_out = usb_device.ports()
 midi = adafruit_midi.MIDI(midi_in=midi_in, midi_out=midi_out)
 

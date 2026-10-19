@@ -15,7 +15,7 @@ than the 512 every host (an ESP32-S3 included) takes.
 Needs an ESP32-P4 with a MIPI camera and a board config whose
 ``board_peripherals.camera()`` opens it, a firmware with cameraif, ppa,
 jpegio and machine.USBDevice's streaming endpoints, and micropython-lib's
-``usb-device`` with usbif's ``usb-device-video`` on the board.
+``usb-device`` with usbhost's ``usb-device-video`` on the board.
 
 MJPEG is the default, offered at 640x480, 320x240 and 160x120 for the
 computer to choose: 15 frames a second asked on a full-speed port (about 12

@@ -1,6 +1,6 @@
-# Newcomer's guide to usbif
+# Newcomer's guide to usbhost
 
-`usbif` gives a MicroPython board USB both ways round. As a device, a board appears to a computer as a sound card, webcam, drive, keyboard or MIDI instrument. As a host, it drives keyboards, drives, MIDI controllers, serial devices, speakers, microphones and cameras.
+`usbhost` is the C module under a MicroPython board's USB packages, which live in [pydevices](https://github.com/PyDevices/pydevices). Together they give a board USB both ways round. As a device, a board appears to a computer as a sound card, webcam, drive, keyboard or MIDI instrument. As a host, it drives keyboards, drives, MIDI controllers, serial devices, speakers, microphones and cameras.
 
 ## The board as a device
 
@@ -34,16 +34,16 @@ Start the host with the classes you'll stream (`usb.core.start(classes=("uvc",))
 
 ## Repository map
 
+The class packages (`usb-core`, `usb-host-*`, `usb-device-*`, `usb-hid`) are in pydevices, each in its own directory beside `midiports`. The ESP32 patch that lets the host borrow the OTG controller is the overlay's `patches/micropython/0039`.
+
 | Path | Purpose |
 |---|---|
-| `packages/` | The class packages: `usb-device-audio`, `usb-device-video`, `usb-device-msc`, `usb-hid`, `usb-core`, `usb-host-*`. |
-| `src/mod_usbif.c` | The C module: the host session, its transfers and streams. |
-| `src/usbif_host*.c` | The host core, the generic transfers under `usb.core`, the isochronous streams under the audio and video packages, and the tethering adapter. |
+| `src/mod_usbhost.c` | The C module: the host session, its transfers and streams. |
+| `src/usbhost_host*.c` | The host core, the generic transfers under `usb.core`, the isochronous streams under the audio and video packages, and the tethering adapter. |
 | `src/shared/` | The event ring, the PCM sink's gate, and the host streams' pacing, framing and queue sizing. |
-| `patches/` | The ESP32 patch that lets the host borrow the OTG controller. |
 | `examples/` | Device and host examples. |
 | `tools/` | The device proof matrix and the stream and host checks. |
-| `tests/` | Native ring, leak and API tests. |
+| `tests/` | Native ring, stream and sink tests, and the examples' tests. |
 
 ## Safe first contributions
 

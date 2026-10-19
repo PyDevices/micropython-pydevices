@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Build ESP-IDF's own usb_host_lib example for the ESP32-P4 panel, as one
 # image that mpftp flashes at 0x2000 in place of MicroPython. It is the
-# discriminator usbif#3 names: when usbif's host on the P4 sees no device,
-# this says whether IDF's host stack does either, with usbif out of the picture.
+# discriminator usbif#3 names: when usbhost's host on the P4 sees no device,
+# this says whether IDF's host stack does either, with usbhost out of the picture.
 #
 #   tools/p4_idf_host_example.sh [--fs] [OUT.bin]
 #
 # --fs puts the host on the P4's full-speed controller (peripheral_map BIT1)
-#      instead of the high-speed one (BIT0: what usbif installs on, and the
+#      instead of the high-speed one (BIT0: what usbhost installs on, and the
 #      one wired to the panel's Type-C connector). The full-speed PHY shares
 #      pins with USB-Serial-JTAG and reaches header P2 only through
 #      unpopulated resistors, so --fs is for the header experiment, not the

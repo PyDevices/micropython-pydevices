@@ -1,4 +1,4 @@
-# usbif examples
+# usbhost examples
 
 One script per use of the shipping API. Each role is class-compliant on its
 own: a PC or a commercial peripheral is a valid other end. Board-to-board
@@ -65,6 +65,6 @@ wedged board.
   hold the REPL (a device setup without the console cuts a native-USB session).
 - Device examples use `machine.USBDevice` and the class packages; host
   examples use `usb.core` and its class packages.
-  Never `_usbif` directly: the C module is the packages' own. `tests/test_no_usbif_leak.py` enforces it.
+  Never `_usbhost` directly: the C module is the packages' own. `tests/test_no_usbhost_leak.py` enforces it.
 - No measured fps or latency numbers are claimed in headers for scripts that
   have not been re-run in this pass -- cite prior evidence or stay quiet.

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 //
 // Host-side tests for the generic pieces of a USB host's isochronous
-// streams: PCM pacing (usbif_iso_pace.h) and UVC payloads into whole frames
-// (usbif_uvc_frame.h), driven here against a fake ring.
+// streams: PCM pacing (usbhost_iso_pace.h) and UVC payloads into whole frames
+// (usbhost_uvc_frame.h), driven here against a fake ring.
 //
 //   cc -std=c11 -Wall -Wextra -Werror -Isrc -o /tmp/t tests/test_iso_stream.c && /tmp/t
 
@@ -10,9 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "shared/usbif_downmix.h"
-#include "shared/usbif_iso_pace.h"
-#include "shared/usbif_uvc_frame.h"
+#include "shared/usbhost_downmix.h"
+#include "shared/usbhost_iso_pace.h"
+#include "shared/usbhost_uvc_frame.h"
 
 static int failures;
 
@@ -29,11 +29,11 @@ static int failures;
 
 static void test_pace(uint32_t rate, uint32_t frame, uint32_t slot_us, uint32_t max,
     uint32_t slots, uint32_t lo, uint32_t hi) {
-    usbif_iso_pace_t p;
-    usbif_iso_pace_init(&p, rate, frame, slot_us);
+    usbhost_iso_pace_t p;
+    usbhost_iso_pace_init(&p, rate, frame, slot_us);
     uint64_t total = 0;
     for (uint32_t i = 0; i < slots; i++) {
-        uint32_t n = usbif_iso_pace_next(&p, max);
+        uint32_t n = usbhost_iso_pace_next(&p, max);
         CHECK(n % frame == 0, "rate %u: packet %u bytes is not whole frames", (unsigned)rate, (unsigned)n);
         CHECK(n <= max, "rate %u: packet %u over max %u", (unsigned)rate, (unsigned)n, (unsigned)max);
         CHECK(n >= lo * frame && n <= hi * frame, "rate %u: packet of %u frames, outside %u..%u",
@@ -53,9 +53,9 @@ static void test_pacing(void) {
     test_pace(44100, 6, 1000, 288, 1000, 44, 45);      // 24-bit stereo
     test_pace(96000, 8, 1000, 1024, 1000, 96, 96);
     // A cap below an interval's frames: capped to whole frames.
-    usbif_iso_pace_t p;
-    usbif_iso_pace_init(&p, 48000, 4, 1000);
-    uint32_t n = usbif_iso_pace_next(&p, 102);
+    usbhost_iso_pace_t p;
+    usbhost_iso_pace_init(&p, 48000, 4, 1000);
+    uint32_t n = usbhost_iso_pace_next(&p, 102);
     CHECK(n == 100, "capped packet %u, want 100", (unsigned)n);
 }
 
@@ -107,7 +107,7 @@ static int fake_pop(fake_ring_t *f, uint8_t *out) {
 }
 
 static fake_ring_t ring;
-static usbif_uvc_frame_t fr;
+static usbhost_uvc_frame_t fr;
 
 static void frame_setup(uint32_t max_frame) {
     memset(&ring, 0, sizeof(ring));
@@ -117,7 +117,7 @@ static void frame_setup(uint32_t max_frame) {
     fr.commit = fake_commit;
     fr.overflow = fake_overflow;
     fr.max_frame = max_frame;
-    usbif_uvc_frame_start(&fr);
+    usbhost_uvc_frame_start(&fr);
 }
 
 // A packet: a 2-byte header with these flags, then n bytes of `v`.
@@ -126,12 +126,12 @@ static void pkt(uint8_t flags, uint32_t n, uint8_t v) {
     p[0] = 2;
     p[1] = flags;
     memset(p + 2, v, n);
-    usbif_uvc_frame_payload(&fr, p, 2 + n);
+    usbhost_uvc_frame_payload(&fr, p, 2 + n);
 }
 
 static void test_frames(void) {
     uint8_t out[RING_SIZE];
-    const uint8_t F0 = 0, F1 = USBIF_UVC_HDR_FID, EOF_ = USBIF_UVC_HDR_EOF;
+    const uint8_t F0 = 0, F1 = USBHOST_UVC_HDR_FID, EOF_ = USBHOST_UVC_HDR_EOF;
 
     // Started mid-frame: that frame is dropped, the next is whole.
     frame_setup(0);
@@ -166,7 +166,7 @@ static void test_frames(void) {
 
     // An error bit tears the frame it is in, and only that one.
     pkt(F0, 10, 1);
-    pkt(F0 | USBIF_UVC_HDR_ERR, 10, 1);
+    pkt(F0 | USBHOST_UVC_HDR_ERR, 10, 1);
     pkt(F0 | EOF_, 10, 1);
     CHECK(fr.dropped_torn == 3, "error bit: torn %u", (unsigned)fr.dropped_torn);
     pkt(F1 | EOF_, 6, 2);
@@ -174,7 +174,7 @@ static void test_frames(void) {
 
     // A bad header length tears it too.
     uint8_t bad[4] = { 9, F0, 0, 0 };
-    usbif_uvc_frame_payload(&fr, bad, 4);
+    usbhost_uvc_frame_payload(&fr, bad, 4);
     pkt(F0 | EOF_, 4, 1);
     CHECK(fr.dropped_torn == 4, "bad header: torn %u", (unsigned)fr.dropped_torn);
 
@@ -241,14 +241,14 @@ static void test_downmix(void) {
     }
     buf[4 * count] = 0x55;              // a trailing partial frame
     buf[4 * count + 1] = 0x55;
-    uint32_t n = usbif_downmix_s16(buf, 4 * count + 2);
+    uint32_t n = usbhost_downmix_s16(buf, 4 * count + 2);
     CHECK(n == (uint32_t)(2 * count), "downmix returned %u bytes, want %d", (unsigned)n, 2 * count);
     for (int i = 0; i < count; i++) {
         int m = get16(buf + 2 * i);
         CHECK(m == pairs[i][2], "downmix (%d, %d) gave %d, want %d", pairs[i][0], pairs[i][1], m,
             pairs[i][2]);
     }
-    CHECK(usbif_downmix_s16(buf, 3) == 0, "a packet shorter than a frame gave samples");
+    CHECK(usbhost_downmix_s16(buf, 3) == 0, "a packet shorter than a frame gave samples");
 }
 
 int main(void) {

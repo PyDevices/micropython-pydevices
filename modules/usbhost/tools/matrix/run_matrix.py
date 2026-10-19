@@ -37,7 +37,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MPFTP = os.path.expanduser("~/gh/pydevices/mpftp/scripts/mpftp")
-WIN_TMP = "/mnt/c/Users/bradb/AppData/Local/Temp/usbif-matrix"
+WIN_TMP = "/mnt/c/Users/bradb/AppData/Local/Temp/usbhost-matrix"
 CLASSES = ("cdc", "hid", "midi", "msc")
 # IN endpoints each function takes; the board's own serial port takes two.
 IN_EPS = {"cdc": 2, "hid": 1, "midi": 1, "msc": 1}

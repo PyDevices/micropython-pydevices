@@ -18,7 +18,7 @@
 // early. And the build CI runs under AddressSanitizer turns an actual write
 // into freed memory into a crash.
 //
-// Build with -DUSBIF_PCM_SINK_PLANT_NO_WAIT and close() skips its wait. That
+// Build with -DUSBHOST_PCM_SINK_PLANT_NO_WAIT and close() skips its wait. That
 // build MUST fail this test; CI runs it and requires the failure, so the race
 // test is known to be able to fail.
 #define _POSIX_C_SOURCE 200809L
@@ -49,9 +49,9 @@ static void inside_hook(void) {
     }
 }
 
-#define USBIF_PCM_SINK_INSIDE_HOOK() inside_hook()
-#include "shared/usbif_byte_ring.h"
-#include "shared/usbif_pcm_sink.c"
+#define USBHOST_PCM_SINK_INSIDE_HOOK() inside_hook()
+#include "shared/usbhost_byte_ring.h"
+#include "shared/usbhost_pcm_sink.c"
 #include "pcm_c_sink.h"
 
 static int failures = 0;
@@ -67,27 +67,27 @@ static void yield_wait(void) {
     sched_yield();
 }
 
-// --- the published struct, wired as usbif_host_stream.c wires it ----------
+// --- the published struct, wired as usbhost_host_stream.c wires it ----------
 
-static usbif_byte_ring_t ring;
+static usbhost_byte_ring_t ring;
 
 static uint32_t ring_room(void *r) {
-    return usbif_byte_ring_free(r);
+    return usbhost_byte_ring_free(r);
 }
 
 static uint32_t ring_push(void *r, const uint8_t *src, uint32_t n) {
-    return usbif_byte_ring_push(r, src, n);
+    return usbhost_byte_ring_push(r, src, n);
 }
 
-static const usbif_pcm_ring_ops_t ring_ops = { ring_room, ring_push };
-static usbif_pcm_sink_t gate;
+static const usbhost_pcm_ring_ops_t ring_ops = { ring_room, ring_push };
+static usbhost_pcm_sink_t gate;
 
 static int sink_write(void *ctx, const uint8_t *data, size_t len) {
-    return usbif_pcm_sink_write(&gate, (uint32_t)(uintptr_t)ctx, data, len);
+    return usbhost_pcm_sink_write(&gate, (uint32_t)(uintptr_t)ctx, data, len);
 }
 
 static int sink_space(void *ctx) {
-    return usbif_pcm_sink_space(&gate, (uint32_t)(uintptr_t)ctx);
+    return usbhost_pcm_sink_space(&gate, (uint32_t)(uintptr_t)ctx);
 }
 
 static pcm_c_sink_t make_sink(uint32_t gen) {
@@ -103,16 +103,16 @@ static pcm_c_sink_t make_sink(uint32_t gen) {
 
 static void test_sequential(void) {
     static uint8_t store[64];
-    usbif_byte_ring_init(&ring, store, sizeof(store));
-    usbif_pcm_sink_init(&gate, &ring_ops, &ring, yield_wait);
+    usbhost_byte_ring_init(&ring, store, sizeof(store));
+    usbhost_pcm_sink_init(&gate, &ring_ops, &ring, yield_wait);
     storage_live = 1;
 
-    CHECK(usbif_pcm_sink_current(&gate) == 0);
-    CHECK(usbif_pcm_sink_write(&gate, 1, store, 4) == -1);   // never opened
+    CHECK(usbhost_pcm_sink_current(&gate) == 0);
+    CHECK(usbhost_pcm_sink_write(&gate, 1, store, 4) == -1);   // never opened
 
-    uint32_t g1 = usbif_pcm_sink_open(&gate, 4);
+    uint32_t g1 = usbhost_pcm_sink_open(&gate, 4);
     CHECK(g1 != 0);
-    CHECK(usbif_pcm_sink_current(&gate) == g1);
+    CHECK(usbhost_pcm_sink_current(&gate) == g1);
     pcm_c_sink_t s1 = make_sink(g1);
 
     const uint8_t a[70] = {0};
@@ -123,28 +123,28 @@ static void test_sequential(void) {
     CHECK(s1.write(s1.ctx, a, 70) == 60);                     // cut to what fits
     CHECK(s1.write(s1.ctx, a, 4) == 0);                       // full: 0, not -1
     CHECK(s1.space(s1.ctx) == 0);
-    CHECK(usbif_pcm_sink_write(&gate, 0, a, 4) == -1);        // 0 is never a stream
+    CHECK(usbhost_pcm_sink_write(&gate, 0, a, 4) == -1);        // 0 is never a stream
 
-    usbif_pcm_sink_close(&gate);
-    CHECK(usbif_pcm_sink_current(&gate) == 0);
+    usbhost_pcm_sink_close(&gate);
+    CHECK(usbhost_pcm_sink_current(&gate) == 0);
     CHECK(s1.write(s1.ctx, a, 4) == -1);
     CHECK(s1.space(s1.ctx) == -1);
-    usbif_pcm_sink_close(&gate);                              // idempotent
+    usbhost_pcm_sink_close(&gate);                              // idempotent
 
     // A new stream does not revive the old sink.
-    usbif_byte_ring_init(&ring, store, sizeof(store));
-    uint32_t g2 = usbif_pcm_sink_open(&gate, 4);
+    usbhost_byte_ring_init(&ring, store, sizeof(store));
+    uint32_t g2 = usbhost_pcm_sink_open(&gate, 4);
     CHECK(g2 != g1 && g2 != 0);
     pcm_c_sink_t s2 = make_sink(g2);
     CHECK(s1.write(s1.ctx, a, 4) == -1);
     CHECK(s1.space(s1.ctx) == -1);
     CHECK(s2.write(s2.ctx, a, 4) == 4);
-    usbif_pcm_sink_close(&gate);
+    usbhost_pcm_sink_close(&gate);
 
     // Generations skip 0 when they wrap.
     gate.last_gen = UINT32_MAX;
-    CHECK(usbif_pcm_sink_open(&gate, 4) == 1);
-    usbif_pcm_sink_close(&gate);
+    CHECK(usbhost_pcm_sink_open(&gate, 4) == 1);
+    usbhost_pcm_sink_close(&gate);
 }
 
 // --- 2. the published struct round-trips through a byte buffer --------------
@@ -200,8 +200,8 @@ static void *writer(void *arg) {
 }
 
 static void test_race(void) {
-    usbif_pcm_sink_init(&gate, &ring_ops, &ring, yield_wait);
-    usbif_byte_ring_init(&ring, NULL, 0);
+    usbhost_pcm_sink_init(&gate, &ring_ops, &ring, yield_wait);
+    usbhost_byte_ring_init(&ring, NULL, 0);
     storage_live = 0;
     inside_violations = 0;
 
@@ -213,22 +213,22 @@ static void test_race(void) {
     for (int lap = 0; lap < laps; lap++) {
         const uint32_t size = 1024 + 4 * (uint32_t)(lap % 97);
         uint8_t *mem = malloc(size);
-        usbif_byte_ring_init(&ring, mem, size);
+        usbhost_byte_ring_init(&ring, mem, size);
         __atomic_store_n(&storage_live, 1, __ATOMIC_SEQ_CST);
-        uint32_t gen = usbif_pcm_sink_open(&gate, 4);
+        uint32_t gen = usbhost_pcm_sink_open(&gate, 4);
         __atomic_store_n(&published_gen, gen, __ATOMIC_RELEASE);
 
         // The consumer's part, briefly: the transfer callbacks, here.
         for (int i = 0; i < (lap % 5); i++) {
-            usbif_byte_ring_pop(&ring, drain, sizeof(drain));
+            usbhost_byte_ring_pop(&ring, drain, sizeof(drain));
             sched_yield();
         }
 
-        usbif_pcm_sink_close(&gate);
+        usbhost_pcm_sink_close(&gate);
         __atomic_store_n(&closed_upto, gen, __ATOMIC_RELEASE);
         // close() has returned: the guarantee says the storage is ours.
         __atomic_store_n(&storage_live, 0, __ATOMIC_SEQ_CST);
-        usbif_byte_ring_init(&ring, NULL, 0);
+        usbhost_byte_ring_init(&ring, NULL, 0);
         memset(mem, 0xDD, size);
         free(mem);
     }
@@ -261,7 +261,7 @@ static void *producer(void *arg) {
         frame[1] = seq;
         frame[2] = (uint8_t)~id;
         frame[3] = (uint8_t)~seq;
-        int n = usbif_pcm_sink_write(&gate, usbif_pcm_sink_current(&gate), frame, 4);
+        int n = usbhost_pcm_sink_write(&gate, usbhost_pcm_sink_current(&gate), frame, 4);
         if (n == 4) {
             seq++;
         }
@@ -271,10 +271,10 @@ static void *producer(void *arg) {
 
 static void test_two_producers(void) {
     static uint8_t store[4096];
-    usbif_byte_ring_init(&ring, store, sizeof(store));
-    usbif_pcm_sink_init(&gate, &ring_ops, &ring, yield_wait);
+    usbhost_byte_ring_init(&ring, store, sizeof(store));
+    usbhost_pcm_sink_init(&gate, &ring_ops, &ring, yield_wait);
     __atomic_store_n(&storage_live, 1, __ATOMIC_SEQ_CST);
-    usbif_pcm_sink_open(&gate, 4);
+    usbhost_pcm_sink_open(&gate, 4);
 
     pthread_t a, b;
     pthread_create(&a, NULL, producer, (void *)(uintptr_t)1);
@@ -284,7 +284,7 @@ static void test_two_producers(void) {
     unsigned frames = 0, bad = 0;
     uint8_t buf[256];
     while (frames < 200000) {
-        uint32_t got = usbif_byte_ring_pop(&ring, buf, sizeof(buf));
+        uint32_t got = usbhost_byte_ring_pop(&ring, buf, sizeof(buf));
         if (got % 4) {
             bad++;
         }
@@ -302,7 +302,7 @@ static void test_two_producers(void) {
     __atomic_store_n(&producers_stop, 1, __ATOMIC_RELEASE);
     pthread_join(a, NULL);
     pthread_join(b, NULL);
-    usbif_pcm_sink_close(&gate);
+    usbhost_pcm_sink_close(&gate);
     printf("two producers: %u frames, %u bad\n", frames, bad);
     CHECK(bad == 0);
 }

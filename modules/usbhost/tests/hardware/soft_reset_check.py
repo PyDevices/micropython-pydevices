@@ -1,7 +1,7 @@
-"""Soft reset check: usbif shuts its hardware down on a soft reset.
+"""Soft reset check: usbhost shuts its hardware down on a soft reset.
 
 Run on the PC, with CPython and ``mpftp`` on the PATH (or named by ``MPFTP``),
-against a board running usbif with a USB audio device on its host port: the
+against a board running usbhost with a USB audio device on its host port: the
 ESP32-P4 DEV-KIT with a mic in its USB-A hub, say, or a USB speaker or DAC.
 
     python tests/hardware/soft_reset_check.py -d COM55 --cycles 5
@@ -40,17 +40,17 @@ import subprocess
 import sys
 
 BOARD_STEP = r"""
-import time, _usbif
+import time, _usbhost
 def say(*a):
     print("@@", *a)
-say("host_running_before", _usbif.host_stats()[0])
+say("host_running_before", _usbhost.host_stats()[0])
 import usb.core
 from usb.host.audio import Microphone, Speaker
 usb.core.start(full_speed=True, classes=("uac",))
 t0 = time.ticks_ms()
 attached = False
 while time.ticks_diff(time.ticks_ms(), t0) < 10000 and not attached:
-    events, _ = _usbif.host_drain(16)
+    events, _ = _usbhost.host_drain(16)
     attached = any(kind == 0 and "uac" in row[5] for kind, row in events)
     time.sleep_ms(50)
 say("attach_event", attached)

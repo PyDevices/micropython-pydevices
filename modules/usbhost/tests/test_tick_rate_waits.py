@@ -9,7 +9,7 @@ built at 1000 Hz every such wait shrinks to a tenth: ``host_stop()`` gave
 teardown 200 ms instead of 2 s and reported a clean stop as a wedge. This
 scans ``src/`` for a ``for`` loop whose bound is a bare number and whose body
 sleeps a tick, which is the shape of that bug. Bound the loop with
-``USBIF_MS_TICKS(ms)`` from ``src/usbif_ticks.h`` instead.
+``USBHOST_MS_TICKS(ms)`` from ``src/usbhost_ticks.h`` instead.
 """
 
 import pathlib
@@ -19,7 +19,7 @@ import unittest
 SRC = pathlib.Path(__file__).resolve().parents[1] / "src"
 
 # "for (int i = 0; i < 200 ..." or "... i < SOME_TICKS ..." -- a count, not a
-# duration. A bound that goes through USBIF_MS_TICKS() (or another *_TICKS(ms)
+# duration. A bound that goes through USBHOST_MS_TICKS() (or another *_TICKS(ms)
 # macro taking milliseconds) is a duration and isn't matched.
 _COUNTED = re.compile(r"for\s*\(\s*(?:int|unsigned|uint32_t|TickType_t)\s+\w+\s*=\s*0\s*;"
                       r"\s*\w+\s*<\s*(\d+|[A-Z_]+_TICKS)\b(?!\s*\()")
@@ -57,15 +57,15 @@ class TickRateWaits(unittest.TestCase):
     def test_the_scan_finds_the_old_shape(self):
         # The check above passes on an empty match, so prove it can fail: the
         # host_stop() wait as it was before usbif#29.
-        old = ("for (int i = 0; i < 200 && usbif_host_task_handle != NULL; i++) {\n"
+        old = ("for (int i = 0; i < 200 && usbhost_host_task_handle != NULL; i++) {\n"
                "    vTaskDelay(1);\n}\n")
         m = _COUNTED.search(old)
         self.assertIsNotNone(m)
         self.assertIn("vTaskDelay(1)", _body(old, m.end()))
 
     def test_a_millisecond_bound_is_not_flagged(self):
-        new = ("const TickType_t stop_limit = USBIF_MS_TICKS(USBIF_HOST_STOP_WAIT_MS);\n"
-               "for (TickType_t i = 0; i < stop_limit && usbif_host_task_handle != NULL; i++) {\n"
+        new = ("const TickType_t stop_limit = USBHOST_MS_TICKS(USBHOST_HOST_STOP_WAIT_MS);\n"
+               "for (TickType_t i = 0; i < stop_limit && usbhost_host_task_handle != NULL; i++) {\n"
                "    vTaskDelay(1);\n}\n")
         self.assertIsNone(_COUNTED.search(new))
 

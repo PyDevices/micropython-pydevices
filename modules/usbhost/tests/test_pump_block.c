@@ -5,9 +5,9 @@
 // see the host's frames before the volume multiply, so a host that sets the
 // card's own volume (Windows) kept the meter at full scale even when muted.
 //
-// Built with -DUSBIF_PUMP_PLANT_METER_BEFORE_GAIN, the header meters in the
+// Built with -DUSBHOST_PUMP_PLANT_METER_BEFORE_GAIN, the header meters in the
 // old order and this test has to fail (CI checks that it does).
-#include "shared/usbif_pump_block.h"
+#include "shared/usbhost_pump_block.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -61,7 +61,7 @@ static void test_muted_meters_silence(void) {
     int16_t block[96 * 2];
     reset_meter();
     uint16_t usable = fill(block, 96);
-    uint16_t out = usbif_pump_shape_block((uint8_t *)block, usable, 2, 2, 1, 0, 48000, meter);
+    uint16_t out = usbhost_pump_shape_block((uint8_t *)block, usable, 2, 2, 1, 0, 48000, meter);
     CHECK(out == usable);
     check_meter_is_wire(block, out, 2, 48000);
     int peak = 0;
@@ -76,7 +76,7 @@ static void test_half_volume_meters_half(void) {
     int16_t block[96 * 2];
     reset_meter();
     uint16_t usable = fill(block, 96);
-    uint16_t out = usbif_pump_shape_block((uint8_t *)block, usable, 2, 2, 1, 32768u, 48000, meter);
+    uint16_t out = usbhost_pump_shape_block((uint8_t *)block, usable, 2, 2, 1, 32768u, 48000, meter);
     CHECK(out == usable);
     check_meter_is_wire(block, out, 2, 48000);
     CHECK(seen[0] == -15000 && seen[1] == -10000);
@@ -88,7 +88,7 @@ static void test_mono_decimated_meters_the_wire(void) {
     reset_meter();
     uint16_t usable = fill(block, 96);
     // Quarter volume, mixed to mono, one frame in two: the wire is 24 kHz mono.
-    uint16_t out = usbif_pump_shape_block((uint8_t *)block, usable, 2, 1, 2, 16384u, 48000, meter);
+    uint16_t out = usbhost_pump_shape_block((uint8_t *)block, usable, 2, 1, 2, 16384u, 48000, meter);
     CHECK(out == 48 * 2);
     check_meter_is_wire(block, out, 1, 24000);
     // Frames 0, 2, 4 ... are the negative ones: (-30000 + -20000) / 2 / 4.
@@ -100,7 +100,7 @@ static void test_unity_passthrough_meters_input(void) {
     reset_meter();
     uint16_t usable = fill(block, 96);
     memcpy(copy, block, usable);
-    uint16_t out = usbif_pump_shape_block((uint8_t *)block, usable, 2, 2, 1, 65536u, 44100, meter);
+    uint16_t out = usbhost_pump_shape_block((uint8_t *)block, usable, 2, 2, 1, 65536u, 44100, meter);
     CHECK(out == usable);
     CHECK(memcmp(block, copy, usable) == 0);
     check_meter_is_wire(block, out, 2, 44100);
@@ -110,7 +110,7 @@ static void test_no_meter(void) {
     int16_t block[96 * 2];
     reset_meter();
     uint16_t usable = fill(block, 96);
-    uint16_t out = usbif_pump_shape_block((uint8_t *)block, usable, 2, 2, 1, 0, 48000, NULL);
+    uint16_t out = usbhost_pump_shape_block((uint8_t *)block, usable, 2, 2, 1, 0, 48000, NULL);
     CHECK(out == usable);
     CHECK(seen_calls == 0);
     CHECK(block[0] == 0 && block[1] == 0);

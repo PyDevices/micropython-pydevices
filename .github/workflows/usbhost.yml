@@ -1,0 +1,138 @@
+# usbhost: the host-testable C (rings, the C sink's gate, the host streams'
+# pacing, framing and downmix), each with planted faults it has to catch;
+# the examples' checks on CPython; and the unix port built with the module,
+# the only place mod_usbhost.c compiles on a runner. (These moved here with
+# usbhost from usbif's own workflows, 2026-10-19.)
+name: usbhost
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/usbhost/**'
+      - 'build_mp.py'
+      - 'modules.lock'
+      - 'patches/**'
+      - '.github/workflows/usbhost.yml'
+  pull_request:
+    paths:
+      - 'modules/usbhost/**'
+      - 'build_mp.py'
+      - 'modules.lock'
+      - 'patches/**'
+      - '.github/workflows/usbhost.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  c:
+    name: Host-testable C
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: modules/usbhost
+    steps:
+      - uses: actions/checkout@v7
+      - name: The SPSC ring and the byte ring
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -Isrc -o /tmp/test_ringbuf tests/test_ringbuf.c src/shared/usbhost_ringbuf.c
+          /tmp/test_ringbuf
+          cc -std=c11 -Wall -Wextra -Werror -Isrc -o /tmp/test_byte_ring tests/test_byte_ring.c src/shared/usbhost_byte_ring.c
+          /tmp/test_byte_ring
+      - name: The C sink's lifetime (usbif#43), plain, under ASan and under TSan
+        # Real threads: a writer racing close() and free().
+        run: |
+          SRCS="tests/test_pcm_sink.c src/shared/usbhost_byte_ring.c"
+          cc -std=c11 -Wall -Wextra -Werror -O2 -pthread -Isrc -o /tmp/test_pcm_sink $SRCS
+          /tmp/test_pcm_sink
+          cc -std=c11 -Wall -Wextra -Werror -O1 -g -pthread -fsanitize=address,undefined \
+             -Isrc -o /tmp/test_pcm_sink_asan $SRCS
+          /tmp/test_pcm_sink_asan
+          cc -std=c11 -Wall -Wextra -Werror -O1 -g -pthread -fsanitize=thread \
+             -Isrc -o /tmp/test_pcm_sink_tsan $SRCS
+          setarch -R /tmp/test_pcm_sink_tsan
+      - name: The C sink tests can fail (planted faults must be caught)
+        run: |
+          SRCS="tests/test_pcm_sink.c src/shared/usbhost_byte_ring.c"
+          for fault in USBHOST_PCM_SINK_PLANT_NO_WAIT USBHOST_PCM_SINK_PLANT_NO_TRYLOCK; do
+            cc -std=c11 -Wall -Wextra -Werror -O1 -g -pthread -fsanitize=address,undefined \
+               -Isrc -D$fault -o /tmp/test_pcm_sink_planted $SRCS
+            if /tmp/test_pcm_sink_planted > /tmp/planted.log 2>&1; then
+              cat /tmp/planted.log
+              echo "planted fault $fault was NOT caught"; exit 1
+            fi
+            echo "planted fault $fault caught:"; grep -E "FAIL|ERROR: AddressSanitizer" /tmp/planted.log | head -3
+          done
+      - name: The host streams' queue sizing, pacing, UVC framing and downmix
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -Isrc -o /tmp/test_iso_queue tests/test_iso_queue.c
+          /tmp/test_iso_queue
+          cc -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -Isrc \
+             -o /tmp/test_iso_stream tests/test_iso_stream.c
+          /tmp/test_iso_stream
+      - name: The pacing, framing and downmix tests can fail
+        run: |
+          for fault in USBHOST_UVC_FRAME_PLANT_NO_SYNC USBHOST_ISO_PACE_PLANT_DROP_REMAINDER USBHOST_DOWNMIX_PLANT_LEFT_ONLY; do
+            cc -std=c11 -Wall -Wextra -Werror -Isrc -D$fault -o /tmp/test_iso_planted tests/test_iso_stream.c
+            if /tmp/test_iso_planted > /tmp/planted.log 2>&1; then
+              cat /tmp/planted.log
+              echo "planted fault $fault was NOT caught"; exit 1
+            fi
+            echo "planted fault $fault caught:"; grep FAIL /tmp/planted.log | head -3
+          done
+      - name: The sound card pump block (the meter reads what plays), and its planted fault
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -Isrc \
+             -o /tmp/test_pump_block tests/test_pump_block.c
+          /tmp/test_pump_block
+          cc -std=c11 -Wall -Wextra -Werror -Isrc -DUSBHOST_PUMP_PLANT_METER_BEFORE_GAIN \
+             -o /tmp/test_pump_block_planted tests/test_pump_block.c
+          if /tmp/test_pump_block_planted > /tmp/planted.log 2>&1; then
+            cat /tmp/planted.log
+            echo "metering before the gain was NOT caught"; exit 1
+          fi
+          echo "planted fault caught:"; grep FAIL /tmp/planted.log | head -3
+
+  python:
+    # The examples' checks, the guard that keeps _usbhost out of examples
+    # and docs, and the tick-rate scan of src/. The examples lean on
+    # pydevices' events, found at modules/pydevices.
+    name: Examples and source checks (CPython)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: PyDevices/pydevices
+          path: modules/pydevices
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Run the suite
+        working-directory: modules/usbhost
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+      - name: flake8 (defect checks only, configured in modules/usbhost/.flake8)
+        working-directory: modules/usbhost
+        run: |
+          python -m pip install flake8
+          python -m flake8
+
+  unix:
+    name: The unix port with usbhost
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the unix port's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libffi-dev
+      - name: Build the unix port with usbhost
+        run: python3 build_mp.py --port unix --modules usbhost
+      - name: _usbhost imports and says which tree it was built from
+        run: |
+          ./builds/unix/standard/micropython -c "import _usbhost; print(_usbhost.__revision__)"

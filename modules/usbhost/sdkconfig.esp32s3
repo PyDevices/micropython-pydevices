@@ -1,4 +1,4 @@
-# usbif on the ESP32-S3 only.
+# usbhost on the ESP32-S3 only.
 # Bias the host FIFOs toward IN: hosting a camera needs a 512-byte isochronous
 # IN endpoint, and the balanced preset caps IN below that so interface_claim
 # refuses the camera outright. Costs periodic OUT 600 -> 128 bytes, which still

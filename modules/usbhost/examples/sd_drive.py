@@ -13,7 +13,7 @@ itself: ``machine.SDCard``, mip's ``sdcard.SDCard`` over SPI, a flash
 partition.
 
 Install the package first on a firmware that doesn't freeze it:
-``mip.install("github:PyDevices/usbif/packages/usb-device-msc")``.
+``mip.install("github:PyDevices/pydevices/usb-device-msc")``.
 
 **One writer.** While the computer has the card, don't mount it on the board.
 """

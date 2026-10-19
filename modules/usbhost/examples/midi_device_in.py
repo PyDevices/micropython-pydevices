@@ -7,7 +7,7 @@
 # it. Anything that can send MIDI drives it: a DAW track whose output is
 # this board, or a keyboard routed through one.
 #
-#   mpftp run usbif/examples/midi_device_in.py -d COM49 --follow --timeout 90
+#   mpftp run usbhost/examples/midi_device_in.py -d COM49 --follow --timeout 90
 #
 # The tally at the end is the evidence: which message types arrived, how
 # many of each, and the spread of velocities and channels. A clean run shows

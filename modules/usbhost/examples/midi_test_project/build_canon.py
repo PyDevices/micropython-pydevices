@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Generate USBIF_MIDI_Test.RPP: Canon in D (after Pachelbel) driving
-hardware MIDI out for usbif board testing. Prints a verification report
+"""Generate USBHOST_MIDI_Test.RPP: Canon in D (after Pachelbel) driving
+hardware MIDI out for usbhost board testing. Prints a verification report
 to stdout and writes the .RPP to the path given on argv[1].
 """
 import sys

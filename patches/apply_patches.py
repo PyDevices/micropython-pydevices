@@ -3,7 +3,7 @@
 
 The checkout is moved to the tag in UPSTREAM, then gets every patch in
 patches/micropython/ and every module's own MicroPython patches (the *.patch
-files directly inside modules/<name>/patches/, today usbif's and cameraif's),
+files directly inside modules/<name>/patches/, today cameraif's),
 all applied once and recorded as one local commit. That commit's body names
 the series it was made from, so a tree prepared before a patch changed is
 caught instead of silently built.
@@ -52,7 +52,7 @@ def series():
 
 def series_id(patches):
     # Covers the modules' patches too, which tools/prepare-micropython.sh's id
-    # left out: a changed usbif patch now makes a prepared tree stale.
+    # left out: a changed module patch now makes a prepared tree stale.
     digest = hashlib.sha256()
     for patch in patches:
         digest.update(patch.read_bytes())

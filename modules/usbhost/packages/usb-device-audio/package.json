@@ -1,7 +1,0 @@
-{
-  "urls": [
-    ["usb/device/audio.py", "github:PyDevices/usbif/packages/usb-device-audio/usb/device/audio.py"]
-  ],
-  "deps": [["usb-device", "latest"]],
-  "version": "0.1.0"
-}

@@ -4,9 +4,9 @@
 // from its own task, without the interpreter moving the bytes (usbif#43).
 //
 // This header is meant to be COPIED. A consumer (earful, say) vendors this
-// file rather than including anything else of usbif's, so the two modules
+// file rather than including anything else of usbhost's, so the two modules
 // share a struct layout and nothing more: no link-time dependency, no shared
-// MicroPython type. Any publisher can fill the same struct; usbif's UAC host
+// MicroPython type. Any publisher can fill the same struct; usbhost's UAC host
 // output is the first, and audiodsp's audiopump.Ring could be the second.
 //
 // --- how a consumer gets one -----------------------------------------------
@@ -16,7 +16,7 @@
 // pcm_c_sink_copy() below, which also checks it. Nothing
 // in the struct points into the MicroPython heap, so the copy never dangles:
 // `write` and `space` are functions in firmware, and `ctx` is whatever the
-// publisher needs to recognise the stream the sink was issued for (usbif
+// publisher needs to recognise the stream the sink was issued for (usbhost
 // passes a generation number, not a pointer).
 //
 //     mp_obj_t dest[2];
@@ -56,7 +56,7 @@
 //    side (audiodev's PCMOutput) is not applied to bytes written here.
 //
 // One producer at a time is the ring's design. A publisher may let two
-// producers race without corrupting the ring (usbif does: the loser gets 0),
+// producers race without corrupting the ring (usbhost does: the loser gets 0),
 // but interleaving two streams of audio is never what anyone wants.
 #ifndef PCM_C_SINK_H
 #define PCM_C_SINK_H

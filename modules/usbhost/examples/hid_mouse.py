@@ -6,7 +6,7 @@ CircuitPython's mouse code, unchanged: ``usb_hid`` gives CircuitPython's
     mpftp run -d COM49 examples/hid_mouse.py
 
 Install the packages first on a firmware that doesn't freeze them:
-``mip.install("github:PyDevices/usbif/packages/usb-hid")`` and
+``mip.install("github:PyDevices/pydevices/usb-hid")`` and
 ``mip.install("github:PyDevices/pydevices/bledev_hid")`` for ``adafruit_hid``.
 """
 import time

@@ -1,13 +1,13 @@
-# USBIF MIDI test project
+# USBHOST MIDI test project
 
-A REAPER project for MIDI-out hardware testing against a usbif dev board.
+A REAPER project for MIDI-out hardware testing against a usbhost dev board.
 No VST3 plugins, no rendering, no audio in this project — it exists purely
 to push real MIDI traffic out a hardware port for ~2 minutes so the board's
 receive side has something musical (not test tones) to chew on.
 
 ## What it is
 
-`USBIF_MIDI_Test.RPP` — Canon in D (after Pachelbel): the authentic 1680
+`USBHOST_MIDI_Test.RPP` — Canon in D (after Pachelbel): the authentic 1680
 ground bass (D-A-B-F#-G-D-G-A) under a 3-voice strict canon, plus a soft
 percussion pulse on the GM percussion channel. 66 BPM, 4/4, 33 bars, ends
 on a sustained D major chord — a clean 120.000 second stop, not a cutoff
@@ -35,7 +35,7 @@ way; said here so nobody mistakes it for a scholarly transcription.
 
 ## How to open it
 
-Just open `USBIF_MIDI_Test.RPP` in REAPER — double-click it, or File ->
+Just open `USBHOST_MIDI_Test.RPP` in REAPER — double-click it, or File ->
 Open Project. All routing is already configured; nothing else to set up.
 Press Play. Every track's hardware MIDI output is enabled and pointed at
 the **Espressif Device** MIDI output, on channel 0 (pass-through), so each
@@ -64,7 +64,7 @@ whenever a MIDI device is added or removed — this project will outlive
 today's enumeration. If playback doesn't seem to reach the board:
 
 1. Actions -> Show action list -> ReaScript: Load... and pick
-   `USBIF_MIDI_Test_fix_routing.lua` in this directory.
+   `USBHOST_MIDI_Test_fix_routing.lua` in this directory.
 2. Run it. It finds the MIDI output device whose name contains
    "Espressif" and repoints every track's hardware MIDI output there
    (channel 0 / pass-through, matching how this project is wired). If no
@@ -75,12 +75,12 @@ today's enumeration. If playback doesn't seem to reach the board:
 ## Regenerating it
 
 `build_canon.py` (plain Python, no dependencies) generated
-`USBIF_MIDI_Test.RPP` and is included here for provenance and so a
+`USBHOST_MIDI_Test.RPP` and is included here for provenance and so a
 different tempo, device index, or musical shape doesn't require
 hand-editing MIDI event bytes:
 
 ```
-python3 build_canon.py USBIF_MIDI_Test.RPP
+python3 build_canon.py USBHOST_MIDI_Test.RPP
 ```
 
 It also prints a track/channel/timing table and asserts, at generation
@@ -95,7 +95,7 @@ sign anything broke).
 
 `midi_in_count.py` is the PC half of a board-to-PC MIDI check, for Windows,
 with nothing to install: it drives `winmm` through `ctypes`, lists the MIDI
-inputs, opens the one whose name contains its first argument (a usbif board
+inputs, opens the one whose name contains its first argument (a usbhost board
 appears as "Espressif Device"), listens for the given seconds and prints how
 many messages arrived and the last few.
 

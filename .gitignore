@@ -7,6 +7,7 @@
 !/modules/manifest.py
 !/modules/all/
 !/modules/castif/
+!/modules/usbhost/
 !/modules/h264enc/
 !/modules/tsmux/
 !/modules/ppa/

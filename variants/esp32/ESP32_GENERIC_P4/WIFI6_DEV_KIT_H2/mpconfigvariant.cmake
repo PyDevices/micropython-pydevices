@@ -11,7 +11,7 @@
 #
 # The REPL stays on the CH343 UART ("USB TO UART", H1), and on the device's
 # CDC through H2 whenever the device wears CDC. The high-speed controller
-# still reaches only the USB-A sockets, for usbif's host, so the board is host
+# still reaches only the USB-A sockets, for usbhost's host, so the board is host
 # and device at once.
 include(${CMAKE_CURRENT_LIST_DIR}/../WIFI6_DEV_KIT/mpconfigvariant.cmake)
 
