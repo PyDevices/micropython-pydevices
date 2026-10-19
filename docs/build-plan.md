@@ -39,9 +39,10 @@ micropython-pydevices/
 │   ├── jpegio/              tracked: lives only here (moved from displayif, 2026-10-06); every port
 │   ├── usbhost/             tracked: lives only here (moved from usbif, 2026-10-19, history kept); ESP32-S2, S3 and P4
 │   ├── mdns/                tracked: lives only here; esp32, rp2, unix, windows
+│   ├── audioif/, cameraif/, displayif/  tracked: moved here 2026-10-19 from their own repos, history kept
 │   ├── audiodsp -> ../../audiodsp          ignored symlinks to sibling checkouts,
-│   ├── audioif  -> ../../audioif           clones at the modules.lock commit anywhere else
-│   ├── audiocomponents, cameraif, displayif, lvgl-micropython, palettes,
+│   ├── audiocomponents -> ...               clones at the modules.lock commit anywhere else
+│   ├── lvgl-micropython, palettes,
 │   ├── pdwidgets, pydevices, pygraphics, ulab
 │   ├── .lvgl-bindings       ignored: what lvgl-micropython compiles; a link, or a sparse fetch at its modules.lock commit
 │   └── jpegio                later: see "Open"

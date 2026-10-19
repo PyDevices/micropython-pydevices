@@ -63,6 +63,9 @@ v1.29.0). Point the script at your own MicroPython tree:
 /path/to/cameraif/apply_patches.sh --apply /path/to/micropython
 ```
 
+micropython-pydevices' `build_mp.py` applies them on its own, with the rest of
+its patch series.
+
 Then, on MicroPython 1.29 or later, add one line to the manifest your P4 build
 already uses (usually `ports/esp32/boards/manifest.py`, unless your board
 brings its own):
