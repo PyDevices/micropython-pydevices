@@ -1,13 +1,14 @@
-# Upstream pins for displayif builds and its vendored code.
+# Upstream pins for displayif's vendored code and its other build inputs.
 #
 # displayif is source-integrated: it has no versioned releases of its own
 # (see README "Status"). This file records what a build is tested against
 # and where the one vendored third-party source tree came from.
 
 ## MicroPython
-Org-pinned upstream (the ref CI builds against): v1.29.0
-  https://github.com/micropython/micropython @ v1.29.0
-  Verify locally with: git -C <your micropython checkout> describe --tags   # expect v1.29.0
+The MicroPython this module builds against is the one pinned for the whole
+repository, in ../../UPSTREAM (a full commit; provenance.json names it in words).
+CI builds the unix port from that pin. Nothing here repeats it, so it can't go stale.
+  Verify locally with: git -C <your micropython checkout> rev-parse HEAD   # matches ../../UPSTREAM
 
 ## CircuitPython (usdl2 desktop path only, as a user C module)
 Tested against: 11.0.0-alpha.1 (CircuitPython 11 is the first line whose
