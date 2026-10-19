@@ -1,0 +1,367 @@
+// SPDX-License-Identifier: MIT
+// MIPI DSI host for MIMXRT1176 (LCDIFV2 + NXP mipi_dsi_split).
+// Lifecycle: idempotent deinit/__del__/ctor + soft-reset teardown (see soft_reset.h).
+
+#include <string.h>
+#include <stdlib.h>
+
+#include "py/runtime.h"
+#include "displayif/build.h"
+#include "py/obj.h"
+#include "py/binary.h"
+#include "py/mphal.h"
+#include "displayif/mp_helpers.h"
+#include "displayif/fb_fill.h"
+#include "displayif/soft_reset.h"
+
+#if defined(MIMXRT1176_SERIES) || defined(CPU_MIMXRT1176) || defined(CPU_MIMXRT1176DVMAA_cm7)
+
+#include "mimxrt1176_dsi_display.h"
+#include "fsl_cache.h"
+
+typedef struct _mipidsi_bus_obj_t {
+    mp_obj_base_t base;
+    uint8_t num_lanes;
+    uint32_t lane_bit_rate_hz;
+    bool ready;
+    bool deinited;
+} mipidsi_bus_obj_t;
+
+typedef struct _mipidsi_display_obj_t {
+    mp_obj_base_t base;
+    mipidsi_bus_obj_t *bus;
+    uint16_t width;
+    uint16_t height;
+    uint16_t row_stride;
+    uint8_t *buf;
+    size_t buf_len;
+    uint8_t virtual_channel;
+    bool lcdif_ready;
+    bool deinited;
+} mipidsi_display_obj_t;
+
+static bool s_soft_reset_registered;
+
+static const mp_obj_type_t mipidsi_bus_type;
+static const mp_obj_type_t mipidsi_display_type;
+
+static void mipidsi_raise_status(status_t status) {
+    if (status == kStatus_Success) {
+        return;
+    }
+    mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("NXP SDK status %d"), (int)status);
+}
+
+/* Complete host teardown. Safe if already clean. Does not touch GC memory. */
+static void mipidsi_host_teardown(void) {
+    displayif_mimxrt1176_dsi_display_stop();
+    displayif_mimxrt1176_dsi_bus_deinit();
+}
+
+static void mipidsi_host_display_teardown(void) {
+    displayif_mimxrt1176_dsi_display_stop();
+}
+
+static void mipidsi_ensure_soft_reset_registered(void) {
+    if (!s_soft_reset_registered) {
+        displayif_register_soft_reset(mipidsi_host_teardown);
+        s_soft_reset_registered = true;
+    }
+}
+
+static void mipidsi_bus_deinit_internal(mipidsi_bus_obj_t *self) {
+    mipidsi_host_teardown();
+    if (self != NULL) {
+        self->ready = false;
+        self->deinited = true;
+    }
+}
+
+static void mipidsi_display_deinit_internal(mipidsi_display_obj_t *self) {
+    if (self != NULL && self->deinited) {
+        return;
+    }
+    mipidsi_host_display_teardown();
+    if (self != NULL) {
+        if (self->buf != NULL) {
+            m_free(self->buf);
+            self->buf = NULL;
+        }
+        self->lcdif_ready = false;
+        self->deinited = true;
+    }
+}
+
+static mp_obj_t mipidsi_bus_make(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+    enum {
+        ARG_frequency,
+        ARG_num_lanes,
+    };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_frequency, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 500000000 } },
+        { MP_QSTR_num_lanes, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 2 } },
+    };
+    mp_arg_val_t vals[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all_kw_array(n_args, n_kw, args, MP_ARRAY_SIZE(allowed_args), allowed_args, vals);
+
+    if (vals[ARG_frequency].u_int <= 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("frequency must be positive"));
+    }
+    if (vals[ARG_num_lanes].u_int <= 0 || vals[ARG_num_lanes].u_int > 4) {
+        mp_raise_ValueError(MP_ERROR_TEXT("num_lanes out of range"));
+    }
+
+    mipidsi_host_teardown();
+    mipidsi_ensure_soft_reset_registered();
+
+    mipidsi_bus_obj_t *self = mp_obj_malloc(mipidsi_bus_obj_t, type);
+    self->num_lanes = vals[ARG_num_lanes].u_int;
+    self->lane_bit_rate_hz = (uint32_t)vals[ARG_frequency].u_int;
+    self->ready = false;
+    self->deinited = false;
+
+    mipidsi_raise_status(displayif_mimxrt1176_dsi_bus_init(self->num_lanes, self->lane_bit_rate_hz));
+    self->ready = true;
+    return MP_OBJ_FROM_PTR(self);
+}
+
+static mp_obj_t mipidsi_bus_deinit(mp_obj_t self_in) {
+    mipidsi_bus_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (self->deinited) {
+        return mp_const_none;
+    }
+    mipidsi_bus_deinit_internal(self);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mipidsi_bus_deinit_obj, mipidsi_bus_deinit);
+
+static mp_obj_t mipidsi_display_make(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+    enum {
+        ARG_bus,
+        ARG_init_sequence,
+        ARG_width,
+        ARG_height,
+        ARG_hsync_pulse_width,
+        ARG_hsync_back_porch,
+        ARG_hsync_front_porch,
+        ARG_vsync_pulse_width,
+        ARG_vsync_back_porch,
+        ARG_vsync_front_porch,
+        ARG_pixel_clock_frequency,
+        ARG_virtual_channel,
+        ARG_color_depth,
+    };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_bus, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
+        { MP_QSTR_init_sequence, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
+        { MP_QSTR_width, MP_ARG_REQUIRED | MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 0 } },
+        { MP_QSTR_height, MP_ARG_REQUIRED | MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 0 } },
+        { MP_QSTR_hsync_pulse_width, MP_ARG_REQUIRED | MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 0 } },
+        { MP_QSTR_hsync_back_porch, MP_ARG_REQUIRED | MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 0 } },
+        { MP_QSTR_hsync_front_porch, MP_ARG_REQUIRED | MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 0 } },
+        { MP_QSTR_vsync_pulse_width, MP_ARG_REQUIRED | MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 0 } },
+        { MP_QSTR_vsync_back_porch, MP_ARG_REQUIRED | MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 0 } },
+        { MP_QSTR_vsync_front_porch, MP_ARG_REQUIRED | MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 0 } },
+        { MP_QSTR_pixel_clock_frequency, MP_ARG_REQUIRED | MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 0 } },
+        { MP_QSTR_virtual_channel, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 0 } },
+        { MP_QSTR_color_depth, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 16 } },
+    };
+    mp_arg_val_t vals[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all_kw_array(n_args, n_kw, args, MP_ARRAY_SIZE(allowed_args), allowed_args, vals);
+
+    mp_obj_t bus_obj = vals[ARG_bus].u_obj;
+    mipidsi_bus_obj_t *bus = MP_OBJ_TO_PTR(bus_obj);
+    if (!mp_obj_is_type(bus_obj, &mipidsi_bus_type)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("bus must be mipidsi.Bus"));
+    }
+    if (bus->deinited || !bus->ready) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("MIPI DSI bus is not initialized"));
+    }
+    if (vals[ARG_color_depth].u_int != 16) {
+        mp_raise_ValueError(MP_ERROR_TEXT("only color_depth=16 is supported"));
+    }
+    if (vals[ARG_width].u_int <= 0 || vals[ARG_height].u_int <= 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("width and height must be positive"));
+    }
+    if (vals[ARG_pixel_clock_frequency].u_int <= 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("pixel_clock_frequency must be positive"));
+    }
+    if (vals[ARG_virtual_channel].u_int < 0 || vals[ARG_virtual_channel].u_int > 3) {
+        mp_raise_ValueError(MP_ERROR_TEXT("virtual_channel must be 0..3"));
+    }
+    if (vals[ARG_virtual_channel].u_int != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("virtual_channel must be 0 on mimxrt"));
+    }
+
+    mp_buffer_info_t init_bufinfo;
+    mp_get_buffer_raise(vals[ARG_init_sequence].u_obj, &init_bufinfo, MP_BUFFER_READ);
+
+    mipidsi_host_display_teardown();
+
+    mipidsi_display_obj_t *self = mp_obj_malloc(mipidsi_display_obj_t, type);
+    self->bus = bus;
+    self->width = vals[ARG_width].u_int;
+    self->height = vals[ARG_height].u_int;
+    self->row_stride = self->width * sizeof(uint16_t);
+    self->buf_len = (size_t)self->row_stride * self->height;
+    self->buf = m_malloc(self->buf_len);
+    if (self->buf == NULL) {
+        mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("MIPI DSI framebuffer allocation failed"));
+    }
+    memset(self->buf, 0, self->buf_len);
+    self->virtual_channel = (uint8_t)vals[ARG_virtual_channel].u_int;
+    self->lcdif_ready = false;
+    self->deinited = false;
+
+    displayif_mimxrt1176_dsi_timings_t timings = {
+        .width = self->width,
+        .height = self->height,
+        .pixel_clock_hz = (uint32_t)vals[ARG_pixel_clock_frequency].u_int,
+        .hsw = vals[ARG_hsync_pulse_width].u_int,
+        .hfp = vals[ARG_hsync_front_porch].u_int,
+        .hbp = vals[ARG_hsync_back_porch].u_int,
+        .vsw = vals[ARG_vsync_pulse_width].u_int,
+        .vfp = vals[ARG_vsync_front_porch].u_int,
+        .vbp = vals[ARG_vsync_back_porch].u_int,
+        .num_lanes = bus->num_lanes,
+        .lane_bit_rate_hz = bus->lane_bit_rate_hz,
+    };
+
+    mipidsi_raise_status(displayif_mimxrt1176_dsi_display_start(&timings,
+        init_bufinfo.buf, init_bufinfo.len));
+
+    displayif_mimxrt1176_dsi_lcdifv2_start(self->buf);
+    self->lcdif_ready = true;
+
+    return MP_OBJ_FROM_PTR(self);
+}
+
+static mp_obj_t mipidsi_display_refresh(mp_obj_t self_in) {
+    mipidsi_display_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (self->deinited || self->buf == NULL) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("MIPI DSI display is deinited"));
+    }
+    DCACHE_CleanByRange((uint32_t)self->buf, self->buf_len);
+    displayif_mimxrt1176_dsi_set_framebuffer(self->buf);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mipidsi_display_refresh_obj, mipidsi_display_refresh);
+
+/* The LCDIFv2 scans out of this buffer, so a fill is a write to memory and
+ * nothing else; refresh() does the DCACHE clean over the whole buffer, which is
+ * the same order FBDisplay draws in. Without this, a fill falls back to per-row
+ * memoryview assigns from Python (displayif#28). */
+static mp_obj_t mipidsi_display_fill_rect(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    mipidsi_display_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+    if (self->deinited || self->buf == NULL) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("MIPI DSI display is deinited"));
+    }
+    int x = mp_obj_get_int(args[1]);
+    int y = mp_obj_get_int(args[2]);
+    int w = mp_obj_get_int(args[3]);
+    int h = mp_obj_get_int(args[4]);
+    uint16_t color = (uint16_t)mp_obj_get_int(args[5]);
+    if (!displayif_fb_rect_ok(x, y, w, h, self->width, self->height)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fill_rect out of range"));
+    }
+    displayif_fb_fill_rect16(self->buf, self->row_stride, x, y, w, h, color);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mipidsi_display_fill_rect_obj, 6, 6, mipidsi_display_fill_rect);
+
+static mp_obj_t mipidsi_display_del(mp_obj_t self_in) {
+    mipidsi_display_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    mipidsi_display_deinit_internal(self);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mipidsi_display_del_obj, mipidsi_display_del);
+
+static void mipidsi_display_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    mipidsi_display_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (dest[0] == MP_OBJ_NULL) {
+        if (attr == MP_QSTR_width) {
+            dest[0] = mp_obj_new_int(self->width);
+        } else if (attr == MP_QSTR_height) {
+            dest[0] = mp_obj_new_int(self->height);
+        } else if (attr == MP_QSTR_row_stride) {
+            dest[0] = mp_obj_new_int(self->row_stride);
+        } else if (attr == MP_QSTR_refresh) {
+            dest[0] = MP_OBJ_FROM_PTR(&mipidsi_display_refresh_obj);
+            dest[1] = self_in;
+        } else if (attr == MP_QSTR_fill_rect) {
+            dest[0] = MP_OBJ_FROM_PTR(&mipidsi_display_fill_rect_obj);
+            dest[1] = self_in;
+        } else if (attr == MP_QSTR_deinit) {
+            dest[0] = MP_OBJ_FROM_PTR(&mipidsi_display_del_obj);
+            dest[1] = self_in;
+        } else if (attr == MP_QSTR___del__) {
+            dest[0] = MP_OBJ_FROM_PTR(&mipidsi_display_del_obj);
+            dest[1] = self_in;
+        }
+    }
+}
+
+static mp_int_t mipidsi_display_get_buffer(mp_obj_t self_in, mp_buffer_info_t *bufinfo, mp_uint_t flags) {
+    (void)flags;
+    mipidsi_display_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (self->deinited || self->buf == NULL) {
+        bufinfo->buf = NULL;
+        bufinfo->len = 0;
+        bufinfo->typecode = 'H';
+        return 0;
+    }
+    bufinfo->buf = self->buf;
+    bufinfo->len = self->buf_len;
+    bufinfo->typecode = 'H';
+    return 0;
+}
+
+static const mp_rom_map_elem_t mipidsi_bus_locals_dict_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&mipidsi_bus_deinit_obj) },
+    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&mipidsi_bus_deinit_obj) },
+};
+static MP_DEFINE_CONST_DICT(mipidsi_bus_locals_dict, mipidsi_bus_locals_dict_table);
+
+static const mp_rom_map_elem_t mipidsi_display_locals_dict_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_refresh), MP_ROM_PTR(&mipidsi_display_refresh_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fill_rect), MP_ROM_PTR(&mipidsi_display_fill_rect_obj) },
+    { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&mipidsi_display_del_obj) },
+    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&mipidsi_display_del_obj) },
+};
+static MP_DEFINE_CONST_DICT(mipidsi_display_locals_dict, mipidsi_display_locals_dict_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    mipidsi_display_type,
+    MP_QSTR_Display,
+    MP_TYPE_FLAG_NONE,
+    make_new, mipidsi_display_make,
+    attr, mipidsi_display_attr,
+    locals_dict, &mipidsi_display_locals_dict,
+    buffer, mipidsi_display_get_buffer
+);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    mipidsi_bus_type,
+    MP_QSTR_Bus,
+    MP_TYPE_FLAG_NONE,
+    make_new, mipidsi_bus_make,
+    locals_dict, &mipidsi_bus_locals_dict
+);
+
+static const mp_rom_map_elem_t mipidsi_module_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_mipidsi) },
+    DISPLAYIF_REVISION_ENTRY,
+    { MP_ROM_QSTR(MP_QSTR_Bus), MP_ROM_PTR(&mipidsi_bus_type) },
+    { MP_ROM_QSTR(MP_QSTR_Display), MP_ROM_PTR(&mipidsi_display_type) },
+};
+static MP_DEFINE_CONST_DICT(mipidsi_module_globals, mipidsi_module_globals_table);
+
+const mp_obj_module_t mipidsi_user_cmodule = {
+    .base = { &mp_type_module },
+    .globals = (mp_obj_dict_t *)&mipidsi_module_globals,
+};
+
+MP_REGISTER_MODULE(MP_QSTR_mipidsi, mipidsi_user_cmodule);
+
+#endif /* MIMXRT1176 */
