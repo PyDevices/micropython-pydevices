@@ -1,7 +1,7 @@
 # Roadmap
 
 What's planned for audioif. Bugs, and things you need that don't work yet, go
-to [issues](https://github.com/PyDevices/audioif/issues).
+to [issues](https://github.com/PyDevices/micropython-pydevices/issues).
 
 ## Playback
 
