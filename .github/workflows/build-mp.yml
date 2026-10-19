@@ -1,5 +1,6 @@
 # build_mp.py's own unit tests: the decisions it makes before any build, such
-# as when a build dir has to be wiped. No toolchain, no MicroPython checkout.
+# as when a build dir has to be wiped. No toolchain, no MicroPython checkout,
+# except for the one job that asks make where it finds a module's sources.
 name: build_mp.py tests
 
 on:
@@ -8,11 +9,15 @@ on:
     paths:
       - 'build_mp.py'
       - 'test_build_mp.py'
+      - 'UPSTREAM'
+      - 'patches/micropython/**'
       - '.github/workflows/build-mp.yml'
   pull_request:
     paths:
       - 'build_mp.py'
       - 'test_build_mp.py'
+      - 'UPSTREAM'
+      - 'patches/micropython/**'
       - '.github/workflows/build-mp.yml'
   workflow_dispatch:
 
@@ -27,3 +32,29 @@ jobs:
       - uses: actions/checkout@v7
       - name: Unit tests
         run: python3 -m unittest test_build_mp -v
+
+  vpath:
+    # make must find each user C module's sources in its own directory, not in
+    # a directory of the same name beside another module (patches/micropython/
+    # 0040). The test asks the unix port's Makefile where it finds one; nothing
+    # is compiled. It skips without a prepared checkout, so here it is required.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read the pinned upstream from UPSTREAM
+        id: pin
+        run: echo "ref=$(cat UPSTREAM)" >> "$GITHUB_OUTPUT"
+      - name: Check out the pinned upstream
+        uses: actions/checkout@v7
+        with:
+          repository: micropython/micropython
+          ref: ${{ steps.pin.outputs.ref }}
+          path: micropython
+          fetch-depth: 1
+      - name: Lay the overlay on it
+        run: python3 patches/apply_patches.py micropython
+      - name: Each module's sources come from its own directory
+        env:
+          PYDEVICES_REQUIRE_MICROPYTHON: '1'
+        run: python3 -m unittest test_build_mp.VpathSearchesEachModuleFirst -v

@@ -6,6 +6,7 @@
 import contextlib
 import io
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -196,6 +197,100 @@ class FrozenManifest(unittest.TestCase):
                 self.assertEqual(fm("unix", None, None), modules / "manifest.py")
             finally:
                 build_mp.VARIANTS_DIR, build_mp.MODULES_DIR = saved
+
+
+class ForeignSources(unittest.TestCase):
+    """foreign_sources() names an object compiled from outside its module, and only that."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.build = self.root / "build"
+        self.module = self.root / "repo" / "modules" / "displayif"
+        (self.module / "src").mkdir(parents=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def dep(self, obj, src):
+        p = self.build / obj
+        p.parent.mkdir(parents=True, exist_ok=True)
+        # What mkrules.mk leaves: gcc's rule, then a "header :" line per header.
+        p.write_text(f"{self.build}/{obj[:-2]}.o: \\\n {src} \\\n /usr/include/stdio.h\n/usr/include/stdio.h :\n")
+
+    def test_own_module_core_and_absolute_objects_pass(self):
+        self.dep("displayif/src/a.P", self.module / "src" / "a.c")
+        self.dep("py/gc.P", "../../py/gc.c")
+        self.dep("main.P", "main.c")
+        # A source outside every module keeps its whole path under BUILD.
+        self.dep(f"{str(self.root).lstrip('/')}/bindings/lv.P", self.root / "bindings" / "lv.c")
+        self.assertEqual(build_mp.foreign_sources(self.build, [self.module]), [])
+
+    def test_a_stray_copy_beside_another_module_is_named(self):
+        stray = self.root / "displayif" / "src" / "a.c"
+        self.dep("displayif/src/a.P", stray)
+        self.dep("displayif/src/b.P", self.module / "src" / "b.c")
+        found = build_mp.foreign_sources(self.build, [self.module, self.root / "audiodsp"])
+        self.assertEqual(found, [(self.build / "displayif/src/a.P", str(stray))])
+
+    def test_a_module_reached_through_a_link_is_its_own(self):
+        link = self.root / "repo" / "modules" / "linked"
+        link.symlink_to(self.module, target_is_directory=True)
+        self.dep("displayif/src/a.P", self.module / "src" / "a.c")
+        self.assertEqual(build_mp.foreign_sources(self.build, [link]), [])
+
+
+class VpathSearchesEachModuleFirst(unittest.TestCase):
+    """make finds a user C module's sources in its own directory, not in a
+    directory of the same name beside another module's parent (an older
+    checkout of it). Upstream's search list holds every module's parent,
+    sorted, so a parent that sorts first wins; patches/micropython/0040 puts
+    each module's own directory first.
+
+    Needs micropython/ prepared with the overlay (any build does it); skipped
+    without one, unless PYDEVICES_REQUIRE_MICROPYTHON is set, as CI does."""
+
+    def mp(self):
+        mp = Path(build_mp.__file__).resolve().parent / "micropython"
+        why = None
+        if os.name == "nt":
+            why = "the unix port's Makefile on native Windows"
+        elif not (mp / "py" / "py.mk").is_file():
+            why = "no micropython/ checkout"
+        elif "The PyDevices overlay applied" not in build_mp.git_out(mp, "log", "-1", "--format=%s"):
+            why = "micropython/ is not prepared with the overlay (run a build, or patches/apply_patches.py)"
+        if why:
+            if os.environ.get("PYDEVICES_REQUIRE_MICROPYTHON"):
+                self.fail(why)
+            self.skipTest(why)
+        return mp
+
+    def resolve(self, mp, layout):
+        """Where make finds mod/x.c, in the unix port, for a build of `sib` and `repo/modules/mod`."""
+        probe = layout / "probe.mk"
+        probe.write_text('include Makefile\nvpath-probe: mod/x.c\n\t@echo "PROBE $<"\n')
+        mods = f"{layout / 'sib'} {layout / 'repo' / 'modules' / 'mod'}"
+        out = subprocess.run(["make", "-s", "-C", str(mp / "ports" / "unix"), "-f", str(probe),
+                              f"BUILD={layout / 'build'}", "FROZEN_MANIFEST=", f"USER_C_MODULES={mods}",
+                              "vpath-probe"], capture_output=True, text=True, timeout=60)
+        got = [l[6:] for l in out.stdout.splitlines() if l.startswith("PROBE ")]
+        self.assertEqual(len(got), 1, out.stdout + out.stderr)
+        return Path(got[0])
+
+    def test_the_module_own_copy_wins(self):
+        mp = self.mp()
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            (t / "sib").mkdir()
+            (t / "sib" / "micropython.mk").write_text("# puts its parent on the search list\n")
+            ours = t / "repo" / "modules" / "mod"
+            ours.mkdir(parents=True)
+            (ours / "micropython.mk").write_text("SRC_USERMOD_C += $(USERMOD_DIR)/x.c\n")
+            (ours / "x.c").write_text("int ours;\n")
+            self.assertEqual(self.resolve(mp, t), ours / "x.c")  # control: nothing stray
+            (t / "mod").mkdir()
+            (t / "mod" / "x.c").write_text("#error stray copy\n")  # beside sib, sorted first
+            self.assertEqual(self.resolve(mp, t), ours / "x.c")
 
 
 class MicropythonLibPatches(unittest.TestCase):

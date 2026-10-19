@@ -498,6 +498,57 @@ def modules_moved(had, now):
     return moved
 
 
+def foreign_sources(build, roots):
+    """Objects a make build compiled from outside the module they belong to:
+    (dependency file, source) for each, or [] when every one came from its
+    own module.
+
+    make ports name a module's sources <module>/<file>.c and find them through
+    vpath, in the parent directories of the build's modules. When modules come
+    from different places, a directory of the module's name beside another
+    module's parent (an older checkout of it, say) can be searched first, and
+    its copy is compiled, silently. Our py.mk patch searches each module's own
+    directory first; this reads what the compiler was actually handed, from
+    each object's dependency file (BUILD/<module>/<file>.P, whose first rule
+    names the source first), so it catches the next way it goes wrong too.
+
+    `roots` are the build's module directories (and anything else the build
+    is meant to compile from, such as lvgl-bindings): a source counts as its
+    module's when the directory it was found under is inside one of them.
+    CMake ports name sources by absolute path and write no .P files."""
+    roots = [Path(os.path.realpath(r)) for r in roots]
+    found = []
+    for dep in sorted(Path(build).rglob("*.P")):
+        rel = dep.relative_to(build).with_suffix("").as_posix()
+        if "/" not in rel:
+            continue  # the port's own files, built at the top of BUILD
+        rule = []
+        try:
+            with open(dep, errors="replace") as f:
+                for line in f:
+                    rule.append(line.rstrip("\r\n").rstrip("\\"))
+                    if not line.rstrip("\r\n").endswith("\\"):
+                        break
+        except OSError:
+            continue
+        _, colon, deps = " ".join(rule).partition(": ")
+        if not colon or not deps.split():
+            continue
+        src = deps.split()[0].replace("\\", "/")
+        stem = src.rpartition(".")[0]
+        # Found through vpath as <module>/<file>, the source ends with the
+        # object's path under BUILD. One relative to the port (../../py/gc.c)
+        # or absolute all the way (BUILD/home/...) was never searched for.
+        absolute = src.startswith("/") or re.match(r"[A-Za-z]:/", src)
+        if not absolute or not stem.endswith("/" + rel) or stem == "/" + rel:
+            continue
+        module = rel.split("/", 1)[0]
+        found_in = Path(os.path.realpath(stem[: -len(rel)] + module))
+        if not any(found_in == r or r in found_in.parents for r in roots):
+            found.append((dep, src))
+    return found
+
+
 # ---- esp32: the generated board directory, the fragments, autosize --------
 
 def esp32_chip(base):
@@ -1258,6 +1309,16 @@ def main():
             out.append(chunk)
         return p.wait(), "".join(out)
 
+    # make keeps an object whose source it now finds somewhere else, if the
+    # object is newer, so one compiled from a stray copy by a build made before
+    # py.mk searched each module's own directory first would stay in. Drop
+    # those, and this build compiles them again from their modules.
+    roots = module_dirs + ([bindings] if bindings else [])
+    for dep, src in foreign_sources(build, roots):
+        say(f"compiling {dep.relative_to(build).with_suffix('.o').as_posix()} again: it was compiled from {src}")
+        dep.with_suffix(".o").unlink(missing_ok=True)
+        dep.unlink()
+
     rc, out = 0, ""
     tinyusb = None
     try:
@@ -1343,6 +1404,12 @@ def main():
     if rc != 0:
         hint = failure_hint(port, out)
         die(f"the build failed (make exit {rc})" + (f"\n{hint}" if hint else ""))
+    stray = [f"{dep.relative_to(build).with_suffix('.o').as_posix()} was compiled from {src}"
+             for dep, src in foreign_sources(build, roots)]
+    if stray:
+        shown = "\n  ".join(stray[:10]) + (f"\n  ... and {len(stray) - 10} more" if len(stray) > 10 else "")
+        die(f"some of this build's objects were compiled from outside their module:\n  {shown}\n"
+            "A directory of the module's name beside another module was searched before the module's own.")
     rec = dict(want, complete=True)
     if port == "rp2" and rp2_storage:
         rec["rp2_storage_bytes"] = rp2_storage
