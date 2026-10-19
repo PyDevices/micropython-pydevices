@@ -1,0 +1,17 @@
+[flake8]
+# Defect checks only, no formatting opinions -- the house style, matching
+# the sibling *if modules.
+select = E9,F63,F7,F82,F401,F811,F841
+max-line-length = 100
+# Names MicroPython provides that CPython does not: viper's pointer types and
+# the freeze manifest's vocabulary. Without these, real F821 checking has to
+# be switched off wholesale to keep the run green -- which would also stop it
+# catching genuine undefined names.
+# manifest.py is run by MicroPython's makemanifest.py, which injects
+# c_module(), include(), require() and friends as globals. flake8's
+# `builtins` option would name them, but flake8 7.4.0 + pyflakes 4.0.0
+# crash on that option, so the undefined-name check is switched off for
+# that one file instead.
+per-file-ignores =
+    manifest.py:F821
+exclude = .git,__pycache__

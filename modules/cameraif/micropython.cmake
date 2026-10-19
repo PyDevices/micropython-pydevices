@@ -1,0 +1,68 @@
+# cameraif: MIPI-CSI camera capture as a MicroPython native module.
+#
+# MicroPython's Makefile-based ports get nothing from micropython.mk: every
+# line of this module is ESP32-P4 CSI hardware, so there is nothing a unix
+# build could compile. micropython.mk is CircuitPython's route in, since
+# CircuitPython builds its espressif port with make. On a CMake port without
+# CSI the Python-facing functions still exist -- mod_cameraif.c guards its
+# bodies -- so an application can ask `cameraif.available()` rather than
+# catching ImportError.
+set(CAMERAIF_MOD_DIR ${CMAKE_CURRENT_LIST_DIR})
+set(CAMERAIF_SRC_DIR ${CAMERAIF_MOD_DIR}/src)
+
+add_library(usermod_cameraif INTERFACE)
+
+target_sources(usermod_cameraif INTERFACE
+    ${CAMERAIF_SRC_DIR}/mod_cameraif.c
+    ${CAMERAIF_SRC_DIR}/sensor_table.c
+)
+
+target_include_directories(usermod_cameraif INTERFACE
+    ${CAMERAIF_SRC_DIR}
+)
+
+# The IDF components this module drives. Declared rather than assumed: a
+# usermod is an INTERFACE library added to `main`, so it only sees what main
+# already required -- esp_driver_cam and esp_driver_jpeg are not in that set,
+# and without these the headers are simply not on the include path.
+#
+# Only on ESP-IDF, though. The header comment above promises this module builds
+# on rp2 and unix with mod_cameraif.c's bodies guarded, but linking idf::
+# targets unconditionally broke that promise: on an rp2 build CMake fails
+# outright because those targets do not exist, taking the whole firmware with
+# it. Found building for a Pico.
+if(ESP_PLATFORM)
+    target_link_libraries(usermod_cameraif INTERFACE
+        idf::esp_driver_cam
+        idf::esp_driver_isp
+        idf::esp_driver_jpeg
+    )
+endif()
+
+# Note there is deliberately no `-u ov5647_detect` here.
+#
+# Sensor drivers register their probe in a linker section that nothing in C
+# ever names, so --gc-sections would drop them -- but esp_cam_sensor's own
+# CMakeLists already emits the `-u` when CONFIG_CAMERA_OV5647_AUTO_DETECT_
+# MIPI_INTERFACE_SENSOR is set. Adding it here as well looked harmless and
+# was not: with CONFIG_CAMERA_OV5647 unset the driver is not compiled at all,
+# so the forced reference resolved to nothing, the link still succeeded, and
+# the detect array was empty with `ov5647_detect` left undefined in the ELF.
+# The camera then reports "no sensor answered on SCCB" -- a wiring-shaped
+# error for a build-configuration cause. The sdkconfig options are what
+# matter; they live in the cameraif patch.
+
+target_link_libraries(usermod INTERFACE usermod_cameraif)
+
+# --- which cameraif this firmware was built from ----------------------
+# Computed at build time from this repo's own git, never stored; "unknown" when
+# there is no git (a tarball). Read on a target as <module>.__revision__.
+execute_process(
+    COMMAND git -C ${CAMERAIF_MOD_DIR} describe --always --dirty --abbrev=7
+    OUTPUT_VARIABLE CAMERAIF_REVISION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+if(NOT CAMERAIF_REVISION)
+    set(CAMERAIF_REVISION "unknown")
+endif()
+target_compile_definitions(usermod_cameraif INTERFACE CAMERAIF_REVISION=\"${CAMERAIF_REVISION}\")
