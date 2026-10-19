@@ -1,0 +1,113 @@
+# This repository is the pump's platform driver: the one file that knows what
+# a thread, a mutex, a clock and a sink are. It has no Python and no tests of
+# its own that a runner could execute without building it, so the whole of CI
+# is: build an interpreter with it, then ask it to play something.
+#
+# It needs a checkout of `audiodsp` beside this one and nothing else. audiodsp
+# carries the engine, the DSP nodes and the headers this driver compiles
+# against; MicroPython comes from upstream at the pinned version. No
+# workspace, no overlay, no board.
+#
+# When this repository becomes part of the public audiodsp, this job moves
+# there as a second cell of `clean-build.yml` and loses the extra checkout.
+name: Build and probe the driver
+
+# Documentation-only changes can't change this result, so they don't run it.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unix-driver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: audioif
+
+      # The engine half, at a release tag rather than its default branch, so a
+      # change on audiodsp's main cannot redden this repository's (#6). v0.5.1
+      # is the first release carrying the pump; move the ref when the driver
+      # needs something newer from the engine.
+      - uses: actions/checkout@v7
+        with:
+          repository: PyDevices/audiodsp
+          ref: v0.5.1
+          path: audiodsp
+
+      - name: Fetch audiodsp's pinned dependencies
+        working-directory: audiodsp
+        run: ./scripts/fetch_deps.sh
+
+      - uses: actions/checkout@v7
+        with:
+          repository: micropython/micropython
+          ref: v1.29.0
+          path: micropython
+
+      # USER_C_MODULES is the PARENT directory: py.mk globs
+      # $(USER_C_MODULES)/*/micropython.mk one level down, so both this
+      # repository and audiodsp are picked up by sitting side by side. That
+      # is also how audioif/micropython.mk finds audiodsp's headers --
+      # AUDIODSP_DIR defaults to $(USERMOD_DIR)/../audiodsp.
+      - name: Build the unix port with the engine and this driver
+        run: |
+          make -C micropython/mpy-cross -j2
+          make -C micropython/ports/unix submodules
+          make -C micropython/ports/unix -j2 \
+            USER_C_MODULES=$GITHUB_WORKSPACE
+
+      - name: The driver bound, and it has a thread
+        run: |
+          MP=./micropython/ports/unix/build-standard/micropython
+          "$MP" -c "
+          import audiopump, audiobusio
+          name = audiopump.driver()
+          assert name == 'pthread', 'driver() says %r' % name
+          assert audiopump.threaded(), 'a bound driver with no thread'
+          print('driver:', name, 'threaded:', audiopump.threaded())"
+
+      # Every probe's planted fault runs FIRST and must fail. A probe whose
+      # failing mode is never exercised is not a gate -- the same rule
+      # audiodsp's clean-build workflow runs its own probes under.
+      - name: The probes, and proof each one can fail
+        run: |
+          MP=./micropython/ports/unix/build-standard/micropython
+          TMP="${RUNNER_TEMP:-/tmp}"
+          run () { "$MP" -X heapsize=256M "audioif/tests/$@"; }
+          for planted in "busio_probe.py $TMP --fault deaf" \
+                         "sink_probe.py $TMP --fault flip" \
+                         "sink_probe.py $TMP --fault truncate"; do
+            if run $planted > /dev/null; then
+              echo "the planted fault passed: $planted" >&2
+              exit 1
+            fi
+          done
+          run sink_probe.py "$TMP"
+          run busio_probe.py "$TMP"
+
+      # CircuitPython's own I2SOut docstring example, character for character
+      # apart from the three pin arguments a desktop does not have. If it
+      # plays here, a CircuitPython audio program runs on this firmware and
+      # what it gets underneath is the pump.
+      - name: CircuitPython's documented example, unmodified
+        run: |
+          MP=./micropython/ports/unix/build-standard/micropython
+          OUT="${RUNNER_TEMP:-/tmp}/cp_example.raw"
+          "$MP" -X heapsize=256M audioif/tests/cp_example_probe.py "$OUT"
+          test -s "$OUT" || { echo "the example played nothing" >&2; exit 1; }
+          echo "$(stat -c%s "$OUT") bytes out of the docstring example"
