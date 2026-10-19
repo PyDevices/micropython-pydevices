@@ -1,0 +1,53 @@
+# The native Windows build, as the installer runs it for a new user: MSYS2's
+# make and MinGW gcc on a Windows runner, every module, LVGL included. The
+# cross-build in mdns.yml runs on Linux, where no path has a drive letter, so
+# it can't see what breaks only on Windows paths (lvgl-micropython#28, a
+# makefile target holding C:/ that make read as a static pattern rule).
+name: windows-native
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'build_mp.py'
+      - 'modules.lock'
+      - 'patches/**'
+      - '.github/workflows/windows-native.yml'
+  pull_request:
+    paths:
+      - 'build_mp.py'
+      - 'modules.lock'
+      - 'patches/**'
+      - '.github/workflows/windows-native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      # The runner's own MSYS2 at C:\msys64, where build_mp.py looks for it.
+      - name: Install MSYS2's make and MinGW toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          release: false
+          update: false
+          msystem: MINGW64
+          install: make mingw-w64-x86_64-gcc autoconf automake libtool
+
+      - name: Build the windows port with every module, as the installer does
+        run: python build_mp.py --port windows --variant pydevices --modules all
+
+      - name: The modules import, LVGL among them
+        shell: bash
+        run: |
+          exe=$(find builds/windows -name micropython.exe | head -n 1)
+          test -n "$exe"
+          "$exe" -c "import sys; print(sys.version, sys.implementation)"
+          "$exe" -c "import lvgl as lv; print('lvgl', lv.version_major(), lv.version_minor())"
+          "$exe" -c "import ulab, synthio, audiopump, audiosampler; print('modules ok')"
