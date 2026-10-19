@@ -31,6 +31,17 @@ _SPEEDS = {"low": 1, "full": 2, "high": 3}
 _SETTLE_MS = 1500   # a device just plugged in needs this long to enumerate
 
 
+# Not every port's errno names them all: ESP32 builds have no EPIPE, and a
+# missing name here turned every USB error after a timeout into an
+# AttributeError. The numbers are MicroPython's (py/mperrno.h), which the C
+# module raises.
+_ETIMEDOUT = getattr(errno, "ETIMEDOUT", 110)
+_EPIPE = getattr(errno, "EPIPE", 32)
+_ENODEV = getattr(errno, "ENODEV", 19)
+_ENOENT = getattr(errno, "ENOENT", 2)
+_EOPNOTSUPP = getattr(errno, "EOPNOTSUPP", 95)
+
+
 class USBError(OSError):
     pass
 
@@ -44,11 +55,11 @@ class NoBackendError(ValueError):
 
 
 def _raise(e):
-    if e.errno == errno.ETIMEDOUT:
+    if e.errno == _ETIMEDOUT:
         raise USBTimeoutError(e.errno, "timed out")
-    if e.errno == errno.EPIPE:
+    if e.errno == _EPIPE:
         raise USBError(e.errno, "pipe error (stall)")
-    if e.errno == errno.ENODEV:
+    if e.errno == _ENODEV:
         raise USBError(e.errno, "no such device (it may have been unplugged)")
     raise USBError(e.errno, str(e))
 
@@ -204,7 +215,7 @@ class Device:
         # ESP-IDF's host sets the first configuration at enumeration, which
         # is the one nearly every device has.
         if configuration not in (None, 1):
-            raise USBError(errno.EOPNOTSUPP, "only the first configuration is supported")
+            raise USBError(_EOPNOTSUPP, "only the first configuration is supported")
 
     def set_interface_altsetting(self, interface=0, alternate_setting=0):
         """Select an alternate setting, as PyUSB does: the host claims the
@@ -281,7 +292,7 @@ class Device:
             elif cfg[i + 1] == 5 and cfg[i + 2] == endpoint:
                 return itf
             i += cfg[i]
-        raise USBError(errno.ENOENT, "no endpoint 0x%02x" % endpoint)
+        raise USBError(_ENOENT, "no endpoint 0x%02x" % endpoint)
 
     # -- transfers
 
@@ -343,7 +354,7 @@ class Device:
                 n = _usbif.host_xfer(self._id, endpoint, buf, timeout or 250)
                 break
             except OSError as e:
-                if not timeout and e.errno == errno.ETIMEDOUT:
+                if not timeout and e.errno == _ETIMEDOUT:
                     continue
                 _raise(e)
         if into is not None:

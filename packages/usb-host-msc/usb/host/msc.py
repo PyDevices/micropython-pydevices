@@ -19,6 +19,9 @@ import time
 
 import usb.core
 
+# ESP32 builds' errno has no EPIPE; the C module raises MicroPython's 32.
+_EPIPE = getattr(errno, "EPIPE", 32)
+
 _CBW = 0x43425355
 _CSW = 0x53425355
 _MAX_BLOCKS = 64    # per command: 32 KB at 512 bytes
@@ -87,14 +90,14 @@ class Drive:
             elif data_out is not None and length:
                 self.dev.write(self._out, data_out, self.timeout)
         except usb.core.USBError as e:
-            if e.errno != errno.EPIPE:   # a stalled data phase; the CSW still follows
+            if e.errno != _EPIPE:   # a stalled data phase; the CSW still follows
                 raise
             ep = self._in if data_in is not None else self._out
             self.dev.ctrl_transfer(0x02, 0x01, 0, ep, None, 1000)   # CLEAR_FEATURE(ENDPOINT_HALT)
         try:
             self.dev.read(self._in, self._csw, self.timeout)
         except usb.core.USBError as e:
-            if e.errno != errno.EPIPE:
+            if e.errno != _EPIPE:
                 raise
             self.dev.ctrl_transfer(0x02, 0x01, 0, self._in, None, 1000)
             self.dev.read(self._in, self._csw, self.timeout)
