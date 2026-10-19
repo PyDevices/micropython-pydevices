@@ -1,32 +1,34 @@
 """Soft reset check: usbif shuts its hardware down on a soft reset.
 
 Run on the PC, with CPython and ``mpftp`` on the PATH (or named by ``MPFTP``),
-against a board running usbif with a USB microphone on its host port: the
-ESP32-P4 DEV-KIT with a mic in its USB-A hub, say.
+against a board running usbif with a USB audio device on its host port: the
+ESP32-P4 DEV-KIT with a mic in its USB-A hub, say, or a USB speaker or DAC.
 
     python tests/hardware/soft_reset_check.py -d COM55 --cycles 5
 
 Each cycle runs a short program on the board through the raw REPL, the way an
 app would, and leaves everything running for the soft reset to deal with:
 
-- the USB host, started at full speed for the UAC class;
-- the microphone's input stream, open and delivering.
+- the USB host, started at full speed for the UAC class (``usb.core``);
+- an audio stream, open and moving: the device's microphone through
+  ``usb.host.audio.Microphone`` when it has one, otherwise its speaker
+  through ``Speaker``, fed silence.
 
 Then it soft-resets the board and goes again. From the second cycle on, each
 check expects a fresh start:
 
 - ``host stopped``: the host isn't running before the program starts it;
-- ``attach event``: starting the host queues an attach for the mic, so the
+- ``attach event``: starting the host queues an attach for the device, so the
   host really started again rather than finding the old one;
-- ``mic opens``: the mic opens and delivers audio within a second.
+- ``stream opens``: the stream opens and moves audio within a second (bytes
+  recorded for a mic, bytes sent on the bus for a speaker).
 
 Prints ``PASS``/``FAIL`` per check and a final ``GATE PASS``/``GATE FAIL``.
 
 The checker can fail, and did. On firmware from before the fix, the second
 cycle found the host still running (``host stopped`` FAIL), no attach event,
-the mic's stream still open from the first cycle (``host_uac_open failed
-(-1)``).
-Calling ``host_stop()`` from Python at that point didn't help: the stream's
+and the mic's stream still open from the first cycle, so opening it again
+failed. Stopping the host from Python at that point didn't help: the stream's
 transfers never retired and the host came back wedged until a hard reset.
 """
 
@@ -42,7 +44,9 @@ import time, _usbif
 def say(*a):
     print("@@", *a)
 say("host_running_before", _usbif.host_stats()[0])
-_usbif.host_start(("uac",), full_speed=True)
+import usb.core
+from usb.host.audio import Microphone, Speaker
+usb.core.start(full_speed=True, classes=("uac",))
 t0 = time.ticks_ms()
 attached = False
 while time.ticks_diff(time.ticks_ms(), t0) < 10000 and not attached:
@@ -50,23 +54,35 @@ while time.ticks_diff(time.ticks_ms(), t0) < 10000 and not attached:
     attached = any(kind == 0 and "uac" in row[5] for kind, row in events)
     time.sleep_ms(50)
 say("attach_event", attached)
-from usbif import uac, uac_audio
-dev = None
-for dev_id, streams in uac_audio.audio_devices():
-    if any(s.direction == uac.IN for s in streams):
-        dev = dev_id
+# The stream is left open on purpose: the soft reset has to stop it.
 got = 0
 try:
-    mic = uac_audio.input(dev, ring_ms=500)
-    mic.open()
-    buf = bytearray(960)
-    t1 = time.ticks_ms()
-    while time.ticks_diff(time.ticks_ms(), t1) < 1000:
-        got += mic.readinto(buf) or 0
-        time.sleep_ms(10)
+    dev = usb.core.find(custom_match=Microphone.match)
+    if dev is not None:
+        say("stream", "mic")
+        mic = Microphone(dev, ring_ms=500)
+        mic.start()
+        buf = bytearray(960)
+        t1 = time.ticks_ms()
+        while time.ticks_diff(time.ticks_ms(), t1) < 1000:
+            got += mic.read(buf)
+            time.sleep_ms(10)
+    else:
+        dev = usb.core.find(custom_match=Speaker.match)
+        if dev is None:
+            raise OSError("no USB audio device")
+        say("stream", "speaker")
+        spk = Speaker(dev, ring_ms=500)
+        spk.start()
+        buf = bytearray(960 - 960 % spk.frame_bytes)
+        t1 = time.ticks_ms()
+        while time.ticks_diff(time.ticks_ms(), t1) < 1000:
+            spk.write(buf)
+            time.sleep_ms(10)
+        got = spk.stats()[1]
 except Exception as e:
-    say("mic_error", repr(e))
-say("mic_bytes", got)
+    say("stream_error", repr(e))
+say("stream_bytes", got)
 """
 
 def mpftp(args, device):
@@ -117,9 +133,10 @@ def main():
                   "running=" + str(values.get("host_running_before")))
         check("attach event", values.get("attach_event") == "True",
               "seen=" + str(values.get("attach_event")))
-        mic_bytes = int(values.get("mic_bytes", "0") or 0)
-        check("mic opens", mic_bytes > 0,
-              "%d bytes in 1 s%s" % (mic_bytes, "; " + values["mic_error"] if "mic_error" in values else ""))
+        moved = int(values.get("stream_bytes", "0") or 0)
+        check("stream opens", moved > 0,
+              "%s: %d bytes in 1 s%s" % (values.get("stream", "no stream"), moved,
+                                        "; " + values["stream_error"] if "stream_error" in values else ""))
 
     print("GATE %s" % ("FAIL" if failed else "PASS"))
     return 1 if failed else 0

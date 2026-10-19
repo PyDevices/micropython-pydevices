@@ -1,9 +1,10 @@
 """Live camera preview: a hosted USB webcam shown on the board's own display.
 
-The board is the USB *host* here. It enumerates a class-compliant UVC camera,
-reads its descriptors, negotiates a video mode with it, and streams frames in
-over isochronous transfers -- then puts them on the display that
-``board_config`` already set up. No PC in the loop at any point.
+The board is the USB *host* here. ``usb.host.video.Camera`` reads a
+class-compliant UVC camera's descriptors, negotiates a video mode with it, and
+streams frames in over isochronous transfers -- then this script puts them on
+the display that ``board_config`` already set up. No PC in the loop at any
+point.
 
 Run it on a board with a display and a camera on its host port::
 
@@ -34,8 +35,8 @@ import board_config
 import micropython
 from board_config import display_drv
 
-import usbif.auto
-from usbif import uvc
+import usb.core
+from usb.host.video import Camera
 
 app = appdev.App(board_config)
 
@@ -43,12 +44,13 @@ app = appdev.App(board_config)
 # only reachable if its negotiated payload fits the host's isochronous IN
 # limit. That limit is set by the DWC FIFO split the host chooses from the
 # classes it is started for (usbif#2): a session asking for "uvc" gets the
-# IN-leaning split, 600 bytes. Modes are tried
-# largest-first and the first one the camera and the bus both accept wins.
+# IN-leaning split, 600 bytes. Camera tries modes largest-first and the first
+# one the camera and the bus both accept wins.
 IN_LIMIT = 600
 
-# 100 ns units, which is how UVC counts frame intervals throughout.
-INTERVALS = (2000000, 1333333, 1000000, 666666, 333333)   # 5, 7.5, 10, 15, 30 fps
+# The frame rate to ask the camera for; Camera takes the nearest it offers
+# that the bus can carry. None asks for the highest that fits.
+FPS = 5
 
 # False tries the uncompressed (YUY2) modes even when jpegio is present.
 PREFER_MJPEG = True
@@ -192,121 +194,75 @@ def rgb565_copy_down(buf: ptr16, width: int, rows: int):  # noqa: F821
         r += 1
 
 
-def find_camera(host, timeout_ms=10000):
-    """The first device the enumerator classifies as video."""
+def find_camera(timeout_ms=10000):
+    """The first device with a video streaming interface."""
     deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
     while time.ticks_diff(deadline, time.ticks_ms()) > 0:
-        found = host.find("uvc")
-        if found:
-            return found[0].id
+        dev = usb.core.find(custom_match=Camera.match)
+        if dev is not None:
+            return dev
         time.sleep_ms(250)
     return None
 
 
-def pick_mode(dev_id, formats, alts, max_w, max_h, prefer_mjpeg):
+def open_camera(dev, max_size, prefer_mjpeg):
     """Negotiate the largest mode the bus can actually carry.
 
-    Two separate gates, and they have to be asked in this order. Whether a
-    mode *exists* is in the descriptors; how much bandwidth it costs is not --
-    only the camera can say, and it says it by answering PROBE. So each
-    candidate is negotiated for real before it is accepted or rejected.
+    Whether a mode *exists* is in the descriptors; how much bandwidth it costs
+    is not -- only the camera can say, and it says it by answering PROBE.
+    Camera asks for real before it accepts or rejects each candidate, and
+    raises ValueError, listing what the camera offers, when none fits.
 
-    When ``prefer_mjpeg`` is true, MJPEG modes are tried first; otherwise
-    only uncompressed encodings are considered.
+    When ``prefer_mjpeg`` is true, MJPEG modes are tried first and YUY2 is the
+    fallback; otherwise only YUY2 is considered.
     """
-    candidates = []
-    for fmt in formats:
-        is_mjpeg = fmt.encoding == "mjpeg"
-        if prefer_mjpeg:
-            if not is_mjpeg and not fmt.frames:
-                continue
-            if not is_mjpeg:
-                # Prefer MJPEG; keep uncompressed as a fallback pass below.
-                continue
-        else:
-            if is_mjpeg or not fmt.frames:
-                continue
-        if not fmt.frames:
-            continue
-        for frame in fmt.frames:
-            if frame.width > max_w or frame.height > max_h:
-                continue
-            # MJPEG first when asked: score by size, then prefer mjpeg in the
-            # sort key so equal sizes still land on the compressed path.
-            rank = 1 if is_mjpeg else 0
-            candidates.append((rank, frame.width * frame.height, fmt, frame))
-    candidates.sort(key=lambda c: (c[0], c[1]), reverse=True)
-
-    for _, _, fmt, frame in candidates:
-        for interval in INTERVALS:
-            if frame.intervals and interval not in frame.intervals:
-                continue
-            payload, frame_bytes = host.uvc_negotiate(
-                dev_id, fmt.interface, fmt.index, frame.index, interval)
-            if payload > IN_LIMIT:
-                continue
-            alt = uvc.alt_for_payload(alts, payload)
-            if alt is None:
-                continue
-            return fmt, frame, interval, payload, frame_bytes, alt
+    last = None
+    for encoding in (("mjpeg", "YUY2") if prefer_mjpeg else ("YUY2",)):
+        try:
+            return Camera(dev, encoding=encoding, max_size=max_size, fps=FPS, in_limit=IN_LIMIT)
+        except ValueError as e:
+            last = e
+    print("no mode fits this host's isochronous IN limit")
+    print("  ", last)
     return None
 
 
-def _offered(formats):
-    for fmt in formats:
-        print("   offered:", uvc.describe(fmt))
-
-
-def _scale_geometry(frame):
-    scale = min(display_drv.width // frame.width,
-                display_drv.height // frame.height) or 1
+def _scale_geometry(cam):
+    scale = min(display_drv.width // cam.width,
+                display_drv.height // cam.height) or 1
     if UPSCALE:
         scale = min(scale, UPSCALE)
-    out_w = frame.width * scale
-    out_h = frame.height * scale
+    out_w = cam.width * scale
+    out_h = cam.height * scale
     x0 = (display_drv.width - out_w) // 2
     y0 = (display_drv.height - out_h) // 2
     return scale, out_w, out_h, x0, y0
 
 
-host = usbif.auto.host(classes=("uvc",)).start()
-dev_id = find_camera(host)
-picked = None
-if dev_id is None:
+usb.core.start(classes=("uvc",))
+dev = find_camera()
+cam = None
+if dev is None:
     print("no UVC camera found on the host port")
 else:
-    print("camera is device", dev_id)
+    print("camera is", dev, dev.manufacturer, dev.product)
     if _HAVE_JPEGIO:
         print("jpegio present -- preferring MJPEG")
     else:
         print("uncompressed YUY2 only (no jpegio, or PREFER_MJPEG is False)")
-    blob = host.desc(dev_id)
-    max_w, max_h = MAX_SIZE or (display_drv.width, display_drv.height)
-    formats = uvc.formats(blob)
-    alts = uvc.alt_settings(blob)
-    if not formats:
-        print("camera declares no video formats")
-    else:
-        if _HAVE_JPEGIO:
-            picked = pick_mode(dev_id, formats, alts, max_w, max_h, True)
-        if picked is None:
-            picked = pick_mode(dev_id, formats, alts, max_w, max_h, False)
-        if picked is None:
-            print("no mode fits this host's isochronous IN limit")
-            _offered(formats)
+    cam = open_camera(dev, MAX_SIZE or (display_drv.width, display_drv.height), _HAVE_JPEGIO)
 
-if picked is not None:
-    fmt, frame, interval, payload, frame_bytes, alt = picked
-    print("streaming", uvc.describe(fmt, frame, interval))
-    print("payload %d B/frame on alt %d" % (payload, alt.alt))
+if cam is not None:
+    print("streaming %s %dx%d @ %s fps, up to %d bytes a frame"
+          % (cam.encoding, cam.width, cam.height, cam.fps, cam.frame_bytes))
+    print("payload %d B/frame" % cam.payload)
 
-    scale, out_w, out_h, x0, y0 = _scale_geometry(frame)
+    scale, out_w, out_h, x0, y0 = _scale_geometry(cam)
     print("%dx%d upscaled x%d -> %dx%d at (%d, %d)"
-          % (frame.width, frame.height, scale, out_w, out_h, x0, y0))
+          % (cam.width, cam.height, scale, out_w, out_h, x0, y0))
 
-    src = bytearray(frame_bytes)
-    host.uvc_open(dev_id, fmt.interface, alt.alt, alt.endpoint,
-                  alt.max_packet, frame_bytes)
+    src = bytearray(cam.frame_bytes)
+    cam.start()
     # This loop presents its own frames: the App's refresh timer would also
     # call show(), waiting on the panel and swapping buffers under it.
     _refresh_claim = app.pause_refresh()
@@ -331,9 +287,9 @@ if picked is not None:
         if _shown % 25 == 0:
             dt = time.ticks_diff(time.ticks_ms(), _t0)
             print("%d frames, %.1f fps, stats %r"
-                  % (_shown, _shown * 1000 / dt, host.uvc_stats()))
+                  % (_shown, _shown * 1000 / dt, cam.stats()))
 
-    if fmt.encoding == "mjpeg":
+    if cam.encoding == "mjpeg":
         # The P4's JPEG engine decodes a whole frame several times faster than
         # TJpgDec; other chips refuse hardware=True, and an older jpegio
         # doesn't know the keyword.
@@ -343,14 +299,14 @@ if picked is not None:
             decoder = jpegio.JpegDecoder()
         # Native-order RGB565, tight. Sized for the negotiated frame; a camera
         # that sends a larger JPEG than it advertised is refused by decode.
-        rgb = bytearray(frame.width * frame.height * 2)
+        rgb = bytearray(cam.width * cam.height * 2)
         # Nearest-neighbour upscale into a band, same reason as the YUY2 path:
         # blit_rect byteswaps in place, so one band / one blit / one swap.
         band_stride = out_w * 2
         band = bytearray(band_stride * scale)
         band_mv = memoryview(band)
         rgb_mv = memoryview(rgb)
-        src_stride = frame.width * 2
+        src_stride = cam.width * 2
 
         # Paint the panel's own buffer when it lets us, and the pixels need
         # no byte swap on the way.
@@ -370,23 +326,23 @@ if picked is not None:
                 decoder.decode(rgb, scale=0)
                 fmv = memoryview(fbuf)
                 row = stride * 2
-                for sy in range(frame.height):
+                for sy in range(cam.height):
                     at = (y0 + sy * scale) * row + x0 * 2
                     rgb565_row_upscale(rgb_mv[sy * src_stride:(sy + 1) * src_stride], fmv[at:],
-                                       frame.width, scale, stride)
+                                       cam.width, scale, stride)
             if TEAR_FREE:
                 display_drv.show()
             _count_frame()
 
         def _tick(_=None):
-            n = host.uvc_read_frame(src)
+            n = cam.read(src)
             if n <= 0:
                 return
             try:
                 decoder.open(memoryview(src)[:n])
             except Exception:
                 return
-            if decoder.width != frame.width or decoder.height != frame.height:
+            if decoder.width != cam.width or decoder.height != cam.height:
                 return
             if direct[0]:
                 try:
@@ -410,8 +366,8 @@ if picked is not None:
                 return
             # Integer upscale row by row into the band, then blit: each row
             # widened in native code, then copied down for the other rows.
-            for sy in range(frame.height):
-                rgb565_row_upscale(rgb_mv[sy * src_stride:(sy + 1) * src_stride], band_mv, frame.width, scale, out_w)
+            for sy in range(cam.height):
+                rgb565_row_upscale(rgb_mv[sy * src_stride:(sy + 1) * src_stride], band_mv, cam.width, scale, out_w)
                 display_drv.blit_rect(band, x0, y0 + sy * scale, out_w, scale)
             _frame_shown()
 
@@ -421,8 +377,8 @@ if picked is not None:
         band = bytearray(band_stride * scale)
         band_mv = memoryview(band)
         src_mv = memoryview(src)
-        src_stride = frame.width * 2
-        whole_frame = src_stride * frame.height
+        src_stride = cam.width * 2
+        whole_frame = src_stride * cam.height
         # The whole converted frame, for the one-blit path at scale 1.
         rgb = bytearray(out_w * out_h * 2) if scale == 1 else None
 
@@ -433,7 +389,7 @@ if picked is not None:
             would be wrong: it owns the interpreter, so touch, the REPL and
             anything else the app is running never get a turn.
             """
-            n = host.uvc_read_frame(src)
+            n = cam.read(src)
             if n <= 0:
                 return
             # A short frame means the camera sent less than a whole picture.
@@ -443,13 +399,13 @@ if picked is not None:
             if scale == 1:
                 # No widening, so the frame converts as one long row and
                 # goes to the display in one blit.
-                yuy2_row_to_rgb565(src, rgb, frame.width * frame.height, 1)
+                yuy2_row_to_rgb565(src, rgb, cam.width * cam.height, 1)
                 display_drv.blit_rect(rgb, x0, y0, out_w, out_h)
                 _frame_shown()
                 return
-            for sy in range(frame.height):
+            for sy in range(cam.height):
                 yuy2_row_to_rgb565(src_mv[sy * src_stride:], band,
-                                   frame.width, scale)
+                                   cam.width, scale)
                 rgb565_copy_down(band, out_w, scale)
                 display_drv.blit_rect(band, x0, y0 + sy * scale, out_w, scale)
             _frame_shown()
@@ -463,4 +419,4 @@ if picked is not None:
             while True:
                 _tick()
         finally:
-            host.uvc_close()
+            cam.stop()

@@ -14,10 +14,14 @@ The two periods are coprime, so the stalls sometimes stack (up to
 ``WORK_MS + TICK_MS``).
 
 The feeder never blocks: it asks ``space()`` and writes that much with
-``try_write()``. Each case opens the stream, fills the ring, then counts the
-driver's ``starved`` packets (a bus interval that found the ring short and sent
-silence) across ``SECONDS`` of stalls. The first fill is not counted: a ring
+``write()``, which takes what fits and returns. Each case builds a
+``Speaker`` with its ``ring_ms`` (None keeps the 8 KB default), starts it,
+fills the ring, then counts the stream's ``starved`` packets (a bus interval
+that found the ring short and sent silence) across ``SECONDS`` of stalls. The first fill is not counted: a ring
 starts empty, and so does every stream.
+
+The ring each case actually got is ``capacity()``, printed as ``ring=``: the
+size ``ring_ms`` asked for, as the ring rounded it up.
 
 Gate: a case with ``expect="pass"`` must starve 0 packets; a case with
 ``expect="fail"`` must starve at least ``FAIL_MIN``. The second kind is the
@@ -38,8 +42,8 @@ import math
 import time
 
 import machine
-import usbif.auto
-from usbif import uac, uac_audio
+import usb.core
+from usb.host.audio import Speaker
 
 RATE = 48000
 SECONDS = 20
@@ -83,9 +87,9 @@ def tone(rate, channels, freq=400, level=0.01):
 def find(timeout_ms=15000):
     t0 = time.ticks_ms()
     while time.ticks_diff(time.ticks_ms(), t0) < timeout_ms:
-        for dev_id, streams in uac_audio.audio_devices():
-            if any(s.direction == uac.OUT for s in streams):
-                return dev_id
+        dev = usb.core.find(custom_match=Speaker.match)
+        if dev is not None:
+            return dev
         time.sleep_ms(250)
     return None
 
@@ -100,16 +104,17 @@ class Feeder:
         room = self.out.space()
         while room > 0:
             take = min(room, len(self.pcm) - self.pos)
-            n = self.out.try_write(self.pcm[self.pos:self.pos + take])
+            n = self.out.write(self.pcm[self.pos:self.pos + take])
             if n <= 0:
                 return
             self.pos = (self.pos + n) % len(self.pcm)
             room -= n
 
 
-def run_case(dev_id, pcm, name, ring_ms, stalls, expect):
-    out = uac_audio.output(dev_id, rate=RATE, ring_ms=ring_ms)
-    out.open()
+def run_case(dev, pcm, name, ring_ms, stalls, expect):
+    # The tone is 16-bit stereo, so the stream is asked for exactly that.
+    out = Speaker(dev, rate=RATE, channels=2, bits=16, ring_ms=ring_ms)
+    out.start()
     feeder = Feeder(out, pcm)
     cap = out.capacity()
     # Fill, and let the bus take a few packets so the count starts clean.
@@ -146,7 +151,7 @@ def run_case(dev_id, pcm, name, ring_ms, stalls, expect):
             if gap > longest:
                 longest = gap
             last = now
-            fill = out.queued_size()
+            fill = out.queued()
             if fill < min_fill:
                 min_fill = fill
             feeder.top_up()
@@ -163,8 +168,8 @@ def run_case(dev_id, pcm, name, ring_ms, stalls, expect):
     finally:
         if timer:
             timer.deinit()
-        end = out.stats()
-        out.close()
+        out.stop()
+        end = out.stats()      # the stream's last counters, kept by stop()
 
     starved = end[3] - base[3]
     packets = end[0] - base[0]
@@ -185,20 +190,20 @@ def run_case(dev_id, pcm, name, ring_ms, stalls, expect):
 
 
 def main():
-    host = usbif.auto.host(classes=("uac",)).start()
+    usb.core.start(classes=("uac",))
     try:
-        dev_id = find()
-        if dev_id is None:
+        dev = find()
+        if dev is None:
             print("GATE FAIL: no USB audio output found")
             return
         pcm = tone(RATE, 2)
         results = []
         for case in CASES:
-            results.append(run_case(dev_id, pcm, *case))
+            results.append(run_case(dev, pcm, *case))
             time.sleep_ms(300)
         print("GATE %s" % ("PASS" if all(results) else "FAIL"))
     finally:
-        host.stop()
+        usb.core.stop()
 
 
 main()

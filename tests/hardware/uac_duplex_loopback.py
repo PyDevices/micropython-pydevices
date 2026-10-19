@@ -42,8 +42,8 @@ import gc
 import math
 import time
 
-import usbif.auto
-from usbif import uac_audio
+import usb.core
+from usb.host.audio import Microphone, Speaker
 from ulab import numpy as np
 from ulab import utils
 
@@ -93,8 +93,10 @@ def tone(hz, dbfs, frames):
 
 class Rig:
     def __init__(self, dev):
-        self.out = uac_audio.output(dev, rate=RATE, channels=2, bits=16, ring_ms=OUT_RING_MS)
-        self.mic = uac_audio.input(dev, rate=RATE, channels=2, bits=16, ring_ms=IN_RING_MS)
+        # One device, two streams: its speaker and its microphone, each on
+        # its own interface.
+        self.out = Speaker(dev, rate=RATE, channels=2, bits=16, ring_ms=OUT_RING_MS)
+        self.mic = Microphone(dev, rate=RATE, channels=2, bits=16, ring_ms=IN_RING_MS)
         self.chunk = bytearray(8192)
         self.read_frames = 0
         self.src = None
@@ -107,11 +109,11 @@ class Rig:
     def feed(self, keep):
         """Keep ``keep`` bytes queued from the current source, cyclically."""
         beat()
-        room = keep - self.out.queued_size()
+        room = keep - self.out.queued()
         while room >= FRAME:
             take = min(room, len(self.src) - self.pos)
             take -= take % FRAME
-            n = self.out.try_write(self.src[self.pos:self.pos + take])
+            n = self.out.write(self.src[self.pos:self.pos + take])
             if n <= 0:
                 break
             self.pos = (self.pos + n) % len(self.src)
@@ -120,13 +122,13 @@ class Rig:
     def capture(self, into, got):
         """Read into ``into`` from ``got``; past its end, read and discard."""
         if got < len(into):
-            n = self.mic.readinto(memoryview(into)[got:])
+            n = self.mic.read(memoryview(into)[got:])
             self.read_frames += n // FRAME
             return got + n
-        n = self.mic.readinto(self.chunk)
+        n = self.mic.read(self.chunk)
         while n:
             self.read_frames += n // FRAME
-            n = self.mic.readinto(self.chunk)
+            n = self.mic.read(self.chunk)
         return got
 
     def run(self, ms, keep, into=None, got=0):
@@ -254,9 +256,9 @@ def phase_latency(rig, noise_peak):
         rig.capture(bytearray(0), 0)        # empty the capture ring
         # The capture position at the moment of writing: frames read so far
         # plus those captured and waiting.
-        mark = rig.read_frames + rig.mic.available() // FRAME
-        q = rig.out.queued_size()
-        n = rig.out.try_write(burst)
+        mark = rig.read_frames + rig.mic.queued() // FRAME
+        q = rig.out.queued()
+        n = rig.out.write(burst)
         first = rig.read_frames
         got = rig.run(200, SHALLOW, window)
         if n != len(burst):
@@ -316,25 +318,29 @@ def phase_soak(rig, seconds, stall_ms=0):
     return clean, d_out
 
 
+def _duplex(dev):
+    return Speaker.match(dev) and Microphone.match(dev)
+
+
 def main():
-    host = usbif.auto.host(classes=("uac",))
-    host.start()
-    devs = ()
+    usb.core.start(classes=("uac",))
+    dev = None
     for _ in range(60):
-        devs = uac_audio.audio_devices()
-        if devs:
+        dev = usb.core.find(custom_match=_duplex)
+        if dev is not None:
             break
         time.sleep_ms(250)
-    if not devs:
-        print("no USB audio device")
+    if dev is None:
+        print("no USB audio device with both a speaker and a microphone")
+        usb.core.stop()
         return
-    rig = Rig(devs[0][0])
+    rig = Rig(dev)
     say("streams: %d B out on ep 0x%02x, %d B in on ep 0x%02x" % (
         rig.out.stream.max_packet, rig.out.stream.endpoint,
         rig.mic.stream.max_packet, rig.mic.stream.endpoint))
     gates = {}
-    rig.out.open()
-    rig.mic.open()
+    rig.out.start()
+    rig.mic.start()
     try:
         gates["tone"], noise_peak = phase_tone(rig)
         gates["latency"] = phase_latency(rig, noise_peak)
@@ -343,9 +349,9 @@ def main():
         gates["planted stall is caught"] = (not stall_clean) and d_out[3] > 0
         say("RESULT totals out", rig.out.stats(), "in", rig.mic.stats())
     finally:
-        rig.out.close()
-        rig.mic.close()
-        host.stop()
+        rig.out.stop()
+        rig.mic.stop()
+        usb.core.stop()
     print()
     for line in out_log:
         print(line)

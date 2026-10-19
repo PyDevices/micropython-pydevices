@@ -1,8 +1,8 @@
 """Play a tone through a hosted USB speaker -- the S3 half of the sound card.
 
 A commercial USB audio interface, a headset, or a PyDevices board running
-``usb_soundcard.py`` all look the same here: ``usbif.uac_audio.output`` returns an
-ordinary ``audiodev.PCMOutput``. The application never knows a bus is involved.
+``usb_soundcard.py`` all look the same here: ``usb.host.audio.Speaker`` opens
+the stream and you write PCM to it, a whole frame at a time.
 
     mpftp run -d COM49 examples/usb_speaker.py
 
@@ -15,7 +15,8 @@ can back-feed unless the cable omits VBUS; see ``examples/README.md``.
 
 **FIFO split.** Hosted playback competes with hosted video for DWC FIFO
 space, and the split is fixed when the host starts (usbif#2). The host picks
-it from the classes it is started for: this script asks for ``uac`` alone,
+it from the classes it is started for: this script asks for ``uac`` alone
+(``usb.core.start(classes=("uac",))``),
 which gives periodic OUT 200 bytes on an S3, enough for 48 kHz stereo from a
 USB Audio 2.0 device (196), and 800 on a P4, enough for a USB-C DAC whose
 endpoint declares 384. The host prints the split and those limits as it
@@ -26,20 +27,18 @@ cannot open such a stream.
 import math
 import time
 
-import usbif.auto
-from usbif import uac
-from usbif import uac_audio
+import usb.core
+from usb.host.audio import Speaker
 
 
-def find_speaker(host, timeout_ms=15000):
+def find_speaker(timeout_ms=15000):
     deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
     while time.ticks_diff(deadline, time.ticks_ms()) > 0:
-        for dev_id, streams in uac_audio.audio_devices():
-            out = [s for s in streams if s.direction == uac.OUT]
-            if out:
-                return dev_id, out
+        dev = usb.core.find(custom_match=Speaker.match)
+        if dev is not None:
+            return dev
         time.sleep_ms(250)
-    return None, ()
+    return None
 
 
 def tone_frames(rate, channels, bits, freq=440.0, seconds=2.0, volume=0.2):
@@ -61,33 +60,28 @@ def tone_frames(rate, channels, bits, freq=440.0, seconds=2.0, volume=0.2):
 
 
 def main():
-    host = usbif.auto.host(classes=("uac",)).start()
-    dev_id, outs = find_speaker(host)
-    if dev_id is None:
+    usb.core.start(classes=("uac",))
+    dev = find_speaker()
+    if dev is None:
         print("no USB audio output found")
         print("attach a speaker, headset, or a board running usb_soundcard.py")
-        host.stop()
+        usb.core.stop()
         return
 
-    print("audio device", dev_id)
-    for s in outs:
-        print(" ", uac.describe(s))
+    print("audio device", dev, dev.manufacturer, dev.product)
 
-    out = uac_audio.output(dev_id)
-    out.open()
-    fmt = getattr(out, "format", None) or getattr(out, "_format", None)
-    if fmt is None:
-        # Fall back to the stream the adapter negotiated.
-        stream = out.stream
-        rate = max(stream.rates) if stream.rates else 48000
-        channels, bits = stream.channels, stream.bits
-    else:
-        rate, channels, bits = fmt.rate, fmt.channels, fmt.bits
+    # The tone below is 16-bit, so ask for a 16-bit stream; the rate and
+    # channels are the device's best offer.
+    out = Speaker(dev, bits=16)
+    s = out.stream
+    print("  ep 0x%02x, %d B packets" % (s.endpoint, s.max_packet))
+    rate, channels, bits = out.rate, out.channels, out.bits
     print("playing 440 Hz for 2 s at %d Hz %d ch %d-bit" % (rate, channels, bits))
 
     pcm = tone_frames(rate, channels, bits)
     view = memoryview(pcm)
     sent = 0
+    out.start()
     try:
         while sent < len(pcm):
             n = out.write(view[sent:])
@@ -99,8 +93,8 @@ def main():
         time.sleep_ms(500)
     finally:
         print("sent", sent, "bytes; stats", out.stats())
-        out.close()
-        host.stop()
+        out.stop()
+        usb.core.stop()
 
 
 if __name__ == "__main__":
