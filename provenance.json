@@ -1,18 +1,18 @@
 {
- "upstream": "micropython/micropython v1.29.0",
+ "upstream": "micropython/micropython main at b70ae1aca657 (v1.30.0-preview-160)",
  "migrated-from": "PyDevices/cmods (patches/, wasmbridge/, variants/) on 2026-08-29",
  "patches": {
   "0001-micropython-windows-enable-networking-sockets-select-ssl-msvc.patch": {
-   "sha256": "c7684833d612947a2ba1f7038fc796bcff77039201e236a2c00948e1a58dd1b7"
+   "sha256": "45216e5549e33d0a6bd049be66e74048e9917b3cd2d818d6b0c275a5c121dc63"
   },
   "0002-micropython-unix-raise-MICROPY_SCHEDULER_DEPTH-for-desktop-SDL.patch": {
    "sha256": "b3827e1dea6b189d401c58d9addbda62389c94edc2043a38d8347abcbcaa0818"
   },
   "0003-micropython-windows-enable-ffi-modffi-libffi.patch": {
-   "sha256": "7fe6e6bedf604b86161473bc98eb5feeb899803ab0211fae1ad93ad278779118"
+   "sha256": "6478ac713be9b83da645dd7394e76f1c432a52a25251adf2cad945f2f4d1d998"
   },
   "0004-micropython-webassembly-allow-Asyncify-in-runPythonAsync.patch": {
-   "sha256": "563e85fcd9f2c6762f8d78a6d2caae091ad3c3a130d041f5854629a4e99320f0"
+   "sha256": "a6a7faff0b3b22c4d176b8f25ad23e68a585df5c82b06a83406fca05f883863a"
   },
   "0005-micropython-webassembly-fix-node-hook-ccall-signatures.patch": {
    "sha256": "231fd1834fc60ac733b57c9d2be5f455966bc570d0f9d02ce6a079413d5a3ab4"
@@ -21,52 +21,52 @@
    "sha256": "840230162343cce7322a124cd8ae2f7a4c17e30666e97da002179b85e7434247"
   },
   "0007-micropython-webassembly-inert-jsffi-callbacks-across-reinit.patch": {
-   "sha256": "0771733d29f80418202c094c52066b971113f7e242fd39418191ed3e4636f727"
+   "sha256": "89e4ec6ac0873b130047a06428995a394363933718112e648c4f7a26d06eea93"
   },
   "0008-micropython-webassembly-fix-empty-single-input-lexer-eof-primer.patch": {
    "sha256": "60fd92772c5f83b1e9ad20ca27722d4ca8d580e688027a964cc7b798db0b9ad4"
   },
   "0009-micropython-esp32s3-add-SPIRAM_OCT_DEBUG-variant.patch": {
-   "sha256": "fccf6a744f5a6761518fc13c6b000cafc2c0f005490df9860cf7ddc502699947"
+   "sha256": "4765393d799fff2ed8822769d6af31cc5e39773f04062a2fa7d9a32fa20dbe03"
   },
   "0010-micropython-esp32-i2s-mck-pin.patch": {
-   "sha256": "982eac9b7884aaea4e2f3ab70cec4b1d6908ebfd6375483594f2311595ed121e"
+   "sha256": "96bff6ae2079ac3bc1b14e4cb1b681ea0398569f485858581826f28e8fbf605a"
   },
   "0011-micropython-esp32-webrepl-ctrl-c-in-tight-loops.patch": {
-   "sha256": "067d54faa178f67abd99d489a6c5000aa212d01a4709e4f029e5bf0c8a4e8fb3"
+   "sha256": "c3d6a1e8374f07e7d68eca25ce7aa4ca9146c428f56b50cceee27a963a680f08"
   },
   "0012-micropython-unix-variant-configurable-default-heap-size.patch": {
    "sha256": "7198d8855b3a2684f45bd964f3ca500831277d8f3a040a988e443dfb1926746b"
   },
   "0013-micropython-windows-read-piped-stdin-in-the-repl.patch": {
-   "sha256": "7eaa2034dcaf86b30910daceb9ce704dfe49ed06a361ac066b1f674e26367954"
+   "sha256": "909fbba5d4b8685cc4b589b22dd7c1c19ee1839618352b60d01f5cde3c0d4905"
   },
   "0014-micropython-esp32-tinyusb-0.21.patch": {
-   "sha256": "15a101901c7bebd93b5846e02fb1ff62b3c9a5e043b43c7c76de455007e02492"
+   "sha256": "a220d93f73163c6edf1ecb4205b52ba5e11bc553188b3f1a96483267975e8318"
   },
   "0015-micropython-windows-timing-module-and-idle-console.patch": {
-   "sha256": "77ce5f8b4a0745bf4764e3b47255b023a335209c649c60400f335ec2f11ae30a"
+   "sha256": "5060f06c4f2b831a28f56248f72815ab5cceba172ac6736556d6069de88879c3"
   },
   "0016-micropython-esp32-machine-timer-fire-during-reinit.patch": {
-   "sha256": "f47080be47249c3e5076aab89c57073b57a437fe0bf77f96e8a8bfe52cc86780"
+   "sha256": "6d4a43158f88785fbb1ea4cb885bfd3d435a90653a16e321186ca90ef2b5d72e"
   },
   "0017-micropython-py-makeqstrdefs-incremental-build-header-qstr.patch": {
    "sha256": "8ef3dee1fde56ca4dffd230e09df323e0eea050cc3d96a542eb56bf4e99c2de5"
   },
   "0018-micropython-esp32-drop-missing-usermod-include-dirs.patch": {
-   "sha256": "ed968c8c24147056cad48642612fe9eed9a8fff051b64705ee587c548a8144b9"
+   "sha256": "6e46afd5af703f77e19c952d3f9a1b8fcc264fb30fdc23510a58e041598ce930"
   },
   "0019-micropython-tools-makemanifest-c-modules-forward-slashes.patch": {
-   "sha256": "0d0cc9dfad8d3d07b762337cd7eb95ef43eee12d8c380f7cb405d480b2723956"
+   "sha256": "22997c755adf28d9d97490a3d8ad2f1c12af00de74beb4daff24567cb4b92edd"
   },
   "0020-micropython-py-mkrules-qstr-response-file-on-windows.patch": {
-   "sha256": "04d2f0f01cd14ed67481066681c08002ec6baa8d7f40508bec0b27bf4c1d928f"
+   "sha256": "bfc14bc42438c8c343add2907036862ce4efb555c8c99095307cfb11e9876e1a"
   },
   "0021-micropython-tools-makemanifest-mpy-tool-response-file-on-windows.patch": {
-   "sha256": "72d976eaeac044a053139f5a41c06b4e7f75f5defbc738635e3599e9bbbab207"
+   "sha256": "122e7c4e93c2f269724fa4b3b944c6874f9ccbf64d76e030a1149fafb17bf017"
   },
   "0022-micropython-py-mkrules-link-response-file-on-windows.patch": {
-   "sha256": "b4d522a23779986dae282a4ad54f9e7f2984c49727c84dfbae484fb1d4fe4816"
+   "sha256": "ad065ba6c1fc0fe5a92473be4c89f5543455d4a87af08b29bc6ad3825a7c0fb5"
   },
   "0023-micropython-esp32-nimble-default-eventq-deinit-without-controller.patch": {
    "sha256": "acad1e25d06627549e157737f2901d03e69364d65163b1bc40c461cf7734b0f7"
@@ -75,19 +75,46 @@
    "sha256": "e0437cf768418af5e7f5cdd4a2dc8b325150dd098ab2f07ce402f33621dbbafe"
   },
   "0025-micropython-shared-tinyusb-usbd-stall-cdc-in-before-clearing-tx-fifo.patch": {
-   "sha256": "18996cf42eb4b052aba3a3ca54c01944b018000500c40ac8c7d0771c86c849ea"
+   "sha256": "8b7f89a3705ddc5d576f15646c5529c3792c4e7245c57659012ffc22c6914650"
   },
   "0027-micropython-esp32-sdcard-stage-unaligned-buffers-for-multi-sector-dma.patch": {
    "sha256": "b3f0a51a2d8d387154e87ad9e5d905a444e26d5a8b73abab71efb97e3a98dd7b"
   },
   "0028-micropython-esp32-i2s-pdm-rx.patch": {
-   "sha256": "055d67f88fe120a11ec807fd5d0e49e59551f9c587d50d4118eec91645e3b0ce"
+   "sha256": "a0f69651c0bb31c06fda132e212ba1186dcb7bb913ff114d472c84d06f2e52a1"
   },
   "0029-micropython-py-mkrules-cmake-short-qstr-include-paths.patch": {
-   "sha256": "1b675c07f807b56288d6626e1bfe52aeb21bb4bd567cd70c3d1cfc279c088b1f"
+   "sha256": "13ed62750d774c5fad3810936b63be45cba0549615c5ced373cfc446dba65976"
   },
   "0030-micropython-py-mkrules-qstr-arguments-in-a-response-file.patch": {
    "sha256": "2e4ef37460ef174c81c778c2274735d61894c4ad732efdd2574bea3ce6e6e337"
+  },
+  "0031-micropython-extmod-machine-usb-device-high-speed-descriptor-speed-and-in-endpoint-check.patch": {
+   "sha256": "c24e31ea2db47f24692be02c21980c469b8be7ad4435d33274095700b08be261"
+  },
+  "0032-micropython-esp32-p4-full-speed-device-phy.patch": {
+   "sha256": "24a2ea2e3358ca4c2b6eda3d46e97c26ded00e65540b35217c621632cdb723bc"
+  },
+  "0033-micropython-extmod-machine-usb-device-streaming-endpoints.patch": {
+   "sha256": "4856af2281296052644a139a44f3c0b8e1231787ed64aabd3b8bf01cec7ad62d"
+  },
+  "0034-micropython-extmod-machine-usb-device-uvc-payloads.patch": {
+   "sha256": "670a2bcc72e7ccb28925285cc9d6aba0bd7fb0f04eca89c2554a082868a69a6f"
+  },
+  "0035-micropython-shared-tinyusb-stream-c-sink.patch": {
+   "sha256": "06a9bdb316b8ef0f8acf3ff473ffc5b3be777880f84cb724589740faee315599"
+  },
+  "0036-micropython-shared-tinyusb-uvc-variable-frames.patch": {
+   "sha256": "2a888e8b8d06c75df7cd30ac3368e2abe2b5018c08ad45151643e01cfc151757"
+  },
+  "0037-micropython-shared-tinyusb-ring-c-api.patch": {
+   "sha256": "0c94f169869328320e31ec839dc2a15f2df79354c0bd0f6674381e5510cb4c72"
+  },
+  "0038-micropython-lib-oofatfs-utf-8-filenames.patch": {
+   "sha256": "c362b659d4f46b0ac51f74b99749cc06704b6ce237a6aec381bfa0321e394096"
+  },
+  "0039-micropython-esp32-otg-phy-handoff-for-host-mode.patch": {
+   "sha256": "ca4a89342bfa8ea42cde9526bedbf43f33c614754f67c21a6cbfc66d2d7d9507"
   }
  },
  "tinyusb_patches": {

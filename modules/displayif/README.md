@@ -1,6 +1,6 @@
 # displayif
 
-**Status:** source-integrated component — built into firmware from source as a user C module, not installed as a package. By design it has no versioned releases and is **not** in PyDevices' publishing set (unlike `pydevices` / `pydevices-desktop`). Maturity: **Alpha**. Issues: [PyDevices/displayif/issues](https://github.com/PyDevices/displayif/issues).
+**Status:** source-integrated component — built into firmware from source as a user C module, not installed as a package. By design it has no versioned releases and is **not** in PyDevices' publishing set (unlike `pydevices` / `pydevices-desktop`). Maturity: **Alpha**. Issues: [micropython-pydevices issues](https://github.com/PyDevices/micropython-pydevices/issues).
 
 Native display **interface** modules for PyDevices `displaydev`. Portable code in `src/ports/common/`; SoC-specific code under `src/ports/<mp-port>/`.
 

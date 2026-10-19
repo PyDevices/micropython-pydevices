@@ -1,7 +1,7 @@
 # Idempotent init / deinit — displayif contract
 
 **Audience:** Agents and humans changing host-owning displayif backends.  
-**Repo:** [PyDevices/displayif](https://github.com/PyDevices/displayif).
+**Module:** [`modules/displayif`](..) in micropython-pydevices (the standalone repository is archived).
 **Companions:** [AGENTS.md](../AGENTS.md), [port-matrix.md](port-matrix.md), [soft-reset-and-bring-up.md](soft-reset-and-bring-up.md), [README.md](../README.md).
 **Related PyDevices package:** `displaydev` expects idempotent `deinit()` — native modules must match.
 

@@ -19,4 +19,4 @@ letting a drawing layer work with the panel's own memory rather than around it.
   bulk transfers.
 
 Bugs, and things you need that don't work yet, go to
-[issues](https://github.com/PyDevices/displayif/issues).
+[issues](https://github.com/PyDevices/micropython-pydevices/issues).

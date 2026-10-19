@@ -25,7 +25,7 @@ app partition, the build grows the partition and builds again.
 
 ```text
 micropython-pydevices/
-├── UPSTREAM                 the MicroPython tag we build on (v1.29.0)
+├── UPSTREAM                 the MicroPython commit we build on (b70ae1aca657, v1.30.0-preview-160)
 ├── VERSION                  our version (scheme still open, below)
 ├── build_mp.py              the one command; Python so it runs anywhere
 ├── modules.lock             one line per module: name, git URL, commit (and lvgl-bindings, below)

@@ -57,7 +57,7 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
 - [`build_mp.py`](build_mp.py) — the one command. It fills in `micropython/`, `modules/`
   and `deps/` if they're missing, prepares the MicroPython tree, and runs
   the port's own `make`.
-- [`UPSTREAM`](UPSTREAM) — the MicroPython release everything applies to (v1.29.0).
+- [`UPSTREAM`](UPSTREAM) — the MicroPython everything applies to (main at `b70ae1aca657`, v1.30.0-preview-160).
 - [`modules.lock`](modules.lock), [`deps.lock`](deps.lock) — the commits and versions `build_mp.py`
   fetches when a module or a toolchain isn't there. `deps.lock` also pins
   CircuitPython, for `--interpreter circuitpython`. `modules.lock` also pins
@@ -79,7 +79,7 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   - [`ppa/`](modules/ppa/): scale, rotate, convert and fill pixel buffers, on the
     ESP32-P4's Pixel Processing Accelerator or in portable C elsewhere.
   - [`tsmux/`](modules/tsmux/): MPEG-TS and HLS segments from H.264.
-- [`patches/micropython/`](patches/micropython/) — our patch series (`0001-…` to `0030-…`; there
+- [`patches/micropython/`](patches/micropython/) — our patch series (`0001-…` to `0039-…`; there
   is no `0026`, whose fix moved into `patches/tinyusb/`), each justified
   in its own header; [`patches/apply_patches.py`](patches/apply_patches.py) applies it, plus
   each module's own MicroPython patches, once, as one local commit.
