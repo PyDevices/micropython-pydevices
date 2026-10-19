@@ -971,6 +971,15 @@ static volatile bool audiopump_starved_pending;    // count from the next write
 static uint8_t audiopump_i2s_holds;
 static audiopump_i2s_cfg_t audiopump_i2s_live;
 
+// A receive-only channel: RX opened by itself for a recorder, with no TX half
+// and no output's config describing it, so it keeps its own. `audioi2sin.
+// I2SIn(bclk, ws, data)` names no speaker pin, and CircuitPython opens exactly
+// this for it. It may sit beside an output on other pins (the T-Embed's
+// microphone is on port 0 and its amplifier on port 1); it never shares a
+// clock with one, so an output beside it may retune freely.
+static bool audiopump_i2s_rx_alone;
+static audiopump_i2s_cfg_t audiopump_i2s_rx_live;
+
 // --- capture: the RX half, handed to the interpreter ------------------------
 //
 // The capture half of the channel pair, as PCM Python can read. `Input` above
@@ -1009,42 +1018,60 @@ typedef struct {
     volatile uint32_t frames;   // frames that reached the ring
     volatile uint32_t dropped;  // frames the ring had no room for
     uint8_t take;
-    uint8_t out_frame;          // 2 for one channel out, 4 for two
+    uint8_t in_bytes;           // one sample on the wire: 1, 2 or 4 bytes
+    uint8_t out_frame;          // in_bytes for one channel out, twice that for two
     volatile bool armed;
 } audiopump_cap_t;
 
 static audiopump_cap_t audiopump_cap;
 static portMUX_TYPE audiopump_cap_mux = portMUX_INITIALIZER_UNLOCKED;
 
-// In the interrupt. `in` is the finished descriptor: signed 16-bit stereo,
-// because the channel is opened stereo whenever there is an RX half to read.
-// A full ring keeps what it has and counts the rest, so a slow reader loses
-// the newest audio rather than corrupting the oldest.
-static IRAM_ATTR void audiopump_cap_push(const int16_t *in, uint32_t frames) {
+// In the interrupt. `in` is the finished descriptor: two slots a frame,
+// because the channel is opened stereo whenever there is an RX half to read,
+// each slot `in_bytes` wide (16-bit unless a receive-only channel asked for 8
+// or 32). A full ring keeps what it has and counts the rest, so a slow reader
+// loses the newest audio rather than corrupting the oldest.
+//
+// One loop per width, because this runs for every frame the microphone makes
+// and a per-sample memcpy is the wrong thing to put there.
+#define AUDIOPUMP_CAP_LOOP(T, MIX) \
+    for (uint32_t f = 0; f < n; f++) { \
+        const T l = ((const T *)in)[2 * f]; \
+        const T r = ((const T *)in)[2 * f + 1]; \
+        T *out = (T *)(void *)(buf + pos); \
+        if (take == AUDIOPUMP_TAKE_BOTH) { \
+            out[0] = l; \
+            out[1] = r; \
+        } else if (take == AUDIOPUMP_TAKE_LEFT) { \
+            out[0] = l; \
+        } else if (take == AUDIOPUMP_TAKE_RIGHT) { \
+            out[0] = r; \
+        } else { \
+            out[0] = (MIX); \
+        } \
+        pos += step; \
+        if (pos >= len) { \
+            pos = 0; \
+        } \
+    }
+
+static IRAM_ATTR void audiopump_cap_push(const void *in, uint32_t frames) {
     audiopump_cap_t *c = &audiopump_cap;
     const uint32_t taken = __atomic_load_n(&c->taken, __ATOMIC_ACQUIRE);
     const uint32_t room = (c->len - (c->written - taken)) / c->out_frame;
     const uint32_t n = frames < room ? frames : room;
     uint8_t *buf = c->buf;
     uint32_t pos = c->wpos;
-    for (uint32_t f = 0; f < n; f++) {
-        const int16_t l = in[2 * f];
-        const int16_t r = in[2 * f + 1];
-        int16_t *out = (int16_t *)(void *)(buf + pos);
-        if (c->out_frame == 4) {
-            out[0] = l;
-            out[1] = r;
-        } else if (c->take == AUDIOPUMP_TAKE_LEFT) {
-            out[0] = l;
-        } else if (c->take == AUDIOPUMP_TAKE_RIGHT) {
-            out[0] = r;
-        } else {
-            out[0] = (int16_t)(((int32_t)l + (int32_t)r) >> 1);
-        }
-        pos += c->out_frame;
-        if (pos >= c->len) {
-            pos = 0;
-        }
+    const uint32_t step = c->out_frame;
+    const uint32_t len = c->len;
+    const uint8_t take = c->take;
+    if (c->in_bytes == 4) {
+        // Halve before adding: two full-scale 32-bit slots overflow an int32.
+        AUDIOPUMP_CAP_LOOP(int32_t, (l >> 1) + (r >> 1))
+    } else if (c->in_bytes == 1) {
+        AUDIOPUMP_CAP_LOOP(int8_t, (int8_t)(((int32_t)l + (int32_t)r) >> 1))
+    } else {
+        AUDIOPUMP_CAP_LOOP(int16_t, (int16_t)(((int32_t)l + (int32_t)r) >> 1))
     }
     c->wpos = pos;
     c->frames += n;
@@ -1129,8 +1156,8 @@ static IRAM_ATTR bool audiopump_on_recv(i2s_chan_handle_t handle,
     if (audiopump_cap.armed) {
         portENTER_CRITICAL_ISR(&audiopump_cap_mux);
         if (audiopump_cap.armed && audiopump_cap.buf != NULL) {
-            audiopump_cap_push((const int16_t *)event->dma_buf,
-                (uint32_t)(event->size / 4));
+            audiopump_cap_push(event->dma_buf,
+                (uint32_t)(event->size / (2u * audiopump_cap.in_bytes)));
         }
         portEXIT_CRITICAL_ISR(&audiopump_cap_mux);
     }
@@ -1157,6 +1184,28 @@ static void audiopump_i2s_close(void) {
         i2s_del_channel(audiopump_i2s_tx);
         audiopump_i2s_tx = NULL;
     }
+    audiopump_i2s_rx_alone = false;
+}
+
+// The output's half only, for an output that leaves (or fails to open)
+// beside a receive-only recorder: that channel is the recorder's, on a port
+// of its own, and closing it would end a recording nobody asked to stop.
+static void audiopump_i2s_close_tx(void) {
+    if (audiopump_i2s_tx != NULL) {
+        i2s_channel_disable(audiopump_i2s_tx);
+        i2s_del_channel(audiopump_i2s_tx);
+        audiopump_i2s_tx = NULL;
+    }
+}
+
+// The recorder's receive-only channel only.
+static void audiopump_i2s_close_rx_alone(void) {
+    if (audiopump_i2s_rx_alone && audiopump_i2s_rx != NULL) {
+        i2s_channel_disable(audiopump_i2s_rx);
+        i2s_del_channel(audiopump_i2s_rx);
+        audiopump_i2s_rx = NULL;
+    }
+    audiopump_i2s_rx_alone = false;
 }
 
 static bool audiopump_sink_ready(void) {
@@ -1373,6 +1422,11 @@ static void audiopump_i2s_check_join(const audiopump_i2s_cfg_t *want,
         mp_raise_ValueError(MP_ERROR_TEXT(
             "the I2S channel is open with another sample width or slot count"));
     }
+    if (want->msb != live->msb) {
+        mp_raise_ValueError(MP_ERROR_TEXT(
+            "the I2S channel is open in Philips mode; left_justified needs a "
+            "channel of its own"));
+    }
 }
 
 // The OUTPUT's open. Joins a channel the capture reader holds; refuses a
@@ -1386,9 +1440,53 @@ uint32_t audiopump_i2s_open(const audiopump_i2s_cfg_t *cfg) {
         audiopump_i2s_holds |= AUDIOPUMP_I2S_HOLD_OUT;
         return audiopump_i2s_depth();
     }
+    if (audiopump_i2s_rx_alone) {
+        // A recorder holds a receive-only channel. An output on other pins
+        // gets a TX channel of its own beside it; one on the recorder's own
+        // clocks cannot, because that channel has no TX half to give it and
+        // the IDF will not add one to a running RX.
+        const audiopump_i2s_cfg_t *rx = &audiopump_i2s_rx_live;
+        if (cfg->bclk == rx->bclk || cfg->ws == rx->ws
+            || (cfg->din >= 0 && cfg->din == rx->din)) {
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT(
+                "Peripheral in use: a recorder holds these I2S clocks for "
+                "receive only; open the output first, with data_in=, to play "
+                "and record on one port"));
+        }
+        if (cfg->din >= 0) {
+            mp_raise_ValueError(MP_ERROR_TEXT(
+                "a recorder is open; an output beside it cannot open a "
+                "microphone of its own"));
+        }
+        const uint32_t depth = audiopump_i2s_open_raw(cfg);
+        audiopump_i2s_holds |= AUDIOPUMP_I2S_HOLD_OUT;
+        return depth;
+    }
     const uint32_t depth = audiopump_i2s_open_raw(cfg);
     audiopump_i2s_holds = AUDIOPUMP_I2S_HOLD_OUT;
     return depth;
+}
+
+// MCLK in bit clocks per frame, as the IDF spells it. 256 unless asked.
+static i2s_mclk_multiple_t audiopump_i2s_mclk_multiple(int fs) {
+    switch (fs) {
+        case 128: return I2S_MCLK_MULTIPLE_128;
+        case 384: return I2S_MCLK_MULTIPLE_384;
+        case 512: return I2S_MCLK_MULTIPLE_512;
+        default:  return I2S_MCLK_MULTIPLE_256;
+    }
+}
+
+// An output's open failed part way. Beside a receive-only recorder only the
+// output's half goes; otherwise everything this open made does.
+static void audiopump_i2s_open_failed(void) {
+    if (audiopump_i2s_rx_alone) {
+        audiopump_i2s_close_tx();
+    } else {
+        audiopump_i2s_close();
+        audiopump_i2s_tx = NULL;
+        audiopump_i2s_rx = NULL;
+    }
 }
 
 static uint32_t audiopump_i2s_open_raw(const audiopump_i2s_cfg_t *cfg) {
@@ -1428,9 +1526,7 @@ static uint32_t audiopump_i2s_open_raw(const audiopump_i2s_cfg_t *cfg) {
         err = i2s_new_channel(&rx_config, NULL, &audiopump_i2s_rx);
     }
     if (err != ESP_OK) {
-        audiopump_i2s_close();
-        audiopump_i2s_tx = NULL;
-        audiopump_i2s_rx = NULL;
+        audiopump_i2s_open_failed();
         // ESP_ERR_NOT_FOUND is every peripheral already taken, and
         // CircuitPython's own words for it are "Peripheral in use". Any other
         // failure here is wiring or configuration, and OSError(EIO) is what
@@ -1465,12 +1561,7 @@ static uint32_t audiopump_i2s_open_raw(const audiopump_i2s_cfg_t *cfg) {
             .invert_flags = { false, false, false },
         },
     };
-    switch (cfg->mclk_fs) {
-        case 128: std_cfg.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_128; break;
-        case 384: std_cfg.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_384; break;
-        case 512: std_cfg.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_512; break;
-        default:  std_cfg.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_256; break;
-    }
+    std_cfg.clk_cfg.mclk_multiple = audiopump_i2s_mclk_multiple(cfg->mclk_fs);
 
     err = i2s_channel_init_std_mode(audiopump_i2s_tx, &std_cfg);
     if (err == ESP_OK && duplex && !split) {
@@ -1507,7 +1598,9 @@ static uint32_t audiopump_i2s_open_raw(const audiopump_i2s_cfg_t *cfg) {
     }
     if (err == ESP_OK) {
         audiopump_dma_bytes = 0;
-        audiopump_rx_bytes = 0;
+        if (!audiopump_i2s_rx_alone) {
+            audiopump_rx_bytes = 0;
+        }
         audiopump_sink_bytes = 0;
         const uint32_t frame_bytes = (uint32_t)(cfg->bits / 8)
             * (uint32_t)(cfg->channels == 1 ? 1 : 2);
@@ -1532,7 +1625,7 @@ static uint32_t audiopump_i2s_open_raw(const audiopump_i2s_cfg_t *cfg) {
         err = i2s_channel_enable(audiopump_i2s_tx);
     }
     if (err != ESP_OK) {
-        audiopump_i2s_close();
+        audiopump_i2s_open_failed();
         mp_raise_OSError(MP_EIO);
     }
     audiopump_i2s_live = *cfg;
@@ -1634,6 +1727,201 @@ static mp_obj_t audiopump_i2s_starved_bytes(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(audiopump_i2s_starved_bytes_obj,
     audiopump_i2s_starved_bytes);
 
+// --- the capture half: open, join, read, close ------------------------------
+//
+// One implementation behind both faces: `audioi2sin.I2SIn` (audioi2sin.c) and
+// `_audioif.rx_open` below. See audiopump_i2s.h for the three ways a
+// recorder can start.
+
+// RX by itself, for a recorder that names no speaker pin. CircuitPython's
+// espressif I2SIn opens the same thing: a standard-mode channel configured
+// STEREO, with a mono recording taking the left slot afterwards. Not a
+// shortcut: the S3 and P4 write both slots into the RX DMA whatever the slot
+// mode says, so a "mono" channel fills at twice the word-select rate and
+// records at half speed.
+static void audiopump_i2s_open_rx_only(const audiopump_i2s_cfg_t *cfg) {
+    audiopump_arm_guard();
+    i2s_chan_config_t chan_config = I2S_CHANNEL_DEFAULT_CONFIG(
+        cfg->port < 0 ? I2S_NUM_AUTO : (i2s_port_t)cfg->port,
+        I2S_ROLE_MASTER);
+    chan_config.dma_desc_num = (uint32_t)cfg->dma_desc;
+    chan_config.dma_frame_num = (uint32_t)cfg->dma_frame;
+    esp_err_t err = i2s_new_channel(&chan_config, NULL, &audiopump_i2s_rx);
+    if (err != ESP_OK) {
+        audiopump_i2s_rx = NULL;
+        if (err == ESP_ERR_NOT_FOUND) {
+            mp_raise_msg(&mp_type_RuntimeError,
+                MP_ERROR_TEXT("Peripheral in use"));
+        }
+        mp_raise_OSError(MP_EIO);
+    }
+    const i2s_data_bit_width_t width = cfg->bits == 32
+        ? I2S_DATA_BIT_WIDTH_32BIT
+        : (cfg->bits == 8 ? I2S_DATA_BIT_WIDTH_8BIT : I2S_DATA_BIT_WIDTH_16BIT);
+    i2s_std_slot_config_t slot_cfg = cfg->msb
+        ? (i2s_std_slot_config_t)I2S_STD_MSB_SLOT_DEFAULT_CONFIG(width,
+            I2S_SLOT_MODE_STEREO)
+        : (i2s_std_slot_config_t)I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(width,
+            I2S_SLOT_MODE_STEREO);
+    slot_cfg.slot_mask = I2S_STD_SLOT_BOTH;
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG((uint32_t)cfg->rate),
+        .slot_cfg = slot_cfg,
+        .gpio_cfg = {
+            .mclk = cfg->mclk < 0 ? I2S_GPIO_UNUSED : (gpio_num_t)cfg->mclk,
+            .bclk = (gpio_num_t)cfg->bclk,
+            .ws = (gpio_num_t)cfg->ws,
+            .dout = I2S_GPIO_UNUSED,
+            .din = (gpio_num_t)cfg->din,
+            .invert_flags = { false, false, false },
+        },
+    };
+    std_cfg.clk_cfg.mclk_multiple = audiopump_i2s_mclk_multiple(cfg->mclk_fs);
+    err = i2s_channel_init_std_mode(audiopump_i2s_rx, &std_cfg);
+    if (err == ESP_OK) {
+        i2s_event_callbacks_t rx_cbs = { .on_recv = audiopump_on_recv };
+        err = i2s_channel_register_event_callback(audiopump_i2s_rx, &rx_cbs,
+            NULL);
+    }
+    if (err == ESP_OK) {
+        audiopump_rx_bytes = 0;
+        err = i2s_channel_enable(audiopump_i2s_rx);
+    }
+    if (err != ESP_OK) {
+        i2s_del_channel(audiopump_i2s_rx);
+        audiopump_i2s_rx = NULL;
+        mp_raise_OSError(MP_EIO);
+    }
+    audiopump_i2s_rx_alone = true;
+    audiopump_i2s_rx_live = *cfg;
+}
+
+static uint8_t audiopump_i2s_slot_bytes(int bits) {
+    return bits == 8 ? 1 : (bits == 16 ? 2 : 4);
+}
+
+uint32_t audiopump_i2s_rx_begin(const audiopump_i2s_cfg_t *cfg, uint32_t ring,
+    int take) {
+    if (audiopump_i2s_holds & AUDIOPUMP_I2S_HOLD_IN) {
+        mp_raise_ValueError(MP_ERROR_TEXT("capture already open"));
+    }
+    if (take < AUDIOPUMP_TAKE_LEFT || take > AUDIOPUMP_TAKE_BOTH) {
+        mp_raise_ValueError(MP_ERROR_TEXT("take must be 0, 1, 2 or 3"));
+    }
+    if (cfg->din < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("a recorder needs its data pin"));
+    }
+    // An output holding a TX/RX pair: join it. An output holding TX alone:
+    // a recorder on its clocks has nothing to join, and one on other pins
+    // gets a receive-only channel of its own.
+    const bool join = audiopump_i2s_tx != NULL && audiopump_i2s_rx != NULL
+        && !audiopump_i2s_rx_alone;
+    if (audiopump_i2s_tx != NULL && !join
+        && (cfg->dout >= 0 || cfg->bclk == audiopump_i2s_live.bclk
+            || cfg->ws == audiopump_i2s_live.ws)) {
+        mp_raise_ValueError(MP_ERROR_TEXT(
+            "the I2S channel was opened without its microphone pin; open the "
+            "output with data_in= to record while it plays"));
+    }
+    const bool pair = !join && audiopump_i2s_tx == NULL && cfg->dout >= 0;
+    if (join) {
+        audiopump_i2s_check_join(cfg, true);
+    }
+    const uint8_t in_bytes = audiopump_i2s_slot_bytes(
+        join ? audiopump_i2s_live.bits : cfg->bits);
+    const uint8_t out_frame = (uint8_t)(in_bytes
+        * (take == AUDIOPUMP_TAKE_BOTH ? 2 : 1));
+    uint32_t len = ring - ring % out_frame;
+    if (len < 64u * out_frame) {
+        mp_raise_ValueError(MP_ERROR_TEXT("ring is too small"));
+    }
+
+    // The ring before the channel, so a refusal for memory leaves nothing
+    // open. Internal RAM first: the interrupt copies into it.
+    uint8_t *buf = heap_caps_malloc_prefer(len, 2,
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT, MALLOC_CAP_8BIT);
+    if (buf == NULL) {
+        mp_raise_msg(&mp_type_MemoryError,
+            MP_ERROR_TEXT("no memory for the capture ring"));
+    }
+    portENTER_CRITICAL(&audiopump_cap_mux);
+    audiopump_cap.buf = buf;
+    audiopump_cap.len = len;
+    audiopump_cap.wpos = 0;
+    audiopump_cap.rpos = 0;
+    audiopump_cap.written = 0;
+    audiopump_cap.taken = 0;
+    audiopump_cap.frames = 0;
+    audiopump_cap.dropped = 0;
+    audiopump_cap.take = (uint8_t)take;
+    audiopump_cap.in_bytes = in_bytes;
+    audiopump_cap.out_frame = out_frame;
+    audiopump_cap.armed = join;
+    portEXIT_CRITICAL(&audiopump_cap_mux);
+
+    if (join) {
+        audiopump_i2s_holds |= AUDIOPUMP_I2S_HOLD_IN;
+        return len;
+    }
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        if (pair) {
+            (void)audiopump_i2s_open_raw(cfg);
+        } else {
+            audiopump_i2s_open_rx_only(cfg);
+        }
+        nlr_pop();
+    } else {
+        audiopump_cap_release();
+        nlr_jump(nlr.ret_val);
+    }
+    audiopump_i2s_holds |= AUDIOPUMP_I2S_HOLD_IN;
+    audiopump_cap.armed = true;
+    return len;
+}
+
+uint32_t audiopump_i2s_rx_pull(uint8_t *dst, uint32_t want) {
+    return audiopump_cap_pull(dst, want);
+}
+
+void audiopump_i2s_rx_discard(void) {
+    audiopump_cap_t *c = &audiopump_cap;
+    if (c->buf == NULL) {
+        return;
+    }
+    const uint32_t written = __atomic_load_n(&c->written, __ATOMIC_ACQUIRE);
+    const uint32_t have = written - c->taken;   // whole frames, <= len
+    uint32_t pos = c->rpos + have;
+    if (pos >= c->len) {
+        pos -= c->len;
+    }
+    c->rpos = pos;
+    __atomic_store_n(&c->taken, c->taken + have, __ATOMIC_RELEASE);
+}
+
+void audiopump_i2s_rx_counts(uint32_t *frames, uint32_t *dropped) {
+    *frames = audiopump_cap.frames;
+    *dropped = audiopump_cap.dropped;
+}
+
+void audiopump_i2s_rx_end(void) {
+    if (!(audiopump_i2s_holds & AUDIOPUMP_I2S_HOLD_IN)) {
+        return;
+    }
+    audiopump_cap_release();
+    audiopump_i2s_holds &= (uint8_t)~AUDIOPUMP_I2S_HOLD_IN;
+    if (audiopump_i2s_rx_alone) {
+        audiopump_i2s_close_rx_alone();
+    }
+    if (audiopump_i2s_holds == 0) {
+        audiopump_i2s_close();
+    }
+}
+
+bool audiopump_i2s_rx_held(void) {
+    return (audiopump_i2s_holds & AUDIOPUMP_I2S_HOLD_IN) != 0;
+}
+
 // --- rx_open / rx_read: recording while the output plays -------------------
 //
 //     _audioif.rx_open(0, 12, 10, 9, 11, 24000, mclk=13, ring=20000, take=2)
@@ -1647,9 +1935,9 @@ static MP_DEFINE_CONST_FUN_OBJ_0(audiopump_i2s_starved_bytes_obj,
 // output leaves the recording running, and closing the recorder leaves the
 // output playing.
 //
-// `dout` is the speaker's pin even for a recorder that never plays, because
-// the pair is allocated together and an output arriving later has to find
-// its half already wired.
+// `dout` is the speaker's pin, so that an output arriving later finds its
+// half already wired. -1 opens the microphone receive-only instead, the way
+// `audioi2sin.I2SIn` does, and no output can join that channel later.
 static mp_obj_t audiopump_rx_open(size_t n_args, const mp_obj_t *pos_args,
     mp_map_t *kw_args) {
     enum { ARG_port, ARG_bclk, ARG_ws, ARG_dout, ARG_din, ARG_rate, ARG_mclk,
@@ -1674,23 +1962,6 @@ static mp_obj_t audiopump_rx_open(size_t n_args, const mp_obj_t *pos_args,
     mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed),
         allowed, args);
 
-    if (audiopump_i2s_holds & AUDIOPUMP_I2S_HOLD_IN) {
-        mp_raise_ValueError(MP_ERROR_TEXT("capture already open"));
-    }
-    const int take = args[ARG_take].u_int;
-    if (take < AUDIOPUMP_TAKE_LEFT || take > AUDIOPUMP_TAKE_BOTH) {
-        mp_raise_ValueError(MP_ERROR_TEXT("take must be 0, 1, 2 or 3"));
-    }
-    if (args[ARG_din].u_int < 0 || args[ARG_dout].u_int < 0) {
-        mp_raise_ValueError(MP_ERROR_TEXT("rx_open needs both dout and din"));
-    }
-    const uint8_t out_frame = take == AUDIOPUMP_TAKE_BOTH ? 4 : 2;
-    uint32_t len = (uint32_t)args[ARG_ring].u_int;
-    len -= len % out_frame;
-    if (len < 64u * out_frame) {
-        mp_raise_ValueError(MP_ERROR_TEXT("ring is too small"));
-    }
-
     const int rate = args[ARG_rate].u_int;
     const audiopump_i2s_cfg_t cfg = {
         .port = args[ARG_port].u_int,
@@ -1710,47 +1981,9 @@ static mp_obj_t audiopump_rx_open(size_t n_args, const mp_obj_t *pos_args,
         .in_ws = -1,
         .in_mclk = -1,
     };
-    if (audiopump_i2s_tx != NULL) {
-        audiopump_i2s_check_join(&cfg, true);
-    }
-
-    // The ring before the channel, so a refusal for memory leaves nothing
-    // open. Internal RAM first: the interrupt copies into it.
-    uint8_t *buf = heap_caps_malloc_prefer(len, 2,
-        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT, MALLOC_CAP_8BIT);
-    if (buf == NULL) {
-        mp_raise_msg(&mp_type_MemoryError,
-            MP_ERROR_TEXT("no memory for the capture ring"));
-    }
-    portENTER_CRITICAL(&audiopump_cap_mux);
-    audiopump_cap.buf = buf;
-    audiopump_cap.len = len;
-    audiopump_cap.wpos = 0;
-    audiopump_cap.rpos = 0;
-    audiopump_cap.written = 0;
-    audiopump_cap.taken = 0;
-    audiopump_cap.frames = 0;
-    audiopump_cap.dropped = 0;
-    audiopump_cap.take = (uint8_t)take;
-    audiopump_cap.out_frame = out_frame;
-    audiopump_cap.armed = audiopump_i2s_tx != NULL;
-    portEXIT_CRITICAL(&audiopump_cap_mux);
-
-    if (audiopump_i2s_tx == NULL) {
-        nlr_buf_t nlr;
-        if (nlr_push(&nlr) == 0) {
-            (void)audiopump_i2s_open_raw(&cfg);
-            nlr_pop();
-        } else {
-            audiopump_cap_release();
-            nlr_jump(nlr.ret_val);
-        }
-        audiopump_i2s_holds = AUDIOPUMP_I2S_HOLD_IN;
-        audiopump_cap.armed = true;
-    } else {
-        audiopump_i2s_holds |= AUDIOPUMP_I2S_HOLD_IN;
-    }
-    return mp_obj_new_int_from_uint(len);
+    const int ring = args[ARG_ring].u_int;
+    return mp_obj_new_int_from_uint(audiopump_i2s_rx_begin(&cfg,
+        ring < 0 ? 0 : (uint32_t)ring, args[ARG_take].u_int));
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(audiopump_rx_open_obj, 6, audiopump_rx_open);
 
@@ -1772,14 +2005,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(audiopump_rx_read_obj, audiopump_rx_read);
 // Stop recording. The channel closes only if no output holds it. Safe to
 // call twice.
 static mp_obj_t audiopump_rx_close(void) {
-    if (!(audiopump_i2s_holds & AUDIOPUMP_I2S_HOLD_IN)) {
-        return mp_const_none;
-    }
-    audiopump_cap_release();
-    audiopump_i2s_holds &= (uint8_t)~AUDIOPUMP_I2S_HOLD_IN;
-    if (audiopump_i2s_holds == 0) {
-        audiopump_i2s_close();
-    }
+    audiopump_i2s_rx_end();
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(audiopump_rx_close_obj, audiopump_rx_close);
@@ -1803,13 +2029,19 @@ static MP_DEFINE_CONST_FUN_OBJ_0(audiopump_rx_stats_obj, audiopump_rx_stats);
 // None when no channel is open, else (rate, channels, has_rx, holders):
 // holders is 1 for the output, 2 for the recorder, 3 for both. A board asks
 // this before it touches a clock pin the channel may already be driving.
+//
+// A receive-only recorder's channel counts as open: it drives the clock pins
+// (and MCLK, when it was given one) as surely as an output's does. Its rate
+// is reported when no output is open beside it.
 static mp_obj_t audiopump_i2s_state(void) {
-    if (audiopump_i2s_tx == NULL) {
+    if (audiopump_i2s_tx == NULL && audiopump_i2s_rx == NULL) {
         return mp_const_none;
     }
+    const audiopump_i2s_cfg_t *live = audiopump_i2s_tx != NULL
+        ? &audiopump_i2s_live : &audiopump_i2s_rx_live;
     mp_obj_t items[4] = {
-        mp_obj_new_int(audiopump_i2s_live.rate),
-        mp_obj_new_int(audiopump_i2s_live.channels),
+        mp_obj_new_int(live->rate),
+        mp_obj_new_int(live->channels),
         mp_obj_new_bool(audiopump_i2s_rx != NULL),
         mp_obj_new_int(audiopump_i2s_holds),
     };
@@ -2255,13 +2487,19 @@ void audiopump_i2s_shutdown(void) {
     audiopump_i2s_holds &= (uint8_t)~AUDIOPUMP_I2S_HOLD_OUT;
     if (audiopump_i2s_holds == 0) {
         audiopump_i2s_close();
+    } else if (audiopump_i2s_rx_alone) {
+        // The recorder's channel is its own; only the output's half goes.
+        audiopump_i2s_close_tx();
     }
     #endif
 }
 
+// A recorder on THIS output's clock. One on a receive-only channel of its own
+// does not count: the output may retune without moving its rate.
 bool audiopump_i2s_input_held(void) {
     #if AUDIOIF_DRV_ESP
-    return (audiopump_i2s_holds & AUDIOPUMP_I2S_HOLD_IN) != 0;
+    return (audiopump_i2s_holds & AUDIOPUMP_I2S_HOLD_IN) != 0
+        && !audiopump_i2s_rx_alone;
     #else
     return false;
     #endif
@@ -2346,5 +2584,35 @@ void audiopump_i2s_starved_resume(void) {
 uint32_t audiopump_i2s_open(const audiopump_i2s_cfg_t *cfg) {
     (void)cfg;
     mp_raise_NotImplementedError(MP_ERROR_TEXT("this port has no I2S"));
+}
+
+// No capture half on a desktop: audioi2sin reads its `source=` there instead.
+uint32_t audiopump_i2s_rx_begin(const audiopump_i2s_cfg_t *cfg, uint32_t ring,
+    int take) {
+    (void)cfg;
+    (void)ring;
+    (void)take;
+    mp_raise_NotImplementedError(MP_ERROR_TEXT("this port has no I2S"));
+}
+
+uint32_t audiopump_i2s_rx_pull(uint8_t *dst, uint32_t want) {
+    (void)dst;
+    (void)want;
+    return 0;
+}
+
+void audiopump_i2s_rx_discard(void) {
+}
+
+void audiopump_i2s_rx_counts(uint32_t *frames, uint32_t *dropped) {
+    *frames = 0;
+    *dropped = 0;
+}
+
+void audiopump_i2s_rx_end(void) {
+}
+
+bool audiopump_i2s_rx_held(void) {
+    return false;
 }
 #endif

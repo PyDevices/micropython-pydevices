@@ -1,8 +1,8 @@
 # audioif
 
 The audio hardware layer for PyDevices firmware: the platform drivers under the
-audio pump. It is one C module, `_audioif`, and a CircuitPython-shaped
-`audiobusio.I2SOut` on top of it — the part that knows what a thread is, what a
+audio pump. It is one C module, `_audioif`, with CircuitPython's
+`audiobusio.I2SOut` and `audioi2sin.I2SIn` on top of it — the part that knows what a thread is, what a
 mutex is, where the clock comes from and where the audio goes. It sits beside
 [`displayif`](../displayif) and
 [`usbhost`](../usbhost), and under `audiodev` in
@@ -108,9 +108,73 @@ table wins in both link maps and the three entry points are in both images
 and not discarded — and the desktop probe covers all 39 legs. No image
 carrying them has been flashed.
 
-**`audioi2sin.I2SIn` is not built.** CircuitPython 10.3.0 keeps I2S capture
-there rather than in `audiobusio`. `_audioif.Input` below is the same thing
-under a private name.
+## `audioi2sin.I2SIn` — recording from a microphone
+
+```python
+import array, audioi2sin, board
+
+buf = array.array("h", [0] * 16000)
+with audioi2sin.I2SIn(board.D9, board.D10, board.D11,
+                      sample_rate=16000, bit_depth=16) as mic:
+    mic.record(buf, len(buf))
+```
+
+That is the example from CircuitPython's own `I2SIn` docstring, and it records
+on this firmware with only its pins changed. CircuitPython keeps I2S capture in
+a module of its own, `audioi2sin`, not in `audiobusio`, so that is where it is
+here too. The constructor, `record(buffer, count)`, the typecode rules for the
+buffer, `bit_depth` and `output_bit_depth` (with CircuitPython's own rounding),
+`mono` (the left slot), `left_justified`, `samples_signed` and the properties
+`sample_rate`, `bits_per_sample`, `channel_count`, `bit_depth`,
+`samples_signed` and `overflow` all behave as CircuitPython documents them. A
+24-bit microphone (INMP441, SPH0645LM4H) is read from the top of its 32-bit
+slot, so `bit_depth=24` with an `'i'` buffer gives you the 24-bit value.
+
+**A microphone behind a codec needs the codec set up first.** A MEMS
+microphone needs nothing, but the ES7210 on the ESP32-P4 panels and the LilyGO
+T-Embed is an ADC on I2C. Its board configuration brings it up with
+`audio_in_power()`, the role `audio_power()` is for `I2SOut`, and you pass the
+codec's MCLK pin as `main_clock=`:
+
+```python
+import board_peripherals
+board_peripherals.audio_in_power(True, rate=16000)
+mic = audioi2sin.I2SIn(47, 21, 14, main_clock=48, sample_rate=16000)  # T-Embed
+```
+
+The ES7210 sends zeros for its first 96 ms after MCLK reaches it, so a
+recording opened straight after starts with a tenth of a second of silence.
+
+**What it opens.** With nothing else on the I2S pins, a receive-only channel of
+its own, as CircuitPython does. Beside an `audiobusio.I2SOut` on other pins, a
+receive-only channel next to it: on the T-Embed the amplifier is on one port
+and the microphone on another, and either can open first, play or record, and
+close without disturbing the other. On a board whose codec and microphone
+share one port's clocks, open the output first with `data_in=` and the
+recorder joins its channel at its rate; an output asked for after a
+receive-only recorder on the same clocks is refused, because that channel has
+no transmit half to give it.
+
+**Where it differs from CircuitPython.** `record()` reads from a quarter-second
+ring the DMA's interrupt fills, so a script that pauses between calls (a
+garbage collection, a file write) loses nothing, and successive calls are
+continuous. A ring that overflowed while nobody was recording is emptied
+first, so a recording always starts at now. `overflow` is real here: it reads
+True when the ring dropped samples since you last looked, where CircuitPython's
+espressif port always says False. If the microphone delivers nothing for a
+second, `record()` returns the short count instead of blocking forever.
+`external_clock` raises `NotImplementedError`, as on CircuitPython's espressif
+port. A second `I2SIn` raises CircuitPython's `"Peripheral in use"`: there is
+one capture ring.
+
+Three keywords are ours: `port=` picks the I2S peripheral, `main_clock_fs=`
+sets MCLK in bit clocks per frame (256 by default), and `source=`, on a
+desktop build, is a buffer of two-slot wire frames that `record()` reads in a
+loop. With no `source=` a desktop records silence, paced at the sample rate.
+
+`_audioif.Input` below is a different thing: an audiosample the pump pulls on
+its own thread, so a live microphone can feed an effect graph. `I2SIn` is not
+an audiosample yet, so `I2SOut.play(mic)` does not work here.
 
 **The mono path is not written.** A board with one transducer fed by a
 two-slot wire gets the same signal in both slots and has no answer here.
@@ -139,7 +203,7 @@ audiopump.shutdown()          # closes the channel with the task
 | `i2s_start(…, din=PIN)` | Opens the RX half of the **same** channel pair, so one clock tree drives capture and playback and the two DMAs cannot drift. |
 | `i2s_start(…, din=, in_port=, in_bclk=, in_ws=, in_mclk=)` | Opens RX on a **different** peripheral, for a board whose microphone is not on the speaker's port. See the warning below. |
 | `i2s_stop()` | Closes both channels, a recording included. |
-| `rx_open(port, bclk, ws, dout, din, rate, mclk=, mclk_fs=, ring=, take=)` | Records from the RX half while an output plays on the same port. Opens the channel pair if nothing has (TX then clocks zeros until an output joins), or joins the one `I2SOut(..., data_in=)` opened; the output and the recorder each hold the channel and it closes when the last lets go. The RX interrupt copies every DMA block into a ring of `ring` bytes, taking the left slot, the right, their average or both (`take` 0, 1, 2, 3). A recorder at another rate than the open channel is refused by name. |
+| `rx_open(port, bclk, ws, dout, din, rate, mclk=, mclk_fs=, ring=, take=)` | Records from the RX half while an output plays on the same port. Opens the channel pair if nothing has (TX then clocks zeros until an output joins), or joins the one `I2SOut(..., data_in=)` opened; `dout=-1` opens a receive-only channel instead, the one `audioi2sin.I2SIn` uses; the output and the recorder each hold the channel and it closes when the last lets go. The RX interrupt copies every DMA block into a ring of `ring` bytes, taking the left slot, the right, their average or both (`take` 0, 1, 2, 3). A recorder at another rate than the open channel is refused by name. |
 | `rx_read(buf)` | Copies whole frames from that ring into `buf` and returns the bytes copied, 0 when nothing is waiting. Never blocks. |
 | `rx_close()` | Stops recording. The channel closes only if no output holds it. |
 | `rx_stats()` | `(frames captured, frames dropped, bytes waiting)`. Dropped frames are a reader that fell further behind than `ring`. |

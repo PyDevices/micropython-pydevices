@@ -123,7 +123,7 @@ MP_REGISTER_ROOT_POINTER(mp_obj_t audiobusio_live);
 #define audiobusio_arm(self) ((void)(self))
 #endif
 
-static int audiobusio_pin_gpio(mp_obj_t pin_or_int, qstr what) {
+int audiobusio_pin_gpio(mp_obj_t pin_or_int, qstr what) {
     if (pin_or_int == MP_OBJ_NULL || pin_or_int == mp_const_none) {
         return -1;
     }
@@ -1020,13 +1020,11 @@ MP_DEFINE_CONST_OBJ_TYPE(
 
 // --- the input half, named and refused ------------------------------------
 //
-// CircuitPython 10.3.0 puts PDM microphones in `audiobusio.PDMIn` and I2S
-// capture in a module of its own, `audioi2sin.I2SIn` -- it is NOT in
-// audiobusio, which is why this module has no I2SIn either. Neither is built
-// here yet: the pump already has an input node (`_audioif.Input`), and what an
-// `I2SIn` would be is that node plus a channel opened for RX. PDMIn is a
-// different peripheral and a different decimation filter, and nothing in this
-// workspace has one wired.
+// CircuitPython puts PDM microphones in `audiobusio.PDMIn` and I2S capture in
+// a module of its own, `audioi2sin.I2SIn` -- not in audiobusio -- and this
+// firmware does the same: `I2SIn` is in audioi2sin.c, over the capture half
+// of `_audioif`. PDMIn is a different mode of the peripheral and a different
+// decimation filter, and no board this firmware supports has one wired.
 //
 // The name exists and says so, which is displayif's precedent for a bus a
 // port cannot do (src/ports/common/notimpl/): a NotImplementedError naming the
