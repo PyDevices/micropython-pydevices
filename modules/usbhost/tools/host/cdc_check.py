@@ -5,6 +5,8 @@ import time
 import usb.core
 from usb.host.cdc import Serial
 
+PLANT = False  # the proof matrix's host leg: the line typed asks the wrong sum
+
 
 def run():
     usb.core.start(classes=("cdc",))
@@ -18,7 +20,7 @@ def run():
     while port.read(256):
         pass
     t0 = time.ticks_ms()
-    port.write(b"print('cdc', 6 * 7)\r\n")
+    port.write(b"print('cdc', 6 * 8)\r\n" if PLANT else b"print('cdc', 6 * 7)\r\n")
     got = b""
     end = time.ticks_add(t0, 2000)
     while time.ticks_diff(end, time.ticks_ms()) > 0 and b"cdc 42" not in got:

@@ -7,6 +7,8 @@ import usb.core
 import vfs
 from usb.host.msc import Drive
 
+PLANT = False  # the proof matrix's host leg: one byte of the file goes bad on the way to the drive
+
 
 def run():
     usb.core.start()
@@ -24,7 +26,7 @@ def run():
     data = bytes(range(256)) * 64       # 16 KB
     t0 = time.ticks_ms()
     with open("/usb/_usbcore_check.bin", "wb") as f:
-        f.write(data)
+        f.write(data if not PLANT else data[:100] + bytes((data[100] ^ 1,)) + data[101:])
     write_ms = time.ticks_diff(time.ticks_ms(), t0)
     vfs.umount("/usb")
     vfs.mount(vfs.VfsFat(Drive(dev)), "/usb")

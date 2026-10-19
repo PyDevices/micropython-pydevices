@@ -5,6 +5,8 @@ import time
 import usb.core
 from usb.host.audio import Speaker
 
+PLANT = False  # the proof matrix's host leg: the tone stops halfway
+
 
 def run(seconds=3, hz=440, amp=0.3):
     usb.core.start(classes=("uac",))
@@ -23,7 +25,7 @@ def run(seconds=3, hz=440, amp=0.3):
     sent = 0
     t0 = time.ticks_ms()
     with spk:
-        end = time.ticks_add(t0, seconds * 1000)
+        end = time.ticks_add(t0, seconds * (500 if PLANT else 1000))
         mv = memoryview(one)
         at = 0
         while time.ticks_diff(end, time.ticks_ms()) > 0:

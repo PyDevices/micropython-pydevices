@@ -4,6 +4,8 @@ import time
 import usb.core
 from usb.host.video import Camera
 
+PLANT = False  # the proof matrix's host leg: the last frame's JPEG header is lost
+
 
 def run(seconds=3, max_size=(320, 240)):
     usb.core.start(classes=("uvc",))
@@ -29,6 +31,8 @@ def run(seconds=3, max_size=(320, 240)):
         secs = time.ticks_diff(time.ticks_ms(), t) / 1000
     out = {"camera": "%s %s" % (dev.manufacturer, dev.product), "mode": (cam.encoding, cam.width, cam.height, cam.fps),
            "frames": got, "fps": round(got / secs, 1), "last": last, "offers": cam.modes()}
+    if PLANT and last:
+        buf[0:2] = b"\x00\x00"
     if cam.encoding == "mjpeg" and last:
         import jpegio
         d = jpegio.JpegDecoder()

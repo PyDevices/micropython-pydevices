@@ -41,6 +41,7 @@ WIN_TMP = "/mnt/c/Users/bradb/AppData/Local/Temp/usbhost-matrix"
 CLASSES = ("cdc", "hid", "midi", "msc")
 # IN endpoints each function takes; the board's own serial port takes two.
 IN_EPS = {"cdc": 2, "hid": 1, "midi": 1, "msc": 1}
+DEV = None  # the held board, set from --dev or --ws
 
 
 def sh(cmd, timeout=120, cwd=None):
@@ -57,7 +58,7 @@ def win_py(script, *args, timeout=120):
 
 def ask(code, timeout=60):
     """Run code in the held REPL; returns what it printed after the @@ marker."""
-    rc, out = sh([MPFTP, "hold", "ask", "print('@@', repr(%s))" % code, "--marker", "@@", "--text",
+    rc, out = sh([MPFTP, "hold", "ask", "-d", DEV, "print('@@', repr(%s))" % code, "--marker", "@@", "--text",
                   "--timeout", str(timeout)], timeout=timeout + 30)
     # With --marker and --text the holder prints just what followed the marker.
     return out.strip() if rc == 0 else "ERROR " + out[-300:]
@@ -201,18 +202,22 @@ def main():
         sh(["cp", os.path.expanduser("~/gh/pydevices/pydevices/utils/uwin32.py"), WIN_TMP])
         sh(["cp", "-r", "/tmp/midiports-adafruit_midi/1.6.0/adafruit_midi", WIN_TMP])
 
-    sh([MPFTP, "hold", "stop"], timeout=30)
     if not (args.ws or args.dev):
         ap.error("--ws or --dev is needed")
-    rc, out = sh([MPFTP, "hold", "start", "-d", args.dev or "ws://" + args.ws], timeout=60)
+    # Every hold command names this board: another agent's holder may be
+    # running beside this one, and an unnamed command would find that one.
+    global DEV
+    DEV = args.dev or "ws://" + args.ws
+    sh([MPFTP, "hold", "stop", "-d", DEV], timeout=30)
+    rc, out = sh([MPFTP, "hold", "start", "-d", DEV], timeout=60)
     # The board's REPL outlives a run: drop any matrix_board an earlier run
     # imported, so this run uses the file on the board now.
     # Opening a UART bridge can reset the board, and a board that boots into
     # an app (main.py) isn't at the prompt: interrupt, and retry until it
     # answers.
     for _ in range(10):
-        sh([MPFTP, "hold", "interrupt"], timeout=30)
-        sh([MPFTP, "hold", "ask", "import sys; sys.modules.pop('matrix_board', None); import matrix_board",
+        sh([MPFTP, "hold", "interrupt", "-d", DEV], timeout=30)
+        sh([MPFTP, "hold", "ask", "-d", DEV, "import sys; sys.modules.pop('matrix_board', None); import matrix_board",
             "--timeout", "20"], timeout=60)
         if ask("'matrix_board' in sys.modules") == "True":
             break
@@ -220,7 +225,7 @@ def main():
     else:
         sys.exit("the board never imported matrix_board")
     if args.plant:
-        sh([MPFTP, "hold", "ask", "matrix_board._drop = 0", "--timeout", "10"], timeout=40)
+        sh([MPFTP, "hold", "ask", "-d", DEV, "matrix_board._drop = 0", "--timeout", "10"], timeout=40)
 
     classes = args.only.split(",") if args.only else CLASSES
     results = []
@@ -286,8 +291,8 @@ def main():
             row["pass"] = ok
             results.append(row)
             print(json.dumps(row), flush=True)
-    sh([MPFTP, "hold", "ask", "matrix_board.stop()", "--timeout", "10"], timeout=40)
-    sh([MPFTP, "hold", "stop"], timeout=30)
+    sh([MPFTP, "hold", "ask", "-d", DEV, "matrix_board.stop()", "--timeout", "10"], timeout=40)
+    sh([MPFTP, "hold", "stop", "-d", DEV], timeout=30)
     good = all(r["pass"] for r in results)
     print("MATRIX", "PASS" if good else "FAIL", "%d of %d" % (sum(r["pass"] for r in results), len(results)))
     sys.exit(0 if good else 1)
