@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **`audioi2sin.I2SIn` records from an I2S microphone.** CircuitPython's own
+  class: `I2SIn(bit_clock, word_select, data, ...)` and `record(buffer,
+  count)`, with its keywords, typecode rules and bit-depth conversions, so
+  CircuitPython capture code runs unchanged apart from its pins. It opens a
+  receive-only I2S channel when nothing else holds the pins, sits beside an
+  output on other pins, or joins an `audiobusio.I2SOut(..., data_in=)` on the
+  same ones. `record()` reads a quarter-second ring, so pauses between calls
+  lose nothing, and `overflow` reports when it did drop samples. Proven on
+  the ESP32-P4 panel and the LilyGO T-Embed with CircuitPython's docstring
+  example and a 1 kHz tone.
+- `_audioif.rx_open()` takes `dout=-1` for a receive-only channel, and records
+  8-bit and 32-bit wire slots as well as 16-bit.
+- unix and windows builds compile this directory's sources even when an older
+  standalone `audioif` checkout sits beside another module in the build. It
+  used to win the search silently.
+
 ## v0.1.2 (2026-10-10)
 
 - **Record while you play, on one I2S port.** `_audioif.rx_open()` reads the RX

@@ -57,7 +57,9 @@ run() { "$mp" -X heapsize=256M "$here/$1" "${@:2}"; }
 echo "--- planted faults, each of which must fail ---"
 for planted in "busio_probe.py $tmp --fault deaf" \
                "sink_probe.py $tmp --fault flip" \
-               "sink_probe.py $tmp --fault truncate"; do
+               "sink_probe.py $tmp --fault truncate" \
+               "i2sin_probe.py --fault rate" \
+               "i2sin_probe.py --fault slot"; do
     # shellcheck disable=SC2086
     if run $planted > /dev/null 2>&1; then
         echo "the planted fault PASSED, so the probe is not a gate: $planted" >&2
@@ -70,6 +72,7 @@ echo
 echo "--- the probes ---"
 run sink_probe.py "$tmp"
 run busio_probe.py "$tmp"
+run i2sin_probe.py
 
 echo
 echo "--- CircuitPython's documented I2SOut example, unmodified ---"

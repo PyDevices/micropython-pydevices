@@ -14,6 +14,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "py/obj.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -38,6 +40,11 @@ typedef struct {
     int in_bclk;
     int in_ws;
     int in_mclk;
+    // 0 is Philips I2S (data one bit clock after word select), 1 is
+    // left-justified (MSB on the word-select edge), which the SPH0645LM4H
+    // wants. Only a receive-only channel can be opened left-justified; every
+    // output is Philips.
+    int msb;
 } audiopump_i2s_cfg_t;
 
 // Who is holding the open channel. The output (`audiobusio.I2SOut`, or
@@ -92,6 +99,48 @@ uint32_t audiopump_i2s_open(const audiopump_i2s_cfg_t *cfg);
 // holds it, in which case TX goes on clocking zeros and RX keeps recording.
 // Safe to call when nothing is open.
 void audiopump_i2s_shutdown(void);
+
+// --- the capture half, for audioi2sin.I2SIn and _audioif.rx_open ----------
+//
+// Start recording into a ring of `ring` bytes, taking the left slot, the
+// right, their average or both (`take` 0, 1, 2, 3). Three ways it can go:
+//
+//   - An output already holds a TX/RX pair on these pins (`I2SOut(...,
+//     data_in=)`): the recorder joins it, at its rate and width.
+//   - Nothing is open and `cfg->dout` names a pin: the pair is opened here,
+//     and an output arriving later joins it.
+//   - `cfg->dout` is -1: a receive-only channel is opened on a port of its
+//     own (`cfg->port`, or the first free one). An output open on other pins
+//     is left alone; one on the same pins without a microphone is refused,
+//     because its TX half cannot grow an RX half under it.
+//
+// Samples land in the ring at the channel's width: one byte at 8 bits, two at
+// 16, four at 24 and 32. Raises; needs an nlr handler above it. Returns the
+// ring's length in bytes. 0 on a build with no I2S, which raises instead.
+uint32_t audiopump_i2s_rx_begin(const audiopump_i2s_cfg_t *cfg, uint32_t ring,
+    int take);
+
+// Copy whole frames from the ring into `dst`, up to `want` bytes. Returns the
+// bytes copied, 0 when nothing is waiting. Never blocks.
+uint32_t audiopump_i2s_rx_pull(uint8_t *dst, uint32_t want);
+
+// Throw away what is waiting in the ring, so the next pull starts at now.
+void audiopump_i2s_rx_discard(void);
+
+// Frames that reached the ring and frames it had no room for, since
+// rx_begin.
+void audiopump_i2s_rx_counts(uint32_t *frames, uint32_t *dropped);
+
+// Stop recording. A receive-only channel closes; a pair closes only when no
+// output holds it. Safe to call when nothing is recording.
+void audiopump_i2s_rx_end(void);
+
+// True while a recorder holds the capture ring.
+bool audiopump_i2s_rx_held(void);
+
+// The pins as a GPIO number, from an int, a machine.Pin or a string naming
+// one; -1 for None. Shared by audiobusio and audioi2sin (audiobusio.c).
+int audiobusio_pin_gpio(mp_obj_t pin_or_int, qstr what);
 
 // Silence on the wire since the performance began, in bytes: descriptors the
 // DMA started with nothing written into them, plus any time the DMA itself
