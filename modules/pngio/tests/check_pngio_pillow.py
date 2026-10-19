@@ -72,7 +72,9 @@ for bits in (1, 2, 4):
     g = Image.fromarray((rgb[..., 0] >> (8 - bits) << (8 - bits)).astype(np.uint8), "L")
     p = os.path.join(out, "pil_gray%d.png" % bits)
     g.save(p, "PNG", bits=bits)
-    paths[p] = g
+    # Pillow 13 writes grey at 1, 2 and 4 bits (12 wrote 8), and a decoder
+    # scales those samples to full range: compare with Pillow's read of the file.
+    paths[p] = Image.open(p)
 # Pillow can't write Adam7 (its interlace option is ignored), so set the IHDR's
 # interlace byte on one of its files and re-sign the chunk: pngio must refuse it
 import zlib
