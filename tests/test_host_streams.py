@@ -342,9 +342,10 @@ class TestCamera(unittest.TestCase):
         self.assertEqual(cam.encoding.lower(), "yuy2")
 
     def test_in_limit_skips_modes_too_big_for_the_fifo(self):
-        host.reset(_C920E, probe_payload=3072)
-        with self.assertRaises(ValueError):
+        host.reset(_C920E, probe_payload=640)
+        with self.assertRaises(ValueError) as e:
             Camera(device(), max_size=(320, 240), in_limit=600)
+        self.assertIn("640-byte packets, over in_limit=600", str(e.exception))
 
     def test_start_claims_the_alt_and_opens_a_video_stream(self):
         cam = self.camera(max_size=(320, 240))

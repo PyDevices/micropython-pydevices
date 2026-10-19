@@ -82,8 +82,12 @@ class Camera:
         self._last = (0,) * 8
         picked = self._negotiate(encoding, max_size, fps, in_limit)
         if picked is None:
-            raise ValueError("no mode the camera and this bus can both carry; it offers: "
-                             + "; ".join(self.modes()))
+            why = ""
+            if self._over_limit is not None:
+                why = " (the smallest it asked for was %d-byte packets, over in_limit=%d)" % (
+                    self._over_limit, in_limit)
+            raise ValueError("no mode the camera and this bus can both carry%s; it offers: %s"
+                             % (why, "; ".join(self.modes())))
         fmt, frame, interval, payload, frame_bytes, alt = picked
         self._fmt, self._alt = fmt, alt
         self.encoding = fmt.encoding
@@ -107,6 +111,7 @@ class Camera:
                     rank = 1 if fmt.encoding == "mjpeg" else 0
                     found.append((frame.width * frame.height, rank, fmt, frame))
         found.sort(key=lambda c: (c[0], c[1]), reverse=True)
+        self._over_limit = None     # the smallest payload in_limit refused
         for _, _, fmt, frame in found:
             intervals = list(frame.intervals) or [0]
             if fps:
@@ -116,6 +121,8 @@ class Camera:
             for interval in intervals:
                 payload, frame_bytes = _negotiate(self.dev, fmt.interface, fmt.index, frame.index, interval)
                 if in_limit and payload > in_limit:
+                    if self._over_limit is None or payload < self._over_limit:
+                        self._over_limit = payload
                     continue
                 alt = _uvc.alt_for_payload(self._alts, payload)
                 if alt is not None:
