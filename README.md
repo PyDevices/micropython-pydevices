@@ -101,7 +101,7 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   what should match on any machine. Needs no board. For a report on builds you
   already have, name their folders:
   `scripts/exercise_build.sh --report builds/rp2/RPI_PICO2/default ...`.
-- [`provenance.json`](provenance.json) — the patches' checksums and migration record.
+- [`provenance.json`](provenance.json) — the patches' checksums and migration record. After changing a patch or moving `UPSTREAM`, run `python3 scripts/update_provenance.py`; CI fails on a stale file.
 
 What's planned next is in [ROADMAP.md](ROADMAP.md).
 
