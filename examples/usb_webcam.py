@@ -8,6 +8,10 @@ streaming endpoint sends it from the USB interrupt.
 
     mpftp run -d COM31 examples/usb_webcam.py
 
+or from a program: ``import usb_webcam; usb_webcam.main()``, or
+``main(packet=640)`` for a computer at full speed, which takes bigger packets
+than the 512 every host (an ESP32-S3 included) takes.
+
 Needs an ESP32-P4 with a MIPI camera and a board config whose
 ``board_peripherals.camera()`` opens it, a firmware with cameraif, ppa,
 jpegio and machine.USBDevice's streaming endpoints, and micropython-lib's
@@ -41,10 +45,12 @@ else:
     SIZES, FPS = (((320, 240), (160, 120)), 30) if high_speed else (((160, 120),), 15)
 WIDTH, HEIGHT = SIZES[0]
 # One isochronous packet a millisecond at full speed, a microframe at high
-# speed. High speed allows 1024 bytes; full speed allows 1023, but the ESP32's
-# full-speed controller has FIFO room for 640 beside the serial port (768
-# fails to open), which carries 640x480 MJPEG at about 12 frames a second.
-PACKET = 1024 if high_speed else 640
+# speed. High speed allows 1024 bytes. At full speed the default is 512, which
+# every host takes, an ESP32-S3 (at most 600) included. A computer takes more:
+# main(packet=640) is the most the ESP32's full-speed controller has FIFO room
+# for beside the serial port (768 fails to open), and carries 640x480 MJPEG at
+# about 12 frames a second.
+PACKET = 1024 if high_speed else 512
 
 
 def aligned(n):
@@ -69,17 +75,19 @@ def open_4_3():
     return board_peripherals.camera(format=best[0])
 
 
-def main():
+def main(packet=PACKET):
+    """Run the webcam until Ctrl-C. ``packet`` is the bytes an isochronous
+    packet carries; raise it for a host that takes more than 512."""
     cam = open_4_3()
     if FORMAT == "mjpeg":
         import jpegio
 
         encoder = jpegio.JpegEncoder(quality=QUALITY)
         rgb = aligned(WIDTH * HEIGHT * 2)
-        uvc = CameraInterface(sizes=SIZES, fps=FPS, format="mjpeg", max_frame=WIDTH * HEIGHT // 3, packet=PACKET)
+        uvc = CameraInterface(sizes=SIZES, fps=FPS, format="mjpeg", max_frame=WIDTH * HEIGHT // 3, packet=packet)
     else:
         frame = aligned(WIDTH * HEIGHT * 2)
-        uvc = CameraInterface(sizes=SIZES, fps=FPS, packet=PACKET)
+        uvc = CameraInterface(sizes=SIZES, fps=FPS, packet=packet)
     usb.device.get().init(uvc, builtin_driver=True)
     print("webcam up: %s %s at %d fps; open it on the computer (Ctrl-C stops)"
           % (FORMAT, " ".join("%dx%d" % sz for sz in SIZES), FPS))
@@ -112,4 +120,5 @@ def main():
         cam.deinit()
 
 
-main()
+if __name__ == "__main__":
+    main()
