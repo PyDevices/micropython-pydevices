@@ -32,17 +32,14 @@ report = kbd.read()
 
 Start the host with the classes you'll stream (`usb.core.start(classes=("uvc",))` for a camera, `("uac",)` for a speaker): the controller's FIFO split is fixed while the host runs.
 
-The older host API, `usbif.auto` with its class drivers in C, is still in `lib/usbif/` while the packages replace it.
-
 ## Repository map
 
 | Path | Purpose |
 |---|---|
 | `packages/` | The class packages: `usb-device-audio`, `usb-device-video`, `usb-device-msc`, `usb-hid`, `usb-core`, `usb-host-*`. |
-| `src/mod_usbif.c` | The C module: the host session and its transfers. |
-| `src/usbif_host*.c` | The host core, the generic transfer layer under `usb.core`, and the older class drivers. |
-| `src/shared/` | Event ring, PCM sink and USB-MIDI packet code. |
-| `lib/usbif/` | The older portable host API and its desktop backends. |
+| `src/mod_usbif.c` | The C module: the host session, its transfers and streams. |
+| `src/usbif_host*.c` | The host core, the generic transfers under `usb.core`, the isochronous streams under the audio and video packages, and the tethering adapter. |
+| `src/shared/` | The event ring, the PCM sink's gate, and the host streams' pacing, framing and queue sizing. |
 | `patches/` | The ESP32 patch that lets the host borrow the OTG controller. |
 | `examples/` | Device and host examples. |
 | `tools/` | The device proof matrix and the stream and host checks. |

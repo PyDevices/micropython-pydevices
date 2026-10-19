@@ -20,7 +20,7 @@ jobs:
     # The event transport is the piece the whole host side rests on, and it
     # is testable without hardware: a failure here should be a two-second
     # answer on a runner rather than a reflash on someone's desk.
-    name: Host-testable C (ring buffers, C sink, MIDI packet codec)
+    name: Host-testable C (ring buffers, C sink, host stream pieces)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -62,12 +62,6 @@ jobs:
             fi
             echo "planted fault $fault caught:"; grep -E "FAIL|ERROR: AddressSanitizer" /tmp/planted.log | head -3
           done
-      - name: Build and run the USB-MIDI packet codec tests
-        run: |
-          cc -std=c11 -Wall -Wextra -Werror -Isrc \
-             -o /tmp/test_midi_packets tests/test_midi_packets.c \
-             src/shared/usbif_midi_packet.c
-          /tmp/test_midi_packets
       - name: Build and run the host stream queue-size tests
         run: |
           cc -std=c11 -Wall -Wextra -Werror -Isrc \

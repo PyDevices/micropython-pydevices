@@ -75,13 +75,8 @@ ESP32-S3, whose host port is full speed, about 4 Mbit/s. It speaks
 RNDIS, which Samsung and many other Android phones use. CDC-ECM, CDC-NCM and
 iPhone tethering are not implemented.
 
-The older host API, `usbif.auto` and its class drivers in C, is still here
-while the class packages replace it.
-
 Also working, and the foundation the rest builds on:
 
-- the portable API and its Linux and Windows desktop backends, in `lib/usbif`,
-  with one conformance suite run against every backend
 - the event transport in C (`src/shared/usbif_ringbuf.c`), with host-side tests
 - one small patch to MicroPython (`patches/`), with provenance: an esp32
   helper that lets the host borrow the OTG controller
@@ -121,18 +116,12 @@ on one device or two. On an ESP32-P4 hosting a USB-C headset dongle with its out
 looped into its mic, both ran 30 s with not one packet lost either way
 ([tests/hardware/uac_duplex_loopback.py](tests/hardware/uac_duplex_loopback.py)).
 
-**Not yet working, said precisely:** macOS
-desktop support, which sits at the [community-verified
-tier](https://github.com/PyDevices/.github/blob/main/docs/platform-support-tiers.md):
-no Mac is on this project's bench, `auto.py` returns a null backend there
-rather than pretending, and a report from the field is what promotes it.
-
 **A drive from any block device.** `usb-device-msc` serves a RAM disk, an SD
 card or a flash partition: anything with `readblocks`, `writeblocks` and
 `ioctl`. When the computer ejects it, the board can mount it again.
 
 And the working host side carries honest limits for now: the controller's
-FIFO split is fixed when the host starts, so `host(classes=...)` chooses it
+FIFO split is fixed when the host starts, so `usb.core.start(classes=...)` chooses it
 from what was asked for (`uvc` leans IN; `uac` without `uvc` makes room for a
 speaker's 196-byte packet and a microphone's; otherwise the board's Kconfig
 bias), and a camera and a USB Audio 2.0 speaker cannot share one `start()`;
@@ -173,18 +162,13 @@ half-installed: `host_stop()` powers the root port off to retire the
 request the class driver gave up on, and the next `host_start()` works
 ([#73](https://github.com/PyDevices/usbif/issues/73)).
 A soft reset (Ctrl-D) stops what the program left running, as MicroPython's
-own `machine` peripherals do: the host and any stream open on it, the sound
-card's I2S pump, and an attached drive. The next program finds the host
+own `machine` peripherals do: the host and any stream open on it. The next program finds the host
 stopped and its devices attach again. `host_stop()` with a microphone or
 speaker stream still open no longer wedges the host.
 `tests/hardware/soft_reset_check.py` checks all of it on a board.
 `host_start()`'s class filter **is** now honoured -- verified both
 in the intersection arithmetic and against a live device (excluded from a
-class tuple, it is invisible to `host_devices()`; included, it attaches) --
-and `capabilities()` reports the true built set (`{'cdc', 'hid', 'msc'}` on
-the S3 bench build) rather than the empty set it silently returned since
-Phase 1.
-The API design is in [`docs/api-sketch.md`](docs/api-sketch.md).
+class tuple, it is invisible to `host_devices()`; included, it attaches).
 
 What's planned next is in [ROADMAP.md](ROADMAP.md).
 
@@ -200,16 +184,16 @@ Start the host at full speed instead, and the hub runs at full speed too and
 passes those devices straight through:
 
 ```python
-import usbif.auto
+import usb.core
 
-host = usbif.auto.host(classes=("midi", "hid"), full_speed=True).start()
+usb.core.start(full_speed=True)
 ```
 
 High-speed devices on the same hub still work, at full-speed bandwidth
 (12 Mbit/s): a webcam negotiates a smaller or more compressed mode, and a
 flash drive copies more slowly. So leave it off when everything on the bus is
 high speed, or when the slow device is plugged straight into the port. It
-takes effect when the host starts; to change it, `stop()` and start again. On
+takes effect when the host starts; to change it, `usb.core.stop()` and start again. On
 the ESP32-S2 and S3 the port is full speed already, and the option changes
 nothing. Under the hood it sets the controller's `HCFG.FSLSSupp` bit before
 the port is powered.
@@ -217,8 +201,7 @@ the port is powered.
 ## Why the events are drained rather than delivered
 
 The design decision most likely to surprise a reader is that USB events are
-buffered in C and collected by Python calling `poll()`, instead of arriving as
-callbacks. That is a measurement, not a preference.
+buffered in C and drained by Python, instead of arriving as callbacks. That is a measurement, not a preference.
 
 On ESP32 a C callback reaches Python through `mp_sched_schedule`. Measured on
 an ESP32-S3 at a 1 kHz event rate:
@@ -275,19 +258,15 @@ brings its own):
 include("/path/to/usbif/manifest.py")
 ```
 
-and build as usual. That line brings both halves: it names the C module
-(`_usbif`) and freezes the `usbif` Python package from `lib/`. The package
-imports `events`, which comes from
-[pydevices](https://github.com/PyDevices/pydevices) by `mip`, so install that
-on the board too. If you would rather pass a manifest of your own as
+and build as usual. That line names the C module (`_usbif`). The packages in
+`packages/` are installed on the board with `mip`, only the ones it needs. If
+you would rather pass a manifest of your own as
 `FROZEN_MANIFEST=`, it replaces the port's default, so give it
 `include("$(PORT_DIR)/boards/manifest.py")` as well or you lose `asyncio` and
 the port's other frozen modules.
 
 On MicroPython older than 1.29, manifests have no `c_module()`, so this one
-will not load. Use the `USER_C_MODULES` flag, and freeze `lib/usbif` yourself
-(`package("usbif", base_path="/path/to/usbif/lib")` in your manifest) or copy
-it to the board:
+will not load. Use the `USER_C_MODULES` flag:
 
 ```bash
 idf.py -D MICROPY_BOARD=ESP32_GENERIC_S3 -D USER_C_MODULES=/path/to/usbif/micropython.cmake build
@@ -316,8 +295,8 @@ instead, which does not inherit the variable.
 | [`midi_harmonizer.py`](examples/midi_harmonizer.py) | device | MIDI effect: melody in, triads out |
 | [`midi_harmonizer_ui.py`](examples/midi_harmonizer_ui.py) | device | Harmonizer with a touchscreen chord picker |
 | [`midi_device_in.py`](examples/midi_device_in.py) | device | Prove the board receives MIDI from a host |
-| [`host_enum.py`](examples/host_enum.py) | host | Attach/detach via the portable API (board or desktop) |
-| [`hid_host.py`](examples/hid_host.py) | host | USB keyboard → PyDevices key events (M1) |
+| [`host_enum.py`](examples/host_enum.py) | host | List what's plugged into the host port, with its strings |
+| [`hid_host.py`](examples/hid_host.py) | host | Read a USB keyboard's keys (`usb-host-hid`) |
 | [`usb_serial.py`](examples/usb_serial.py) | host | CDC read/write to a USB-serial device |
 | [`usb_speaker.py`](examples/usb_speaker.py) | host | Play through a hosted USB speaker, or a board running `usb_soundcard.py` |
 | [`usb_mic.py`](examples/usb_mic.py) | host | Capture from a hosted USB microphone |
@@ -339,11 +318,13 @@ cc -std=c11 -Wall -Wextra -Werror -Isrc -o /tmp/test_ringbuf tests/test_ringbuf.
 cc -std=c11 -Wall -Wextra -Werror -Isrc -o /tmp/test_byte_ring tests/test_byte_ring.c src/shared/usbif_byte_ring.c && /tmp/test_byte_ring
 ```
 
-The portable API's conformance suite lives with the API, in this repository
-(it finds `events` and `audiodev` in a sibling `pydevices` checkout):
+The Python packages and the host-testable C run on CPython and the unix
+port:
 
 ```bash
-python -m unittest discover -s tests -p "test_usbif.py"
+python -m unittest discover -s tests -p "test_*.py"
+cc -std=c11 -Wall -Wextra -Werror -Isrc -o /tmp/test_iso_stream tests/test_iso_stream.c && /tmp/test_iso_stream
+MICROPYPATH=packages/usb-core micropython tests/unix_core_poll.py
 ```
 
 ## Licence

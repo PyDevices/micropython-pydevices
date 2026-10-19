@@ -12,8 +12,7 @@ CFLAGS_USERMOD += -I$(USBIF_SRC_DIR)
 
 SRC_USERMOD_C += \
     $(USBIF_SRC_DIR)/mod_usbif.c \
-    $(USBIF_SRC_DIR)/shared/usbif_ringbuf.c \
-    $(USBIF_SRC_DIR)/shared/usbif_midi_packet.c
+    $(USBIF_SRC_DIR)/shared/usbif_ringbuf.c
 
 # --- which usbif this firmware was built from ----------------------
 # Computed at build time from this repo's own git, never stored; "unknown" when

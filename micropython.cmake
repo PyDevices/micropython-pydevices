@@ -37,16 +37,11 @@ add_library(usermod_usbif INTERFACE)
 target_sources(usermod_usbif INTERFACE
     ${USBIF_SRC_DIR}/mod_usbif.c
     ${USBIF_SRC_DIR}/usbif_host.c
-    ${USBIF_SRC_DIR}/usbif_host_cdc.c
     ${USBIF_SRC_DIR}/usbif_host_xfer.c
     ${USBIF_SRC_DIR}/usbif_host_net.c
-    ${USBIF_SRC_DIR}/usbif_host_hid.c
-    ${USBIF_SRC_DIR}/usbif_host_msc.c
-    ${USBIF_SRC_DIR}/usbif_host_midi.c
     ${USBIF_SRC_DIR}/usbif_host_stream.c
     ${USBIF_SRC_DIR}/shared/usbif_ringbuf.c
     ${USBIF_SRC_DIR}/shared/usbif_pcm_sink.c
-    ${USBIF_SRC_DIR}/shared/usbif_midi_packet.c
 )
 
 target_include_directories(usermod_usbif INTERFACE

@@ -2,15 +2,12 @@
 //
 // The `_usbif` native module: the MicroPython-facing surface of usbif.
 //
-// Scope note (Phase 1): this wires up the module, the capability report and
-// the event transport. The IDF USB Host Library and its class drivers arrive
-// in Phase 2 and push into the same ring declared here, so nothing about the
-// Python-facing contract changes when they do -- which is the point of landing
-// the transport first.
-//
-// The Python half of this backend lives in pydevices `lib/usbif/native_usb.py`
-// and documents the same surface from the caller's side. The two are meant to
-// be read together.
+// The host port (ESP-IDF's USB host library, usbif_host.c) and what usb.core
+// and the usb.host.* packages build on: the device list and descriptors,
+// generic control, bulk and interrupt transfers (usbif_host_xfer.c),
+// isochronous streams (usbif_host_stream.c) and the tethering adapter
+// (usbif_host_net.c). The class drivers are those Python packages; this module
+// is their only caller.
 
 #include "py/runtime.h"
 #include "py/obj.h"
@@ -55,30 +52,7 @@ extern int usbif_host_port_cycle(void);
 extern void usbif_host_set_class_filter(uint16_t mask);
 extern void usbif_host_set_full_speed(bool full_speed);
 extern void usbif_host_intr_dump(void);
-extern int usbif_cdc_open(uint32_t dev_id);
-extern int usbif_cdc_write(const uint8_t *data, size_t len);
-extern int usbif_cdc_read(uint8_t *out, size_t max);
-extern void usbif_cdc_close(void);
-extern uint32_t usbif_cdc_rx_dropped(void);
-extern int usbif_hid_open(uint32_t dev_id);
-extern int usbif_hid_read(uint8_t *out, size_t max);
-extern void usbif_hid_close(void);
-extern int usbif_msc_open(uint32_t dev_id);
-extern int usbif_msc_info(uint32_t *num_blocks, uint32_t *block_size, const char **inquiry);
-extern int usbif_msc_read_block(uint32_t lba, uint8_t *out, size_t max);
-extern int usbif_msc_write_block(uint32_t lba, const uint8_t *data, size_t len);
-extern int usbif_msc_provoke_error(void);
 extern int usbif_host_desc_get(uint32_t dev_id, const uint8_t **out, uint16_t *len);
-extern int usbif_host_midi_open(uint32_t dev_id);
-extern int usbif_host_midi_read(uint8_t *out, size_t max);
-extern int usbif_host_midi_write(const uint8_t *data, size_t len);
-extern void usbif_host_midi_close(void);
-extern uint32_t usbif_host_midi_rx_dropped(void);
-extern uint8_t usbif_host_midi_release_failed;
-extern uint8_t usbif_msc_last_fail_stage, usbif_msc_last_csw_status, usbif_msc_last_xfer_status;
-extern uint8_t usbif_msc_last_sense_key, usbif_msc_last_asc, usbif_msc_last_ascq;
-extern int usbif_msc_last_moved;
-extern void usbif_msc_close(void);
 #else
 #define USBIF_HAVE_HOST (0)
 #endif
@@ -122,15 +96,9 @@ static const qstr usbif_speed_names[] = {
     MP_QSTRnull, MP_QSTR_low, MP_QSTR_full, MP_QSTR_high,
 };
 
-// Classes this firmware was actually built with. Phase 1 left this at zero
-// pending class drivers; CDC, HID and MSC host drivers now exist (unconditionally,
-// under the same USBIF_HAVE_HOST gate), so an honest answer names those three --
-// MIDI joined them (usbif_host_midi.c) once it became clear nobody upstream
-// supplies one, and UAC and UVC with the isochronous host streams
-// (usbif_host_stream.c, under usb.host.audio and usb.host.video).
-// capabilities() reports what can actually be driven, not
-// what the enumerator can name -- so a bit appears here only once a driver
-// behind it exists.
+// Classes a host_start() may ask for: every class is driven from Python,
+// over usb.core's transfers and the isochronous streams, so all of them
+// wherever there is a host, and none where there isn't.
 static uint16_t usbif_supported_classes(void) {
     #if USBIF_HAVE_HOST
     return USBIF_CLASS_CDC | USBIF_CLASS_HID | USBIF_CLASS_MSC | USBIF_CLASS_MIDI
@@ -151,12 +119,11 @@ static mp_obj_t usbif_classes_to_set(uint16_t mask) {
 }
 
 // Reverse of usbif_classes_to_set: an iterable of class-name strings (a tuple,
-// per the native_usb.py contract) to a bitmask. Unknown names are ignored
+// as usb.core.start() passes it) to a bitmask. Unknown names are ignored
 // rather than raising -- host_start() intersects the result against
 // usbif_supported_classes() anyway, so an unrecognised or unsupported name
 // simply doesn't start, which is what "not built into this firmware" should
-// look like on the host side too (see NativeDevice.functions() for the same
-// philosophy on the device side).
+// look like on the host side too.
 static uint16_t usbif_classes_from_iterable(mp_obj_t classes_in) {
     size_t len;
     mp_obj_t *items;
@@ -174,14 +141,9 @@ static uint16_t usbif_classes_from_iterable(mp_obj_t classes_in) {
     return mask;
 }
 
-static mp_obj_t usbif_capabilities(void) {
-    return usbif_classes_to_set(usbif_supported_classes());
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_capabilities_obj, usbif_capabilities);
-
-// Build the DeviceInfo row the Python side turns into a namedtuple. Field
-// order matches usbif.DeviceInfo exactly; the parity harness asserts on those
-// names, so a change here is a change to the portable contract.
+// One row of host_devices(): (dev_id, vid, pid, product, serial, classes,
+// speed). usb.core's Device reads it by position, so the order is its
+// contract.
 static mp_obj_t usbif_device_row(const usbif_event_t *event) {
     mp_obj_t items[7];
     items[0] = mp_obj_new_int_from_uint(event->dev_id);
@@ -211,7 +173,7 @@ static mp_obj_t usbif_host_start(size_t n_args, const mp_obj_t *pos_args, mp_map
     mp_obj_t classes_in = args[ARG_classes].u_obj;
     // Intersected against what this firmware can actually drive: a caller
     // naming an unbuilt or unknown class doesn't start it, matching the
-    // return value ("the set actually started") that native_usb.py documents.
+    // return value ("the set actually started") that usb.core relies on.
     uint16_t wanted = usbif_classes_from_iterable(classes_in) & usbif_supported_classes();
     // Only a genuine start initialises the ring: a second host_start() on a
     // running host must be a no-op, not a wipe of queued events -- learned
@@ -337,210 +299,6 @@ static mp_obj_t usbif_host_intr_dump_py(void) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_intr_dump_obj, usbif_host_intr_dump_py);
-
-// CDC-ACM session: open by the dev_id an attach event (or host_devices row)
-// reported. One session at a time in this first cut.
-static mp_obj_t usbif_host_cdc_open(mp_obj_t dev_id_in) {
-    #if USBIF_HAVE_HOST
-    int err = usbif_cdc_open((uint32_t)mp_obj_get_int(dev_id_in));
-    if (err != 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    #else
-    (void)dev_id_in;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_host_cdc_open_obj, usbif_host_cdc_open);
-
-static mp_obj_t usbif_host_cdc_write(mp_obj_t buf_in) {
-    #if USBIF_HAVE_HOST
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_READ);
-    // Write the whole buffer through the single in-flight transfer.
-    size_t done = 0;
-    while (done < buf.len) {
-        int n = usbif_cdc_write((const uint8_t *)buf.buf + done, buf.len - done);
-        if (n <= 0) {
-            break;
-        }
-        done += (size_t)n;
-    }
-    return mp_obj_new_int_from_uint(done);
-    #else
-    (void)buf_in;
-    return MP_OBJ_NEW_SMALL_INT(0);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_host_cdc_write_obj, usbif_host_cdc_write);
-
-static mp_obj_t usbif_host_cdc_read(mp_obj_t buf_in) {
-    #if USBIF_HAVE_HOST
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_WRITE);
-    int n = usbif_cdc_read((uint8_t *)buf.buf, buf.len);
-    return MP_OBJ_NEW_SMALL_INT(n < 0 ? 0 : n);
-    #else
-    (void)buf_in;
-    return MP_OBJ_NEW_SMALL_INT(0);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_host_cdc_read_obj, usbif_host_cdc_read);
-
-static mp_obj_t usbif_host_cdc_close_py(void) {
-    #if USBIF_HAVE_HOST
-    usbif_cdc_close();
-    #endif
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_cdc_close_obj, usbif_host_cdc_close_py);
-
-static mp_obj_t usbif_host_hid_open(mp_obj_t dev_id_in) {
-    #if USBIF_HAVE_HOST
-    if (usbif_hid_open((uint32_t)mp_obj_get_int(dev_id_in)) != 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    #else
-    (void)dev_id_in;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_host_hid_open_obj, usbif_host_hid_open);
-
-// Returns one input report's length (bytes written into buf), 0 if none.
-static mp_obj_t usbif_host_hid_read(mp_obj_t buf_in) {
-    #if USBIF_HAVE_HOST
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_WRITE);
-    int n = usbif_hid_read((uint8_t *)buf.buf, buf.len);
-    return MP_OBJ_NEW_SMALL_INT(n < 0 ? 0 : n);
-    #else
-    (void)buf_in;
-    return MP_OBJ_NEW_SMALL_INT(0);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_host_hid_read_obj, usbif_host_hid_read);
-
-static mp_obj_t usbif_host_hid_close_py(void) {
-    #if USBIF_HAVE_HOST
-    usbif_hid_close();
-    #endif
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_hid_close_obj, usbif_host_hid_close_py);
-
-static mp_obj_t usbif_host_msc_open(mp_obj_t dev_id_in) {
-    #if USBIF_HAVE_HOST
-    if (usbif_msc_open((uint32_t)mp_obj_get_int(dev_id_in)) != 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    #else
-    (void)dev_id_in;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_host_msc_open_obj, usbif_host_msc_open);
-
-// (num_blocks, block_size, inquiry_string)
-static mp_obj_t usbif_host_msc_info(void) {
-    #if USBIF_HAVE_HOST
-    uint32_t blocks, bs;
-    const char *inq;
-    if (usbif_msc_info(&blocks, &bs, &inq) != 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    mp_obj_t items[3] = {
-        mp_obj_new_int_from_uint(blocks),
-        mp_obj_new_int_from_uint(bs),
-        mp_obj_new_str(inq, strlen(inq)),
-    };
-    return mp_obj_new_tuple(3, items);
-    #else
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_msc_info_obj, usbif_host_msc_info);
-
-static mp_obj_t usbif_host_msc_read(mp_obj_t lba_in, mp_obj_t buf_in) {
-    #if USBIF_HAVE_HOST
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_WRITE);
-    int n = usbif_msc_read_block((uint32_t)mp_obj_get_int(lba_in), (uint8_t *)buf.buf, buf.len);
-    if (n < 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    return MP_OBJ_NEW_SMALL_INT(n);
-    #else
-    (void)lba_in;
-    (void)buf_in;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(usbif_host_msc_read_obj, usbif_host_msc_read);
-
-// One block, host-to-device. The buffer must be exactly one block: a short
-// write is refused rather than padded, since padding would put whatever
-// follows the caller's data into the rest of the sector.
-static mp_obj_t usbif_host_msc_write(mp_obj_t lba_in, mp_obj_t buf_in) {
-    #if USBIF_HAVE_HOST
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_READ);
-    int n = usbif_msc_write_block((uint32_t)mp_obj_get_int(lba_in),
-        (const uint8_t *)buf.buf, buf.len);
-    if (n < 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    return MP_OBJ_NEW_SMALL_INT(n);
-    #else
-    (void)lba_in;
-    (void)buf_in;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(usbif_host_msc_write_obj, usbif_host_msc_write);
-
-// (fail_stage, csw_status, bytes_moved) for the last BOT transaction.
-// fail_stage: 0 none, 1 CBW, 2 data, 3 CSW read, 4 CSW malformed, 5 CSW
-// reported failure. Distinguishes a transfer that errored from a device
-// that rejected the command -- guessing between those wastes a build.
-static mp_obj_t usbif_host_msc_diag(void) {
-    #if USBIF_HAVE_HOST
-    mp_obj_t items[7] = {
-        MP_OBJ_NEW_SMALL_INT(usbif_msc_last_fail_stage),
-        MP_OBJ_NEW_SMALL_INT(usbif_msc_last_csw_status),
-        MP_OBJ_NEW_SMALL_INT(usbif_msc_last_moved),
-        MP_OBJ_NEW_SMALL_INT(usbif_msc_last_xfer_status),
-        MP_OBJ_NEW_SMALL_INT(usbif_msc_last_sense_key),
-        MP_OBJ_NEW_SMALL_INT(usbif_msc_last_asc),
-        MP_OBJ_NEW_SMALL_INT(usbif_msc_last_ascq),
-    };
-    return mp_obj_new_tuple(7, items);
-    #else
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_msc_diag_obj, usbif_host_msc_diag);
-
-// Provoke a device-side command failure on purpose, so the recovery path
-// and REQUEST SENSE can be proven on real hardware instead of assumed.
-// Returns the transaction result (negative); read host_msc_diag() after.
-static mp_obj_t usbif_host_msc_provoke(void) {
-    #if USBIF_HAVE_HOST
-    return MP_OBJ_NEW_SMALL_INT(usbif_msc_provoke_error());
-    #else
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_msc_provoke_obj, usbif_host_msc_provoke);
-
-// --- MIDI host -------------------------------------------------------
-// Deliberately the same shape as the device-side midi_read/midi_write: a
-// plain MIDI byte stream both ways, so an application that harmonises or
-// logs does not care which end of the cable it is on. The USB-MIDI packet
-// framing lives in usbif_host_midi.c and never reaches Python.
 
 // The raw active configuration descriptor of a hosted device.
 //
@@ -909,93 +667,6 @@ static mp_obj_t usbif_host_net_default_py(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_net_default_obj, usbif_host_net_default_py);
 
-static mp_obj_t usbif_host_midi_open_py(mp_obj_t dev_id_in) {
-    #if USBIF_HAVE_HOST
-    int rc = usbif_host_midi_open((uint32_t)mp_obj_get_int(dev_id_in));
-    if (rc != 0) {
-        // Carry the driver's own code: -4 no MIDIStreaming interface, -5 max
-        // packet too large, -6 interface claim refused, -7 transfer alloc
-        // failed, -8 first submit failed. Collapsing all of those into a bare
-        // EIO is what made a concurrency failure unreadable.
-        mp_raise_msg_varg(&mp_type_OSError,
-            MP_ERROR_TEXT("host_midi_open failed (%d)"), rc);
-    }
-    return mp_const_none;
-    #else
-    (void)dev_id_in;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_host_midi_open_obj, usbif_host_midi_open_py);
-
-static mp_obj_t usbif_host_midi_read_py(mp_obj_t buf_in) {
-    #if USBIF_HAVE_HOST
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_WRITE);
-    int n = usbif_host_midi_read((uint8_t *)buf.buf, buf.len);
-    if (n < 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    return MP_OBJ_NEW_SMALL_INT(n);
-    #else
-    (void)buf_in;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_host_midi_read_obj, usbif_host_midi_read_py);
-
-// Returns how many bytes were consumed, which can be fewer than offered: a
-// trailing partial message is left for the next call rather than sent half
-// finished.
-static mp_obj_t usbif_host_midi_write_py(mp_obj_t buf_in) {
-    #if USBIF_HAVE_HOST
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_READ);
-    int n = usbif_host_midi_write((const uint8_t *)buf.buf, buf.len);
-    if (n < 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    return MP_OBJ_NEW_SMALL_INT(n);
-    #else
-    (void)buf_in;
-    mp_raise_OSError(MP_EOPNOTSUPP);
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(usbif_host_midi_write_obj, usbif_host_midi_write_py);
-
-static mp_obj_t usbif_host_midi_close_py(void) {
-    #if USBIF_HAVE_HOST
-    usbif_host_midi_close();
-    #endif
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_midi_close_obj, usbif_host_midi_close_py);
-
-// (dropped_bytes, release_failed). The second is the one that matters when
-// a later host_stop() misbehaves: a stuck interface claim surfaces there,
-// far from its cause.
-static mp_obj_t usbif_host_midi_dropped_py(void) {
-    #if USBIF_HAVE_HOST
-    mp_obj_t items[2] = {
-        mp_obj_new_int_from_uint(usbif_host_midi_rx_dropped()),
-        MP_OBJ_NEW_SMALL_INT(usbif_host_midi_release_failed),
-    };
-    return mp_obj_new_tuple(2, items);
-    #else
-    return mp_const_none;
-    #endif
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_midi_dropped_obj, usbif_host_midi_dropped_py);
-
-static mp_obj_t usbif_host_msc_close_py(void) {
-    #if USBIF_HAVE_HOST
-    usbif_msc_close();
-    #endif
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(usbif_host_msc_close_obj, usbif_host_msc_close_py);
-
-
 // _usbif.__revision__: which usbif this firmware was built from. The build
 // passes USBIF_REVISION (git describe) as a compile definition; a build with no
 // git says "unknown" rather than guessing.
@@ -1006,11 +677,7 @@ static const MP_DEFINE_STR_OBJ(_usbif_revision_obj, USBIF_REVISION);
 
 static const mp_rom_map_elem_t usbif_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___revision__), MP_ROM_PTR(&_usbif_revision_obj) },
-    { MP_ROM_QSTR(MP_QSTR_FN_CDC), MP_ROM_INT(1) },
-    { MP_ROM_QSTR(MP_QSTR_FN_AUDIO), MP_ROM_INT(4) },
-    { MP_ROM_QSTR(MP_QSTR_FN_VIDEO), MP_ROM_INT(32) },
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR__usbif) },
-    { MP_ROM_QSTR(MP_QSTR_capabilities), MP_ROM_PTR(&usbif_capabilities_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_start), MP_ROM_PTR(&usbif_host_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_stop), MP_ROM_PTR(&usbif_host_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_devices), MP_ROM_PTR(&usbif_host_devices_obj) },
@@ -1032,25 +699,6 @@ static const mp_rom_map_elem_t usbif_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_host_stats), MP_ROM_PTR(&usbif_host_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_port_cycle), MP_ROM_PTR(&usbif_host_port_cycle_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_intr_dump), MP_ROM_PTR(&usbif_host_intr_dump_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_cdc_open), MP_ROM_PTR(&usbif_host_cdc_open_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_cdc_write), MP_ROM_PTR(&usbif_host_cdc_write_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_cdc_read), MP_ROM_PTR(&usbif_host_cdc_read_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_cdc_close), MP_ROM_PTR(&usbif_host_cdc_close_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_hid_open), MP_ROM_PTR(&usbif_host_hid_open_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_hid_read), MP_ROM_PTR(&usbif_host_hid_read_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_hid_close), MP_ROM_PTR(&usbif_host_hid_close_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_msc_open), MP_ROM_PTR(&usbif_host_msc_open_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_msc_info), MP_ROM_PTR(&usbif_host_msc_info_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_msc_read), MP_ROM_PTR(&usbif_host_msc_read_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_msc_write), MP_ROM_PTR(&usbif_host_msc_write_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_msc_diag), MP_ROM_PTR(&usbif_host_msc_diag_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_msc_provoke), MP_ROM_PTR(&usbif_host_msc_provoke_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_midi_open), MP_ROM_PTR(&usbif_host_midi_open_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_midi_read), MP_ROM_PTR(&usbif_host_midi_read_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_midi_write), MP_ROM_PTR(&usbif_host_midi_write_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_midi_close), MP_ROM_PTR(&usbif_host_midi_close_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_midi_dropped), MP_ROM_PTR(&usbif_host_midi_dropped_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_msc_close), MP_ROM_PTR(&usbif_host_msc_close_obj) },
 };
 static MP_DEFINE_CONST_DICT(usbif_module_globals, usbif_module_globals_table);
 

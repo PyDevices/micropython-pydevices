@@ -8,7 +8,7 @@ on the boards people actually use.
 - A USB microphone: a capture endpoint on the device side, so a board can be a
   USB mic or a full-duplex sound card for a PC or another board.
 - `network.USBD_NCM` (Ethernet over USB, new in MicroPython 1.29): either a
-  costume for it, or a line in the roster on enabling it without usbif.
+  package for it, or a note on enabling it without usbif.
 
 ## MIDI
 

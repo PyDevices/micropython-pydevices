@@ -21,9 +21,10 @@
 // handoff above is skipped in both directions, so the device stays attached
 // while the host starts and stops (USBIF_HOST_TAKES_DEVICE below).
 //
-// Class drivers (CDC, HID, MSC) now exist alongside this file, each opened
-// on demand by Python once it sees an attach whose class bitmask matches.
-// The bitmask itself is derived from interface descriptors below, and is
+// The class drivers are Python packages (usb.host.*) over usb.core's generic
+// transfers (usbif_host_xfer.c) and isochronous streams
+// (usbif_host_stream.c); only the tethering adapter's frames move in a C
+// driver of their own (usbif_host_net.c). The class bitmask is derived from interface descriptors below, and is
 // also what host_start()'s class filter is checked against: a device
 // offering none of the requested classes is closed immediately in
 // usbif_host_on_new_dev and never occupies a slot, so it never appears in
@@ -514,17 +515,6 @@ static void usbif_host_on_new_dev(uint8_t addr) {
     usbif_host_attaches++;
 }
 
-extern void usbif_cdc_on_dev_gone(usb_device_handle_t dev);
-extern void usbif_hid_on_dev_gone(usb_device_handle_t dev);
-extern void usbif_msc_on_dev_gone(usb_device_handle_t dev);
-extern void usbif_host_midi_on_dev_gone(usb_device_handle_t dev);
-extern void usbif_cdc_close(void);
-extern void usbif_hid_close(void);
-extern void usbif_msc_close(void);
-extern void usbif_cdc_close_for_host_stop(void);
-extern void usbif_hid_close_for_host_stop(void);
-extern void usbif_host_midi_close_for_host_stop(void);
-extern void usbif_msc_close_for_host_stop(void);
 extern void usbif_stream_close_all(void);
 
 extern void usbif_xfer_on_dev_gone(usb_device_handle_t dev);
@@ -535,10 +525,6 @@ extern void usbif_net_stop(void);
 static void usbif_host_on_dev_gone(usb_device_handle_t hdl) {
     usbif_net_on_dev_gone(hdl);
     usbif_xfer_on_dev_gone(hdl);
-    usbif_cdc_on_dev_gone(hdl);
-    usbif_hid_on_dev_gone(hdl);
-    usbif_msc_on_dev_gone(hdl);
-    usbif_host_midi_on_dev_gone(hdl);
     for (int i = 0; i < USBIF_HOST_MAX_DEVS; i++) {
         usbif_host_slot_t *slot = &usbif_host_devs[i];
         if (slot->in_use && slot->hdl == hdl) {
@@ -761,66 +747,14 @@ static void usbif_host_task(void *arg) {
     printf("usbif_host: teardown starting (new devices now declined)\n");
     for (int i = 0; i < USBIF_HOST_MAX_DEVS; i++) {
         if (usbif_host_devs[i].in_use) {
-            // A class driver that is genuinely open (e.g. HID's interrupt-IN
-            // transfer, which resubmits itself from its own completion
-            // callback until something clears its `open` flag) never learns
-            // host_stop() is happening if we go straight to device_close()
-            // -- the transfer keeps re-arming forever, the device can never
-            // go idle, and usb_host_device_free_all()'s async completion
-            // (what the ALL_FREE wait below is blocking on) never arrives.
-            //
-            // The FIRST fix attempt called usbif_*_on_dev_gone() here, the
-            // same hooks the surprise-detach path uses -- wrong choice,
-            // caught by testing rather than review: those hooks free the
-            // transfer object without first halting/flushing/clearing its
-            // endpoint, which is correct for a detach (the device is
-            // already physically gone, so endpoint operations on it would
-            // be meaningless) but leaves the library's internal state
-            // inconsistent when the device is still attached, which then
-            // surfaced downstream as usb_host_client_deregister() failing
-            // with ESP_ERR_INVALID_STATE (0x103) instead of the hang moving
-            // anywhere. The device IS still attached here -- host_stop() is
-            // a voluntary teardown, not a detach -- so the correct call is
-            // each driver's ordinary _close(), which does halt+flush+clear
-            // before freeing, exactly as if Python had closed it itself.
-            // SECOND fix attempt: the plain _close() functions still failed
-            // identically even with real wall-clock time in the
-            // pre-deregister drain below. Root cause, found by reading
-            // esp-idf's usb_host.c directly rather than guessing further:
-            // usb_host_endpoint_halt()/flush() are themselves asynchronous
-            // -- interface_release() refuses (ESP_ERR_INVALID_STATE) until
-            // every endpoint's in-flight URB count is back to zero, and
-            // that only happens once something pumps
-            // usb_host_client_handle_events(). Live, that's always the host
-            // task's own main loop running concurrently in the background;
-            // here, that loop has already exited, so nothing pumps it
-            // between halt/flush and interface_release inside the plain
-            // close(). The _for_host_stop() variants pump explicitly in
-            // that exact gap -- safe here specifically because nothing else
-            // is servicing this client concurrently at this point. MSC was long
-            // excluded on the grounds that its transfers are
-            // request/response rather than continuously re-armed, so no URB
-            // would be in flight at rest for interface_release() to wait on.
-            // Measured 2026-09-02, that was wrong: an MSC session left open
-            // made this teardown take 1466 ms instead of ~450 ms (the
-            // ALL_FREE wait timing out), uninstall then failed, and the next
-            // host_start() returned ESP_ERR_INVALID_STATE. A MIDI session
-            // left open across the identical path was clean 3/3, and MIDI's
-            // only relevant difference was having a variant. MSC has one now.
-            // Diagnostic bracketing (phase0-findings.md): an intermittent
-            // hang still shows up roughly 1-in-4 with no printf between
-            // "teardown starting" and "pre-deregister drain done" at all,
-            // meaning it moved somewhere inside these three calls or the
-            // device_close() below rather than being eliminated. Bracket
-            // each one so the next hang pins an exact call, not a region.
-            printf("usbif_host: closing cdc\n");
-            usbif_cdc_close_for_host_stop();
-            printf("usbif_host: closing hid\n");
-            usbif_hid_close_for_host_stop();
-            printf("usbif_host: closing midi\n");
-            usbif_host_midi_close_for_host_stop();
-            printf("usbif_host: closing msc\n");
-            usbif_msc_close_for_host_stop();
+            // An isochronous stream left open still has transfers in flight,
+            // and interface_release() refuses (ESP_ERR_INVALID_STATE) until
+            // they retire, which only happens when something pumps
+            // usb_host_client_handle_events(). The host task's loop has
+            // exited by now, so the stream close pumps for itself -- safe
+            // here because nothing else services this client any more. The
+            // generic transfers' claims were released by usbif_xfer_close()
+            // before the loop ended.
             printf("usbif_host: closing streams\n");
             usbif_stream_close_all();
             #if USBIF_HOST_RELEASE_ABANDONED_CTRL
@@ -1118,16 +1052,15 @@ restore_device:
 }
 
 // The plain closes Python calls, for usbif_host_stop_c() below.
-extern void usbif_host_midi_close(void);
 
 void usbif_host_stop_c(void) {
     if (usbif_host_task_handle == NULL) {
         return;
     }
-    // Close every class driver first, the way a program's own close() calls
-    // do, while the host task is still running and retiring their transfers.
-    // The task's teardown has _for_host_stop closes of its own, but by then
-    // its loop has exited, and an isochronous stream's in-flight transfers
+    // Close the network adapter, the streams and the generic transfers' claims
+    // first, the way a program's own stop() calls do, while the host task is
+    // still running and retiring their transfers. The task's teardown closes
+    // the streams again, but by then its loop has exited, and an isochronous stream's in-flight transfers
     // only retire when something pumps the client. A microphone stream left
     // open across host_stop() kept them in flight: the client couldn't
     // deregister, the root port power-off didn't release the device, and the
@@ -1136,10 +1069,6 @@ void usbif_host_stop_c(void) {
     usbif_net_stop();
     usbif_stream_close_all();
     usbif_xfer_close();
-    usbif_cdc_close();
-    usbif_hid_close();
-    usbif_host_midi_close();
-    usbif_msc_close();
     usbif_host_task_running = false;
     // Bounded in milliseconds, not ticks: see USBIF_HOST_STOP_WAIT_MS.
     const TickType_t stop_limit = USBIF_MS_TICKS(USBIF_HOST_STOP_WAIT_MS);
@@ -1189,7 +1118,7 @@ bool usbif_host_is_running(void) {
     return usbif_host_task_handle != NULL;
 }
 
-// For class drivers (usbif_host_cdc.c): the client everything is opened
+// For the transfer, stream and net layers: the client everything is opened
 // under, and a device lookup by the dev_id the event transport reported.
 usb_host_client_handle_t usbif_host_client_get(void) {
     return usbif_host_client;

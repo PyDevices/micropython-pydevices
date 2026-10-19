@@ -210,7 +210,7 @@ out:
 }
 
 // Release with the lock held. Retries while the client pump retires the
-// cancellations, as the class drivers do (usbif_host_cdc.c).
+// cancellations.
 static int usbif_xfer_release_locked(usbif_xfer_claim_t *c) {
     usbif_xfer_drop_pipes(c->dev, c->itf, false);
     esp_err_t err = ESP_FAIL;
