@@ -79,7 +79,7 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   - [`ppa/`](modules/ppa/): scale, rotate, convert and fill pixel buffers, on the
     ESP32-P4's Pixel Processing Accelerator or in portable C elsewhere.
   - [`tsmux/`](modules/tsmux/): MPEG-TS and HLS segments from H.264.
-- [`patches/micropython/`](patches/micropython/) — our patch series (`0001-…` to `0039-…`; there
+- [`patches/micropython/`](patches/micropython/) — our patch series (`0001-…` to `0040-…`; there
   is no `0026`, whose fix moved into `patches/tinyusb/`), each justified
   in its own header; [`patches/apply_patches.py`](patches/apply_patches.py) applies it, plus
   each module's own MicroPython patches, once, as one local commit.

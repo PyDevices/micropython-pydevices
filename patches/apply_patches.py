@@ -153,11 +153,13 @@ def prepare(mp, upstream, patches, refresh=False):
         head = git(mp, "log", "-1", "--format=%h", capture=True)
         print(f"overlay already applied: {head} on {upstream}", flush=True)
     else:
-        dirty = [
-            line
-            for line in git(mp, "status", "--porcelain", "--untracked-files=no", capture=True).splitlines()
-            if not line.startswith(" m")
-        ]
+        # A submodule with edits inside it doesn't count (micropython-lib carries
+        # ours, taken off and put back below; a port's build can touch its own).
+        # --porcelain spells that " M", like a submodule moved to another
+        # commit, so it is git that leaves them out, not a match on the letter.
+        dirty = git(
+            mp, "status", "--porcelain", "--untracked-files=no", "--ignore-submodules=dirty", capture=True
+        ).splitlines()
         if dirty:
             sys.exit(f"{mp} has uncommitted changes; commit or discard them first")
         if git(mp, "describe", "--tags", "--exact-match", check=False, capture=True) != upstream:

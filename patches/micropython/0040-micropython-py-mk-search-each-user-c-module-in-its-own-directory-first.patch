@@ -1,0 +1,56 @@
+From f1459480609fefd9b8b9452102dc3725d0626378 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 14:06:26 -0500
+Subject: [PATCH] py/py.mk: search each user C module's own directory first.
+
+py.mk names a user C module's sources <module>/<file>.c and mkrules.mk
+finds them through vpath, whose list holds the parent directory of every
+module in the build, sorted. When the modules come from different places,
+that list can put another directory first that also holds a directory of
+the module's name, such as an older checkout of the module beside one of
+the others. Its copy of a file is then the one compiled, with no warning,
+and linked against the module's own headers and its other files.
+
+Seen with micropython-pydevices: its displayif lives in modules/displayif,
+and audiodsp is a sibling checkout linked in, so audiodsp's parent, which
+also held a standalone displayif checkout from before the module moved in,
+sorted first. Three of displayif's files came from the old checkout. A
+planted #error in a stray copy shows it in a few seconds.
+
+Each module now gets a vpath directive of its own, <name>/%.c (and .cpp,
+.S, .s) in its own parent directory, before the shared one in mkrules.mk;
+make searches directives in the order they appear. A build whose modules
+all share one parent resolves exactly as before. CMake ports name module
+sources by absolute path and never had the problem.
+
+Unchanged upstream as of b70ae1aca.
+---
+ py/py.mk | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/py/py.mk b/py/py.mk
+index 558f37d7d..fd55cf806 100644
+--- a/py/py.mk
++++ b/py/py.mk
+@@ -89,6 +89,18 @@ $(foreach _MDIR, $(USERMOD_DIRS), \
+ # cexample/foo.c (produced by the patsubst above) resolve to source files.
+ USERMOD_DIR_PARENTS := $(sort $(foreach _MDIR, $(USERMOD_DIRS), $(patsubst %/,%,$(dir $(_MDIR)))))
+ 
++# Each module's own directory first. The search list mkrules.mk gives vpath
++# holds every module's parent directory, sorted, so when modules come from
++# different places, a directory of the same name beside another module's
++# parent (an older checkout of the module, say) can come first, and its copy
++# of a file is the one compiled, with no warning. make searches vpath
++# directives in the order they appear, and these come before mkrules.mk's.
++$(foreach _MDIR, $(USERMOD_DIRS), \
++    $(foreach _EXT, c cpp S s, \
++        $(eval vpath $(notdir $(_MDIR))/%.$(_EXT) $(patsubst %/,%,$(dir $(_MDIR)))) \
++    ) \
++)
++
+ CFLAGS += $(CFLAGS_USERMOD)
+ CXXFLAGS += $(CXXFLAGS_USERMOD)
+ LDFLAGS += $(LDFLAGS_USERMOD)
+-- 
+2.43.0
+

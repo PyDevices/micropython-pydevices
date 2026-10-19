@@ -21,15 +21,6 @@ $(error audioif: audiodsp not found (looked in USER_C_MODULES and at $(AUDIODSP_
 endif
 
 CFLAGS_USERMOD += -I$(AUDIODSP_DIR)/src
-# py.mk names these sources audioif/<file>.c and finds them through vpath,
-# whose list holds the PARENT directory of every module in the build, sorted.
-# A module linked in from elsewhere (audiodsp beside this repository) puts
-# that elsewhere on the list, and if it also holds an audioif/ -- an older
-# standalone checkout of this module -- its copy of _audioif.c is the one
-# compiled, silently, with this directory's new files linked against it.
-# make searches vpath directives in the order they appear, and this one
-# comes before py/mkrules.mk's, so these files are found here first.
-vpath audioif/%.c $(abspath $(AUDIOPUMP_MOD_DIR)/..)
 
 SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/_audioif.c
 SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audiobusio.c
