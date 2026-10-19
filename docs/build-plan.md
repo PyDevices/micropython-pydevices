@@ -116,7 +116,10 @@ for every esp32 build, `sdkconfig.<chip>` (the chip read from the board's
    and may carry an `mpconfigboard.h`, included before the board's own, for
    a C define the ESP-IDF components read too (they see the board header
    but not `MICROPY_DEF_BOARD`; `WIFI6_DEV_KIT`'s `MICROPY_HW_USB_HS` is
-   one).
+   one). It may also carry a `manifest.py`, which the build freezes instead
+   of `modules/manifest.py`: it includes that file and adds what only this
+   board freezes. `WIFI6_DEV_KIT_H2`'s adds usbif's USB packages and
+   midiports, so its apps run without a mip install.
 
 On the S2, S3 and P4 the build also patches TinyUSB, which the port takes
 from the IDF component manager and so the overlay can't reach. It checks out

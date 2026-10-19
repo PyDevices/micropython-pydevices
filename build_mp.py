@@ -400,6 +400,17 @@ def our_variant_dir(port, variant):
     return d if d.is_dir() else None
 
 
+def frozen_manifest(port, board, variant):
+    """The manifest a build freezes. A variant of ours, of a port or of a
+    board, may carry a manifest.py that includes modules/manifest.py and adds
+    what only that variant freezes; every other build freezes
+    modules/manifest.py itself."""
+    mine = board_variant_dir(port, board, variant) if board else our_variant_dir(port, variant)
+    if mine and (mine / "manifest.py").exists():
+        return mine / "manifest.py"
+    return MODULES_DIR / "manifest.py"
+
+
 def module_choices():
     return sorted(p.name for p in MODULES_DIR.iterdir() if p.is_dir() and not p.name.startswith("."))
 
@@ -1214,8 +1225,7 @@ def main():
     make = ["make", "-C", str(port_dir), "-j", JOBS, f"BUILD={build.as_posix()}", *winpy]
     prefix = ""
     ours = our_variant_dir(port, variant) if not board else None
-    manifest = ours / "manifest.py" if ours and (ours / "manifest.py").exists() else MODULES_DIR / "manifest.py"
-    make.append(f"FROZEN_MANIFEST={manifest.as_posix()}")
+    make.append(f"FROZEN_MANIFEST={frozen_manifest(port, board, variant).as_posix()}")
     if board:
         make.append(f"BOARD={board}")
         if variant:
