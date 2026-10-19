@@ -49,6 +49,8 @@ typedef struct {
     uint16_t frame;
     // IN: UVC payloads into whole frames, each led in the ring by its length.
     bool video;
+    // IN: stereo 16-bit PCM averaged to mono as each packet lands.
+    bool downmix;
     uint32_t max_frame;     // video: bigger frames are dropped; 0 for any
 } usbif_stream_cfg_t;
 

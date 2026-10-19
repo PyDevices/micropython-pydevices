@@ -306,6 +306,29 @@ class TestMicrophone(unittest.TestCase):
         mic.stop()
         self.assertEqual(mic.read(buf), 0)
 
+    def test_a_stereo_only_mic_downmixes_to_mono_when_asked(self):
+        host.reset(_uac2_blob(ep=0x83))           # a 2.0 capture stream, stereo only
+        mic = Microphone(device(), rate=48000, channels=1)
+        self.assertTrue(mic.downmix)
+        self.assertEqual((mic.channels, mic.frame_bytes, mic.stream.channels), (1, 2, 2))
+        mic.start()
+        stream = [c for c in host.calls if c[0] == "stream"][0]
+        self.assertEqual(stream[3], {"rate": 0, "frame": 2, "downmix": True})
+        ring = host.streams[mic.stream.endpoint]
+        ring.write(bytes(range(10)))                # mono frames, as C leaves them
+        buf = bytearray(7)
+        self.assertEqual(mic.read(buf), 6)         # whole 2-byte frames
+        mic.stop()
+
+    def test_stereo_asked_of_a_stereo_mic_is_not_downmixed(self):
+        host.reset(_uac2_blob(ep=0x83))
+        mic = Microphone(device(), rate=48000, channels=2)
+        self.assertFalse(mic.downmix)
+        mic.start()
+        stream = [c for c in host.calls if c[0] == "stream"][0]
+        self.assertNotIn("downmix", stream[3])
+        mic.stop()
+
     def test_feeds_an_audiopump_ring_directly(self):
         host.reset(_CODEC)
         mic = Microphone(device(), rate=48000, bits=16)

@@ -92,14 +92,21 @@ class _Stream:
         self._id = dev._id
         found = _streams(dev)
         s = _uac.choose(found, self._direction, rate, channels, bits)
+        self.downmix = False
+        if s is None and channels == 1 and self._direction == _uac.IN and bits in (None, 16):
+            # A stereo-only microphone (a webcam's, often) for a mono
+            # consumer: take its 16-bit stereo, and C averages each frame to
+            # one sample as the packets land.
+            s = _uac.choose(found, self._direction, rate, 2, 16)
+            self.downmix = s is not None
         if s is None:
             raise ValueError("no %s stream matching rate=%s channels=%s bits=%s; it offers: %s" % (
                 self._direction, rate, channels, bits, ", ".join(_uac.describe(x) for x in found)))
         self.stream = s
         self.rate = rate or (max(s.rates) if s.rates else 48000)
-        self.channels = s.channels
+        self.channels = 1 if self.downmix else s.channels
         self.bits = s.bits
-        self.frame_bytes = s.channels * s.frame_bytes
+        self.frame_bytes = self.channels * s.frame_bytes
         self._ring_bytes = _DEFAULT_RING
         if ring_ms:
             self._ring_bytes = max(1, (self.rate * ring_ms + 999) // 1000) * self.frame_bytes
@@ -142,8 +149,12 @@ class _Stream:
                           "usb.core.start(classes=(\"uac\",))" % e)
         self._set_rate()
         try:
-            _usbif.host_stream(self._id, s.endpoint, ring, s.max_packet & 0x7FF, rate=rate,
-                               frame=self.frame_bytes)
+            if self.downmix:
+                _usbif.host_stream(self._id, s.endpoint, ring, s.max_packet & 0x7FF, rate=rate,
+                                   frame=self.frame_bytes, downmix=True)
+            else:
+                _usbif.host_stream(self._id, s.endpoint, ring, s.max_packet & 0x7FF, rate=rate,
+                                   frame=self.frame_bytes)
         except BaseException:
             self._park()
             raise
@@ -216,7 +227,11 @@ class Speaker(_Stream):
 
 
 class Microphone(_Stream):
-    """A USB microphone or audio interface input: PCM read here."""
+    """A USB microphone or audio interface input: PCM read here.
+
+    ``channels=1`` on a microphone that only offers two (16-bit) gives one
+    anyway: each frame arrives as the mean of its two samples, and
+    ``downmix`` is True."""
 
     _direction = _uac.IN
 

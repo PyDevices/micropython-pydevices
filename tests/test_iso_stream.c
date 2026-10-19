@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "shared/usbif_downmix.h"
 #include "shared/usbif_iso_pace.h"
 #include "shared/usbif_uvc_frame.h"
 
@@ -211,7 +212,47 @@ static void test_frames(void) {
         (unsigned)fr.frames, (unsigned)fr.dropped_full);
 }
 
+// --- downmix -------------------------------------------------------------------
+
+static void put16(uint8_t *p, int v) {
+    p[0] = (uint8_t)(v & 0xFF);
+    p[1] = (uint8_t)((v >> 8) & 0xFF);
+}
+
+static int get16(const uint8_t *p) {
+    return (int16_t)(uint16_t)(p[0] | (p[1] << 8));
+}
+
+static void test_downmix(void) {
+    static const int pairs[][3] = {     // left, right, mono
+        { 1000, 3000, 2000 },
+        { -32768, -32768, -32768 },     // full scale stays full scale
+        { 32767, 32767, 32767 },
+        { 32767, -32768, -1 },          // rounds toward minus infinity
+        { 100, -100, 0 },
+        { -3, 0, -2 },
+        { 0, 20000, 10000 },            // right only: half, not nothing
+    };
+    const int count = (int)(sizeof(pairs) / sizeof(pairs[0]));
+    uint8_t buf[4 * 8 + 2];
+    for (int i = 0; i < count; i++) {
+        put16(buf + 4 * i, pairs[i][0]);
+        put16(buf + 4 * i + 2, pairs[i][1]);
+    }
+    buf[4 * count] = 0x55;              // a trailing partial frame
+    buf[4 * count + 1] = 0x55;
+    uint32_t n = usbif_downmix_s16(buf, 4 * count + 2);
+    CHECK(n == (uint32_t)(2 * count), "downmix returned %u bytes, want %d", (unsigned)n, 2 * count);
+    for (int i = 0; i < count; i++) {
+        int m = get16(buf + 2 * i);
+        CHECK(m == pairs[i][2], "downmix (%d, %d) gave %d, want %d", pairs[i][0], pairs[i][1], m,
+            pairs[i][2]);
+    }
+    CHECK(usbif_downmix_s16(buf, 3) == 0, "a packet shorter than a frame gave samples");
+}
+
 int main(void) {
+    test_downmix();
     test_pacing();
     test_frames();
     if (failures) {

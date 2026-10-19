@@ -46,6 +46,7 @@
 #include "usb/usb_host.h"
 
 #include "usbif_host_stream.h"
+#include "shared/usbif_downmix.h"
 #include "shared/usbif_iso_pace.h"
 #include "shared/usbif_iso_queue.h"
 #include "shared/usbif_pcm_sink.h"
@@ -189,15 +190,20 @@ static void usbif_stream_cb(usb_transfer_t *x) {
         uint32_t offset = 0;
         for (int i = 0; i < x->num_isoc_packets; i++) {
             usb_isoc_packet_desc_t *pkt = &x->isoc_packet_desc[i];
-            const uint8_t *data = x->data_buffer + offset;
+            uint8_t *data = x->data_buffer + offset;
             const uint32_t n = (uint32_t)pkt->actual_num_bytes;
             if (pkt->status == USB_TRANSFER_STATUS_COMPLETED && n) {
                 s->st.packets++;
                 s->st.bytes += n;
                 if (s->cfg.video) {
                     usbif_uvc_frame_payload(&s->vid, data, n);
-                } else if (s->cfg.ring.put(s->cfg.ring.ctx, data, n) < n) {
-                    s->st.dropped++;
+                } else {
+                    // The packet is ours until it's resubmitted, so a
+                    // downmix can rewrite it where it lies.
+                    const uint32_t m = s->cfg.downmix ? usbif_downmix_s16(data, n) : n;
+                    if (m && s->cfg.ring.put(s->cfg.ring.ctx, data, m) < m) {
+                        s->st.dropped++;
+                    }
                 }
             } else if (pkt->status != USB_TRANSFER_STATUS_COMPLETED) {
                 s->st.errors++;
@@ -341,6 +347,9 @@ static int usbif_stream_open_locked(uint32_t dev_id, uint8_t ep, const usbif_str
     if (cfg->video && (!in || r->stage == NULL || r->commit == NULL || r->overflow == NULL)) {
         return -MP_EINVAL;
     }
+    if (cfg->downmix && (!in || cfg->video)) {
+        return -MP_EINVAL;
+    }
     uint16_t wmax;
     uint8_t binterval, itf;
     int rc = usbif_xfer_iso_ep(dev, ep, &wmax, &binterval, &itf);
@@ -418,7 +427,7 @@ static int usbif_stream_open_locked(uint32_t dev_id, uint8_t ep, const usbif_str
     }
     printf("usbif_stream: ep 0x%02x itf %u %s, %u-byte packets, %u transfers of %u%s\n",
         (unsigned)ep, (unsigned)itf, in ? "in" : "out", (unsigned)packet, (unsigned)s->nxfer,
-        (unsigned)s->pkts, cfg->video ? ", video frames" : s->paced ? ", paced" : "");
+        (unsigned)s->pkts, cfg->video ? ", video frames" : s->paced ? ", paced" : cfg->downmix ? ", to mono" : "");
     return usbif_stream_index(s);
 }
 

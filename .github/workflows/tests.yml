@@ -67,14 +67,14 @@ jobs:
           cc -std=c11 -Wall -Wextra -Werror -Isrc \
              -o /tmp/test_iso_queue tests/test_iso_queue.c
           /tmp/test_iso_queue
-      - name: Build and run the host stream pacing and UVC framing tests
+      - name: Build and run the host stream pacing, UVC framing and downmix tests
         run: |
           cc -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -Isrc \
              -o /tmp/test_iso_stream tests/test_iso_stream.c
           /tmp/test_iso_stream
-      - name: The pacing and framing tests can fail (planted faults must be caught)
+      - name: The pacing, framing and downmix tests can fail (planted faults must be caught)
         run: |
-          for fault in USBIF_UVC_FRAME_PLANT_NO_SYNC USBIF_ISO_PACE_PLANT_DROP_REMAINDER; do
+          for fault in USBIF_UVC_FRAME_PLANT_NO_SYNC USBIF_ISO_PACE_PLANT_DROP_REMAINDER USBIF_DOWNMIX_PLANT_LEFT_ONLY; do
             cc -std=c11 -Wall -Wextra -Werror -Isrc -D$fault -o /tmp/test_iso_planted tests/test_iso_stream.c
             if /tmp/test_iso_planted > /tmp/planted.log 2>&1; then
               cat /tmp/planted.log

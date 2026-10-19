@@ -441,12 +441,13 @@ static uint32_t usbif_ring_put(void *r, const uint8_t *src, uint32_t n) {
 #endif
 
 // host_stream(dev_id, ep, ring, packet=0, *, rate=0, frame=0, video=False,
-// max_frame=0): start moving ep's packets to (IN) or from (OUT) ring. The
-// endpoint's interface must be claimed at its streaming alternate setting.
-// rate and frame pace a PCM OUT stream; video assembles UVC frames, each led
-// in the ring by its 4-byte length. host_stream(dev_id, ep, None) stops it.
+// max_frame=0, downmix=False): start moving ep's packets to (IN) or from
+// (OUT) ring. The endpoint's interface must be claimed at its streaming
+// alternate setting. rate and frame pace a PCM OUT stream; video assembles
+// UVC frames, each led in the ring by its 4-byte length; downmix averages a
+// stereo 16-bit IN stream to mono as its packets land. host_stream(dev_id, ep, None) stops it.
 static mp_obj_t usbif_host_stream_py(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
-    enum { ARG_dev, ARG_ep, ARG_ring, ARG_packet, ARG_rate, ARG_frame, ARG_video, ARG_max_frame };
+    enum { ARG_dev, ARG_ep, ARG_ring, ARG_packet, ARG_rate, ARG_frame, ARG_video, ARG_max_frame, ARG_downmix };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_dev, MP_ARG_REQUIRED | MP_ARG_INT, {.u_int = 0} },
         { MP_QSTR_ep, MP_ARG_REQUIRED | MP_ARG_INT, {.u_int = 0} },
@@ -456,6 +457,7 @@ static mp_obj_t usbif_host_stream_py(size_t n_args, const mp_obj_t *pos_args, mp
         { MP_QSTR_frame, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
         { MP_QSTR_video, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
         { MP_QSTR_max_frame, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_downmix, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
@@ -477,6 +479,7 @@ static mp_obj_t usbif_host_stream_py(size_t n_args, const mp_obj_t *pos_args, mp
         .frame = (uint16_t)args[ARG_frame].u_int,
         .video = args[ARG_video].u_bool,
         .max_frame = (uint32_t)args[ARG_max_frame].u_int,
+        .downmix = args[ARG_downmix].u_bool,
     };
     void *ptr = MP_OBJ_TO_PTR(ring);
     bool known = false;
