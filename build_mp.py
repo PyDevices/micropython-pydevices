@@ -173,9 +173,8 @@ def ensure_micropython(ws):
     if ws:
         link(MP, ws / "micropython")
     else:
-        upstream = (REPO / "UPSTREAM").read_text().strip()
-        say(f"cloning MicroPython {upstream}")
-        run(["git", "-c", "advice.detachedHead=false", "clone", "-q", "--depth", "1", "--branch", upstream, "https://github.com/micropython/micropython", str(MP)])
+        # UPSTREAM is a tag or a full commit: clone --branch takes only the first.
+        clone_at("https://github.com/micropython/micropython", (REPO / "UPSTREAM").read_text().strip(), MP)
 
 
 # lvgl-bindings is pinned in modules.lock beside the modules, but it is not a
