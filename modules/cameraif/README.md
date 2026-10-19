@@ -30,6 +30,11 @@ as a dict passed as `sensor=`. No firmware build is needed for a new one; see
 Proven on an ESP32-P4 with an OV5647 at 800x800 and an IMX219 (Raspberry Pi
 Camera v2) at up to 1920x1080.
 
+Coming from CircuitPython? On an ESP32-P4, `cameraif` is also `espcamera`,
+with its `take()`, `pixel_format`, `frame_size`, `reconfigure()` and its
+controls as properties. Your code runs with only the constructor changed:
+[Written for espcamera](#written-for-espcamera).
+
 ## Why a C module
 
 Three things in the path are not reachable from Python, and each is the
@@ -136,7 +141,9 @@ time — the P4 has one CSI controller — and constructing a second one raises.
 | `xclk` | `-1` | Pin to generate the sensor's clock on, `-1` if the board has an oscillator |
 | `xclk_hz` | `24000000` | Frequency for that clock |
 | `format` | `None` | Sensor format by name or index; `None` picks the driver's default |
-| `pixel_format` | `None` | `"rgb565"` (default) or `"yuv422"` |
+| `pixel_format` | `None` | What `take()` returns: a `PixelFormat` (`RGB565`, the default, `GRAYSCALE` or `JPEG`). Or `"rgb888"`, for 24-bit frames from `frame()` and `capture()` |
+| `frame_size` | `None` | The size `take()` returns, a `FrameSize`; `None` is the sensor's own ([below](#written-for-espcamera)) |
+| `jpeg_quality` | `80` | `take()`'s JPEG quality, 1-100, higher is better |
 | `raw` | `False` | Bypass the ISP and hand back the sensor's raw bytes |
 | `lane_mbps` | `0` | Override the driver's MIPI lane bit rate; `0` trusts it |
 | `exposure` | `None` | Initial exposure, 0–100 percent of the sensor's range |
@@ -290,8 +297,8 @@ is there for when you do mean the sensor's own numbers.
 | `controls()` | `{name: (min, max, step)}` for what this driver implements |
 | `exposure(pct=None, *, raw=False)` | Shutter or AE target, depending on the driver |
 | `gain(pct=None, *, raw=False)` | Gain. Tries absolute `GAIN`, falls back to analogue `ANGAIN` |
-| `flip(on=None)` | Vertical flip, in the sensor. A bool |
-| `mirror(on=None)` | Horizontal mirror, in the sensor. A bool |
+| `flip(on=None)` | Vertical flip, in the sensor. A bool. Also the `vflip` property |
+| `mirror(on=None)` | Horizontal mirror, in the sensor. A bool. Also the `hmirror` property |
 | `bayer()` | The colour order the ISP opened with |
 | `awb(on=None)` | Automatic white balance. A bool |
 | `wb_gains(red=None, blue=None)` | The white balance's red and blue gains (green is 1). Setting them turns `awb` off |
@@ -308,10 +315,12 @@ three: the matrix and gamma from the sensor's tuning (Espressif's, for the
 OV5647; an identity matrix for a sensor without one), and the white balance
 from the ISP's own statistics while `awb` is on.
 
-**Change flip or mirror at open, not afterwards, if you want true colours.**
-Either one moves the sensor's 2×2 colour cell, and the ISP's order is fixed
-when the camera opens, so `flip()` or `mirror()` on a running camera tints
-the picture. Close the camera and open it again with `flip=` and `mirror=`.
+**Flipping moves the colour order, and the camera follows it.** Either flip
+moves the sensor's 2×2 colour cell, so the ISP's Bayer order changes with it,
+whether you flip at open (`flip=`, `mirror=`) or on a running camera
+(`flip()`, `mirror()`, `vflip`, `hmirror`). `bayer=` fixes the order instead.
+The OV5647 draws its test pattern after the flip, so the pattern neither turns
+over nor keeps its colours when you flip it; judge a flip by a real scene.
 
 **Reading a control returns `None` when the driver cannot answer**, rather
 than a number. This matters more than it looks: the OV5647 driver's
@@ -320,6 +329,10 @@ version of this module ignored that return code and handed back the zero it
 had initialised — reporting a confident, plausible exposure of 0 for a
 sensor that cannot report anything. Setting still works; only reading is
 unavailable, and `None` is how it says so.
+
+The flips and the `espcamera` properties are the exception: where the driver
+can't read one back, they return what you last set (the camera sets both
+flips when it opens), and `None` only for a control nobody has set.
 
 `test_pattern()` reads back what was last *asked for*, not what the sensor
 reports — the ioctl behind it has no read side. Said plainly here because a
@@ -341,7 +354,7 @@ case it saves someone the same hour:
 | | set | read | notes |
 |---|---|---|---|
 | `exposure` | yes, 2–235 | no | `ov5647_set_AE_target` — an auto-exposure target, not a raw shutter time |
-| `flip`, `mirror` | yes | no | |
+| `flip`, `mirror` | yes | no | Read back as last set |
 | `gain` | **no** | no | The driver implements neither `GAIN` nor `ANGAIN` |
 | `test_pattern` | yes | — | ioctl, set-only by design |
 
@@ -376,11 +389,93 @@ heap is wiped — so an interrupted session leaves the CSI controller, the ISP,
 the LDO and the sensor's stream all stopped, not half-running into memory
 that no longer exists.
 
+## Written for espcamera
+
+CircuitPython's [`espcamera`](https://docs.circuitpython.org/en/latest/shared-bindings/espcamera/)
+is the camera API CircuitPython code is written against, and on an ESP32-P4
+this module answers to it. `import espcamera` gives you `cameraif`, with
+espcamera's `take()`, `reconfigure()`, enums and properties. Only the
+constructor differs, because espcamera's takes the DVP data pins of an
+ESP32-S3 camera and this camera is on the CSI connector:
+
+```python
+import espcamera
+
+# espcamera.Camera(data_pins=..., pixel_clock_pin=..., i2c=board.I2C(), ...) becomes
+cam = espcamera.Camera(7, 8, i2c=1,
+                       pixel_format=espcamera.PixelFormat.RGB565,
+                       frame_size=espcamera.FrameSize.QVGA)
+cam.vflip = True
+frame = cam.take(1)                 # 320x240 RGB565
+
+cam.reconfigure(pixel_format=espcamera.PixelFormat.JPEG, frame_size=espcamera.FrameSize.SVGA)
+open("still.jpg", "wb").write(cam.take(1))
+```
+
+**`take(timeout=0.25)`** waits up to `timeout` seconds and returns the frame,
+or `None`. In `RGB565` and `GRAYSCALE` that's the pixels: a read-only
+`displayio.Bitmap` on CircuitPython, as espcamera returns, and a read-only
+`memoryview` on MicroPython. It is borrowed, valid until the next `take()`.
+In `JPEG` it's a `memoryview` of the encoded bytes, so
+`isinstance(frame, memoryview)` tells the two apart on CircuitPython, as it
+does with espcamera.
+
+**`frame_size`** is what `take()` returns, not the sensor's mode, so
+switching costs nothing: `reconfigure()` changes it on a running camera
+without reopening anything. The sensor keeps the mode you opened it in
+(`format=`, see `formats()`), and `take()` crops the frame to the
+`FrameSize`'s shape and scales it on the P4's PPA. The crop is centred, at
+the largest size the PPA scales exactly in hardware (it scales in
+sixteenths). From the OV5647's 800x800, `SVGA` keeps 800x600 of the frame, and
+`QVGA` and `VGA` keep 640x480. Left as `None`, `take()` returns the sensor's
+own frame with no copy at all. None of it costs frames: on the OV5647 at
+800x800, `take()` keeps the sensor's 35.7 fps natively, scaled to `QVGA`,
+`HVGA`, `VGA` and `SVGA`, in `GRAYSCALE` at `QQVGA`, and as a JPEG natively
+and at `SVGA`. `GRAYSCALE` and any `FrameSize` need
+[ppa](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/ppa)
+in the firmware, and `JPEG` needs
+[jpegio](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/jpegio).
+
+**The controls are properties**, with espcamera's names, mapped onto the
+`esp_cam_sensor` parameters that `controls()` reports:
+
+| espcamera | `controls()` | What it reaches | On the OV5647 |
+|---|---|---|---|
+| `vflip`, `hmirror` | `flip`, `mirror` | `VFLIP`, `HMIRROR` | yes |
+| `aec_value` | `exposure` | `EXPOSURE_VAL`, in the sensor's units | yes: its auto-exposure target, 2-235 |
+| `agc_gain` | `gain` | `GAIN`, or `ANGAIN` | no |
+| `brightness`, `contrast`, `saturation`, `sharpness`, `denoise` | the same | the parameter of that name | no |
+| `whitebal` | `awb` | `AWB`; without one, the ISP's white balance (`awb()`) | yes, the ISP's |
+| `gain_ctrl` | `agc` | `AGC` | no |
+| `exposure_ctrl`, `ae_level`, `wb_mode`, `special_effect`, `lenc` | the same | `AE_CONTROL`, `AE_LEVEL`, `WB`, `SPECIAL_EFFECT`, `LENC` | no |
+| `colorbar` | | the sensor's test pattern (`test_pattern()`) | yes |
+| `quality` | | `take()`'s JPEG quality, 1-100 | yes |
+
+A control the sensor lacks raises `AttributeError`, as espcamera does, naming
+the sensor and pointing at `controls()`. So `hasattr(cam, "agc_gain")` is the
+question to ask. `gain_ceiling`, `aec2`, `awb_gain`, `dcw`, `bpc`, `wpc` and
+`raw_gma` have nothing behind them on any `esp_cam_sensor` driver and always
+raise. Values are the sensor's own, as in espcamera, not the percentages that
+`exposure()` and `gain()` take.
+
+Also there: `pixel_format`, `frame_size`, `width` and `height` (of what `take()`
+returns), `sensor_name`, `address`, `supports_jpeg`, `max_frame_size` (the
+largest `FrameSize` the sensor's mode holds), `frame_available`, the
+`GrabMode` and `GainCeiling` enums, and `with` blocks. `grab_mode` and
+`framebuffer_count` are accepted by `reconfigure()`. The camera always keeps
+two buffers and `take()` always returns the newest frame, so they read back as
+`GrabMode.LATEST` and `2`.
+
+What stays this module's own: the constructor, `frame()`, `capture()`,
+`capture_jpeg()`, `capture_scaled()`, `capture_yuy2()`, `controls()` and the
+ISP's tuning. Those names keep working as they did.
+
 ## Examples
 
 | File | What it shows |
 |---|---|
 | [`camera_preview.py`](examples/camera_preview.py) | The camera on the board's own panel. No PC, no network, no USB |
+| [`camera_espcamera.py`](examples/camera_espcamera.py) | espcamera's API: `take()`, `reconfigure()`, `vflip` and `hmirror`, a JPEG |
 | [`camera_snapshot.py`](examples/camera_snapshot.py) | A still to the filesystem as hardware-encoded JPEG |
 | [`camera_mjpeg.py`](examples/camera_mjpeg.py) | An MJPEG server any browser can open |
 | [`camera_still.py`](examples/camera_still.py) | Live view, BOOT button takes the picture. The one that feels like a camera |

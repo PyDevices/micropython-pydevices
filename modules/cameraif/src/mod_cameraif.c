@@ -64,6 +64,9 @@
 // On CircuitPython the SCCB bus can be a busio.I2C (board.I2C(), say): the
 // camera joins that bus rather than guessing which I2C port it landed on.
 #include "shared-bindings/busio/I2C.h"
+#if CIRCUITPY_DISPLAYIO
+#include "shared-bindings/displayio/Bitmap.h"
+#endif
 #endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -105,7 +108,9 @@ typedef struct {
 extern ppa_mod_client_t *ppa_mod_open(int hw) __attribute__((weak));
 extern void ppa_mod_close(ppa_mod_client_t *c) __attribute__((weak));
 extern const char *ppa_mod_srm(ppa_mod_client_t *c, const ppa_mod_srm_t *op) __attribute__((weak));
+extern bool ppa_mod_used_hw(ppa_mod_client_t *c) __attribute__((weak));
 #define CAMERAIF_PPA_RGB565 0
+#define CAMERAIF_PPA_GRAY8 3
 #define CAMERAIF_PPA_YUY2 4
 
 extern mp_obj_t jpegio_encode(const void *pixels, size_t len, int width, int height, size_t stride,
@@ -170,6 +175,19 @@ typedef struct {
     uint8_t ae_target;
     uint8_t ae_skip;            // frames left before the sensor shows the last change
     int32_t ae_e, ae_g;         // what the loop last set, for drivers that can't read back (-1: nothing yet)
+    // espcamera's shape: what take() hands back. take_fmt is a PixelFormat
+    // (CAMERAIF_PF_NONE on an rgb888 or raw camera, where take() is frame());
+    // take_size a FrameSize, or -1 for the sensor's own size.
+    uint8_t take_fmt;
+    int8_t take_size;
+    uint8_t quality;            // take()'s JPEG quality, 1-100
+    uint8_t addr;               // the sensor's SCCB address
+    uint8_t *take_buf;          // where the PPA writes a scaled or grey frame
+    size_t take_len;
+    // The last value set for each control, for drivers that can't read one
+    // back (the OV5647's can't read any): one per row of cameraif_ctls.
+    int32_t ctl_last[24];
+    uint32_t ctl_known;
 } cameraif_obj_t;
 
 // One camera, mirrored in BSS.
@@ -218,10 +236,131 @@ static bool IRAM_ATTR cameraif_on_trans_finished(esp_cam_ctlr_handle_t handle,
 
 // --- helpers -------------------------------------------------------------
 
+// The controls, by espcamera's name and by the name controls() reports, onto
+// esp_cam_sensor's parameter ids. One table, so the two can't disagree: a
+// control is present when the driver answers query_para_desc for its id, and
+// that is what controls() lists and what the properties check. agc_gain has
+// two rows because drivers disagree on the id (absolute GAIN or analogue
+// ANGAIN); the first one the driver has wins.
+enum { CAMERAIF_CTL_INT, CAMERAIF_CTL_BOOL };
+typedef struct {
+    uint16_t name;      // espcamera's property
+    uint16_t ctl;       // controls()' key
+    uint32_t id;
+    uint8_t kind;
+} cameraif_ctl_t;
+static const cameraif_ctl_t cameraif_ctls[] = {
+    { MP_QSTR_aec_value,      MP_QSTR_exposure,       ESP_CAM_SENSOR_EXPOSURE_VAL,  CAMERAIF_CTL_INT },
+    { MP_QSTR_agc_gain,       MP_QSTR_gain,           ESP_CAM_SENSOR_GAIN,          CAMERAIF_CTL_INT },
+    { MP_QSTR_agc_gain,       MP_QSTR_gain,           ESP_CAM_SENSOR_ANGAIN,        CAMERAIF_CTL_INT },
+    { MP_QSTR_vflip,          MP_QSTR_flip,           ESP_CAM_SENSOR_VFLIP,         CAMERAIF_CTL_BOOL },
+    { MP_QSTR_hmirror,        MP_QSTR_mirror,         ESP_CAM_SENSOR_HMIRROR,       CAMERAIF_CTL_BOOL },
+    { MP_QSTR_brightness,     MP_QSTR_brightness,     ESP_CAM_SENSOR_BRIGHTNESS,    CAMERAIF_CTL_INT },
+    { MP_QSTR_contrast,       MP_QSTR_contrast,       ESP_CAM_SENSOR_CONTRAST,      CAMERAIF_CTL_INT },
+    { MP_QSTR_saturation,     MP_QSTR_saturation,     ESP_CAM_SENSOR_SATURATION,    CAMERAIF_CTL_INT },
+    { MP_QSTR_sharpness,      MP_QSTR_sharpness,      ESP_CAM_SENSOR_SHARPNESS,     CAMERAIF_CTL_INT },
+    { MP_QSTR_denoise,        MP_QSTR_denoise,        ESP_CAM_SENSOR_DENOISE,       CAMERAIF_CTL_INT },
+    { MP_QSTR_whitebal,       MP_QSTR_awb,            ESP_CAM_SENSOR_AWB,           CAMERAIF_CTL_BOOL },
+    { MP_QSTR_gain_ctrl,      MP_QSTR_agc,            ESP_CAM_SENSOR_AGC,           CAMERAIF_CTL_BOOL },
+    { MP_QSTR_exposure_ctrl,  MP_QSTR_exposure_ctrl,  ESP_CAM_SENSOR_AE_CONTROL,    CAMERAIF_CTL_BOOL },
+    { MP_QSTR_ae_level,       MP_QSTR_ae_level,       ESP_CAM_SENSOR_AE_LEVEL,      CAMERAIF_CTL_INT },
+    { MP_QSTR_wb_mode,        MP_QSTR_wb_mode,        ESP_CAM_SENSOR_WB,            CAMERAIF_CTL_INT },
+    { MP_QSTR_special_effect, MP_QSTR_special_effect, ESP_CAM_SENSOR_SPECIAL_EFFECT, CAMERAIF_CTL_INT },
+    { MP_QSTR_lenc,           MP_QSTR_lenc,           ESP_CAM_SENSOR_LENC,          CAMERAIF_CTL_BOOL },
+};
+_Static_assert(MP_ARRAY_SIZE(cameraif_ctls) <= 24, "ctl_last holds one value per row");
+
+// espcamera's PixelFormat and FrameSize. take() hands back RGB565, grey or a
+// JPEG, at the sensor's own size or scaled to a FrameSize; the ISP always
+// makes RGB565, and the PPA and the JPEG engine make the rest.
+#define CAMERAIF_PF_RGB565 0
+#define CAMERAIF_PF_GRAYSCALE 1
+#define CAMERAIF_PF_JPEG 2
+#define CAMERAIF_PF_NONE 0xff  // an rgb888 or raw camera: take() is frame()
+
+typedef struct {
+    uint16_t name;
+    uint16_t w, h;
+} cameraif_size_t;
+// espcamera's order, which is esp32-camera's framesize_t less the sizes
+// espcamera leaves out; a FrameSize is its index here.
+static const cameraif_size_t cameraif_sizes[] = {
+    { MP_QSTR_R96X96, 96, 96 },
+    { MP_QSTR_QQVGA, 160, 120 },
+    { MP_QSTR_QCIF, 176, 144 },
+    { MP_QSTR_HQVGA, 240, 176 },
+    { MP_QSTR_R240X240, 240, 240 },
+    { MP_QSTR_QVGA, 320, 240 },
+    { MP_QSTR_CIF, 400, 296 },
+    { MP_QSTR_HVGA, 480, 320 },
+    { MP_QSTR_VGA, 640, 480 },
+    { MP_QSTR_SVGA, 800, 600 },
+    { MP_QSTR_XGA, 1024, 768 },
+    { MP_QSTR_HD, 1280, 720 },
+    { MP_QSTR_SXGA, 1280, 1024 },
+    { MP_QSTR_UXGA, 1600, 1200 },
+    { MP_QSTR_FHD, 1920, 1080 },
+    { MP_QSTR_P_HD, 720, 1280 },
+    { MP_QSTR_P_3MP, 864, 1536 },
+    { MP_QSTR_QXGA, 2048, 1536 },
+    { MP_QSTR_QHD, 2560, 1440 },
+    { MP_QSTR_WQXGA, 2560, 1600 },
+    { MP_QSTR_P_FHD, 1080, 1920 },
+    { MP_QSTR_QSXGA, 2560, 1920 },
+};
+
+// Whether take() can hand back this PixelFormat at this FrameSize (-1: the
+// sensor's own) in this firmware; raises the reason when it can't.
+static void cameraif_check_take(int fmt, int size) {
+    if (fmt != CAMERAIF_PF_RGB565 && fmt != CAMERAIF_PF_GRAYSCALE && fmt != CAMERAIF_PF_JPEG) {
+        mp_raise_ValueError(MP_ERROR_TEXT("pixel_format is a PixelFormat"));
+    }
+    if (size < -1 || size >= (int)MP_ARRAY_SIZE(cameraif_sizes)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("frame_size is a FrameSize"));
+    }
+    if (fmt == CAMERAIF_PF_JPEG && jpegio_encode == NULL) {
+        mp_raise_msg(&mp_type_OSError,
+            MP_ERROR_TEXT("PixelFormat.JPEG needs the jpegio module in this firmware"));
+    }
+    if (fmt == CAMERAIF_PF_GRAYSCALE && ppa_mod_open == NULL) {
+        mp_raise_msg(&mp_type_OSError,
+            MP_ERROR_TEXT("PixelFormat.GRAYSCALE needs the ppa module in this firmware"));
+    }
+}
+
+// Set a parameter and remember it, for the drivers that can't read one back.
+static esp_err_t cameraif_set_ctl(cameraif_obj_t *c, uint32_t id, int32_t v) {
+    esp_err_t err = esp_cam_sensor_set_para_value(c->sensor, id, &v, sizeof(v));
+    if (err == ESP_OK) {
+        for (size_t i = 0; i < MP_ARRAY_SIZE(cameraif_ctls); i++) {
+            if (cameraif_ctls[i].id == id) {
+                c->ctl_last[i] = v;
+                c->ctl_known |= 1u << i;
+            }
+        }
+    }
+    return err;
+}
+
+// Read a parameter: the sensor's answer when the driver can give one, else
+// the last value set here. False when neither exists.
+static bool cameraif_get_ctl(cameraif_obj_t *c, uint32_t id, int32_t *v) {
+    if (esp_cam_sensor_get_para_value(c->sensor, id, v, sizeof(*v)) == ESP_OK) {
+        return true;
+    }
+    for (size_t i = 0; i < MP_ARRAY_SIZE(cameraif_ctls); i++) {
+        if (cameraif_ctls[i].id == id && (c->ctl_known & (1u << i))) {
+            *v = c->ctl_last[i];
+            return true;
+        }
+    }
+    return false;
+}
+
 static void cameraif_set_para(uint32_t id, int32_t v) {
     cameraif_obj_t *c = &cameraif_singleton;
     if (c->sensor) {
-        esp_cam_sensor_set_para_value(c->sensor, id, &v, sizeof(v));
+        cameraif_set_ctl(c, id, v);
     }
 }
 
@@ -298,6 +437,11 @@ static void cameraif_teardown(void) {
         heap_caps_free(c->yuy2_buf);
         c->yuy2_buf = NULL;
         c->yuy2_len = 0;
+    }
+    if (c->take_buf) {
+        heap_caps_free(c->take_buf);
+        c->take_buf = NULL;
+        c->take_len = 0;
     }
     if (c->sensor) {
         int off = 0;
@@ -701,6 +845,7 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
         ARG_format, ARG_pixel_format, ARG_raw, ARG_lane_mbps,
         ARG_exposure, ARG_gain, ARG_flip, ARG_mirror, ARG_test_pattern,
         ARG_bayer, ARG_awb, ARG_auto_exposure, ARG_black_level, ARG_sensor,
+        ARG_frame_size, ARG_jpeg_quality,
     };
     static const mp_arg_t allowed[] = {
         // Board wiring. sda/scl are required: a camera module cannot guess
@@ -740,10 +885,28 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
         { MP_QSTR_auto_exposure, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
         { MP_QSTR_black_level,  MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
         { MP_QSTR_sensor,       MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        // espcamera's: what take() returns. None is the sensor's own size.
+        { MP_QSTR_frame_size,   MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_jpeg_quality, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 80} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed),
         allowed, args);
+
+    // espcamera's arguments, checked before any hardware is touched.
+    int take_fmt = CAMERAIF_PF_RGB565;
+    mp_obj_t pf_in = args[ARG_pixel_format].u_obj;
+    if (pf_in != mp_const_none && !mp_obj_is_str(pf_in)) {
+        take_fmt = mp_obj_get_int(pf_in);
+        pf_in = mp_const_none;      // the ISP makes RGB565 for all three
+    }
+    int take_size = args[ARG_frame_size].u_obj == mp_const_none ? -1
+        : mp_obj_get_int(args[ARG_frame_size].u_obj);
+    cameraif_check_take(take_fmt, take_size);
+    const mp_int_t quality = args[ARG_jpeg_quality].u_int;
+    if (quality < 1 || quality > 100) {
+        mp_raise_ValueError(MP_ERROR_TEXT("jpeg_quality is 1..100"));
+    }
 
     // Idempotent: tear down whatever a previous camera left before building
     // a new one, rather than refusing. Refusing makes the module unusable
@@ -754,6 +917,9 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
     memset(c, 0, sizeof(*c));
     c->base.type = type;
     c->raw = args[ARG_raw].u_bool;
+    c->take_fmt = take_fmt;
+    c->take_size = take_size;
+    c->quality = quality;
 
     esp_ldo_channel_config_t ldo_cfg = {
         .chan_id = args[ARG_ldo_chan].u_int,
@@ -879,6 +1045,7 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
                 MP_ERROR_TEXT("the described sensor did not answer with its ID"));
         }
         c->sccb = io;
+        c->addr = addr;
     }
     for (esp_cam_sensor_detect_fn_t *p = &__esp_cam_sensor_detect_fn_array_start;
          c->sensor == NULL && p < &__esp_cam_sensor_detect_fn_array_end; ++p) {
@@ -896,6 +1063,7 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
         c->sensor = (*(p->detect))(&sensor_cfg);
         if (c->sensor != NULL) {
             c->sccb = io;
+            c->addr = p->sccb_addr;
             break;
         }
         esp_sccb_del_i2c_io(io);
@@ -961,8 +1129,8 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
     }
     isp_color_t isp_out = ISP_COLOR_RGB565;
     c->bytes_per_px = 2;
-    if (args[ARG_pixel_format].u_obj != mp_const_none) {
-        const char *pf = mp_obj_str_get_str(args[ARG_pixel_format].u_obj);
+    if (pf_in != mp_const_none) {
+        const char *pf = mp_obj_str_get_str(pf_in);
         if (strcmp(pf, "rgb565") == 0) {
             isp_out = ISP_COLOR_RGB565; c->bytes_per_px = 2;
         } else if (strcmp(pf, "rgb888") == 0) {
@@ -975,6 +1143,13 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
     }
     if (c->raw) {
         c->bytes_per_px = 1;
+    }
+    if (c->raw || c->bytes_per_px != 2) {
+        if (args[ARG_pixel_format].u_obj != pf_in || take_size >= 0) {
+            cameraif_teardown();
+            mp_raise_ValueError(MP_ERROR_TEXT("a PixelFormat or frame_size needs an rgb565 camera"));
+        }
+        c->take_fmt = CAMERAIF_PF_NONE;
     }
 
     c->width = chosen->width;
@@ -1188,7 +1363,7 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
     cameraif_set_para(ESP_CAM_SENSOR_HMIRROR, args[ARG_mirror].u_bool);
     if (args[ARG_test_pattern].u_bool) {
         int on = 1;
-        esp_cam_sensor_ioctl(c->sensor, ESP_CAM_SENSOR_IOC_S_TEST_PATTERN, &on);
+        c->test_pattern = esp_cam_sensor_ioctl(c->sensor, ESP_CAM_SENSOR_IOC_S_TEST_PATTERN, &on) == ESP_OK;
     }
 
     if (displayif_register_soft_reset) {
@@ -1587,7 +1762,7 @@ static mp_obj_t cameraif_para(cameraif_obj_t *c, uint32_t id, size_t n_args,
                 v -= (v - lo) % (int32_t)desc.number.step;
             }
         }
-        if (esp_cam_sensor_set_para_value(c->sensor, id, &v, sizeof(v)) != ESP_OK) {
+        if (cameraif_set_ctl(c, id, v) != ESP_OK) {
             mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("sensor rejected value"));
         }
         if (id == ESP_CAM_SENSOR_EXPOSURE_VAL || id == ESP_CAM_SENSOR_GAIN
@@ -1616,9 +1791,28 @@ static mp_obj_t cameraif_para(cameraif_obj_t *c, uint32_t id, size_t n_args,
     return MP_OBJ_NEW_SMALL_INT(((int64_t)(cur - lo) * 100) / (hi - lo));
 }
 
+// Flipping reads the array from the other end, so the colour order the ISP
+// sees moves by a row or a column; follow it, or red and blue trade places.
+// The flips come from the cache when the driver can't read them back (the
+// OV5647's can't), or this would always see an upright sensor.
+static void cameraif_follow_bayer(cameraif_obj_t *c) {
+    if (!c->isp || !c->fmt || c->bayer_fixed) {
+        return;
+    }
+    int32_t fl = 0, mi = 0;
+    cameraif_get_ctl(c, ESP_CAM_SENSOR_VFLIP, &fl);
+    cameraif_get_ctl(c, ESP_CAM_SENSOR_HMIRROR, &mi);
+    int b = cameraif_bayer_for(c->fmt, fl != 0, mi != 0, c->sensor->id.pid == CAMERAIF_OV5647_PID);
+    if (b != c->bayer) {
+        c->bayer = b;
+        isp_ll_set_bayer_mode(&ISP, (color_raw_element_order_t)b);
+    }
+}
+
 // Booleans that live in the sensor. Same parameter mechanism, but a flip is
 // on or off -- reporting it as a percentage of a two-value range would be
-// technically true and useless.
+// technically true and useless. Reading gives the sensor's answer, or what
+// was last set when the driver can't answer, or None when neither exists.
 static mp_obj_t cameraif_para_bool(cameraif_obj_t *c, uint32_t id,
     size_t n_args, const mp_obj_t *args) {
     if (!c->sensor) {
@@ -1626,26 +1820,15 @@ static mp_obj_t cameraif_para_bool(cameraif_obj_t *c, uint32_t id,
     }
     if (n_args >= 2 && args[1] != mp_const_none) {
         int32_t v = mp_obj_is_true(args[1]) ? 1 : 0;
-        if (esp_cam_sensor_set_para_value(c->sensor, id, &v, sizeof(v)) != ESP_OK) {
+        if (cameraif_set_ctl(c, id, v) != ESP_OK) {
             mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("sensor rejected value"));
         }
-        // Flipping reads the array from the other end, so the colour order
-        // the ISP sees moves by a row or a column; follow it, or red and blue
-        // trade places.
-        if ((id == ESP_CAM_SENSOR_VFLIP || id == ESP_CAM_SENSOR_HMIRROR) && c->isp && c->fmt
-            && !c->bayer_fixed) {
-            int32_t fl = 0, mi = 0;
-            esp_cam_sensor_get_para_value(c->sensor, ESP_CAM_SENSOR_VFLIP, &fl, sizeof(fl));
-            esp_cam_sensor_get_para_value(c->sensor, ESP_CAM_SENSOR_HMIRROR, &mi, sizeof(mi));
-            int b = cameraif_bayer_for(c->fmt, fl != 0, mi != 0, c->sensor->id.pid == CAMERAIF_OV5647_PID);
-            if (b != c->bayer) {
-                c->bayer = b;
-                isp_ll_set_bayer_mode(&ISP, (color_raw_element_order_t)b);
-            }
+        if (id == ESP_CAM_SENSOR_VFLIP || id == ESP_CAM_SENSOR_HMIRROR) {
+            cameraif_follow_bayer(c);
         }
     }
     int32_t cur = 0;
-    if (esp_cam_sensor_get_para_value(c->sensor, id, &cur, sizeof(cur)) != ESP_OK) {
+    if (!cameraif_get_ctl(c, id, &cur)) {
         return mp_const_none;
     }
     return mp_obj_new_bool(cur != 0);
@@ -1663,32 +1846,20 @@ static mp_obj_t cameraif_controls(mp_obj_t self_in) {
     if (!c->sensor) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("camera is deinited"));
     }
-    static const struct { uint16_t q; uint32_t id; } known[] = {
-        { MP_QSTR_exposure,   ESP_CAM_SENSOR_EXPOSURE_VAL },
-        { MP_QSTR_gain,       ESP_CAM_SENSOR_GAIN },
-        { MP_QSTR_gain,       ESP_CAM_SENSOR_ANGAIN },
-        { MP_QSTR_flip,       ESP_CAM_SENSOR_VFLIP },
-        { MP_QSTR_mirror,     ESP_CAM_SENSOR_HMIRROR },
-        { MP_QSTR_brightness, ESP_CAM_SENSOR_BRIGHTNESS },
-        { MP_QSTR_contrast,   ESP_CAM_SENSOR_CONTRAST },
-        { MP_QSTR_saturation, ESP_CAM_SENSOR_SATURATION },
-        { MP_QSTR_sharpness,  ESP_CAM_SENSOR_SHARPNESS },
-        { MP_QSTR_denoise,    ESP_CAM_SENSOR_DENOISE },
-        { MP_QSTR_awb,        ESP_CAM_SENSOR_AWB },
-        { MP_QSTR_agc,        ESP_CAM_SENSOR_AGC },
-    };
     mp_obj_t d = mp_obj_new_dict(4);
-    for (size_t i = 0; i < MP_ARRAY_SIZE(known); i++) {
-        esp_cam_sensor_param_desc_t desc = { .id = known[i].id };
-        if (esp_cam_sensor_query_para_desc(c->sensor, &desc) != ESP_OK) {
-            continue;
+    for (size_t i = 0; i < MP_ARRAY_SIZE(cameraif_ctls); i++) {
+        esp_cam_sensor_param_desc_t desc = { .id = cameraif_ctls[i].id };
+        mp_obj_t key = MP_OBJ_NEW_QSTR(cameraif_ctls[i].ctl);
+        if (mp_map_lookup(mp_obj_dict_get_map(d), key, MP_MAP_LOOKUP) != NULL
+            || esp_cam_sensor_query_para_desc(c->sensor, &desc) != ESP_OK) {
+            continue;       // gain: the first of GAIN and ANGAIN, as gain() and agc_gain take it
         }
         mp_obj_t range[3] = {
             MP_OBJ_NEW_SMALL_INT(desc.number.minimum),
             MP_OBJ_NEW_SMALL_INT(desc.number.maximum),
             MP_OBJ_NEW_SMALL_INT(desc.number.step),
         };
-        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(known[i].q), mp_obj_new_tuple(3, range));
+        mp_obj_dict_store(d, key, mp_obj_new_tuple(3, range));
     }
     return d;
 }
@@ -2035,7 +2206,433 @@ static mp_obj_t cameraif_wb_gains(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(cameraif_wb_gains_obj, 1, 3, cameraif_wb_gains);
 
+// --- espcamera's shape ---------------------------------------------------
+//
+// CircuitPython's espcamera is the camera API CircuitPython users already
+// write: take(), pixel_format and frame_size, reconfigure(), and the controls
+// as properties. Where the jobs overlap this module answers to the same
+// names, so their code runs here with only the constructor changed (which
+// stays ours: espcamera's takes DVP data pins, and this camera is MIPI-CSI).
+
+// The frame as take() hands it back. On CircuitPython, a read-only
+// displayio.Bitmap, as espcamera's take() returns; elsewhere, a read-only
+// memoryview of the pixels.
+static mp_obj_t cameraif_wrap(uint8_t *buf, uint32_t w, uint32_t h, int bits) {
+    #if defined(CIRCUITPY) && CIRCUITPY_DISPLAYIO
+    displayio_bitmap_t *bitmap = m_new_obj(displayio_bitmap_t);
+    bitmap->base.type = &displayio_bitmap_type;
+    common_hal_displayio_bitmap_construct_from_buffer(bitmap, w, h, bits, (uint32_t *)(void *)buf, true);
+    return MP_OBJ_FROM_PTR(bitmap);
+    #else
+    return mp_obj_new_memoryview('B', (size_t)w * h * bits / 8, buf);
+    #endif
+}
+
+// A JPEG of an RGB565 picture, as a memoryview: espcamera's take() returns
+// one for JPEG, and code written for it tells JPEG from pixels that way.
+static mp_obj_t cameraif_jpeg_view(cameraif_obj_t *c, const uint8_t *buf, uint32_t w, uint32_t h) {
+    mp_obj_t jpeg = jpegio_encode(buf, (size_t)w * h * 2, w, h, (size_t)w * 2, 0, false,
+        c->quality, true, -1, false, NULL);
+    return mp_call_function_1(MP_OBJ_FROM_PTR(&mp_type_memoryview), jpeg);
+}
+
+// The block of a W x H frame that scales to w x h: the target's shape, centred,
+// at a size the PPA scales exactly. It scales in sixteenths, so the block is
+// 16w/k by 16h/k for the smallest k that makes both whole and fits the frame.
+// That keeps the work in hardware at the cost of a little of the edges: from
+// the OV5647's 800x800, QVGA and VGA keep 640x480 of it, SVGA all 800x600.
+// False when no such block keeps half the frame's width or height; the
+// caller then takes the largest block and lets ppa scale it in software.
+static bool cameraif_block(uint32_t W, uint32_t H, uint32_t w, uint32_t h,
+    uint32_t *sx, uint32_t *sy, uint32_t *sw, uint32_t *sh) {
+    uint32_t mw, mh;    // the largest block of the target's shape
+    if ((uint64_t)W * h >= (uint64_t)H * w) {
+        mh = H;
+        mw = (uint32_t)((uint64_t)H * w / h);
+    } else {
+        mw = W;
+        mh = (uint32_t)((uint64_t)W * h / w);
+    }
+    bool exact = false;
+    for (uint32_t k = 1; k <= 256; k++) {
+        if ((16 * w) % k || (16 * h) % k) {
+            continue;
+        }
+        uint32_t bw = 16 * w / k, bh = 16 * h / k;
+        if (bw <= mw && bh <= mh) {
+            if (2 * bw >= mw && 2 * bh >= mh) {
+                mw = bw;
+                mh = bh;
+                exact = true;
+            }
+            break;
+        }
+    }
+    *sw = mw;
+    *sh = mh;
+    *sx = (W - mw) / 2;
+    *sy = (H - mh) / 2;
+    return exact;
+}
+
+// take(timeout=0.25) -> frame | None
+//
+// espcamera's: wait up to timeout seconds for a frame. RGB565 at the sensor's
+// own size is the frame where it landed, with no copy (borrowed, as from
+// frame(): valid until the next take() or frame()). At a FrameSize, or in
+// GRAYSCALE, the PPA writes it into a buffer of ours, valid until the next
+// take(). JPEG is a fresh memoryview of the encoded bytes.
+static mp_obj_t cameraif_take(size_t n_args, const mp_obj_t *args) {
+    cameraif_obj_t *c = MP_OBJ_TO_PTR(args[0]);
+    mp_float_t t = (n_args > 1 && args[1] != mp_const_none)
+        ? mp_obj_get_float(args[1]) : MICROPY_FLOAT_CONST(0.25);
+    mp_int_t ms = (mp_int_t)(t * 1000 + MICROPY_FLOAT_CONST(0.5));
+    if (!c->open) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("camera is deinited"));
+    }
+    const uint32_t W = c->width, H = c->height;
+    uint32_t w = W, h = H;
+    if (c->take_size >= 0) {
+        w = cameraif_sizes[c->take_size].w;
+        h = cameraif_sizes[c->take_size].h;
+    }
+    const bool native = w == W && h == H;
+    if (c->take_fmt == CAMERAIF_PF_NONE || (native && c->take_fmt == CAMERAIF_PF_RGB565)) {
+        if (!cameraif_wait_frame(c, ms, true)) {
+            return mp_const_none;
+        }
+        if (c->take_fmt == CAMERAIF_PF_NONE) {
+            return mp_obj_new_memoryview('B', c->frame_bytes, c->frame);
+        }
+        return cameraif_wrap(c->frame, W, H, 16);
+    }
+    if (native && c->take_fmt == CAMERAIF_PF_JPEG) {
+        if (!cameraif_wait_frame(c, ms, false)) {
+            return mp_const_none;
+        }
+        return cameraif_jpeg_view(c, c->frame, W, H);
+    }
+
+    // Scaled, or grey: the PPA reads the frame and writes our buffer by DMA.
+    const bool grey = c->take_fmt == CAMERAIF_PF_GRAYSCALE;
+    const size_t need = (size_t)w * h * (grey ? 1 : 2);
+    const size_t alloc = (need + 63) & ~(size_t)63;
+    ppa_mod_client_t *pc = cameraif_ppa(c);
+    if (c->take_len < alloc) {
+        if (c->take_buf) {
+            heap_caps_free(c->take_buf);
+        }
+        c->take_buf = heap_caps_aligned_calloc(64, 1, alloc, MALLOC_CAP_SPIRAM);
+        c->take_len = c->take_buf ? alloc : 0;
+        if (c->take_buf == NULL) {
+            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("no memory for take()'s frame"));
+        }
+        // Written back once, so no dirty line of ours lands on a DMA write later.
+        esp_cache_msync(c->take_buf, alloc, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    }
+    uint32_t sx, sy, sw, sh;
+    const bool exact = cameraif_block(W, H, w, h, &sx, &sy, &sw, &sh);
+    // Only software reads the frame with the CPU, and only an inexact ratio
+    // goes to software; the invalidate costs about 5 ms, so ask for it then.
+    if (!cameraif_wait_frame(c, ms, !exact)) {
+        return mp_const_none;
+    }
+    ppa_mod_srm_t op = {
+        .src = c->frame, .src_w = W, .src_h = H, .src_fmt = CAMERAIF_PPA_RGB565,
+        .sx = sx, .sy = sy, .sw = sw, .sh = sh,
+        .dst = c->take_buf, .dst_len = c->take_len, .dst_w = w, .dst_h = h,
+        .dst_fmt = grey ? CAMERAIF_PPA_GRAY8 : CAMERAIF_PPA_RGB565,
+    };
+    const char *why = ppa_mod_srm(pc, &op);
+    if (why != NULL) {
+        mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("ppa: %s"), why);
+    }
+    if (!grey && ppa_mod_used_hw(pc)) {
+        // The PPA wrote it by DMA: drop whatever the cache held.
+        esp_cache_msync(c->take_buf, alloc, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+    } else {
+        // The CPU wrote it (software, or grey's last pass): put it in memory
+        // for the JPEG engine and for the next DMA write.
+        esp_cache_msync(c->take_buf, alloc, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    }
+    if (c->take_fmt == CAMERAIF_PF_JPEG) {
+        return cameraif_jpeg_view(c, c->take_buf, w, h);
+    }
+    return cameraif_wrap(c->take_buf, w, h, grey ? 8 : 16);
+}
+static mp_obj_t cameraif_take_kw(size_t n_args, const mp_obj_t *args, mp_map_t *kw) {
+    static const qstr names[] = { MP_QSTR_timeout };
+    static const mp_obj_t defaults[] = { mp_const_none };
+    return cameraif_call_kw(cameraif_take, names, defaults, MP_ARRAY_SIZE(names), 1, n_args, args, kw);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(cameraif_take_kw_obj, 1, cameraif_take_kw);
+
+// reconfigure(frame_size=None, pixel_format=None, grab_mode=None,
+//             framebuffer_count=None)
+//
+// espcamera's: change what take() returns; None leaves a setting as it is.
+// Nothing reopens -- the sensor keeps its mode and take() scales and encodes
+// on the way out -- so this is cheap. grab_mode and framebuffer_count are
+// accepted because espcamera code passes them; this camera always keeps two
+// buffers and take() always hands back the newest frame.
+static mp_obj_t cameraif_reconfigure(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
+    enum { ARG_frame_size, ARG_pixel_format, ARG_grab_mode, ARG_framebuffer_count };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_frame_size,        MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_pixel_format,      MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_grab_mode,         MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_framebuffer_count, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+    };
+    mp_arg_val_t a[MP_ARRAY_SIZE(allowed)];
+    cameraif_obj_t *c = MP_OBJ_TO_PTR(pos[0]);
+    mp_arg_parse_all(n_args - 1, pos + 1, kw, MP_ARRAY_SIZE(allowed), allowed, a);
+    if (!c->open) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("camera is deinited"));
+    }
+    const bool fs = a[ARG_frame_size].u_obj != mp_const_none;
+    const bool pf = a[ARG_pixel_format].u_obj != mp_const_none;
+    if (!fs && !pf) {
+        return mp_const_none;
+    }
+    if (c->take_fmt == CAMERAIF_PF_NONE) {
+        mp_raise_ValueError(MP_ERROR_TEXT("a PixelFormat or frame_size needs an rgb565 camera"));
+    }
+    int fmt = pf ? mp_obj_get_int(a[ARG_pixel_format].u_obj) : c->take_fmt;
+    int size = fs ? mp_obj_get_int(a[ARG_frame_size].u_obj) : c->take_size;
+    cameraif_check_take(fmt, size);
+    c->take_fmt = fmt;
+    c->take_size = size;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(cameraif_reconfigure_obj, 1, cameraif_reconfigure);
+
+// espcamera names this module has nothing behind on any esp_cam_sensor
+// driver: they always raise, as a control a sensor lacks does.
+static const uint16_t cameraif_unmapped[] = {
+    MP_QSTR_gain_ceiling, MP_QSTR_aec2, MP_QSTR_awb_gain, MP_QSTR_dcw,
+    MP_QSTR_bpc, MP_QSTR_wpc, MP_QSTR_raw_gma,
+};
+
+// The other properties, read-only unless said.
+static const uint16_t cameraif_props[] = {
+    MP_QSTR_pixel_format, MP_QSTR_frame_size, MP_QSTR_width, MP_QSTR_height,
+    MP_QSTR_quality, MP_QSTR_colorbar, MP_QSTR_sensor_name, MP_QSTR_address,
+    MP_QSTR_supports_jpeg, MP_QSTR_max_frame_size, MP_QSTR_frame_available,
+    MP_QSTR_grab_mode, MP_QSTR_framebuffer_count,
+};
+
+static bool cameraif_qstr_in(qstr q, const uint16_t *list, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        if (list[i] == q) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// How a sensor that lacks a control says so: the same AttributeError
+// espcamera raises, for a name controls() leaves out.
+static MP_NORETURN void cameraif_no_control(cameraif_obj_t *c, qstr attr) {
+    mp_raise_msg_varg(&mp_type_AttributeError,
+        MP_ERROR_TEXT("%s has no '%q' control; controls() lists what it has"),
+        c->sensor->name ? c->sensor->name : "this sensor", attr);
+}
+
+// The FrameSize of a w x h picture, or None.
+static mp_obj_t cameraif_size_of(uint32_t w, uint32_t h) {
+    for (size_t i = 0; i < MP_ARRAY_SIZE(cameraif_sizes); i++) {
+        if (cameraif_sizes[i].w == w && cameraif_sizes[i].h == h) {
+            return MP_OBJ_NEW_SMALL_INT(i);
+        }
+    }
+    return mp_const_none;
+}
+
+// One property: load when val is MP_OBJ_NULL (the result goes to *out), store
+// otherwise. False when attr isn't one of ours, or is ours and read-only on a
+// store; either way the runtime carries on and says so.
+static bool cameraif_prop(cameraif_obj_t *c, qstr attr, mp_obj_t val, mp_obj_t *out) {
+    const cameraif_ctl_t *row = NULL;
+    bool named = false;
+    for (size_t i = 0; i < MP_ARRAY_SIZE(cameraif_ctls); i++) {
+        if (cameraif_ctls[i].name == attr) {
+            named = true;
+            break;
+        }
+    }
+    const bool unmapped = cameraif_qstr_in(attr, cameraif_unmapped, MP_ARRAY_SIZE(cameraif_unmapped));
+    if (!named && !unmapped && !cameraif_qstr_in(attr, cameraif_props, MP_ARRAY_SIZE(cameraif_props))) {
+        return false;
+    }
+    if (!c->open || !c->sensor) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("camera is deinited"));
+    }
+    if (unmapped) {
+        cameraif_no_control(c, attr);
+    }
+    const bool store = val != MP_OBJ_NULL;
+
+    if (named) {
+        // The first row of this name whose id the driver has.
+        for (size_t i = 0; i < MP_ARRAY_SIZE(cameraif_ctls); i++) {
+            esp_cam_sensor_param_desc_t desc = { .id = cameraif_ctls[i].id };
+            if (cameraif_ctls[i].name == attr
+                && esp_cam_sensor_query_para_desc(c->sensor, &desc) == ESP_OK) {
+                row = &cameraif_ctls[i];
+                break;
+            }
+        }
+        if (row == NULL) {
+            // White balance is the ISP's on every sensor that has none of its
+            // own, so whitebal reaches that rather than raising.
+            if (attr == MP_QSTR_whitebal && c->awb != NULL) {
+                if (store) {
+                    c->awb_on = mp_obj_is_true(val);
+                } else {
+                    *out = mp_obj_new_bool(c->awb_on);
+                }
+                return true;
+            }
+            cameraif_no_control(c, attr);
+        }
+        if (store) {
+            int32_t v = row->kind == CAMERAIF_CTL_BOOL ? (mp_obj_is_true(val) ? 1 : 0)
+                : (int32_t)mp_obj_get_int(val);
+            if (cameraif_set_ctl(c, row->id, v) != ESP_OK) {
+                mp_raise_msg_varg(&mp_type_ValueError,
+                    MP_ERROR_TEXT("the sensor rejected %d for '%q'"), (int)v, attr);
+            }
+            if (row->id == ESP_CAM_SENSOR_EXPOSURE_VAL || row->id == ESP_CAM_SENSOR_GAIN
+                || row->id == ESP_CAM_SENSOR_ANGAIN) {
+                c->ae_on = false;   // or the next frame would undo it
+            }
+            if (row->id == ESP_CAM_SENSOR_VFLIP || row->id == ESP_CAM_SENSOR_HMIRROR) {
+                cameraif_follow_bayer(c);
+            }
+            return true;
+        }
+        int32_t cur = 0;
+        if (!cameraif_get_ctl(c, row->id, &cur)) {
+            *out = mp_const_none;   // never set, and the driver can't say
+        } else {
+            *out = row->kind == CAMERAIF_CTL_BOOL ? mp_obj_new_bool(cur != 0) : mp_obj_new_int(cur);
+        }
+        return true;
+    }
+
+    if (attr == MP_QSTR_quality) {
+        if (store) {
+            mp_int_t q = mp_obj_get_int(val);
+            if (q < 1 || q > 100) {
+                mp_raise_ValueError(MP_ERROR_TEXT("quality is 1..100"));
+            }
+            c->quality = q;
+        } else {
+            *out = MP_OBJ_NEW_SMALL_INT(c->quality);
+        }
+        return true;
+    }
+    if (attr == MP_QSTR_colorbar) {
+        // The sensor's test pattern. Reads back what was last asked for: the
+        // ioctl behind it has no read side.
+        if (store) {
+            int on = mp_obj_is_true(val) ? 1 : 0;
+            if (esp_cam_sensor_ioctl(c->sensor, ESP_CAM_SENSOR_IOC_S_TEST_PATTERN, &on) != ESP_OK) {
+                cameraif_no_control(c, attr);
+            }
+            c->test_pattern = on != 0;
+        } else {
+            *out = mp_obj_new_bool(c->test_pattern);
+        }
+        return true;
+    }
+    if (store) {
+        return false;               // the rest are read-only
+    }
+    uint32_t w = c->width, h = c->height;
+    if (c->take_size >= 0) {
+        w = cameraif_sizes[c->take_size].w;
+        h = cameraif_sizes[c->take_size].h;
+    }
+    switch (attr) {
+        case MP_QSTR_pixel_format:
+            *out = c->take_fmt == CAMERAIF_PF_NONE ? mp_const_none : MP_OBJ_NEW_SMALL_INT(c->take_fmt);
+            break;
+        case MP_QSTR_frame_size:
+            *out = c->take_size >= 0 ? MP_OBJ_NEW_SMALL_INT(c->take_size) : cameraif_size_of(w, h);
+            break;
+        case MP_QSTR_width:
+            *out = MP_OBJ_NEW_SMALL_INT(w);
+            break;
+        case MP_QSTR_height:
+            *out = MP_OBJ_NEW_SMALL_INT(h);
+            break;
+        case MP_QSTR_sensor_name: {
+            const char *n = c->sensor->name ? c->sensor->name : "unknown";
+            *out = mp_obj_new_str(n, strlen(n));
+            break;
+        }
+        case MP_QSTR_address:
+            *out = MP_OBJ_NEW_SMALL_INT(c->addr);
+            break;
+        case MP_QSTR_supports_jpeg:
+            *out = mp_obj_new_bool(jpegio_encode != NULL && c->take_fmt != CAMERAIF_PF_NONE);
+            break;
+        case MP_QSTR_max_frame_size: {
+            // The largest FrameSize the sensor's mode holds without scaling up.
+            int best = -1;
+            uint32_t area = 0;
+            for (size_t i = 0; i < MP_ARRAY_SIZE(cameraif_sizes); i++) {
+                const cameraif_size_t *z = &cameraif_sizes[i];
+                if (z->w <= c->width && z->h <= c->height && (uint32_t)z->w * z->h > area) {
+                    area = (uint32_t)z->w * z->h;
+                    best = i;
+                }
+            }
+            *out = best < 0 ? mp_const_none : MP_OBJ_NEW_SMALL_INT(best);
+            break;
+        }
+        case MP_QSTR_frame_available:
+            *out = mp_obj_new_bool(c->frame_ready && uxSemaphoreGetCount(c->frame_ready) > 0);
+            break;
+        case MP_QSTR_grab_mode:
+            *out = MP_OBJ_NEW_SMALL_INT(1);     // GrabMode.LATEST, always
+            break;
+        case MP_QSTR_framebuffer_count:
+            *out = MP_OBJ_NEW_SMALL_INT(2);
+            break;
+        default:
+            return false;
+    }
+    return true;
+}
+
+// Properties first; everything else goes on to the methods.
+static void cameraif_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    cameraif_obj_t *c = MP_OBJ_TO_PTR(self_in);
+    if (dest[0] == MP_OBJ_NULL) {
+        if (!cameraif_prop(c, attr, MP_OBJ_NULL, &dest[0])) {
+            dest[1] = MP_OBJ_SENTINEL;
+        }
+    } else if (dest[0] == MP_OBJ_SENTINEL && dest[1] != MP_OBJ_NULL) {
+        mp_obj_t unused;
+        if (cameraif_prop(c, attr, dest[1], &unused)) {
+            dest[0] = MP_OBJ_NULL;
+        }
+    }
+}
+
+static mp_obj_t cameraif_exit(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    return cameraif_deinit(args[0]);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(cameraif_exit_obj, 4, 4, cameraif_exit);
+
 static const mp_rom_map_elem_t cameraif_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_take), MP_ROM_PTR(&cameraif_take_kw_obj) },
+    { MP_ROM_QSTR(MP_QSTR_reconfigure), MP_ROM_PTR(&cameraif_reconfigure_obj) },
+    { MP_ROM_QSTR(MP_QSTR___enter__), MP_ROM_PTR(&mp_identity_obj) },
+    { MP_ROM_QSTR(MP_QSTR___exit__), MP_ROM_PTR(&cameraif_exit_obj) },
     { MP_ROM_QSTR(MP_QSTR_capture), MP_ROM_PTR(&cameraif_capture_obj) },
     { MP_ROM_QSTR(MP_QSTR_capture_yuy2), MP_ROM_PTR(&cameraif_capture_yuy2_obj) },
     { MP_ROM_QSTR(MP_QSTR_capture_jpeg), MP_ROM_PTR(&cameraif_capture_jpeg_obj) },
@@ -2069,6 +2666,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     MP_QSTR_Camera,
     MP_TYPE_FLAG_NONE,
     make_new, cameraif_make_new,
+    attr, cameraif_attr,
     locals_dict, &cameraif_locals_dict
 );
 
@@ -2130,11 +2728,77 @@ static MP_DEFINE_CONST_FUN_OBJ_0(cameraif_available_obj, cameraif_available);
 #endif
 static const MP_DEFINE_STR_OBJ(cameraif_revision_obj, CAMERAIF_REVISION);
 
+// espcamera's enums, as classes of small ints. FrameSize is the index into
+// cameraif_sizes, in the same order; PixelFormat matches CAMERAIF_PF_*.
+static const mp_rom_map_elem_t cameraif_pixel_format_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_RGB565), MP_ROM_INT(0) },
+    { MP_ROM_QSTR(MP_QSTR_GRAYSCALE), MP_ROM_INT(1) },
+    { MP_ROM_QSTR(MP_QSTR_JPEG), MP_ROM_INT(2) },
+};
+static MP_DEFINE_CONST_DICT(cameraif_pixel_format_dict, cameraif_pixel_format_table);
+static MP_DEFINE_CONST_OBJ_TYPE(cameraif_pixel_format_type, MP_QSTR_PixelFormat, MP_TYPE_FLAG_NONE,
+    locals_dict, &cameraif_pixel_format_dict);
+
+static const mp_rom_map_elem_t cameraif_frame_size_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_R96X96), MP_ROM_INT(0) },
+    { MP_ROM_QSTR(MP_QSTR_QQVGA), MP_ROM_INT(1) },
+    { MP_ROM_QSTR(MP_QSTR_QCIF), MP_ROM_INT(2) },
+    { MP_ROM_QSTR(MP_QSTR_HQVGA), MP_ROM_INT(3) },
+    { MP_ROM_QSTR(MP_QSTR_R240X240), MP_ROM_INT(4) },
+    { MP_ROM_QSTR(MP_QSTR_QVGA), MP_ROM_INT(5) },
+    { MP_ROM_QSTR(MP_QSTR_CIF), MP_ROM_INT(6) },
+    { MP_ROM_QSTR(MP_QSTR_HVGA), MP_ROM_INT(7) },
+    { MP_ROM_QSTR(MP_QSTR_VGA), MP_ROM_INT(8) },
+    { MP_ROM_QSTR(MP_QSTR_SVGA), MP_ROM_INT(9) },
+    { MP_ROM_QSTR(MP_QSTR_XGA), MP_ROM_INT(10) },
+    { MP_ROM_QSTR(MP_QSTR_HD), MP_ROM_INT(11) },
+    { MP_ROM_QSTR(MP_QSTR_SXGA), MP_ROM_INT(12) },
+    { MP_ROM_QSTR(MP_QSTR_UXGA), MP_ROM_INT(13) },
+    { MP_ROM_QSTR(MP_QSTR_FHD), MP_ROM_INT(14) },
+    { MP_ROM_QSTR(MP_QSTR_P_HD), MP_ROM_INT(15) },
+    { MP_ROM_QSTR(MP_QSTR_P_3MP), MP_ROM_INT(16) },
+    { MP_ROM_QSTR(MP_QSTR_QXGA), MP_ROM_INT(17) },
+    { MP_ROM_QSTR(MP_QSTR_QHD), MP_ROM_INT(18) },
+    { MP_ROM_QSTR(MP_QSTR_WQXGA), MP_ROM_INT(19) },
+    { MP_ROM_QSTR(MP_QSTR_P_FHD), MP_ROM_INT(20) },
+    { MP_ROM_QSTR(MP_QSTR_QSXGA), MP_ROM_INT(21) },
+};
+static MP_DEFINE_CONST_DICT(cameraif_frame_size_dict, cameraif_frame_size_table);
+static MP_DEFINE_CONST_OBJ_TYPE(cameraif_frame_size_type, MP_QSTR_FrameSize, MP_TYPE_FLAG_NONE,
+    locals_dict, &cameraif_frame_size_dict);
+
+static const mp_rom_map_elem_t cameraif_grab_mode_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_WHEN_EMPTY), MP_ROM_INT(0) },
+    { MP_ROM_QSTR(MP_QSTR_LATEST), MP_ROM_INT(1) },
+};
+static MP_DEFINE_CONST_DICT(cameraif_grab_mode_dict, cameraif_grab_mode_table);
+static MP_DEFINE_CONST_OBJ_TYPE(cameraif_grab_mode_type, MP_QSTR_GrabMode, MP_TYPE_FLAG_NONE,
+    locals_dict, &cameraif_grab_mode_dict);
+
+// Here so espcamera code that names it still imports; no esp_cam_sensor
+// driver has a gain ceiling, so gain_ceiling always raises.
+static const mp_rom_map_elem_t cameraif_gain_ceiling_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_GAIN_2X), MP_ROM_INT(0) },
+    { MP_ROM_QSTR(MP_QSTR_GAIN_4X), MP_ROM_INT(1) },
+    { MP_ROM_QSTR(MP_QSTR_GAIN_8X), MP_ROM_INT(2) },
+    { MP_ROM_QSTR(MP_QSTR_GAIN_16X), MP_ROM_INT(3) },
+    { MP_ROM_QSTR(MP_QSTR_GAIN_32X), MP_ROM_INT(4) },
+    { MP_ROM_QSTR(MP_QSTR_GAIN_64X), MP_ROM_INT(5) },
+    { MP_ROM_QSTR(MP_QSTR_GAIN_128X), MP_ROM_INT(6) },
+};
+static MP_DEFINE_CONST_DICT(cameraif_gain_ceiling_dict, cameraif_gain_ceiling_table);
+static MP_DEFINE_CONST_OBJ_TYPE(cameraif_gain_ceiling_type, MP_QSTR_GainCeiling, MP_TYPE_FLAG_NONE,
+    locals_dict, &cameraif_gain_ceiling_dict);
+
 static const mp_rom_map_elem_t cameraif_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_cameraif) },
     { MP_ROM_QSTR(MP_QSTR___revision__), MP_ROM_PTR(&cameraif_revision_obj) },
     { MP_ROM_QSTR(MP_QSTR_Camera), MP_ROM_PTR(&cameraif_camera_type) },
     { MP_ROM_QSTR(MP_QSTR_available), MP_ROM_PTR(&cameraif_available_obj) },
+    { MP_ROM_QSTR(MP_QSTR_PixelFormat), MP_ROM_PTR(&cameraif_pixel_format_type) },
+    { MP_ROM_QSTR(MP_QSTR_FrameSize), MP_ROM_PTR(&cameraif_frame_size_type) },
+    { MP_ROM_QSTR(MP_QSTR_GrabMode), MP_ROM_PTR(&cameraif_grab_mode_type) },
+    { MP_ROM_QSTR(MP_QSTR_GainCeiling), MP_ROM_PTR(&cameraif_gain_ceiling_type) },
 };
 static MP_DEFINE_CONST_DICT(cameraif_globals, cameraif_globals_table);
 
@@ -2144,3 +2808,12 @@ const mp_obj_module_t cameraif_module = {
 };
 
 MP_REGISTER_MODULE(MP_QSTR_cameraif, cameraif_module);
+
+// On an ESP32-P4 this module is also espcamera, so code written for
+// CircuitPython's camera imports as it is. Upstream CircuitPython has no
+// espcamera on any P4 (its esp32-camera driver is DVP); a build that does
+// have one keeps its own.
+#if defined(CONFIG_IDF_TARGET_ESP32P4) && CONFIG_IDF_TARGET_ESP32P4 \
+    && !(defined(CIRCUITPY_ESPCAMERA) && CIRCUITPY_ESPCAMERA)
+MP_REGISTER_MODULE(MP_QSTR_espcamera, cameraif_module);
+#endif
