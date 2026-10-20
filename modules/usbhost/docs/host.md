@@ -80,6 +80,32 @@ the ESP32-S2 and S3 the port is full speed already, and the option changes
 nothing. Under the hood it sets the controller's `HCFG.FSLSSupp` bit before
 the port is powered.
 
+### Pick the speed once per power-up on the WIFI6 DEV-KIT
+
+On the Waveshare ESP32-P4-WIFI6-DEV-KIT, don't change `full_speed` between
+starts. The onboard hub (a CH334F) runs from the board's 3.3 V rail, its
+power pins aren't wired to the chip, and the sockets' 5 V is always on, so
+nothing the P4 does can take power away from it. `host_stop()` and
+`host_port_cycle()` only clear the controller's port-power bit, which stops
+the P4 driving the bus; they don't reset the hub, and neither does
+`machine.reset()`. A hub that enumerated at high speed and then finds the
+host back at full speed (or the other way round, which is untested) can end
+up answering nothing at either speed, and only removing the board's power
+brings it back
+([#121](https://github.com/PyDevices/micropython-pydevices/issues/121)).
+
+So `usb.core.start()` refuses that change on this board. It raises
+`USBError` before it touches the host, so the host that is running keeps
+running, and the message says what to do: start with the speed you used, or
+unplug the board's USB power and start again. Stopping and starting at the
+same speed works, and so does changing `classes`. The check remembers the
+speed for as long as the interpreter runs, so a soft reset forgets it while
+the hub doesn't: choose `full_speed=True` if a keyboard or MIDI controller
+will sit behind the hub, and use the same value in every script you run
+between power-ups. If H3 sends the host straight to the lower socket the hub
+isn't in the path, and `usb.core.start(full_speed=..., force=True)` skips the
+check.
+
 ## Why the events are drained rather than delivered
 
 The design decision most likely to surprise a reader is that USB events are
