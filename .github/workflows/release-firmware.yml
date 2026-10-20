@@ -1,0 +1,241 @@
+# The firmware set: MicroPython and CircuitPython-compatible images for the
+# boards we have run, each built by build_mp.py from this checkout's pins, then
+# checked and described in one firmware.json. Cells are in
+# scripts/release_firmware.py.
+#
+# This workflow publishes nothing. It builds every cell, checks the files and
+# keeps them as a run artifact (14 days); there is no release, tag or upload
+# step, and the token cannot write. Run it by hand under Actions > Release
+# firmware > Run workflow, or let it run every Monday: that run keeps the caches
+# warm and says the week an upstream pin moves and a board stops building.
+# Changes to the recipe run the same builds on their pull request.
+#
+# Toolchains and compiler output are cached, but a release is rare, so a cold
+# build is the case to plan for: the cache is a bonus, dropped after 7 days
+# unused.
+name: Release firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Name for the set's files (empty makes v<MicroPython version>-<date>)
+        default: ""
+        type: string
+      pico2:
+        description: Build the Raspberry Pi Pico 2 too (off until a board is on the bench)
+        default: false
+        type: boolean
+      lvgl-circuitpython-ref:
+        description: lvgl-circuitpython branch, tag or commit for the CircuitPython builds
+        default: main
+        type: string
+  schedule:
+    - cron: '17 5 * * 1'
+  pull_request:
+    paths:
+      - '.github/workflows/release-firmware.yml'
+      - 'scripts/release_firmware.py'
+      - 'test_release_firmware.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-firmware-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# bash with -eo pipefail, so a failing build is not hidden by the tee after it.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: The checks themselves pass
+        run: python3 -m unittest test_release_firmware -v
+      - name: Which cells this run builds
+        id: matrix
+        env:
+          PICO2: ${{ inputs.pico2 && '--pico2' || '' }}
+        run: |
+          echo "matrix=$(python3 scripts/release_firmware.py matrix $PICO2)" | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    name: build ${{ matrix.id }}
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.gate.outputs.matrix) }}
+    env:
+      # Compiler output, keyed by the compiler's content (a fresh toolchain
+      # install has fresh timestamps). CMake and ESP-IDF both read these.
+      CCACHE_DIR: /home/runner/.cache/ccache
+      CCACHE_MAXSIZE: 400M
+      CCACHE_COMPILERCHECK: content
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CMAKE_ASM_COMPILER_LAUNCHER: ccache
+      IDF_CCACHE_ENABLE: '1'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: lvgl-circuitpython, which the CircuitPython builds compile in
+        if: matrix.interpreter == 'circuitpython'
+        env:
+          LVGL_CP_REF: ${{ inputs.lvgl-circuitpython-ref || 'main' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ws" && cd "$RUNNER_TEMP/ws"
+          git clone --quiet --depth 1 --branch "$LVGL_CP_REF" https://github.com/PyDevices/lvgl-circuitpython.git \
+            || { git clone --quiet https://github.com/PyDevices/lvgl-circuitpython.git \
+                 && git -C lvgl-circuitpython checkout --quiet "$LVGL_CP_REF"; }
+          git -C lvgl-circuitpython rev-parse HEAD | tee "$RUNNER_TEMP/lvgl-circuitpython.commit"
+
+      - name: Packages the builds need
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache gettext cmake ninja-build pkg-config libffi-dev
+          df -h / | tail -1
+
+      # CircuitPython refuses anything older than GCC 14, and Ubuntu's is 13.
+      - name: Arm GNU toolchain 14.2
+        if: matrix.kind == 'rp2'
+        run: |
+          name=arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/arm.tar.xz" \
+            "https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/$name.tar.xz"
+          echo "62a63b981fe391a9cbad7ef51b17e49aeaa3e7b0d029b36ca1e9c3b2a9b78823  $RUNNER_TEMP/arm.tar.xz" | sha256sum -c -
+          sudo mkdir -p /opt/arm && sudo tar -xf "$RUNNER_TEMP/arm.tar.xz" -C /opt/arm
+          echo "/opt/arm/$name/bin" >> "$GITHUB_PATH"
+
+      # ESP-IDF v5.5.4 (MicroPython) or CircuitPython's tree with its own
+      # ESP-IDF (CircuitPython), and the compilers they download.
+      - name: Cache the toolchains
+        id: deps
+        if: matrix.deps != 'none'
+        uses: actions/cache@v6
+        with:
+          path: |
+            deps/esp-idf
+            deps/circuitpython
+            deps/circuitpython-venv
+            ~/.espressif
+          key: deps-${{ matrix.deps }}-${{ hashFiles('deps.lock', 'patches/circuitpython/**') }}
+
+      - name: Cache compiler output
+        id: ccache
+        uses: actions/cache@v6
+        with:
+          path: /home/runner/.cache/ccache
+          key: ccache-${{ matrix.id }}-${{ hashFiles('UPSTREAM', 'modules.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ matrix.id }}-${{ hashFiles('UPSTREAM', 'modules.lock') }}-
+            ccache-${{ matrix.id }}-
+
+      - name: Build ${{ matrix.id }}
+        run: |
+          start=$(date +%s)
+          ws=()
+          [[ "${{ matrix.interpreter }}" == circuitpython ]] && ws=(--ws "$RUNNER_TEMP/ws")
+          python3 scripts/release_firmware.py build "${{ matrix.id }}" out "${ws[@]}"
+          {
+            echo "### ${{ matrix.id }}"
+            echo "- toolchain cache: ${{ steps.deps.outputs.cache-hit == 'true' && 'hit' || (matrix.deps == 'none' && 'none needed' || 'miss') }}"
+            echo "- compiler cache: ${{ steps.ccache.outputs.cache-matched-key && 'restored' || 'empty' }}"
+            echo "- whole step: $(( $(date +%s) - start )) s"
+            echo '```'
+            ccache -s | head -12
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          du -sh deps ~/.espressif "$CCACHE_DIR" 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cell-${{ matrix.id }}
+          path: out
+          if-no-files-found: error
+          retention-days: 14
+
+  assemble:
+    needs: [gate, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Read-only on purpose: nothing here attaches to a release.
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: cell-*
+          merge-multiple: true
+          path: in
+
+      - name: lvgl-circuitpython's commit
+        id: lvgl
+        env:
+          LVGL_CP_REF: ${{ inputs.lvgl-circuitpython-ref || 'main' }}
+        run: |
+          git clone --quiet --depth 1 --branch "$LVGL_CP_REF" https://github.com/PyDevices/lvgl-circuitpython.git lvgl-cp \
+            || { git clone --quiet https://github.com/PyDevices/lvgl-circuitpython.git lvgl-cp \
+                 && git -C lvgl-cp checkout --quiet "$LVGL_CP_REF"; }
+          echo "commit=$(git -C lvgl-cp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Check the files and write firmware.json
+        env:
+          PICO2: ${{ inputs.pico2 && '--pico2' || '' }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          python3 scripts/release_firmware.py assemble in firmware $PICO2 \
+            --tag "$TAG" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --lvgl-circuitpython-commit "${{ steps.lvgl.outputs.commit }}"
+          ls -l firmware
+          cat firmware/firmware.json
+
+      - name: esptool reads every ESP image
+        run: |
+          python3 -m venv "$RUNNER_TEMP/esptool-venv"
+          "$RUNNER_TEMP/esptool-venv/bin/pip" install -q "esptool>=5"
+          esptool="$RUNNER_TEMP/esptool-venv/bin/esptool"
+          "$esptool" version
+          python3 - "$esptool" <<'PY'
+          import json, subprocess, sys
+          esptool = sys.argv[1]
+          doc = json.load(open("firmware/firmware.json"))
+          bad = 0
+          bootloader = {"esp32s3": 0, "esp32p4": 0x2000}
+          for b in doc["builds"]:
+              if b["chip"] not in ("esp32p4", "esp32s3"):
+                  continue
+              for f in b["files"]:
+                  if f["role"] not in ("flash", "app"):
+                      continue
+                  # A flash image padded from 0 starts with blank flash, not an image.
+                  if f["role"] == "flash" and int(b["flash_offset"], 16) != bootloader[b["chip"]]:
+                      continue
+                  r = subprocess.run([esptool, "--chip", b["chip"], "image-info", "firmware/" + f["name"]],
+                                     capture_output=True, text=True)
+                  ok = r.returncode == 0 and "Checksum" in r.stdout and "invalid" not in r.stdout.lower()
+                  print(("ok   " if ok else "FAIL ") + f["name"])
+                  if not ok:
+                      bad += 1
+                      print(r.stdout[-1500:], r.stderr[-1500:])
+          sys.exit(1 if bad else 0)
+          PY
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: firmware
+          path: firmware
+          if-no-files-found: error
+          retention-days: 14
