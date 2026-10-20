@@ -55,9 +55,9 @@ wedged board.
 
 | Hole | Issue | Consequence for examples |
 |---|---|---|
-| Device UAC is speaker-only (no mic endpoint) | [usbif#7](https://github.com/PyDevices/usbif/issues/7) | `usb_mic.py` hosts a commercial mic; no device-side capture script |
-| P4 behind a hub reaches full-speed devices only at full speed | [usbif#15](https://github.com/PyDevices/usbif/issues/15) | A keyboard or MIDI controller behind a hub needs `usb.core.start(full_speed=True)` (`FULL_SPEED = True` in `hid_host.py`, `midi_host.py` and `host_enum.py`); plugged straight into the port it needs nothing |
-| Host FIFO split is per session | [usbif#2](https://github.com/PyDevices/usbif/issues/2) | `usb.core.start(classes=...)` decides it: `uvc` leans IN (600 B), `uac` without `uvc` gives periodic OUT 200 B and IN 528 B on an S3, four times that on a P4 (800 B and 2136 B); a camera and a 2.0 speaker cannot share one `start()` |
+| Device UAC is speaker-only (no mic endpoint) | [Planned](../../pydevices/ROADMAP.md) | `usb_mic.py` hosts a commercial mic; no device-side capture script |
+| P4 behind a hub: ESP-IDF's host has no transaction translator, so a full-speed device is refused at high speed | [#120](https://github.com/PyDevices/micropython-pydevices/issues/120) | A keyboard or MIDI controller behind a hub needs `usb.core.start(full_speed=True)` (`FULL_SPEED = True` in `hid_host.py`, `midi_host.py` and `host_enum.py`); plugged straight into the port it needs nothing. At full speed the whole port is full speed, so a webcam on the same hub drops to full-speed bandwidth and the two cannot be mixed. Restarting the host at full speed after a high-speed run can leave the DEV-KIT's hub dead until a power cycle ([#121](https://github.com/PyDevices/micropython-pydevices/issues/121)) |
+| Host FIFO split is per session | [Planned](../ROADMAP.md) | `usb.core.start(classes=...)` decides it: `uvc` leans IN (600 B), `uac` without `uvc` gives periodic OUT 200 B and IN 528 B on an S3, four times that on a P4 (800 B and 2136 B); a camera and a 2.0 speaker cannot share one `start()` |
 
 ## Conventions
 
