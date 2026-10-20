@@ -332,6 +332,7 @@ extern int usbhost_xfer_claim(uint32_t dev_id, uint8_t itf, uint8_t alt);
 extern int usbhost_xfer_release(uint32_t dev_id, uint8_t itf);
 extern int usbhost_xfer_ctrl(uint32_t dev_id, const uint8_t setup[8], uint8_t *data, uint16_t len, uint32_t timeout_ms);
 extern int usbhost_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint32_t timeout_ms, bool keep);
+extern int usbhost_xfer_poll(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len);
 
 static mp_obj_t usbhost_xfer_check(int r) {
     if (r < 0) {
@@ -410,6 +411,22 @@ static mp_obj_t usbhost_host_xfer_py(size_t n_args, const mp_obj_t *args) {
     #endif
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbhost_host_xfer_obj, 4, 5, usbhost_host_xfer_py);
+
+// host_poll(dev_id, endpoint, buf): a kept IN read that doesn't wait. It
+// returns the bytes the endpoint's transfer brought if it has finished, and
+// otherwise 0 at once, leaving the transfer armed. The same transfer as
+// host_xfer's with raise_on_timeout False, so the two can share an endpoint.
+static mp_obj_t usbhost_host_poll_py(mp_obj_t dev_id_in, mp_obj_t ep_in, mp_obj_t buf_in) {
+    #if USBHOST_HAVE_HOST
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_WRITE);
+    return usbhost_xfer_check(usbhost_xfer_poll((uint32_t)mp_obj_get_int(dev_id_in), (uint8_t)mp_obj_get_int(ep_in),
+        buf.buf, buf.len));
+    #else
+    mp_raise_OSError(MP_EOPNOTSUPP);
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(usbhost_host_poll_obj, usbhost_host_poll_py);
 
 // Isochronous host streams (usbhost_host_stream.c): an endpoint's packets moved
 // to or from a ring in C, for usb.host.audio and usb.host.video. The ring is
@@ -689,6 +706,7 @@ static const mp_rom_map_elem_t usbhost_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_host_release), MP_ROM_PTR(&usbhost_host_release_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_ctrl), MP_ROM_PTR(&usbhost_host_ctrl_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_xfer), MP_ROM_PTR(&usbhost_host_xfer_obj) },
+    { MP_ROM_QSTR(MP_QSTR_host_poll), MP_ROM_PTR(&usbhost_host_poll_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_stream), MP_ROM_PTR(&usbhost_host_stream_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_stream_stats), MP_ROM_PTR(&usbhost_host_stream_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_stream_write), MP_ROM_PTR(&usbhost_host_stream_write_obj) },

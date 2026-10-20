@@ -77,7 +77,9 @@ typedef struct {
     // A poll that timed out (raise_on_timeout=False) leaves its IN transfer
     // armed rather than retiring it: the next read of this endpoint collects
     // it, so polling an interrupt endpoint costs neither a halt and flush
-    // each time nor a report that lands between polls.
+    // each time nor a report that lands between polls. It stays set after
+    // the transfer completes (busy false) until a read takes the data: the
+    // host task can deliver the completion while no read is waiting.
     bool kept;
 } usbhost_xfer_pipe_t;
 
@@ -147,6 +149,17 @@ static bool usbhost_xfer_wait(SemaphoreHandle_t sem, uint32_t timeout_ms) {
     }
     usbhost_host_lock_resume(held);
     return got;
+}
+
+// Has the transfer on this semaphore finished? One pump of the client's
+// events delivers a completion the bus has already made; then a look, and
+// no waiting. The caller holds the host lock.
+static bool usbhost_xfer_done_now(SemaphoreHandle_t sem) {
+    if (xSemaphoreTake(sem, 0) == pdTRUE) {
+        return true;
+    }
+    usb_host_client_handle_events(usbhost_host_client_get(), 0);
+    return xSemaphoreTake(sem, 0) == pdTRUE;
 }
 
 // -- interfaces
@@ -332,8 +345,8 @@ static usbhost_xfer_pipe_t *usbhost_xfer_pipe(usb_device_handle_t dev, uint8_t e
         *err = -MP_EBUSY;      // the last one timed out and hasn't retired yet
         return NULL;
     }
-    if (pipe != NULL && pipe->busy) {
-        return pipe;           // a kept poll, still armed: the caller waits on it
+    if (pipe != NULL && pipe->kept) {
+        return pipe;           // a kept poll, armed or finished: the caller collects it
     }
     int itf;
     uint16_t mps = usbhost_xfer_ep_mps(dev, ep, &itf);
@@ -392,7 +405,10 @@ static void usbhost_xfer_retire(usbhost_xfer_pipe_t *pipe) {
 // `keep`: an IN transfer that times out stays armed and this returns 0, for
 // a poll that treats "nothing yet" as normal (usb.core's read with
 // raise_on_timeout=False). A later call on the endpoint picks it up.
-int usbhost_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint32_t timeout_ms, bool keep) {
+// `now`, with keep: don't wait at all. Arm the transfer if it isn't, take it
+// if it has finished, and otherwise return 0 at once.
+static int usbhost_xfer_ep_(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint32_t timeout_ms, bool keep,
+    bool now) {
     usbhost_host_lock();
     int r;
     usb_device_handle_t dev;
@@ -406,7 +422,9 @@ int usbhost_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint
     }
     usb_transfer_t *x = pipe->xfer;
     bool in = (ep & 0x80) != 0;
-    if (!pipe->busy) {
+    // A kept transfer is collected, never submitted again over the top of
+    // data it may already hold.
+    if (!pipe->kept) {
         if (!in) {
             memcpy(x->data_buffer, data, len);
         }
@@ -431,7 +449,7 @@ int usbhost_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint
         }
     }
     pipe->kept = false;
-    if (!usbhost_xfer_wait(pipe->done, timeout_ms)) {
+    if (!(now ? usbhost_xfer_done_now(pipe->done) : usbhost_xfer_wait(pipe->done, timeout_ms))) {
         if (keep && in) {
             pipe->kept = true;
             r = 0;
@@ -467,6 +485,19 @@ int usbhost_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint
 out:
     usbhost_host_unlock();
     return r;
+}
+
+int usbhost_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint32_t timeout_ms, bool keep) {
+    return usbhost_xfer_ep_(dev_id, ep, data, len, timeout_ms, keep, false);
+}
+
+// A kept IN read that never waits: the bytes a finished transfer brought, or
+// 0 with the transfer left armed for the next poll.
+int usbhost_xfer_poll(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len) {
+    if (!(ep & 0x80)) {
+        return -MP_EINVAL;
+    }
+    return usbhost_xfer_ep_(dev_id, ep, data, len, 0, true, true);
 }
 
 // Free the pipes of one interface (itf >= 0) or of the whole device. Pipes
