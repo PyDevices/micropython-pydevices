@@ -11,6 +11,9 @@ packages themselves are in pydevices' roadmap.
 - An answer to whether a board can be USB host and USB device at once on two
   connectors: a pedal hosting a MIDI controller while a PC sees its REPL,
   sound card or drive.
+- Fewer lost packets on the USB sound card. At 48 kHz on a high-speed port
+  about one packet in 500 goes missing in bursts, where a 24 kHz wire loses
+  none; the cause isn't found yet.
 
 Bugs, and things you need that don't work yet, go to
 [issues](https://github.com/PyDevices/micropython-pydevices/issues).
