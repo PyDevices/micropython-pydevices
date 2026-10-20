@@ -1,0 +1,32 @@
+audiomixer: level 1.0 passes samples through unchanged without ARM
+
+On ARM Cortex-M4 and up, Mixer.c multiplies a sample by a voice's level
+with smulwb, which is exact. Every other build (unix, the Xtensa ESP32
+ports) fell back to a float divide by (1 << 15) - 1. The level is a Q15
+number where 1.0 is 32768, so a voice at level 1.0 had a gain of
+32768/32767, and any sample above about 32740 gained a step. A bare mixer
+turned -32752 into -32753.
+
+A level of exactly 1.0 now copies the sample. Every other level keeps
+the float multiply it had, so a quieter voice scales as before.
+
+diff --git a/shared-module/audiomixer/Mixer.c b/shared-module/audiomixer/Mixer.c
+index 464117f..c7109c7 100644
+--- a/shared-module/audiomixer/Mixer.c
++++ b/shared-module/audiomixer/Mixer.c
+@@ -108,8 +108,14 @@ static inline uint32_t mult16signed(uint32_t val, int32_t lomul, int32_t himul)
+     #else
+     uint32_t result = 0;
+     for (int8_t i = 0; i < 2; i++) {
+-        float mod_mul = (float)(i ? himul : lomul) / (float)((1 << 15) - 1);
++        int32_t mul = i ? himul : lomul;
+         int16_t ai = (val >> (sizeof(uint16_t) * 8 * i));
++        if (mul == (1 << 15)) {
++            // Level 1.0 passes the sample through unchanged.
++            result |= (((uint32_t)ai) & 0xffff) << (sizeof(int16_t) * 8 * i);
++            continue;
++        }
++        float mod_mul = (float)mul / (float)((1 << 15) - 1);
+         int32_t intermediate = (int32_t)(ai * mod_mul);
+         if (intermediate > SHRT_MAX) {
+             intermediate = SHRT_MAX;
