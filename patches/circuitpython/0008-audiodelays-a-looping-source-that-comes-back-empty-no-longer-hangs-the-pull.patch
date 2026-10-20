@@ -1,0 +1,179 @@
+audiodelays: a looping source that comes back empty no longer hangs the pull
+
+Echo, PitchShift, GranularPitchShift and Flanger pull their source in a
+loop that fills the block. When a looping source ends with nothing in
+hand, the loop resets it, asks again, gets nothing again and goes round
+for ever: get_buffer never returns, and on a board the audio pump stops
+with it. An audioroute.Port pointed at a source that has finished, or an
+empty RawSample played with loop=True, is enough.
+
+Echo now lets go of a source that ends with nothing in hand, looped or
+not, and rings out what its line holds on silence. PitchShift,
+GranularPitchShift and Flanger let go of a looping source that is empty
+straight after its reset, and a source that hands back nothing with more
+to come gets silence for the rest of the block and is asked again on the
+next pull. That is what audiodsp's own builds of these nodes do.
+
+Only a pull that meets an empty buffer changes; a source that hands back
+samples renders the same bytes as before.
+
+diff --git a/shared-module/audiodelays/Echo.c b/shared-module/audiodelays/Echo.c
+index 675c7cb..e66cca2 100644
+--- a/shared-module/audiodelays/Echo.c
++++ b/shared-module/audiodelays/Echo.c
+@@ -281,6 +281,12 @@ audioio_get_buffer_result_t audiodelays_echo_get_buffer(audiodelays_echo_obj_t *
+                     // Track length in terms of words.
+                     self->sample_buffer_length /= (self->base.bits_per_sample / 8);
+                     self->more_data = result == GET_BUFFER_MORE_DATA;
++                    // A source that ends with nothing in hand is let go, looped
++                    // or not, and the echo rings out on silence below. Looping
++                    // it again gets nothing again, and the pull never returns.
++                    if (self->sample_buffer_length == 0 && !self->more_data) {
++                        self->sample = NULL;
++                    }
+                 }
+             }
+         }
+diff --git a/shared-module/audiodelays/Flanger.c b/shared-module/audiodelays/Flanger.c
+index f0d1bb1..303347a 100644
+--- a/shared-module/audiodelays/Flanger.c
++++ b/shared-module/audiodelays/Flanger.c
+@@ -250,13 +250,22 @@ audioio_get_buffer_result_t audiodelays_flanger_get_buffer(audiodelays_flanger_o
+     // channels are interleaved and alternate with every word.
+     bool single_right = single_channel_output && channel == 1 && channel_count == 2;
+ 
++    // Set once the source has handed back nothing with more to come: the rest
++    // of the block is silence and the source is asked again next pull. A
++    // looping source that comes back empty straight after its reset has
++    // nothing at all, so it is let go. Going round again with nothing in
++    // hand in either case would never leave the loop.
++    bool starved = false;
++
+     // Loop over the entire length of our buffer to fill it, this may require several calls to get data from the sample
+     while (length != 0) {
+         // Check if there is no more sample to play, we will either load more data, reset the sample if loop is on or clear the sample
+-        if (self->sample_buffer_length == 0) {
++        if (self->sample_buffer_length == 0 && !starved) {
++            bool reset = false;
+             if (!self->more_data) { // The sample has indicated it has no more data to play
+                 if (self->loop && self->sample) { // If we are supposed to loop reset the sample to the start
+                     audiosample_reset_buffer(self->sample, false, 0);
++                    reset = true;
+                 } else { // If we were not supposed to loop the sample, stop playing it
+                     self->sample = NULL;
+                 }
+@@ -267,10 +276,17 @@ audioio_get_buffer_result_t audiodelays_flanger_get_buffer(audiodelays_flanger_o
+                 // Track length in terms of words.
+                 self->sample_buffer_length /= (self->base.bits_per_sample / 8);
+                 self->more_data = result == GET_BUFFER_MORE_DATA;
++                if (self->sample_buffer_length == 0) {
++                    if (self->more_data) {
++                        starved = true;
++                    } else if (reset) {
++                        self->sample = NULL;
++                    }
++                }
+             }
+         }
+ 
+-        if (self->sample == NULL) {
++        if (self->sample == NULL || starved) {
+             // tick all block inputs so that anything attached to them stays in sync
+             shared_bindings_synthio_lfo_tick(self->base.sample_rate, length / channel_count);
+             (void)synthio_block_slot_get(&self->min_delay_ms);
+diff --git a/shared-module/audiodelays/GranularPitchShift.c b/shared-module/audiodelays/GranularPitchShift.c
+index a737307..639cc78 100644
+--- a/shared-module/audiodelays/GranularPitchShift.c
++++ b/shared-module/audiodelays/GranularPitchShift.c
+@@ -294,13 +294,22 @@ audioio_get_buffer_result_t audiodelays_granular_pitch_shift_get_buffer(audiodel
+         grain_spacing = 1;
+     }
+ 
++    // Set once the source has handed back nothing with more to come: the rest
++    // of the block is silence and the source is asked again next pull. A
++    // looping source that comes back empty straight after its reset has
++    // nothing at all, so it is let go. Going round again with nothing in
++    // hand in either case would never leave the loop.
++    bool starved = false;
++
+     // Loop over the entire length of our buffer to fill it, this may require several calls to get data from the sample
+     while (length != 0) {
+         // Check if there is no more sample to play, we will either load more data, reset the sample if loop is on or clear the sample
+-        if (self->sample_buffer_length == 0) {
++        if (self->sample_buffer_length == 0 && !starved) {
++            bool reset = false;
+             if (!self->more_data) { // The sample has indicated it has no more data to play
+                 if (self->loop && self->sample) { // If we are supposed to loop reset the sample to the start
+                     audiosample_reset_buffer(self->sample, false, 0);
++                    reset = true;
+                 } else { // If we were not supposed to loop the sample, stop playing it
+                     self->sample = NULL;
+                 }
+@@ -316,11 +325,18 @@ audioio_get_buffer_result_t audiodelays_granular_pitch_shift_get_buffer(audiodel
+                     // Track length in terms of words.
+                     self->sample_buffer_length /= (self->base.bits_per_sample / 8);
+                     self->more_data = result == GET_BUFFER_MORE_DATA;
++                    if (self->sample_buffer_length == 0) {
++                        if (self->more_data) {
++                            starved = true;
++                        } else if (reset) {
++                            self->sample = NULL;
++                        }
++                    }
+                 }
+             }
+         }
+ 
+-        if (self->sample == NULL) {
++        if (self->sample == NULL || starved) {
+             if (self->base.samples_signed) {
+                 memset(word_buffer, 0, length * (self->base.bits_per_sample / 8));
+             } else {
+diff --git a/shared-module/audiodelays/PitchShift.c b/shared-module/audiodelays/PitchShift.c
+index 809efaf..bbf92c4 100644
+--- a/shared-module/audiodelays/PitchShift.c
++++ b/shared-module/audiodelays/PitchShift.c
+@@ -202,13 +202,22 @@ audioio_get_buffer_result_t audiodelays_pitch_shift_get_buffer(audiodelays_pitch
+         overlap_size = self->overlap_len / sizeof(uint16_t) / self->base.channel_count;
+     }
+ 
++    // Set once the source has handed back nothing with more to come: the rest
++    // of the block is silence and the source is asked again next pull. A
++    // looping source that comes back empty straight after its reset has
++    // nothing at all, so it is let go. Going round again with nothing in
++    // hand in either case would never leave the loop.
++    bool starved = false;
++
+     // Loop over the entire length of our buffer to fill it, this may require several calls to get data from the sample
+     while (length != 0) {
+         // Check if there is no more sample to play, we will either load more data, reset the sample if loop is on or clear the sample
+-        if (self->sample_buffer_length == 0) {
++        if (self->sample_buffer_length == 0 && !starved) {
++            bool reset = false;
+             if (!self->more_data) { // The sample has indicated it has no more data to play
+                 if (self->loop && self->sample) { // If we are supposed to loop reset the sample to the start
+                     audiosample_reset_buffer(self->sample, false, 0);
++                    reset = true;
+                 } else { // If we were not supposed to loop the sample, stop playing it
+                     self->sample = NULL;
+                 }
+@@ -224,11 +233,18 @@ audioio_get_buffer_result_t audiodelays_pitch_shift_get_buffer(audiodelays_pitch
+                     // Track length in terms of words.
+                     self->sample_buffer_length /= (self->base.bits_per_sample / 8);
+                     self->more_data = result == GET_BUFFER_MORE_DATA;
++                    if (self->sample_buffer_length == 0) {
++                        if (self->more_data) {
++                            starved = true;
++                        } else if (reset) {
++                            self->sample = NULL;
++                        }
++                    }
+                 }
+             }
+         }
+ 
+-        if (self->sample == NULL) {
++        if (self->sample == NULL || starved) {
+             if (self->base.samples_signed) {
+                 memset(word_buffer, 0, length * (self->base.bits_per_sample / 8));
+             } else {

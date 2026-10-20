@@ -11,12 +11,14 @@ on:
       - 'build_mp.py'
       - 'deps.lock'
       - 'modules.lock'
+      - 'patches/circuitpython/**'
       - '.github/workflows/circuitpython.yml'
   pull_request:
     paths:
       - 'build_mp.py'
       - 'deps.lock'
       - 'modules.lock'
+      - 'patches/circuitpython/**'
       - '.github/workflows/circuitpython.yml'
   workflow_dispatch:
 
@@ -57,3 +59,21 @@ jobs:
           assert got == (0xF800, 0x07E0, 0x001F, 0), got
           PY
           ./builds/circuitpython/unix/coverage/micropython check.py
+
+      - name: A looping source that comes back empty does not hang the delay nodes
+        run: |
+          cat > empty_source.py <<'PY'
+          import audiocore, audiodelays
+          from array import array
+          kw = dict(buffer_size=512, sample_rate=8000, channel_count=1)
+          for node in (audiodelays.Echo(max_delay_ms=50, **kw),
+                       audiodelays.PitchShift(**kw),
+                       audiodelays.GranularPitchShift(**kw),
+                       audiodelays.Flanger(**kw)):
+              node.play(audiocore.RawSample(array("h"), sample_rate=8000), loop=True)
+              for _ in range(4):
+                  audiocore.get_buffer(node)
+              print(type(node).__name__, "returned, playing", node.playing)
+              assert not node.playing
+          PY
+          timeout 60 ./builds/circuitpython/unix/coverage/micropython empty_source.py
