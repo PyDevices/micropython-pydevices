@@ -1,4 +1,4 @@
-# Read a hosted keyboard's reports through usb.host.hid for a while.
+# Read a hosted keyboard's key events through usb.host.hid for a while.
 import time
 
 import usb.core
@@ -14,12 +14,12 @@ def run(seconds=6, vid=0x303A, boot=True):
             break
         time.sleep_ms(250)
     kbd = Device(dev, KEYBOARD, boot=boot)
-    reports = []
+    seen = []
     end = time.ticks_add(time.ticks_ms(), int(seconds * 1000))
     while time.ticks_diff(end, time.ticks_ms()) > 0:
-        r = kbd.read(20)
-        if r:
-            reports.append(bytes(r).hex())
+        ev = kbd.read(20)
+        if ev:
+            seen.append(list(ev))       # [kind, keycode, modifiers]
     kbd.close()
     return {"device": "%s %s" % (dev.manufacturer, dev.product), "interface": kbd.interface,
-            "protocol": kbd.protocol, "reports": reports}
+            "protocol": kbd.protocol, "events": seen}

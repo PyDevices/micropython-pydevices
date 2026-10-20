@@ -19,7 +19,7 @@ itself (``--no-put`` skips that). The checks, in order:
 - hid: a real keyboard switched to boot protocol and read back, its LEDs
   set, and ten reads with nobody typing each timing out cleanly;
 - hid_typed: a peer board types a, b, shift+C through ``usb_hid``
-  (``kbd_device.py``) and the host reads the six reports in order
+  (``kbd_device.py``) and the host reads the eight key events in order
   (``kbd_host.py``);
 - cdc: ``print('cdc', 6 * 7)`` typed into the peer's REPL over its USB
   serial port, ``cdc 42`` read back (``cdc_check.py``);
@@ -186,11 +186,13 @@ def judge(name, r):
         return bool(r["boot_protocol"] and r["report_descriptor"] > 0 and r["quiet_reads"] == r["reads"]
                     and r["ms"] < r["reads"] * 300), r
     if name == "hid_typed":
-        # a, release, b, release, shift+C, release, in boot protocol.
-        want = ["0000040000000000", "0000000000000000", "0000050000000000", "0000000000000000",
-                "0200060000000000", "0000000000000000"]
+        # a, release, b, release, shift+C, release, in boot protocol, as
+        # [kind, adafruit_hid Keycode, modifiers] with kind 1 down, 2 up.
+        # Shift (0xE1) and C (0x06) are one report, so shift goes down first and up last.
+        want = [[1, 0x04, 0], [2, 0x04, 0], [1, 0x05, 0], [2, 0x05, 0],
+                [1, 0xE1, 2], [1, 0x06, 2], [2, 0x06, 0], [2, 0xE1, 0]]
         r["expected"] = len(want)
-        return r["reports"] == want, r
+        return r["events"] == want, r
     if name == "cdc":
         return bool(r["answered"]), r
     if name == "midi":
