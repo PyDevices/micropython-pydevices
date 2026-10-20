@@ -1,0 +1,96 @@
+audiodelays: MultiTapDelay no longer hangs the pull on a looping source that comes back empty
+
+MultiTapDelay pulls its source in a loop that fills the block. When a
+looping source ends with nothing in hand, the loop resets it, asks again,
+gets nothing again and goes round for ever: get_buffer never returns,
+and on a board the audio pump stops with it. An audioroute.Port pointed
+at a source that has finished, or an empty RawSample played with
+loop=True, is enough. A source that reports more data and hands back
+nothing does the same.
+
+MultiTapDelay now lets go of a looping source that is empty straight
+after its reset, and a source that hands back nothing with more to come
+gets silence for the rest of the block and is asked again on the next
+pull, the same exits Echo, PitchShift, GranularPitchShift and Flanger
+have. The delay line keeps ringing out on silence either way.
+
+Only a pull that meets an empty buffer changes; a source that hands back
+samples renders the same bytes as before.
+
+diff --git a/shared-module/audiodelays/MultiTapDelay.c b/shared-module/audiodelays/MultiTapDelay.c
+index d4cda65..65ecd5c 100644
+--- a/shared-module/audiodelays/MultiTapDelay.c
++++ b/shared-module/audiodelays/MultiTapDelay.c
+@@ -335,13 +335,22 @@ audioio_get_buffer_result_t audiodelays_multi_tap_delay_get_buffer(audiodelays_m
+ 
+     int32_t mix_down_scale = SYNTHIO_MIX_DOWN_SCALE(self->tap_len);
+ 
++    // Set once the source has handed back nothing with more to come: the rest
++    // of the block is silence and the source is asked again next pull. A
++    // looping source that comes back empty straight after its reset has
++    // nothing at all, so it is let go. Going round again with nothing in
++    // hand in either case would never leave the loop.
++    bool starved = false;
++
+     // Loop over the entire length of our buffer to fill it, this may require several calls to get data from the sample
+     while (length != 0) {
+         // Check if there is no more sample to play, we will either load more data, reset the sample if loop is on or clear the sample
+-        if (self->sample_buffer_length == 0) {
++        if (self->sample_buffer_length == 0 && !starved) {
++            bool reset = false;
+             if (!self->more_data) { // The sample has indicated it has no more data to play
+                 if (self->loop && self->sample) { // If we are supposed to loop reset the sample to the start
+                     audiosample_reset_buffer(self->sample, false, 0);
++                    reset = true;
+                 } else { // If we were not supposed to loop the sample, stop playing it but we still need to play the delay
+                     self->sample = NULL;
+                 }
+@@ -357,13 +366,20 @@ audioio_get_buffer_result_t audiodelays_multi_tap_delay_get_buffer(audiodelays_m
+                     // Track length in terms of words.
+                     self->sample_buffer_length /= (self->base.bits_per_sample / 8);
+                     self->more_data = result == GET_BUFFER_MORE_DATA;
++                    if (self->sample_buffer_length == 0) {
++                        if (self->more_data) {
++                            starved = true;
++                        } else if (reset) {
++                            self->sample = NULL;
++                        }
++                    }
+                 }
+             }
+         }
+ 
+         // Determine how many bytes we can process to our buffer, the less of the sample we have left and our buffer remaining
+         uint32_t n;
+-        if (self->sample == NULL) {
++        if (self->sample == NULL || starved) {
+             n = MIN(length, SYNTHIO_MAX_DUR * self->base.channel_count);
+         } else {
+             n = MIN(MIN(self->sample_buffer_length, length), SYNTHIO_MAX_DUR * self->base.channel_count);
+@@ -376,7 +392,7 @@ audioio_get_buffer_result_t audiodelays_multi_tap_delay_get_buffer(audiodelays_m
+ 
+         int16_t *sample_src = NULL;
+         int8_t *sample_hsrc = NULL;
+-        if (self->sample != NULL) {
++        if (self->sample != NULL && !starved) {
+             // we have a sample to play and delay
+             sample_src = (int16_t *)self->sample_remaining_buffer; // for 16-bit samples
+             sample_hsrc = (int8_t *)self->sample_remaining_buffer; // for 8-bit samples
+@@ -386,7 +402,7 @@ audioio_get_buffer_result_t audiodelays_multi_tap_delay_get_buffer(audiodelays_m
+             uint32_t delay_buffer_offset = delay_buffer_len * ((single_channel_output && channel == 1) || (!single_channel_output && (i % self->base.channel_count) == 1));
+ 
+             int32_t sample_word = 0;
+-            if (self->sample != NULL) {
++            if (self->sample != NULL && !starved) {
+                 if (MP_LIKELY(self->base.bits_per_sample == 16)) {
+                     sample_word = sample_src[i];
+                 } else {
+@@ -464,7 +480,7 @@ audioio_get_buffer_result_t audiodelays_multi_tap_delay_get_buffer(audiodelays_m
+         length -= n;
+         word_buffer += n;
+         hword_buffer += n;
+-        if (self->sample != NULL) {
++        if (self->sample != NULL && !starved) {
+             self->sample_remaining_buffer += (n * (self->base.bits_per_sample / 8));
+             self->sample_buffer_length -= n;
+         }
