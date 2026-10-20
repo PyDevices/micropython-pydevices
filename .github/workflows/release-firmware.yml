@@ -205,7 +205,7 @@ jobs:
       - name: esptool reads every ESP image
         run: |
           python3 -m venv "$RUNNER_TEMP/esptool-venv"
-          "$RUNNER_TEMP/esptool-venv/bin/pip" install -q esptool
+          "$RUNNER_TEMP/esptool-venv/bin/pip" install -q "esptool>=5"
           esptool="$RUNNER_TEMP/esptool-venv/bin/esptool"
           "$esptool" version
           python3 - "$esptool" <<'PY'
@@ -213,13 +213,17 @@ jobs:
           esptool = sys.argv[1]
           doc = json.load(open("firmware/firmware.json"))
           bad = 0
+          bootloader = {"esp32s3": 0, "esp32p4": 0x2000}
           for b in doc["builds"]:
               if b["chip"] not in ("esp32p4", "esp32s3"):
                   continue
               for f in b["files"]:
                   if f["role"] not in ("flash", "app"):
                       continue
-                  r = subprocess.run([esptool, "--chip", b["chip"], "image_info", "firmware/" + f["name"]],
+                  # A flash image padded from 0 starts with blank flash, not an image.
+                  if f["role"] == "flash" and int(b["flash_offset"], 16) != bootloader[b["chip"]]:
+                      continue
+                  r = subprocess.run([esptool, "--chip", b["chip"], "image-info", "firmware/" + f["name"]],
                                      capture_output=True, text=True)
                   ok = r.returncode == 0 and "Checksum" in r.stdout and "invalid" not in r.stdout.lower()
                   print(("ok   " if ok else "FAIL ") + f["name"])
