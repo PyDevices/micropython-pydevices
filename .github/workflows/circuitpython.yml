@@ -69,7 +69,8 @@ jobs:
           for node in (audiodelays.Echo(max_delay_ms=50, **kw),
                        audiodelays.PitchShift(**kw),
                        audiodelays.GranularPitchShift(**kw),
-                       audiodelays.Flanger(**kw)):
+                       audiodelays.Flanger(**kw),
+                       audiodelays.MultiTapDelay(max_delay_ms=50, delay_ms=20, decay=0.5, mix=0.5, **kw)):
               node.play(audiocore.RawSample(array("h"), sample_rate=8000), loop=True)
               for _ in range(4):
                   audiocore.get_buffer(node)
