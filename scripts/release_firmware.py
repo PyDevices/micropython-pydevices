@@ -150,7 +150,7 @@ def matrix(pico2):
 def micropython_version():
     """The checkout's own version, vX.Y.Z with -preview while upstream says so.
     git describe can't say it: a shallow clone has no tags."""
-    h = (REPO / "micropython" / "py" / "mpversion.h").read_text()
+    h = (REPO / "micropython" / "py" / "mpconfig.h").read_text()
     nums = [re.search(rf"define MICROPY_VERSION_{k} (\d+)", h).group(1) for k in ("MAJOR", "MINOR", "MICRO")]
     pre = int(re.search(r"define MICROPY_VERSION_PRERELEASE (\d+)", h).group(1))
     return "v" + ".".join(nums) + ("-preview" if pre else "")
