@@ -147,6 +147,15 @@ def matrix(pico2):
 
 # ---- build -----------------------------------------------------------------
 
+def micropython_version():
+    """The checkout's own version, vX.Y.Z with -preview while upstream says so.
+    git describe can't say it: a shallow clone has no tags."""
+    h = (REPO / "micropython" / "py" / "mpversion.h").read_text()
+    nums = [re.search(rf"define MICROPY_VERSION_{k} (\d+)", h).group(1) for k in ("MAJOR", "MINOR", "MICRO")]
+    pre = int(re.search(r"define MICROPY_VERSION_PRERELEASE (\d+)", h).group(1))
+    return "v" + ".".join(nums) + ("-preview" if pre else "")
+
+
 def build_dir(c):
     if c["interpreter"] == "circuitpython":
         return REPO / "builds" / "circuitpython" / c["port"] / c["board"]
@@ -208,7 +217,7 @@ def build(cell_id, out, ws):
     meta["kind"] = c["kind"]
     meta["files"] = files
     meta["build_seconds"] = seconds
-    meta["interpreter_version"] = (record.get("micropython") if c["interpreter"] == "micropython"
+    meta["interpreter_version"] = (micropython_version() if c["interpreter"] == "micropython"
                                    else record.get("circuitpython"))
     meta["module_revisions"] = {n: m for n, m in sorted((record.get("module_revisions") or {}).items())}
     if c["interpreter"] == "circuitpython":

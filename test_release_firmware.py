@@ -24,7 +24,7 @@ def put(d, name, data):
     return {"file": name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
 
 
-def fake_cell(root, c, version="v1.30.0-preview-160-gb70ae1aca657"):
+def fake_cell(root, c, version="v1.30.0-preview"):
     """A cell directory as `build` leaves it, with files that pass every check."""
     d = Path(root) / c["id"]
     d.mkdir(parents=True)
