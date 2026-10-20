@@ -32,7 +32,8 @@ def fake_cell(root, c, version="v1.30.0-preview-160-gb70ae1aca657"):
     app = b"\xe9" + bytes(range(256)) * 5000      # 1.28 MB
     files = {}
     if c["kind"] in ("esp32", "espressif"):
-        merged = b"\xe9" + b"\x00" * 0x10000 + app + pad
+        boot = rf.BOOTLOADER[c["chip"]] - c["offset"]
+        merged = b"\xff" * boot + b"\xe9" + b"\x00" * (0x10000 - boot - 1) + app + pad
         files["flash"] = put(d, "flash.bin", merged)
         files["app"] = put(d, "app.bin", app)
         files["partitions"] = put(d, "partitions.bin", b"\xaaP" + b"\x00" * 100) if c["kind"] == "esp32" else None
@@ -126,9 +127,12 @@ class Assemble(unittest.TestCase):
         self.assertEqual(doc["pins"]["lvgl-circuitpython"], "b" * 40)
         s3 = next(b for b in doc["builds"] if b["id"] == "mp-s3-lcd7")
         self.assertEqual(s3["flash_offset"], "0x0")
-        self.assertEqual(s3["app_offset"], "0x10001")
+        self.assertEqual(s3["app_offset"], "0x10000")
         p4 = next(b for b in doc["builds"] if b["id"] == "mp-p4-devkit")
         self.assertEqual(p4["flash_offset"], "0x2000")
+        cp4 = next(b for b in doc["builds"] if b["id"] == "cp-p4-devkit")
+        self.assertEqual(cp4["flash_offset"], "0x0")
+        self.assertEqual(cp4["app_offset"], "0x10000")
 
     def test_a_tagged_release_is_not_a_preview(self):
         shutil.rmtree(self.indir)
@@ -188,7 +192,7 @@ class Assemble(unittest.TestCase):
         f.write_bytes(rewrite(f.read_bytes()))
         meta["files"]["flash"]["sha256"] = rf.sha256(f)
         (d / "cell.json").write_text(json.dumps(meta))
-        self.fails_with("0xE9")
+        self.fails_with("magic 0xE9")
 
     def test_an_app_that_is_not_in_the_flash_image_is_caught(self):
         d = self.indir / "mp-s3-tembed"

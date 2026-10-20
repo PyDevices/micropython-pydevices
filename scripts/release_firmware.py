@@ -47,7 +47,9 @@ REPO = Path(__file__).resolve().parent.parent
 MB = 1024 * 1024
 
 # A cell is one file set for one board. `chip` and `flash` are what the flash
-# image is written with: `offset` is where the merged image starts in flash.
+# image is written with: `offset` is the flash address of the merged image's
+# first byte (MicroPython's P4 image starts at its bootloader, 0x2000;
+# CircuitPython's is padded from 0). The bootloader itself is at BOOTLOADER.
 # `deps` names the cache the workflow keeps its toolchains in.
 CELLS = [
     dict(id="mp-p4-devkit", label="ESP32-P4-WIFI6-DEV-KIT", interpreter="micropython", port="esp32",
@@ -68,7 +70,7 @@ CELLS = [
     dict(id="cp-p4-devkit", label="ESP32-P4-WIFI6-DEV-KIT", interpreter="circuitpython", port="espressif",
          board="waveshare_esp32p4_wifi6_dev_kit", variant=None, flash="16MB",
          modules="audiodsp,pygraphics,@lvgl-circuitpython",
-         chip="esp32p4", offset=0x2000, kind="espressif", deps="cp-esp"),
+         chip="esp32p4", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-s3-lcd7", label="ESP32-S3-Touch-LCD-7", interpreter="circuitpython", port="espressif",
          board="waveshare_esp32s3_touch_lcd_7", variant=None, flash="8MB",
          modules="audiodsp,pygraphics,@lvgl-circuitpython",
@@ -225,6 +227,7 @@ def build(cell_id, out, ws):
 # ---- checks ----------------------------------------------------------------
 
 ESP_IMAGE_MAGIC = 0xE9
+BOOTLOADER = {"esp32s3": 0x0, "esp32p4": 0x2000}
 UF2_MAGICS = (b"UF2\n", b"WQ]\x9e", b"\x30\x6f\xb1\x0a")  # start magic 0, 1 and the end magic
 # Smallest sizes a firmware that carries this interpreter and its modules can have.
 MIN_BYTES = {"esp32": 1 * MB, "espressif": 1 * MB, "rp2": 512 * 1024}
@@ -270,8 +273,10 @@ def check_cell(d, c):
             problems.append(f"{c['id']}: {data['flash'].name} is only {len(img)} bytes")
         if offset + len(img) > flash_bytes:
             problems.append(f"{c['id']}: {data['flash'].name} ends at {offset + len(img)}, past the {c['flash']} flash")
-        if not img or img[0] != ESP_IMAGE_MAGIC:
-            problems.append(f"{c['id']}: {data['flash'].name} does not start with the ESP image magic 0xE9")
+        boot = BOOTLOADER[c["chip"]] - offset
+        if boot < 0 or len(img) <= boot or img[boot] != ESP_IMAGE_MAGIC:
+            problems.append(f"{c['id']}: {data['flash'].name} has no ESP image magic 0xE9 at the {c['chip']} "
+                            f"bootloader's {hex(BOOTLOADER[c['chip']])}")
         if "app" in data:
             app = data["app"].read_bytes()
             at = img.find(app[:65536])
