@@ -168,6 +168,26 @@ class LvglBindings(unittest.TestCase):
             self.assertIn("full 40-character commit", str(cm.exception))
 
 
+class RefuseLvglMicropython(unittest.TestCase):
+    """CircuitPython's LVGL binding is lvgl-circuitpython, not lvgl-micropython."""
+
+    def test_lvgl_micropython_is_refused_naming_lvgl_circuitpython(self):
+        with self.assertRaises(SystemExit) as cm:
+            build_mp.refuse_lvgl_micropython(["jpegio", "lvgl-micropython"])
+        self.assertIn("lvgl-circuitpython", str(cm.exception))
+        self.assertIn("--modules", str(cm.exception))
+
+    def test_the_circuitpython_binding_and_other_modules_pass(self):
+        build_mp.refuse_lvgl_micropython(["jpegio", "lvgl-circuitpython", ""])
+
+    @unittest.skipIf(os.name == "nt", "the CircuitPython build is Linux or WSL")
+    def test_a_circuitpython_build_refuses_before_fetching_anything(self):
+        args = type("A", (), {"flash": False, "modules": "jpegio,/some/where/lvgl-micropython"})()
+        with self.assertRaises(SystemExit) as cm:
+            build_mp.build_circuitpython(args, [], None)
+        self.assertIn("lvgl-circuitpython", str(cm.exception))
+
+
 class FrozenManifest(unittest.TestCase):
     """A variant of ours, of a port or of a board, may bring its own manifest."""
 

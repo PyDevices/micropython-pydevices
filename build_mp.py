@@ -945,6 +945,20 @@ def cp_user_c_modules(module_dirs, link_dir):
     return dirs
 
 
+def refuse_lvgl_micropython(names):
+    """lvgl-micropython is MicroPython's LVGL binding. CircuitPython compiles
+    with -Wshadow -Werror, which its generated binding trips over, so a build
+    that reached that error would only say 'shadows a global declaration'.
+    CircuitPython's binding is lvgl-circuitpython, given to --modules by path."""
+    if LVGL_MODULE in names:
+        die(
+            f"{LVGL_MODULE} is MicroPython's LVGL binding and does not build on CircuitPython "
+            "(its generated code stops on -Werror=shadow). For --interpreter circuitpython use "
+            "lvgl-circuitpython, passed by path: --modules /path/to/lvgl-circuitpython "
+            "(see its docs/build-and-flash.md)"
+        )
+
+
 def cp_espressif_env(port_dir, board):
     """What CircuitPython's espressif port needs before make: its ESP-IDF's
     submodules, compilers and Python packages. Returns the shell prefix that
@@ -1016,6 +1030,8 @@ def build_circuitpython(args, make_extra, ws):
         die("--interpreter circuitpython builds from Linux or WSL")
     if args.flash:
         die("--flash is for MicroPython's esp32 port")
+    # Before anything is fetched: a plain name or a path ending in the name.
+    refuse_lvgl_micropython([Path(i.strip()).name for i in (args.modules or "").split(",")])
     ensure_modules(ws)
     cp = ensure_circuitpython()
     lock = lock_beside(cp)  # noqa: F841 -- held until exit
@@ -1046,6 +1062,7 @@ def build_circuitpython(args, make_extra, ws):
         say("Modules: " + ", ".join(module_choices()))
         spec = input('Which (comma list; full paths for others; empty for none)? ').strip()
     spec, module_dirs = resolve_modules(spec)
+    refuse_lvgl_micropython([module_name(d) for d in module_dirs])
 
     # The unix port's own default variant is coverage.
     build = OUT_DIR / "circuitpython" / port / (board or variant or "coverage")
