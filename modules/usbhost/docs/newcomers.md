@@ -27,7 +27,7 @@ import usb.core
 from usb.host.hid import Device, KEYBOARD
 
 kbd = Device(usb.core.find(custom_match=Device.match(KEYBOARD)))
-report = kbd.read()
+event = kbd.read()      # None, or (KEY_DOWN, keycode, modifiers) with adafruit_hid's Keycode values
 ```
 
 Start the host with the classes you'll stream (`usb.core.start(classes=("uvc",))` for a camera, `("uac",)` for a speaker): the controller's FIFO split is fixed while the host runs.

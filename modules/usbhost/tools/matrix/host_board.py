@@ -118,8 +118,8 @@ def _hid_typed(seconds):
     import kbd_host
 
     out = kbd_host.run(seconds=seconds, vid=BOARD_VID, boot=True)
-    if "hid_typed" in PLANT and len(out["reports"]) > 2:
-        del out["reports"][2]  # planted: one report lost on the way
+    if "hid_typed" in PLANT and len(out["events"]) > 2:
+        del out["events"][2]  # planted: one event lost on the way
     return out
 
 
