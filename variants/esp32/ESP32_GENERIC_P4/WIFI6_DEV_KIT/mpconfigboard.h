@@ -5,3 +5,9 @@
 // and 37), leaving the high-speed one to usbhost's host. Overlay patch 0032 gives
 // the device the full-speed PHY.
 #define MICROPY_HW_USB_HS (0)
+
+// The main task's stack. LVGL's timer pass runs a Python callback that builds
+// widgets (an app's now-playing screen, say), and with the pass's own frames
+// that outgrew the 16 KB default: the interpreter raised "maximum recursion
+// depth exceeded" or the board reset.
+#define MICROPY_TASK_STACK_SIZE (32 * 1024)
