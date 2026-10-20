@@ -1096,6 +1096,11 @@ def build_circuitpython(args, make_extra, ws):
     # a board name fetches its port's, "tests" what the unix port builds with.
     run([str(CP_VENV / "bin" / "python"), "tools/ci_fetch_deps.py", board or "tests"], cwd=cp, env=env,
         stdout=subprocess.DEVNULL)
+    # A board that freezes libraries (FROZEN_MPY_DIRS) builds its manifest with
+    # micropython-lib's tools, which ci_fetch_deps leaves out of a board's list.
+    if board and not (cp / "lib" / "micropython-lib" / "README.md").exists():
+        run(["git", "submodule", "update", "--init", "--depth", "1", "lib/micropython-lib"], cwd=cp,
+            stdout=subprocess.DEVNULL)
     # mpy-cross first and on its own: a port's sub-make for it would inherit
     # BUILD= from our command line (the same trap as micropython#19667).
     run(["make", "-C", str(cp / "mpy-cross"), "-j", JOBS], env=env, stdout=subprocess.DEVNULL)

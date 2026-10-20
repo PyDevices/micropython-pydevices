@@ -68,6 +68,7 @@ jobs:
           echo "matrix=$(python3 scripts/release_firmware.py matrix $PICO2)" | tee -a "$GITHUB_OUTPUT"
 
   build:
+    name: build ${{ matrix.id }}
     needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -101,13 +102,20 @@ jobs:
 
       - name: Packages the builds need
         run: |
-          pkgs="ccache gettext cmake ninja-build pkg-config libffi-dev"
-          if [[ "${{ matrix.kind }}" == rp2 ]]; then
-            pkgs="$pkgs gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib"
-          fi
           sudo apt-get update
-          sudo apt-get install -y $pkgs
+          sudo apt-get install -y ccache gettext cmake ninja-build pkg-config libffi-dev
           df -h / | tail -1
+
+      # CircuitPython refuses anything older than GCC 14, and Ubuntu's is 13.
+      - name: Arm GNU toolchain 14.2
+        if: matrix.kind == 'rp2'
+        run: |
+          name=arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/arm.tar.xz" \
+            "https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/$name.tar.xz"
+          echo "62a63b981fe391a9cbad7ef51b17e49aeaa3e7b0d029b36ca1e9c3b2a9b78823  $RUNNER_TEMP/arm.tar.xz" | sha256sum -c -
+          sudo mkdir -p /opt/arm && sudo tar -xf "$RUNNER_TEMP/arm.tar.xz" -C /opt/arm
+          echo "/opt/arm/$name/bin" >> "$GITHUB_PATH"
 
       # ESP-IDF v5.5.4 (MicroPython) or CircuitPython's tree with its own
       # ESP-IDF (CircuitPython), and the compilers they download.
