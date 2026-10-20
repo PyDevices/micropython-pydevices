@@ -1,0 +1,244 @@
+From 958337cf686f34dc434b4ce041412936d87deb96 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 15:49:40 -0500
+Subject: [PATCH] shared/tinyusb: a stream's buffer outlives the stream.
+
+When the host selected alternate setting 0, USBDevice.stream (and the C
+sink and feedback forms) dropped the stream's packet buffer, but the
+transfer the interrupt had last queued on the endpoint stayed queued: the
+host simply stops sending, so the controller keeps the buffer it was given.
+The garbage collector then freed that buffer and handed its memory to
+other objects, and when the host selected the streaming alternate again,
+the first packet it sent was written there. On an ESP32-P4 sound card this
+corrupted the heap once per re-open (a Load access fault in mp_obj_subscr,
+seen about 1.5 s after a WASAPI shared-mode stream closed). The refused
+first arm that patch 0041 stopped counting as a drop was this same
+transfer, still queued.
+
+A slot now keeps its buffer after its stream stops and gives it back to
+the same endpoint's next stream, so the stale transfer lands in the
+buffer the new stream reads. A buffer replaced (a larger packet) while the
+controller may still hold it stays reachable until it can't be; a bus
+reset, which ends every queued transfer, lets those go. A soft reset now
+stops every stream before the heap is cleared, so the interrupt can no
+longer reach a ring or buffer from the previous session.
+---
+ extmod/machine_usb_device.c      |  1 +
+ shared/tinyusb/mp_usbd.h         |  5 +-
+ shared/tinyusb/mp_usbd_runtime.c | 91 +++++++++++++++++++++++++-------
+ 3 files changed, 77 insertions(+), 20 deletions(-)
+
+diff --git a/extmod/machine_usb_device.c b/extmod/machine_usb_device.c
+index 91a60e2c7..ed44773c7 100644
+--- a/extmod/machine_usb_device.c
++++ b/extmod/machine_usb_device.c
+@@ -60,6 +60,7 @@ static mp_obj_t usb_device_make_new(const mp_obj_type_t *type, size_t n_args, si
+         for (int i = 0; i < MP_USBD_STREAMS; i++) {
+             o->stream_objs[i][0] = mp_const_none;
+             o->stream_objs[i][1] = mp_const_none;
++            o->stream_objs[i][2] = mp_const_none;
+         }
+         #if CFG_TUD_MAX_SPEED == OPT_MODE_HIGH_SPEED
+         o->desc_cfg_hs = mp_const_none;
+diff --git a/shared/tinyusb/mp_usbd.h b/shared/tinyusb/mp_usbd.h
+index b0bddca5a..06d905a75 100644
+--- a/shared/tinyusb/mp_usbd.h
++++ b/shared/tinyusb/mp_usbd.h
+@@ -167,8 +167,9 @@ typedef struct {
+     // Temporary pointers for xfer data in progress on each endpoint
+     // Ensuring they aren't garbage collected until the xfer completes
+     mp_obj_t xfer_data[CFG_TUD_ENDPPOINT_MAX][2];
+-    // Streaming endpoints keep their ring and bounce buffer reachable here.
+-    mp_obj_t stream_objs[MP_USBD_STREAMS][2];
++    // Streaming endpoints keep their ring and bounce buffer reachable here,
++    // and a buffer the controller may still hold after it was replaced.
++    mp_obj_t stream_objs[MP_USBD_STREAMS][3];
+ 
+     // Pointer to a memoryview that is reused to refer to various pieces of
+     // control transfer data that are pushed to USB control transfer
+diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
+index fc368784a..f287d0a47 100644
+--- a/shared/tinyusb/mp_usbd_runtime.c
++++ b/shared/tinyusb/mp_usbd_runtime.c
+@@ -580,6 +580,7 @@ MP_DEFINE_CONST_OBJ_TYPE(
+ 
+ typedef struct {
+     uint8_t ep;                 // 0: this slot is free
++    uint8_t last_ep;            // the endpoint the slot last streamed on
+     bool feedback;
+     volatile bool active;
+     uint16_t packet;            // bytes per transfer
+@@ -593,6 +594,7 @@ typedef struct {
+     uint8_t fid;                // video: the frame ID bit, toggled per frame
+     mp_usbd_ring_obj_t *ring;   // data streams
+     uint8_t *pkt;               // the transfer's buffer
++    uint8_t *queued;            // the buffer last queued on last_ep
+     uint8_t fb_len;
+     uint8_t fb[4];              // feedback streams: the value to send
+     volatile uint32_t packets, bytes, drops;
+@@ -650,11 +652,13 @@ static MP_USBD_ISR_ATTR void stream_arm(mp_usbd_stream_t *s, bool in_isr) {
+         n = (uint16_t)ring_read(s->ring, s->pkt, s->packet);
+     }
+     // A drop is a packet lost while the stream runs. The arm that starts a
+-    // stream comes from the scheduler, during SET_INTERFACE's setup stage, and
+-    // TinyUSB refuses it there (measured on the ESP32-P4: the stream's drop
+-    // count reads 1 straight after the call, and packets flow all the same),
+-    // so only a refusal in the interrupt's re-arm is a lost packet.
+-    if (!usbd_edpt_xfer(RHPORT, s->ep, s->pkt, n, in_isr) && in_isr) {
++    // stream is refused when the endpoint still has the transfer it queued
++    // before the stream last stopped (see stream_buffer): that transfer takes
++    // the first packet and the interrupt re-arms from there, so only a
++    // refusal in the interrupt's re-arm is a lost packet.
++    if (usbd_edpt_xfer(RHPORT, s->ep, s->pkt, n, in_isr)) {
++        s->queued = s->pkt;
++    } else if (in_isr) {
+         s->drops++;
+     }
+ }
+@@ -686,28 +690,70 @@ static MP_USBD_ISR_ATTR bool runtime_dev_xfer_isr(uint8_t rhport, uint8_t ep_add
+     return true;
+ }
+ 
++// A transfer queued on an endpoint stays queued when its stream stops: the
++// host leaves alternate setting 0 without sending the packet the endpoint
++// waits for, and the controller writes the first packet after it selects
++// the streaming alternate again into the buffer it was given. So a stream's
++// buffer outlives the stream. It stays in its slot for the endpoint's next
++// stream, and one replaced while it may still be queued is kept in
++// stream_objs[i][2] until it can't be.
++
++static uint8_t *stream_items(mp_obj_t buf) {
++    return ((mp_obj_array_t *)MP_OBJ_TO_PTR(buf))->items;
++}
++
++// Whether the controller may still write to (or send from) buf.
++static bool stream_holds(mp_usbd_stream_t *s, mp_obj_t buf) {
++    return buf != mp_const_none && s->last_ep != 0 && s->queued == stream_items(buf)
++           && usbd_edpt_busy(RHPORT, s->last_ep);
++}
++
+ static mp_usbd_stream_t *stream_slot(mp_obj_usb_device_t *usbd, uint8_t ep_addr, int *index) {
++    // The endpoint's own slot first, running or not: a transfer it queued
++    // before it stopped may still be pending on the buffer kept there.
+     for (int i = 0; i < MP_USBD_STREAMS; i++) {
+-        if (mp_usbd_streams[i].ep == ep_addr) {
++        if (mp_usbd_streams[i].ep == ep_addr
++            || (mp_usbd_streams[i].ep == 0 && mp_usbd_streams[i].last_ep == ep_addr)) {
+             *index = i;
+             return &mp_usbd_streams[i];
+         }
+     }
++    // Then a free slot whose buffer no endpoint holds.
+     for (int i = 0; i < MP_USBD_STREAMS; i++) {
+-        if (mp_usbd_streams[i].ep == 0) {
++        mp_usbd_stream_t *s = &mp_usbd_streams[i];
++        if (s->ep == 0 && !stream_holds(s, usbd->stream_objs[i][1])
++            && !stream_holds(s, usbd->stream_objs[i][2])) {
+             *index = i;
+-            return &mp_usbd_streams[i];
++            return s;
+         }
+     }
+     mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("no free stream"));
+ }
+ 
++// Give slot i a buffer of at least size bytes for ep_addr, reusing the one
++// it has when that is big enough. The stream must be stopped (active false).
++static void stream_buffer(mp_obj_usb_device_t *usbd, int i, uint8_t ep_addr, uint16_t size) {
++    mp_usbd_stream_t *s = &mp_usbd_streams[i];
++    mp_obj_t *objs = usbd->stream_objs[i];
++    if (!stream_holds(s, objs[2])) {
++        objs[2] = mp_const_none;
++    }
++    if (objs[1] == mp_const_none || ((mp_obj_array_t *)MP_OBJ_TO_PTR(objs[1]))->len < size) {
++        if (stream_holds(s, objs[1])) {
++            objs[2] = objs[1];
++        }
++        objs[1] = mp_obj_new_bytearray_by_ref(size, m_new(uint8_t, size));
++    }
++    s->pkt = stream_items(objs[1]);
++    s->last_ep = ep_addr;
++}
++
+ static void stream_release(mp_obj_usb_device_t *usbd, int i) {
+     mp_usbd_stream_t *s = &mp_usbd_streams[i];
+     s->active = false;
+     s->ep = 0;
++    // The buffer stays: the controller may still hold it (see above).
+     usbd->stream_objs[i][0] = mp_const_none;
+-    usbd->stream_objs[i][1] = mp_const_none;
+ }
+ 
+ void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t ring, uint16_t packet, uint32_t frame) {
+@@ -726,11 +772,9 @@ void mp_usbd_stream_attach(mp_obj_usb_device_t *usbd, uint8_t ep_addr, mp_obj_t
+         mp_raise_ValueError(MP_ERROR_TEXT("packet"));
+     }
+     s->active = false;
+-    mp_obj_t pkt = mp_obj_new_bytearray_by_ref(packet, m_new(uint8_t, packet));
++    stream_buffer(usbd, i, ep_addr, packet);
+     usbd->stream_objs[i][0] = ring;
+-    usbd->stream_objs[i][1] = pkt;
+     s->ring = MP_OBJ_TO_PTR(ring);
+-    s->pkt = ((mp_obj_array_t *)MP_OBJ_TO_PTR(pkt))->items;
+     s->packet = packet;
+     s->sink = NULL;
+     s->frame = frame;
+@@ -762,10 +806,9 @@ void mp_usbd_stream_feedback(mp_obj_usb_device_t *usbd, uint8_t ep_addr, const u
+     memcpy(s->fb, value, len);
+     s->fb_len = (uint8_t)len;
+     if (!started) {
+-        mp_obj_t pkt = mp_obj_new_bytearray_by_ref(4, m_new(uint8_t, 4));
++        s->active = false;
++        stream_buffer(usbd, i, ep_addr, 4);
+         usbd->stream_objs[i][0] = mp_const_none;
+-        usbd->stream_objs[i][1] = pkt;
+-        s->pkt = ((mp_obj_array_t *)MP_OBJ_TO_PTR(pkt))->items;
+         s->feedback = true;
+         s->frame = 0;
+         s->packets = s->bytes = s->drops = 0;
+@@ -792,13 +835,11 @@ void mp_usbd_stream_sink(uint8_t ep_addr, mp_usbd_sink_fn sink, void *ctx, mp_ob
+         mp_raise_ValueError(MP_ERROR_TEXT("a sink takes an OUT endpoint and a packet size"));
+     }
+     s->active = false;
+-    mp_obj_t pkt = mp_obj_new_bytearray_by_ref(packet, m_new(uint8_t, packet));
++    stream_buffer(usbd, i, ep_addr, packet);
+     usbd->stream_objs[i][0] = owner;
+-    usbd->stream_objs[i][1] = pkt;
+     s->ring = NULL;
+     s->sink = sink;
+     s->sink_ctx = ctx;
+-    s->pkt = ((mp_obj_array_t *)MP_OBJ_TO_PTR(pkt))->items;
+     s->packet = packet;
+     s->frame = 0;
+     s->feedback = false;
+@@ -822,6 +863,9 @@ bool mp_usbd_stream_stats(uint8_t ep_addr, uint32_t *packets, uint32_t *bytes, u
+ static void mp_usbd_streams_reset(mp_obj_usb_device_t *usbd) {
+     for (int i = 0; i < MP_USBD_STREAMS; i++) {
+         stream_release(usbd, i);
++        // A bus reset ends every queued transfer, so nothing holds a buffer.
++        mp_usbd_streams[i].queued = NULL;
++        usbd->stream_objs[i][2] = mp_const_none;
+     }
+ }
+ 
+@@ -901,6 +945,17 @@ void mp_usbd_init(void) {
+ // runtime device was active.
+ void mp_usbd_deinit(void) {
+     mp_obj_usb_device_t *usbd = MP_OBJ_TO_PTR(MP_STATE_VM(usbd));
++    // Streams point into the heap a soft reset clears: stop the interrupt
++    // reaching them before it goes. Nothing more arrives once disconnected,
++    // and the bus reset on reconnecting ends any transfer still queued.
++    for (int i = 0; i < MP_USBD_STREAMS; i++) {
++        mp_usbd_stream_t *s = &mp_usbd_streams[i];
++        s->active = false;
++        s->ep = 0;
++        s->last_ep = 0;
++        s->queued = NULL;
++        s->pkt = NULL;
++    }
+     MP_STATE_VM(usbd) = MP_OBJ_NULL;
+     if (usbd && usbd->active) {
+         // Disconnect if a runtime USB device was active
+-- 
+2.43.0
+
