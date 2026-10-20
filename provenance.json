@@ -118,6 +118,9 @@
   },
   "0040-micropython-py-mk-search-each-user-c-module-in-its-own-directory-first.patch": {
    "sha256": "92300314c6d0f502c7d37ba08a95a0308b526b9f4db4d77cc19222f232fbd56d"
+  },
+  "0041-micropython-shared-tinyusb-a-streams-first-arm-is-not-a-drop.patch": {
+   "sha256": "7cf585dac9d230aba3fe3861d4d44e3cfb9b7b697be9ca33f94abdb408796a9d"
   }
  },
  "tinyusb_patches": {

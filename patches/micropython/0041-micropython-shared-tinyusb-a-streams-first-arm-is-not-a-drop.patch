@@ -1,0 +1,37 @@
+From 9be670b91b6bfd2055838399693b4ca9a9f475f6 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 12:29:27 -0500
+Subject: [PATCH] shared/tinyusb: a stream's first arm is not a dropped packet.
+
+USBDevice.stream_stats counted a refused usbd_edpt_xfer as a drop wherever
+it came from. The arm that starts a stream comes from the scheduler, during
+SET_INTERFACE's setup stage, and TinyUSB refuses it there although the
+stream then runs: on the ESP32-P4 a sound card's drop count read 1 straight
+after the first arm, before any audio, and again after each re-open. An idle
+stream now reads 0; only the interrupt's re-arm failing, or a ring or sink
+that could not take a packet, counts.
+---
+ shared/tinyusb/mp_usbd_runtime.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/shared/tinyusb/mp_usbd_runtime.c b/shared/tinyusb/mp_usbd_runtime.c
+index 5a28be55c..fc368784a 100644
+--- a/shared/tinyusb/mp_usbd_runtime.c
++++ b/shared/tinyusb/mp_usbd_runtime.c
+@@ -649,7 +649,12 @@ static MP_USBD_ISR_ATTR void stream_arm(mp_usbd_stream_t *s, bool in_isr) {
+     } else if (tu_edpt_dir(s->ep) == TUSB_DIR_IN) {
+         n = (uint16_t)ring_read(s->ring, s->pkt, s->packet);
+     }
+-    if (!usbd_edpt_xfer(RHPORT, s->ep, s->pkt, n, in_isr)) {
++    // A drop is a packet lost while the stream runs. The arm that starts a
++    // stream comes from the scheduler, during SET_INTERFACE's setup stage, and
++    // TinyUSB refuses it there (measured on the ESP32-P4: the stream's drop
++    // count reads 1 straight after the call, and packets flow all the same),
++    // so only a refusal in the interrupt's re-arm is a lost packet.
++    if (!usbd_edpt_xfer(RHPORT, s->ep, s->pkt, n, in_isr) && in_isr) {
+         s->drops++;
+     }
+ }
+-- 
+2.43.0
+
