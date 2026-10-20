@@ -303,7 +303,9 @@ links, the output layout and the build record. What differs is one function:
   is linked into the port's `boards/`, once each; the build record lists the
   patches. The boards are ones CircuitPython has no definition for:
   `feather_rp2040_lvgl` (room for LVGL), `waveshare_esp32s3_touch_lcd_7`
-  (its 800x480 panel as `board.DISPLAY`, one 4 MB app slot), and the
+  (its 800x480 panel as `board.DISPLAY`, one 4 MB app slot),
+  `lilygo_twatch_s3_single_app` (the T-Watch S3 with one 4 MB app slot, so LVGL
+  fits), and the
   ESP32-P4 boards `waveshare_esp32p4_wifi6_dev_kit` (a revision 3 chip,
   console on USB Serial/JTAG) and `waveshare_esp32p4_wifi6_touch_lcd_4b`
   (revision 1, console on the CH343 UART; its panel isn't set up yet), each
