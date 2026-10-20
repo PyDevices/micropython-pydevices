@@ -1313,7 +1313,9 @@ def main():
     # object is newer, so one compiled from a stray copy by a build made before
     # py.mk searched each module's own directory first would stay in. Drop
     # those, and this build compiles them again from their modules.
-    roots = module_dirs + ([bindings] if bindings else [])
+    # The variant tree is ours too: a variant's manifest adds its own C module
+    # (webassembly's wasmbridge) from beside the variant.
+    roots = module_dirs + ([bindings] if bindings else []) + [VARIANTS_DIR / port]
     for dep, src in foreign_sources(build, roots):
         say(f"compiling {dep.relative_to(build).with_suffix('.o').as_posix()} again: it was compiled from {src}")
         dep.with_suffix(".o").unlink(missing_ok=True)
