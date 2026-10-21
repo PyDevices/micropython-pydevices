@@ -44,3 +44,29 @@ CONFIG_LWIP_TCP_SACK_OUT=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_ESP_WIFI_RX_BA_WIN=16
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=48
+
+# A 1 ms tick and caches sized for LVGL, on every S3 board, whether or not it
+# shipped with a display: a display added after flashing gets the same speed.
+#
+# The tick: at the port's 100 Hz, any wait shorter than 10 ms rounds to a whole
+# tick. DotClockFramebuffer.refresh() polls for the panel to take the new frame
+# with vTaskDelay(1), a 10 ms sleep at 100 Hz, and sleep_ms() under one tick
+# busy-waits with the GIL held.
+#
+# The caches: LVGL's code runs from flash and its objects and frame buffers
+# live in PSRAM, so the port's 16 KB instruction cache, 32 KB data cache and
+# 32-byte lines starve it. Together these take 48 KB of internal RAM.
+#
+# lv_test_timer's kit run, median of three, port defaults -> these four:
+#   Waveshare LCD-4.3 (RGB panel)   10.4 -> 17.7 fps (the tick alone: 17.7)
+#   LilyGO T-Embed (SPI panel)      59.5 -> 66.9 fps, with the frame period at
+#                                   1 ms (at the standard 33 ms it's pinned at
+#                                   30 either way); free internal RAM with the
+#                                   display up went 175,867 -> 161,295 B
+#   Waveshare LCD-7, under its remote UI: a full-screen redraw 205 -> 147 ms
+# A 36-minute Wi-Fi and TLS soak on the LCD-4.3 with these never had less than
+# 94 KB of internal RAM free.
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
