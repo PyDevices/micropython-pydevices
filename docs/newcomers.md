@@ -238,6 +238,31 @@ leaving 1/32 of the flash as headroom, 64 KB to 256 KB. That moves the
 filesystem, so a board flashed with that image comes up with an empty one.
 `--no-autosize` refuses instead.
 
+### A troubleshooting build with a core dump
+
+Standard builds, including every image on the download page, don't write a core
+dump to flash when the firmware crashes. When you need one, to find out why a
+board resets or hangs, add `--coredump` to esp32:
+
+```sh
+./build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB --modules all --coredump
+```
+
+It builds into its own folder, `builds/esp32/<board>/<variant>-coredump/`, so
+it never replaces your standard image. After a crash the board keeps the dump
+in its `coredump` partition across the reboot; read it back with `esptool` and
+`esp-coredump` (`esp_coredump info_corefile`) against that build's
+`micropython.elf`. The decode only matches the ELF of the same commit and
+options, so build the troubleshooting image from the commit your board runs.
+
+The dump needs a `coredump` partition, and only the ESP32-S3 table has one
+today. A standard S3 build leaves it unused, which is why the filesystem sits
+where it always did, and a troubleshooting build uses the same table: you can
+flash its app image (`micropython.bin`, at the app offset) onto a board
+running a standard image and keep the files on it. On a board whose table has
+no such partition, such as the ESP32-P4, `--coredump` stops with "this board's
+table has no coredump partition yet" instead of moving your filesystem.
+
 It finds out by trying: the first link fails, loudly, and only then does it
 build again. On esp32 that is a red `Error: app partition is too small for
 binary micropython.bin size 0x…`, then `ninja: build stopped`, `make: ***
@@ -286,8 +311,8 @@ in this order:
 
 The partition table is found the same way, the most specific
 `partitions.csv` winning ([`variants/esp32/partitions.esp32s3.csv`](../variants/esp32/partitions.esp32s3.csv) adds a
-coredump partition on the S3); without one, the board's own is used. Either
-way autosize grows the app partition when the image doesn't fit.
+coredump partition on the S3, which a standard build leaves unused);
+without one, the board's own is used. Either way autosize grows the app partition when the image doesn't fit.
 
 ## Where things are
 

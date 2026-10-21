@@ -8,11 +8,15 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 import build_mp
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
+import release_firmware as rf
 
 A = "a" * 40
 B = "b" * 40
@@ -351,6 +355,64 @@ class MicropythonLibPatches(unittest.TestCase):
                 apply_patches.apply_lib(lib, patches)
             self.assertEqual(out.getvalue().count("already in micropython-lib"), len(patches))
             self.assertEqual((lib / "micropython/usb/usb-device-midi/usb/device/midi.py").read_text(), midi)
+
+
+class Coredump(unittest.TestCase):
+    """A standard esp32 build has no flash core dump; --coredump adds one, with
+    the partition it writes to. Reads the generated sdkconfig and the table
+    build_mp.py would pick, so nothing is built."""
+
+    ON = "CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y"
+    cells = [c for c in rf.CELLS if c["interpreter"] == "micropython" and c["port"] == "esp32"]
+
+    def fragment(self, c, coredump):
+        _, module_dirs = build_mp.resolve_modules(c["modules"])
+        text, _ = build_mp.esp32_fragment(c["chip"], module_dirs, c["board"], c["variant"], c["flash"], None, coredump)
+        return text
+
+    def test_the_release_cells_cover_both_chips(self):
+        self.assertEqual({c["chip"] for c in self.cells}, {"esp32s3", "esp32p4"})
+
+    def test_standard_builds_have_no_coredump(self):
+        for c in self.cells:
+            with self.subTest(c["id"]):
+                self.assertNotIn("COREDUMP", self.fragment(c, False))
+
+    def test_the_opt_in_turns_it_on_last(self):
+        for c in self.cells:
+            with self.subTest(c["id"]):
+                text = self.fragment(c, True)
+                self.assertIn(self.ON, text)
+                # kconfgen takes the last assignment: nothing may follow our lines
+                self.assertEqual(text.rstrip().splitlines()[-1], "CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y")
+
+    def test_only_sdkconfig_coredump_names_it(self):
+        here = Path(build_mp.__file__).resolve().parent
+        for f in list((here / "variants").rglob("sdkconfig*")) + list((here / "modules").rglob("sdkconfig*")):
+            if f.name != "sdkconfig.coredump":
+                with self.subTest(str(f.relative_to(here))):
+                    self.assertNotIn("COREDUMP", f.read_text())
+
+    def test_tables_are_the_same_with_or_without_the_flag_and_only_the_s3_has_the_slot(self):
+        # build_mp.py picks one table whatever the flag says; a standard S3 image
+        # and a troubleshooting one share it, so the filesystem doesn't move. The
+        # P4 has no table of ours, so --coredump refuses there.
+        for c in self.cells:
+            table = build_mp.esp32_table(c["chip"], c["board"], c["variant"])
+            with self.subTest(c["id"]):
+                if c["chip"] == "esp32s3":
+                    self.assertTrue(build_mp.has_coredump_partition(table))
+                else:
+                    self.assertIsNone(table)
+
+    def test_a_table_without_the_partition_is_seen(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp) / "p.csv"
+            t.write_text("nvs, data, nvs, 0x9000, 0x6000,\nfactory, app, factory, 0x10000, 0x1F0000,\n"
+                         "# coredump, data, coredump, 0x200000, 0x10000,\n")
+            self.assertFalse(build_mp.has_coredump_partition(t))
+            t.write_text(t.read_text() + "coredump, data, coredump, 0x200000, 0x10000,\n")
+            self.assertTrue(build_mp.has_coredump_partition(t))
 
 
 if __name__ == "__main__":
