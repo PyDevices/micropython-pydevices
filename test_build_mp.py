@@ -434,6 +434,60 @@ class FrozenManifest(unittest.TestCase):
                 build_mp.VARIANTS_DIR, build_mp.MODULES_DIR = saved
 
 
+class Rp2BoardDir(unittest.TestCase):
+    """A variant of ours on rp2 gets a board directory: upstream's, linked
+    through unchanged, with our files added where the port looks for them."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.base = root / "mp" / "BOARD"
+        self.base.mkdir(parents=True)
+        for name, text in (("mpconfigboard.cmake", "set(A 1)"), ("mpconfigboard.h", "#define NAME 1"),
+                           ("mpconfigvariant.cmake", "set(P 1)"), ("pins.csv", "GP0,GPIO0"), ("board.json", "{}")):
+            (self.base / name).write_text(text)
+        self.ours = root / "variants" / "rp2" / "BOARD" / "OURS"
+        self.ours.mkdir(parents=True)
+        (self.ours / "mpconfigvariant.cmake").write_text("set(Q 2)")
+        self.gen = root / "gen"
+        self.saved = build_mp.VARIANTS_DIR
+        build_mp.VARIANTS_DIR = root / "variants"
+
+    def tearDown(self):
+        build_mp.VARIANTS_DIR = self.saved
+        self.tmp.cleanup()
+
+    def test_variant_file_only(self):
+        build_mp.rp2_board_dir(self.gen, self.base, "BOARD", "OURS")
+        for name in ("mpconfigboard.cmake", "mpconfigboard.h", "mpconfigvariant.cmake", "pins.csv", "board.json"):
+            self.assertEqual(self.gen.joinpath(name).resolve(), self.base.joinpath(name).resolve(), name)
+            self.assertTrue(self.gen.joinpath(name).is_symlink(), name)
+        text = (self.gen / "mpconfigvariant_OURS.cmake").read_text()
+        self.assertIn(f"include({self.base.as_posix()}/mpconfigvariant.cmake OPTIONAL)", text)
+        self.assertLess(text.index("mpconfigvariant.cmake OPTIONAL"), text.index(self.ours.as_posix()))
+        self.assertIn(f"include({self.ours.as_posix()}/mpconfigvariant.cmake)", text)
+
+    def test_our_pins_and_header_replace_and_follow_upstreams(self):
+        (self.ours / "pins.csv").write_text("GP47,GPIO47")
+        (self.ours / "mpconfigboard.h").write_text("#undef NAME")
+        build_mp.rp2_board_dir(self.gen, self.base, "BOARD", "OURS")
+        self.assertEqual((self.gen / "pins.csv").resolve(), (self.ours / "pins.csv").resolve())
+        header = (self.gen / "mpconfigboard.h").read_text()
+        self.assertFalse((self.gen / "mpconfigboard.h").is_symlink())
+        self.assertLess(header.index(self.base.as_posix()), header.index(self.ours.as_posix()))
+        self.assertEqual((self.base / "pins.csv").read_text(), "GP0,GPIO0")  # upstream untouched
+
+    def test_regenerates_over_an_old_directory(self):
+        build_mp.rp2_board_dir(self.gen, self.base, "BOARD", "OURS")
+        (self.ours / "pins.csv").write_text("GP47,GPIO47")
+        build_mp.rp2_board_dir(self.gen, self.base, "BOARD", "OURS")
+        self.assertEqual((self.gen / "pins.csv").resolve(), (self.ours / "pins.csv").resolve())
+
+    def test_a_variant_that_is_not_ours_is_refused(self):
+        with self.assertRaises(SystemExit):
+            build_mp.rp2_board_dir(self.gen, self.base, "BOARD", "NOPE")
+
+
 class CircuitPythonFrozenLibraries(unittest.TestCase):
     """A CircuitPython build that freezes our Python freezes asyncio and
     adafruit_ticks too, unless the board already does."""

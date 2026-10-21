@@ -33,7 +33,7 @@ on:
         default: false
         type: boolean
       pico2:
-        description: Build the Raspberry Pi Pico 2 too (off until a board is on the bench)
+        description: Build the Raspberry Pi Pico 2 and the Pimoroni Pico Plus 2 W too (off until a board is on the bench)
         default: false
         type: boolean
       lvgl-circuitpython-ref:

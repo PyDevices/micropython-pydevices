@@ -6,7 +6,7 @@ on Linux or WSL.
 
     release_firmware.py matrix [--pico2]
         Print the build matrix as JSON for the workflow: one row per cell.
-        The Pico 2's row is left out unless --pico2 is given.
+        The Pico 2's and the Pico Plus 2 W's rows are left out unless --pico2 is given.
 
     release_firmware.py build <cell> <out-dir> [--ws DIR]
         Build one cell with build_mp.py and put its files, a sha256 of each and
@@ -95,6 +95,9 @@ CELLS = [
     # Off by default until a board is on the bench to run it on.
     dict(id="mp-pico2", label="Raspberry Pi Pico 2", interpreter="micropython", port="rp2",
          board="RPI_PICO2", variant=None, flash="4MB", modules="all",
+         chip="rp2350", offset=None, kind="rp2", deps="none", optional=True),
+    dict(id="mp-pico-plus2-w", label="Pimoroni Pico Plus 2 W", interpreter="micropython", port="rp2",
+         board="RPI_PICO2_W", variant="PIMORONI_PICO_PLUS2_W", flash="16MB", modules="all",
          chip="rp2350", offset=None, kind="rp2", deps="none", optional=True),
 ]
 

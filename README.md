@@ -8,7 +8,7 @@ one command:
     --flash 16MB --modules displayif,pygraphics,/home/you/earful
 ```
 
-Boards are upstream's own generic ones; the
+Boards are upstream's own, with a variant of ours where a board needs one; the
 [newcomer's guide](docs/newcomers.md#boards-we-build-for) has the command
 for each board we use. You name the modules you want: ours
 by short name, anything else by its path, or `all`. Leave out `--port` and it
@@ -95,7 +95,10 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   module and a Fetch-backed `requests`), and `esp32/`: the sdkconfig
   fragments and partition table every esp32 or every chip gets, and the few
   board variants of ours (`ESP32_GENERIC_S3` `LCD_4_3`, `LCD_7` and `T_EMBED`,
-  `ESP32_GENERIC_P4` `WIFI6_DEV_KIT` and `WIFI6_DEV_KIT_H2`).
+  `ESP32_GENERIC_P4` `WIFI6_DEV_KIT` and `WIFI6_DEV_KIT_H2`); and `rp2/`
+  (`RPI_PICO2_W` `PIMORONI_PICO_PLUS2_W`, the Pimoroni Pico Plus 2 W with its
+  16 MB flash, 8 MB PSRAM and 48 GPIOs:
+  `--port rp2 --board RPI_PICO2_W --variant PIMORONI_PICO_PLUS2_W`).
 - [`scripts/exercise_build.sh`](scripts/exercise_build.sh) — builds every desktop port and two esp32
   boards from a bare clone, checks the failure paths, and writes a report of
   what should match on any machine. Needs no board. For a report on builds you

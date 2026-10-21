@@ -181,6 +181,7 @@ on top. Add `--modules` to any of these:
 | WT32-SC01 Plus | `--port esp32 --board ESP32_GENERIC_S3 --flash 16MB` |
 | Raspberry Pi Pico (RP2040) | `--port rp2 --board RPI_PICO` (not `--modules all`: see [The model](#the-model)) |
 | Raspberry Pi Pico 2 (RP2350) | `--port rp2 --board RPI_PICO2` |
+| Pimoroni Pico Plus 2 W (16 MB flash, 8 MB PSRAM, 48 GPIOs) | `--port rp2 --board RPI_PICO2_W --variant PIMORONI_PICO_PLUS2_W` |
 
 A new board usually needs no file at all: pick the upstream board and
 variant that match its chip and PSRAM, and give `--flash` its flash size. Make
@@ -316,6 +317,25 @@ The partition table is found the same way, the most specific
 `partitions.csv` winning ([`variants/esp32/partitions.esp32s3.csv`](../variants/esp32/partitions.esp32s3.csv) adds a
 coredump partition on the S3, which a standard build leaves unused);
 without one, the board's own is used. Either way autosize grows the app partition when the image doesn't fit.
+
+## rp2 settings
+
+An rp2 board of ours is a variant of one of upstream's, in
+`variants/rp2/<BOARD>/<VARIANT>/`. The port only knows variants that sit in
+the board's own folder, so `build_mp.py` makes a folder of its own for the
+build, `builds/rp2/<BOARD>/<VARIANT>/<BOARD>/`, links upstream's board into it
+unchanged and adds what the variant holds:
+
+- `mpconfigvariant.cmake` (required): cmake settings, included after the
+  board's own default variant. The board's `PICO_BOARD`, the number of GPIOs,
+  PSRAM and the size of the filesystem go here.
+- `mpconfigboard.h`: C defines, included after the board's own header, so it
+  can `#undef` what the board sets, such as its name.
+- `pins.csv`: the pin names, in place of the board's.
+
+`PIMORONI_PICO_PLUS2_W` is the one so far. It builds the Pico 2 W for the
+Pimoroni board's 16 MB flash, 8 MB PSRAM, 48 GPIOs and its own pin names, and
+its files say why each setting is there.
 
 ## Where things are
 
