@@ -4,11 +4,17 @@
 # scripts/release_firmware.py.
 #
 # This workflow publishes nothing. It builds every cell, checks the files and
-# keeps them as a run artifact (14 days); there is no release, tag or upload
-# step, and the token cannot write. Run it by hand under Actions > Release
-# firmware > Run workflow, or let it run every Monday: that run keeps the caches
-# warm and says the week an upstream pin moves and a board stops building.
-# Changes to the recipe run the same builds on their pull request.
+# keeps them as a run artifact (14 days). Run it by hand under Actions >
+# Release firmware > Run workflow, or let it run every Monday: that run keeps
+# the caches warm and says the week an upstream pin moves and a board stops
+# building. Changes to the recipe run the same builds on their pull request.
+#
+# One input goes further: "draft_release" attests every file and puts them on a
+# DRAFT GitHub Release, which only people who can push to the repository can
+# see. Nothing here publishes it, makes a public tag, or touches a site: a
+# draft creates no tag until someone presses Publish, and a set built from
+# preview pins only takes a tag that starts "staged-" (release_firmware.py
+# notes). Only the draft job can write, and only on a manual run.
 #
 # Toolchains and compiler output are cached, but a release is rare, so a cold
 # build is the case to plan for: the cache is a bonus, dropped after 7 days
@@ -19,9 +25,13 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Name for the set's files (empty makes v<MicroPython version>-<date>)
+        description: Name for the set's files and its draft (empty makes v<MicroPython version>-<date>; a draft built from preview pins needs staged-<name>)
         default: ""
         type: string
+      draft_release:
+        description: Attest the files and put them on a draft GitHub Release (manual runs only; never published)
+        default: false
+        type: boolean
       pico2:
         description: Build the Raspberry Pi Pico 2 too (off until a board is on the bench)
         default: false
@@ -36,7 +46,9 @@ on:
     paths:
       - '.github/workflows/release-firmware.yml'
       - 'scripts/release_firmware.py'
+      - 'scripts/stage_firmware_page.py'
       - 'test_release_firmware.py'
+      - 'test_stage_firmware_page.py'
 
 permissions:
   contents: read
@@ -59,7 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: The checks themselves pass
-        run: python3 -m unittest test_release_firmware -v
+        run: python3 -m unittest test_release_firmware test_stage_firmware_page -v
       - name: Which cells this run builds
         id: matrix
         env:
@@ -237,3 +249,57 @@ jobs:
           path: firmware
           if-no-files-found: error
           retention-days: 14
+
+  # A draft Release and nothing else. It reads the checked set that `assemble`
+  # kept, attests every file, and creates the draft. `--draft` never creates
+  # the tag (GitHub makes it when a draft is published), which the last step
+  # checks. If the tag or a release of that name already exists, it stops.
+  draft:
+    if: github.event_name == 'workflow_dispatch' && inputs.draft_release
+    needs: [assemble]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: firmware
+          path: firmware
+
+      - name: The tag may go on a draft, and the Release's notes
+        run: |
+          python3 scripts/release_firmware.py notes firmware/firmware.json --out "$RUNNER_TEMP/notes.md"
+          echo "TAG=$(python3 -c 'import json; print(json.load(open("firmware/firmware.json"))["tag"])')" >> "$GITHUB_ENV"
+          echo "PRERELEASE=$(python3 -c 'import json; print("--prerelease" if json.load(open("firmware/firmware.json"))["preview"] else "")')" >> "$GITHUB_ENV"
+
+      - name: Nothing of that name exists yet
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::tag $TAG already exists"; exit 1
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::a release named $TAG already exists"; exit 1
+          fi
+
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: firmware/*
+
+      - name: Create the draft Release
+        run: |
+          gh release create "$TAG" firmware/* --draft $PRERELEASE --target "$GITHUB_SHA" \
+            --title "OmniPython firmware $TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          gh release view "$TAG" --json isDraft,url,assets --jq '"draft=\(.isDraft) \(.url) assets=\(.assets|length)"'
+
+      - name: It is still a draft and no tag was made
+        run: |
+          [[ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" == true ]]
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::tag $TAG exists after a draft"; exit 1
+          fi
