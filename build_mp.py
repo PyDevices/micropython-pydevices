@@ -1265,6 +1265,7 @@ def build_circuitpython(args, make_extra, ws):
         env["BINDINGS_DIR"] = str(bindings.resolve())
     if library.tree:
         env["PYDEVICES_LIBRARY"] = library.tree.as_posix()
+    env["PYDEVICES_INTERPRETER"] = "circuitpython"
     env["PATH"] = os.pathsep.join([str(CP_VENV / "bin"), env.get("PATH", "")])
     env["VIRTUAL_ENV"] = str(CP_VENV)
     # Only the submodules this target needs, the way CircuitPython's CI does:

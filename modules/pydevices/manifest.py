@@ -17,8 +17,13 @@ require("bledev", library="omnipython-lib", opt=3)
 # of the same names, and the three desktop helpers (usdl2, uwin32,
 # frame_recorder) that only the desktop board config freezes. So only its
 # packages' files are taken, from the library tree.
-_host = os.path.join(os.environ["PYDEVICES_LIBRARY"], "pydevices-desktop")
-for _pkg in sorted(os.listdir(_host)):
-    if os.path.isdir(os.path.join(_host, _pkg)):
-        _files = sorted(f for f in os.listdir(os.path.join(_host, _pkg)) if f.endswith(".py"))
-        package(_pkg, files=_files, base_path=_host, opt=3)
+#
+# A CircuitPython build leaves them out (build_mp.py sets
+# PYDEVICES_INTERPRETER): CircuitPython runs on boards, and there the host-only
+# files are 26 files whose names a frozen-string pool of 64 KB can't spare.
+if os.environ.get("PYDEVICES_INTERPRETER") != "circuitpython":
+    _host = os.path.join(os.environ["PYDEVICES_LIBRARY"], "pydevices-desktop")
+    for _pkg in sorted(os.listdir(_host)):
+        if os.path.isdir(os.path.join(_host, _pkg)):
+            _files = sorted(f for f in os.listdir(os.path.join(_host, _pkg)) if f.endswith(".py"))
+            package(_pkg, files=_files, base_path=_host, opt=3)
