@@ -417,10 +417,12 @@ four cells of [`release-firmware.yml`](../.github/workflows/release-firmware.yml
 | jpegio | yes | ESP32-P4 | adds only the encoder's C API: CircuitPython has its own `jpegio` decoder |
 | cameraif | yes (`available()` is False) | ESP32-P4 | |
 | mdns | yes (was left out) | no, on purpose | CircuitPython's boards have an `mdns` of their own; its unix port had none |
-| usbhost | yes, as `_usbhost`, with no host engine (was a build error) | not yet | the host engine runs on ESP-IDF's USB host library, and CircuitPython's boards have a USB host of their own |
-| audioif | no | no | links against audiodsp's audio pump and `cp_compat`, which audiodsp's CircuitPython glue doesn't build; boards have `audiobusio` of their own |
+| usbhost | yes, as `_usbhost`, with no host engine (was a build error) | not yet | the host engine runs on ESP-IDF's USB host library. CircuitPython's ESP32 builds have no USB host, so on the ESP32-P4 ours can run on the second USB controller ([roadmap](../ROADMAP.md)); the S3's one controller is CircuitPython's drive and REPL. On the RP2040 and i.MX, CircuitPython's own `usb.core` is the host, and pydevices' HID, CDC and MSC drivers are planned for it |
+| audioif | no | no | links against audiodsp's audio pump and `cp_compat`, which audiodsp's CircuitPython glue doesn't build. CircuitPython's audio samples are fed only from C, so audio made in Python needs a stream sample, the pump's C side shaped as one ([roadmap](../ROADMAP.md)); boards have `audiobusio` of their own |
 | ulab | CircuitPython's own | CircuitPython's own | |
-| castif, h264enc, tflite, vision | no | no | CMake-only ESP32-P4 and S3 modules, with no unix build to import; they need ESP-IDF registry components (esp_h264, TensorFlow Lite Micro) that CircuitPython's espressif port, built with the component manager off, would have to fetch |
+| castif | no: it is the ESP32-P4's | not yet | talks to ESP-IDF and lwIP directly, the lwIP under CircuitPython's own `socketpool`, so it needs only a `micropython.mk` ([roadmap](../ROADMAP.md)) |
+| h264enc | no: it is the ESP32-P4's encoder | not yet | needs Espressif's `esp_h264` component, which CircuitPython's espressif port, built with the component manager off, would fetch through `deps.lock` the way cameraif's sensor components are ([roadmap](../ROADMAP.md)) |
+| tflite, vision | no | no, on purpose | esp-vision's modules, for MicroPython only |
 | lvgl-micropython | no | no | CircuitPython's binding is `lvgl-circuitpython`, passed by path |
 | micropython-lib | no | no | MicroPython's own upstream packages |
 | pydevices, palettes, pdwidgets | frozen | frozen | Python only. On unix, pydevices also freezes its desktop files (the boards drop them), and pdwidgets and palettes with it: together their names pass CircuitPython's 64 KB frozen-string pool, so `build_mp.py` builds the unix port with four-byte qstr offsets (patches 0001 and 0010). Boards keep two-byte offsets |
