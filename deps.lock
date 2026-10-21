@@ -2,7 +2,7 @@
 # its port uses: esp-idf for esp32, emsdk for webassembly, SDL2 for windows
 # when displayif is selected, circuitpython for --interpreter circuitpython,
 # and the ESP-IDF components below for a CircuitPython espressif build with
-# cameraif or h264enc.
+# cameraif, h264enc or usbhost.
 # In a workspace deps/<name> may be a symlink to a shared checkout, and a
 # build refuses if it isn't the version below.
 # The ESP-IDF version is our choice, not upstream's recommendation.
@@ -31,3 +31,7 @@ cmake_utilities https://components-file.espressif.com/components/espressif/cmake
 # espressif port: the version modules/h264enc/components/h264enc_esp_h264 asks
 # MicroPython's build for.
 esp_h264        https://components-file.espressif.com/components/espressif/esp_h264/1.4.1/espressif__esp_h264-v1.4.1.zip              1.4.1
+# usb, ESP-IDF's USB host library, for usbhost on CircuitPython's espressif
+# port: from ESP-IDF 6 it is this registry component, not part of ESP-IDF.
+# The name is the component's, which ESP-IDF takes from its directory.
+usb             https://components-file.espressif.com/components/espressif/usb/1.6.0/espressif__usb-v1.6.0.zip                      1.6.0

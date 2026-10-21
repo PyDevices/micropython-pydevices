@@ -954,7 +954,8 @@ CP_BOARDS = REPO / "boards" / "circuitpython"
 # deps.lock, fetched into deps/, and handed to make as
 # USER_ESP_IDF_COMPONENT_DIRS (one of our CircuitPython patches).
 CP_ESP_IDF_COMPONENTS = {"cameraif": ("esp_cam_sensor", "esp_sccb_intf", "cmake_utilities"),
-                         "h264enc": ("esp_h264",)}
+                         "h264enc": ("esp_h264",),
+                         "usbhost": ("usb",)}
 CP_ESP_IDF_COMPONENT_DEPS = {n for names in CP_ESP_IDF_COMPONENTS.values() for n in names}
 
 

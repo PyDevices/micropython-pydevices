@@ -58,10 +58,12 @@
 
 #include "shared/usbhost_ringbuf.h"
 #include "usbhost_classes.h"
+#include "usbhost_host.h"
+#include "usbhost_host_stream.h"
 #include "usbhost_ticks.h"
 #include "esp_timer.h"
 
-#if MICROPY_HW_ENABLE_USBDEV
+#if defined(MICROPY_HW_ENABLE_USBDEV) && MICROPY_HW_ENABLE_USBDEV
 #include "tusb.h"
 // From ports/esp32/usb.c via usbhost patch 0004: release the device-mode PHY
 // around host duty, and restore it afterwards.
@@ -83,9 +85,8 @@ extern void usb_phy_otg_device_mode(void);
 #define USBHOST_HOST_TAKES_DEVICE (0)
 #endif
 
-// mod_usbhost.c owns the event ring; this is its producer hook. Single
-// producer holds: only the host task below ever calls it.
-extern void usbhost_host_emit(const usbhost_event_t *event);
+// mod_usbhost.c owns the event ring; usbhost_host_emit() is its producer
+// hook. Single producer holds: only the host task below ever calls it.
 
 #define USBHOST_HOST_MAX_DEVS (8)
 // Below the pump (10) -- enumeration control transfers are not realtime
@@ -172,7 +173,7 @@ void usbhost_host_lock_debug(const char *tag) {
     printf("usbhost_host: %s holder=%p self=%p task=%p state=%d depth=%d stage=%d\n",
         tag, (void *)holder, (void *)xTaskGetCurrentTaskHandle(),
         (void *)usbhost_host_task_handle,
-        (int)(usbhost_host_task_handle ? eTaskGetState(usbhost_host_task_handle) : -1),
+        usbhost_host_task_handle ? (int)eTaskGetState(usbhost_host_task_handle) : -1,
         usbhost_api_lock_depth, usbhost_host_stage);
 }
 
@@ -514,13 +515,6 @@ static void usbhost_host_on_new_dev(uint8_t addr) {
     usbhost_host_emit(&event);
     usbhost_host_attaches++;
 }
-
-extern void usbhost_stream_close_all(void);
-
-extern void usbhost_xfer_on_dev_gone(usb_device_handle_t dev);
-extern void usbhost_xfer_close(void);
-extern void usbhost_net_on_dev_gone(usb_device_handle_t dev);
-extern void usbhost_net_stop(void);
 
 static void usbhost_host_on_dev_gone(usb_device_handle_t hdl) {
     usbhost_net_on_dev_gone(hdl);
@@ -942,7 +936,6 @@ static void usbhost_host_task(void *arg) {
 // The pointer is into the host library's own cached descriptor, valid while
 // the device stays attached; the caller copies it immediately.
 // Defined below, after the class-driver plumbing that also uses it.
-int usbhost_host_dev_lookup(uint32_t dev_id, usb_device_handle_t *out);
 
 static int usbhost_host_desc_get_locked(uint32_t dev_id, const uint8_t **out, uint16_t *len) {
     // No USBHOST_HAVE_HOST guard here: that macro is defined in mod_usbhost.c and

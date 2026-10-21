@@ -43,15 +43,8 @@
 #include "usb/usb_host.h"
 #include "usbhost_ticks.h"
 #include "usbhost_host_stream.h"
+#include "usbhost_host.h"
 
-extern usb_host_client_handle_t usbhost_host_client_get(void);
-extern void usbhost_host_lock(void);
-extern void usbhost_host_unlock(void);
-extern int usbhost_host_lock_suspend(void);
-extern void usbhost_host_lock_resume(int held);
-extern int usbhost_host_dev_lookup(uint32_t dev_id, usb_device_handle_t *out);
-extern void usbhost_host_ctrl_abandon(usb_transfer_t *xfer);
-extern bool usbhost_host_ctrl_reclaim(usb_transfer_t *xfer);
 
 #define USBHOST_XFER_MAX_CLAIMS (16)
 #define USBHOST_XFER_MAX_PIPES (16)

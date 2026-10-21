@@ -52,12 +52,7 @@
 #include "shared/usbhost_pcm_sink.h"
 #include "shared/usbhost_uvc_frame.h"
 
-extern usb_host_client_handle_t usbhost_host_client_get(void);
-extern void usbhost_host_lock(void);
-extern void usbhost_host_unlock(void);
-extern int usbhost_host_dev_lookup(uint32_t dev_id, usb_device_handle_t *out);
-extern int usbhost_xfer_iso_ep(usb_device_handle_t dev, uint8_t ep, uint16_t *wmax, uint8_t *interval,
-    uint8_t *itf_out);
+#include "usbhost_host.h"
 
 // The most a packet can be: 1024 bytes times three transactions a
 // microframe, a high-speed high-bandwidth endpoint.

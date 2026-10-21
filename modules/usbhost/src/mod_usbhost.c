@@ -18,7 +18,7 @@
 
 #include "shared/usbhost_ringbuf.h"
 
-#if MICROPY_HW_ENABLE_USBDEV
+#if defined(MICROPY_HW_ENABLE_USBDEV) && MICROPY_HW_ENABLE_USBDEV
 #include "tusb.h"
 #include "mp_usbd.h"
 #endif
@@ -33,28 +33,27 @@
 // ESP_PLATFORM is NOT defined here -- learned the hard way when this gate
 // silently compiled the engine out and the Phase 1 stubs answered in its
 // place. sdkconfig.h existing (and naming an OTG controller) is the real
-// signal that the IDF host library is available.
+// signal that the IDF host library is available. A make build that leaves the
+// engine out says so with USBHOST_NO_HOST_ENGINE (micropython.mk): a
+// CircuitPython ESP32-S3 has the controller, and it's CircuitPython's.
 #if defined(__has_include)
 #if __has_include("sdkconfig.h")
 #include "sdkconfig.h"
 #endif
 #endif
-#if defined(CONFIG_SOC_USB_OTG_SUPPORTED) && CONFIG_SOC_USB_OTG_SUPPORTED
+#if defined(CONFIG_SOC_USB_OTG_SUPPORTED) && CONFIG_SOC_USB_OTG_SUPPORTED && !defined(USBHOST_NO_HOST_ENGINE)
 #define USBHOST_HAVE_HOST (1)
-extern int usbhost_host_start_c(void);
-extern void usbhost_host_stop_c(void);
-extern bool usbhost_host_is_wedged(void);
-extern bool usbhost_host_is_running(void);
-extern int usbhost_host_snapshot(usbhost_event_t *out, int max);
-extern uint32_t usbhost_host_attaches, usbhost_host_detaches, usbhost_host_errors;
-extern int usbhost_host_lib_counts(int *num_devices, int *num_clients);
-extern int usbhost_host_port_cycle(void);
-extern void usbhost_host_set_class_filter(uint16_t mask);
-extern void usbhost_host_set_full_speed(bool full_speed);
-extern void usbhost_host_intr_dump(void);
-extern int usbhost_host_desc_get(uint32_t dev_id, const uint8_t **out, uint16_t *len);
+#include "usbhost_host.h"
 #else
 #define USBHOST_HAVE_HOST (0)
+#endif
+
+// The tethering adapter needs lwIP, which a firmware with no network leaves
+// out (CircuitPython's ESP32-P4 port, until it drives the boards' ESP32-C6).
+#if USBHOST_HAVE_HOST && !defined(USBHOST_NO_NETWORK)
+#define USBHOST_HAVE_NET (1)
+#else
+#define USBHOST_HAVE_NET (0)
 #endif
 
 // Event capacity. Sized from measurement rather than a round number: the worst
@@ -74,9 +73,12 @@ static bool usbhost_host_running = false;
 static void usbhost_arm_soft_reset(void);
 
 // Producer hook for the host engine (usbhost_host.c). Called only from the
-// host task, preserving the ring's single-producer contract. Declared here as
-// well as there: CircuitPython builds with -Wmissing-prototypes -Werror.
+// host task, preserving the ring's single-producer contract. Declared here
+// too for a build without the engine, where nothing calls it: CircuitPython
+// builds with -Wmissing-prototypes -Werror.
+#if !USBHOST_HAVE_HOST
 void usbhost_host_emit(const usbhost_event_t *event);
+#endif
 void usbhost_host_emit(const usbhost_event_t *event) {
     usbhost_rb_push(&usbhost_events, event);
 }
@@ -330,12 +332,6 @@ static MP_DEFINE_CONST_FUN_OBJ_1(usbhost_host_desc_obj, usbhost_host_desc_py);
 // errno: ETIMEDOUT, EPIPE for a stall, ENODEV once the device is gone,
 // EACCES for an endpoint whose interface isn't claimed.
 #if USBHOST_HAVE_HOST
-extern int usbhost_xfer_claim(uint32_t dev_id, uint8_t itf, uint8_t alt);
-extern int usbhost_xfer_release(uint32_t dev_id, uint8_t itf);
-extern int usbhost_xfer_ctrl(uint32_t dev_id, const uint8_t setup[8], uint8_t *data, uint16_t len, uint32_t timeout_ms);
-extern int usbhost_xfer_ep(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint32_t timeout_ms, bool keep);
-extern int usbhost_xfer_poll(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len);
-
 static mp_obj_t usbhost_xfer_check(int r) {
     if (r < 0) {
         mp_raise_OSError(-r);
@@ -501,6 +497,7 @@ static mp_obj_t usbhost_host_stream_py(size_t n_args, const mp_obj_t *pos_args, 
         .downmix = args[ARG_downmix].u_bool,
     };
     void *ptr = MP_OBJ_TO_PTR(ring);
+    (void)ptr;  // unused when this firmware has neither ring type
     bool known = false;
     #if defined(MP_USBD_HAS_RING_API)
     if (mp_obj_is_type(ring, &mp_usbd_ring_type)) {
@@ -614,17 +611,10 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbhost_host_stream_c_sink_obj, 4, 4,
 
 // A hosted network adapter (usb.host.net) as an ESP-IDF network interface,
 // in usbhost_host_net.c: Python does the control side, this moves the frames.
-#if USBHOST_HAVE_HOST
-extern int usbhost_net_start(uint32_t dev_id, uint8_t itf, uint8_t ep_in, uint8_t ep_out, uint16_t mps,
-    const uint8_t mac[6], bool rndis);
-extern void usbhost_net_stop(void);
-extern int usbhost_net_info(uint32_t addr[4], uint32_t counts[5]);
-extern void usbhost_net_set_default(void);
-#endif
 
 // host_net_start(dev_id, interface, ep_in, ep_out, max_packet, mac, rndis)
 static mp_obj_t usbhost_host_net_start_py(size_t n_args, const mp_obj_t *args) {
-    #if USBHOST_HAVE_HOST
+    #if USBHOST_HAVE_NET
     mp_buffer_info_t mac;
     mp_get_buffer_raise(args[5], &mac, MP_BUFFER_READ);
     if (mac.len != 6) {
@@ -634,6 +624,8 @@ static mp_obj_t usbhost_host_net_start_py(size_t n_args, const mp_obj_t *args) {
         (uint8_t)mp_obj_get_int(args[2]), (uint8_t)mp_obj_get_int(args[3]), (uint16_t)mp_obj_get_int(args[4]),
         mac.buf, mp_obj_is_true(args[6])));
     return mp_const_none;
+    #elif USBHOST_HAVE_HOST
+    mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("this firmware has no network"));
     #else
     mp_raise_OSError(MP_EOPNOTSUPP);
     #endif
@@ -641,14 +633,14 @@ static mp_obj_t usbhost_host_net_start_py(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbhost_host_net_start_obj, 7, 7, usbhost_host_net_start_py);
 
 static mp_obj_t usbhost_host_net_stop_py(void) {
-    #if USBHOST_HAVE_HOST
+    #if USBHOST_HAVE_NET
     usbhost_net_stop();
     #endif
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(usbhost_host_net_stop_obj, usbhost_host_net_stop_py);
 
-#if USBHOST_HAVE_HOST
+#if USBHOST_HAVE_NET
 static mp_obj_t usbhost_ip_str(uint32_t a) {
     char buf[16];
     snprintf(buf, sizeof(buf), "%u.%u.%u.%u", (unsigned)(a & 0xff), (unsigned)((a >> 8) & 0xff),
@@ -660,7 +652,7 @@ static mp_obj_t usbhost_ip_str(uint32_t a) {
 // host_net_info(): (up, (ip, netmask, gateway, dns), (rx, tx, rx dropped,
 // tx dropped, rx errors)), or None when no interface is up.
 static mp_obj_t usbhost_host_net_info_py(void) {
-    #if USBHOST_HAVE_HOST
+    #if USBHOST_HAVE_NET
     uint32_t addr[4], counts[5];
     int up = usbhost_net_info(addr, counts);
     if (up < 0) {
@@ -682,7 +674,7 @@ static mp_obj_t usbhost_host_net_info_py(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(usbhost_host_net_info_obj, usbhost_host_net_info_py);
 
 static mp_obj_t usbhost_host_net_default_py(void) {
-    #if USBHOST_HAVE_HOST
+    #if USBHOST_HAVE_NET
     usbhost_net_set_default();
     #endif
     return mp_const_none;
