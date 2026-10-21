@@ -99,7 +99,7 @@ jobs:
   python:
     # The examples' checks, the guard that keeps _usbhost out of examples
     # and docs, and the tick-rate scan of src/. The examples lean on
-    # pydevices' events, found at modules/pydevices.
+    # pydevices' events, found at modules/.omnipython-lib, where build_mp.py keeps the library.
     name: Examples and source checks (CPython)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -108,7 +108,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: PyDevices/pydevices
-          path: modules/pydevices
+          path: modules/.omnipython-lib
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'

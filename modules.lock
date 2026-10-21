@@ -4,16 +4,22 @@
 # modules/castif, tracked in this repository. Commits are full SHAs: GitHub
 # serves a fetch by commit only for the whole 40 characters.
 #
+# omnipython-lib is not a module either: it is the repository of our Python-only
+# packages (pydevices, palettes, pdwidgets, appkit, audioinstruments,
+# audioeffects, board configs and drivers). A build asks its
+# tools/libbuild.py for the library tree and require()s packages from it; the
+# modules/ entries of those names are manifests that do exactly that. It is
+# the pydevices repository until the rename. The packages the library builds
+# from other repositories (audiocomponents' two) are pinned by tag in its
+# lib-lock.json, not here.
+#
 # lvgl-bindings is not a module but the source lvgl-micropython compiles: a
 # build that has lvgl-micropython fetches it at this commit into
 # modules/.lvgl-bindings (a sibling checkout is linked there instead) and
 # hands it to lvgl-micropython, whose own LVGL_BINDINGS_COMMIT then goes unused.
-audiocomponents   https://github.com/PyDevices/audiocomponents.git    b2ebc92c77276229a40d7c279c0a321550a68103
 audiodsp          https://github.com/PyDevices/audiodsp.git           c23f67a3b5f8ab9b4450b4bb49777782d9537f9d
 lvgl-bindings     https://github.com/PyDevices/lvgl-bindings.git      7740c2fae0daa10992f5f8fe54acf670a70e2d3b
 lvgl-micropython  https://github.com/PyDevices/lvgl-micropython.git   48937fcd87e574488178997e2bafe73d9bf02240
-palettes          https://github.com/PyDevices/palettes.git           f3dfad0bac281f1e8816b30861445498b4137de6
-pdwidgets         https://github.com/PyDevices/pdwidgets.git          e92267f2ef938b60ba3b97177ceb2bd0e0d402d3
-pydevices         https://github.com/PyDevices/pydevices.git          323c97ff98da112154fb0f2672671470a0fc23b7
 pygraphics        https://github.com/PyDevices/pygraphics.git         2d7ca35847db78d450428cdc0cb5aa69ab81c809
 ulab              https://github.com/v923z/micropython-ulab.git       1d3ddd8f5228e2c7335dac71f4846e6abb0ec9f9
+omnipython-lib   https://github.com/PyDevices/pydevices.git          46e1654924ee7caae723005adf0e0cea32f07538

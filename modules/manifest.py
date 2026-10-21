@@ -8,7 +8,11 @@
 # including manifest passes one, else $PYDEVICES_MODULES, which build_mp.py
 # sets from --modules. A bare name is modules/<name>; anything with a path
 # separator is a directory of its own (build_mp.py makes it absolute). "all"
-# is modules/all like any other name.
+# is modules/all like any other name. A name that is no directory here is a
+# package of omnipython-lib (build_mp.py assembles the library and sets
+# $PYDEVICES_LIBRARY): palettes and the other Python-only packages have a
+# manifest here that requires theirs, and the rest, appkit, a board config or
+# a driver, are required directly.
 #
 # Called by hand:
 #   PYDEVICES_MODULES=audiodsp,displayif make -C ports/unix \
@@ -64,6 +68,14 @@ for _name in (n.strip() for n in _names.split(",")):
         _dir = _name
     else:
         _dir = os.path.join(_here, _name)
+        if not os.path.isdir(_dir):
+            # Not a module of ours: a package of omnipython-lib, which
+            # build_mp.py has checked it holds. appkit, audioeffects, a board
+            # config such as esp32-s3-touch-lcd-7 or a driver such as gt911 are
+            # named the same way. Frozen at opt=3 like the Python modules.
+            include("library.py")
+            require(_name, library="omnipython-lib", opt=3)
+            continue
     # One spelling per module: upstream drops a duplicate C module only when
     # its path string matches, and a module reached through a symlink and
     # again through its real path would otherwise be compiled twice.

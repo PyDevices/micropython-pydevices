@@ -3,11 +3,11 @@
 # midiports, frozen so the board runs without a mip install. Only this variant
 # freezes them; every other build still installs them with mip.
 #
-# The USB packages live in pydevices, beside midiports. pydevices is registered
-# as a library, so their own require("usb-core") resolves there; usb-device-audio's
-# require("usb-device") and usb-device-midi come from micropython-lib. Nothing
-# here is frozen unless the build carries usbhost, whose _usbhost the host
-# packages need.
+# They come from omnipython-lib, whose usb-* packages require each other there;
+# usb-device-audio's require("usb-device") and the device classes come from
+# micropython-lib (modules/micropython-lib freezes every class; a frozen
+# usb.device hides any usb/device/ in /lib). Nothing here is frozen unless the
+# build carries usbhost, whose _usbhost the host packages need.
 import os
 
 include("../../../../modules/manifest.py")
@@ -15,7 +15,7 @@ include("../../../../modules/manifest.py")
 _names = [n.strip() for n in os.environ.get("PYDEVICES_MODULES", "").split(",")]
 _usbhost = os.path.realpath("../../../../modules/usbhost")
 if any(n in ("all", "usbhost") or os.path.realpath(n) == _usbhost for n in _names if n):
-    add_library("pydevices", os.path.realpath("../../../../modules/pydevices"))
+    include("../../../../modules/library.py")
     for _pkg in (
         "usb-core",
         "usb-host-audio",
@@ -27,17 +27,13 @@ if any(n in ("all", "usbhost") or os.path.realpath(n) == _usbhost for n in _name
         "usb-device-audio",
         "usb-device-video",
         "usb-device-msc",
+        # midiports' board half (UART, USB device, USB host); the desktop ports
+        # stay out. adafruit_midi isn't in it: a firmware that wants it frozen
+        # adds Adafruit's files itself.
+        "midiports",
     ):
-        require(_pkg, library="pydevices")
-    # A frozen usb.device hides any usb/device/ in /lib (a package is found
-    # once, not merged across sys.path), so every device class goes in.
+        require(_pkg, library="omnipython-lib")
+    # The device classes the USB packages and midiports import, if the build
+    # didn't already freeze micropython-lib's (modules/micropython-lib does).
     for _pkg in ("usb-device-midi", "usb-device-cdc", "usb-device-hid"):
         require(_pkg)
-    # midiports' board half (UART, USB device, USB host); the desktop ports stay
-    # out. Its own manifest.py would call metadata() a second time in this
-    # context, so the files are named here, as that manifest names them.
-    package(
-        "midiports",
-        files=("__init__.py", "uart.py", "usb_device.py", "usb_host.py"),
-        base_path="../../../../modules/pydevices/midiports",
-    )

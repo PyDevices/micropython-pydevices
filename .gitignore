@@ -5,6 +5,12 @@
 # modules/ holds symlinks or clones, except what this repository tracks.
 /modules/*
 !/modules/manifest.py
+!/modules/library.py
+!/modules/pydevices/
+!/modules/palettes/
+!/modules/pdwidgets/
+!/modules/audiocomponents/
+!/modules/micropython-lib/
 !/modules/all/
 !/modules/castif/
 !/modules/usbhost/
