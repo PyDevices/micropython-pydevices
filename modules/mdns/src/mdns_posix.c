@@ -522,7 +522,10 @@ static void *responder_thread(void *arg) {
         }
         if (fds[1].revents & POLLIN) {
             char b[16];
-            (void)read(g.wake[0], b, sizeof(b));
+            // Only the wake-up matters, not the bytes; the result is kept so
+            // glibc's warn_unused_result stays quiet (CircuitPython makes it an error).
+            ssize_t drained = read(g.wake[0], b, sizeof(b));
+            (void)drained;
         }
         if (fds[0].revents & POLLIN) {
             struct sockaddr_in src;
@@ -546,7 +549,9 @@ static void *responder_thread(void *arg) {
 
 static void wake_thread(void) {
     if (g.wake[1] >= 0) {
-        (void)write(g.wake[1], "x", 1);
+        // A full pipe already has a wake-up in it, so the result is not needed.
+        ssize_t sent = write(g.wake[1], "x", 1);
+        (void)sent;
     }
 }
 

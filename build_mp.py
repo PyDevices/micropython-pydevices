@@ -1145,7 +1145,9 @@ def cp_user_c_modules(module_dirs, link_dir):
         if not found:
             if cp_frozen_manifest_dir(d):
                 continue  # Python only: frozen through cp_frozen_manifest()
-            die(f"module '{d.name}' has no micropython.mk and no manifest.py that freezes Python for CircuitPython")
+            die(f"module '{d.name}' has no micropython.mk and no manifest.py that freezes Python for CircuitPython: "
+                "it builds through CMake, for MicroPython's esp32 port, and CircuitPython's make ports can't take it yet "
+                "(docs/build-plan.md lists which modules build there)")
         found_dirs.append((module_name(d), found))
     names = [n for n, _ in found_dirs]
     if len(set(names)) != len(names):
@@ -1314,6 +1316,8 @@ def build_circuitpython(args, make_extra, ws):
     if library.tree:
         env["PYDEVICES_LIBRARY"] = library.tree.as_posix()
     env["PYDEVICES_INTERPRETER"] = "circuitpython"
+    # The unix port is a desktop: pydevices freezes its host-only files there.
+    env["PYDEVICES_PLATFORM"] = "desktop" if port == "unix" else "board"
     env["PATH"] = os.pathsep.join([str(CP_VENV / "bin"), env.get("PATH", "")])
     env["VIRTUAL_ENV"] = str(CP_VENV)
     # Only the submodules this target needs, the way CircuitPython's CI does:

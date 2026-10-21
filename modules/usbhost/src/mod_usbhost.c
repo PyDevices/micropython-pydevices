@@ -74,7 +74,9 @@ static bool usbhost_host_running = false;
 static void usbhost_arm_soft_reset(void);
 
 // Producer hook for the host engine (usbhost_host.c). Called only from the
-// host task, preserving the ring's single-producer contract.
+// host task, preserving the ring's single-producer contract. Declared here as
+// well as there: CircuitPython builds with -Wmissing-prototypes -Werror.
+void usbhost_host_emit(const usbhost_event_t *event);
 void usbhost_host_emit(const usbhost_event_t *event) {
     usbhost_rb_push(&usbhost_events, event);
 }
