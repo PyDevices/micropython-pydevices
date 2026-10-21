@@ -2,12 +2,25 @@
 
 Work here mostly follows bug reports and requests, so if something is broken
 or missing for you, open an
-[issue](https://github.com/PyDevices/micropython-pydevices/issues). Planned:
+[issue](https://github.com/PyDevices/micropython-pydevices/issues).
 
-- **More modules in CircuitPython-compatible builds.** Next are audioif (it
-  needs audiodsp's audio pump built for CircuitPython), usbhost's host engine
-  on boards, and castif, h264enc, tflite and vision (ESP-IDF registry
-  components on the espressif port). [What builds today](docs/build-plan.md#which-modules-build-on-circuitpython).
+More modules in CircuitPython-compatible builds
+([what builds today](docs/build-plan.md#which-modules-build-on-circuitpython)):
+
+- **Python-generated audio on CircuitPython.** A stream sample, the audio
+  pump's C side, that plays a ring your Python code fills through
+  `audiobusio.I2SOut`. CircuitPython's own samples take only C; audioif waits on it.
+- **castif and h264enc on CircuitPython's ESP32-P4 builds.** Both talk to
+  ESP-IDF and lwIP directly, and need only the build glue and Espressif's
+  `esp_h264` encoder fetched at build time.
+- **usbhost on CircuitPython for the ESP32-P4.** CircuitPython's ESP32 builds
+  have no USB host; the P4's second USB controller can run ours. The S3's one
+  controller is CircuitPython's drive and REPL, so the S3 is left out.
+- **The USB host drivers on CircuitPython's own `usb.core`**, on the RP2040
+  and i.MX: planned in [pydevices](https://github.com/PyDevices/pydevices/blob/main/ROADMAP.md#usb).
+
+tflite and vision stay MicroPython-only: they are esp-vision's modules, not
+ours to port.
 
 ## Module roadmaps
 
