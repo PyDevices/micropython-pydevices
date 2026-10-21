@@ -162,12 +162,14 @@ def micropython_version():
     return "v" + ".".join(nums) + ("-preview" if pre else "")
 
 
-def check_version_tag(tag, elf, cell_id):
+def check_version_tag(tag, elf, cell_id, after=b""):
     """The image has to print a version. A build that couldn't ask git for one
-    (a clone without tags) prints the commit's hash instead, and still links."""
+    (a clone without tags) prints the commit's hash instead, and still links.
+    `after` is what follows the version where the image prints it: a
+    CircuitPython version that gained a -dirty contains the clean one."""
     if not tag:
         raise Failed(f"{cell_id}: the build recorded no version, so its sys.version would show a commit hash")
-    if tag.encode() not in Path(elf).read_bytes():
+    if tag.encode() + after not in Path(elf).read_bytes():
         raise Failed(f"{cell_id}: {Path(elf).name} does not contain the version {tag}")
 
 
@@ -245,6 +247,9 @@ def build(cell_id, out, ws):
         print(f"  sys.version tag: {record['micropython_version']}", flush=True)
 
     if c["interpreter"] == "circuitpython":
+        # The banner and os.uname() print "<version> on <date>".
+        check_version_tag(record.get("circuitpython_version"), out / f"elf{EXTENSION['elf']}", c["id"], b" on ")
+        print(f"  version: {record['circuitpython_version']}", flush=True)
         check_frozen_libraries(record.get("frozen_libraries"), out / f"elf{EXTENSION['elf']}", c["id"])
         print(f"  frozen libraries: {', '.join(record['frozen_libraries'])}", flush=True)
 
@@ -257,7 +262,7 @@ def build(cell_id, out, ws):
     meta["files"] = files
     meta["build_seconds"] = seconds
     meta["interpreter_version"] = (micropython_version() if c["interpreter"] == "micropython"
-                                   else record.get("circuitpython"))
+                                   else record.get("circuitpython_version"))
     meta["module_revisions"] = {n: m for n, m in sorted((record.get("module_revisions") or {}).items())}
     if c["interpreter"] == "circuitpython":
         meta["circuitpython_patches"] = record.get("circuitpython_patches", [])

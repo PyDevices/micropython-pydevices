@@ -64,6 +64,14 @@ jobs:
           PY
           ./builds/circuitpython/unix/coverage/micropython check.py
 
+      # The build names the pinned tag, not the patch series laid on it.
+      - name: The version is the pinned tag, not -dirty
+        run: |
+          want=$(awk '$1 == "circuitpython" {print $3}' deps.lock)
+          got=$(./builds/circuitpython/unix/coverage/micropython -c "import os; print(os.uname().version.split(' on ')[0])")
+          echo "version: $got (deps.lock: $want)"
+          test "$got" = "$want"
+
       - name: A looping source that comes back empty does not hang the delay nodes
         run: |
           cat > empty_source.py <<'PY'

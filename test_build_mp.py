@@ -342,6 +342,67 @@ class MicropythonVersion(unittest.TestCase):
                 self.assertIsNone(build_mp.micropython_version(tmp, upstream))
 
 
+class CircuitpythonVersion(unittest.TestCase):
+    """CircuitPython's version is its git describe, which our patch series must not make -dirty."""
+
+    def git(self, tmp, *a):
+        return subprocess.run(["git", "-C", tmp, "-c", "user.name=t", "-c", "user.email=t@t", *a],
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    def repo(self, tmp, tagged=True):
+        """A checkout at its tag with our patch (a.txt) laid on it uncommitted; returns the patches."""
+        t = Path(tmp)
+        self.git(tmp, "init", "-q")
+        (t / "a.txt").write_text("one\n")
+        (t / "b.txt").write_text("one\n")
+        self.git(tmp, "add", ".")
+        self.git(tmp, "commit", "-qm", "one")
+        if tagged:
+            self.git(tmp, "tag", "11.0.0-alpha.1")
+        (t / "a.txt").write_text("patched\n")
+        patch = t.parent / (t.name + "-0001.patch")
+        patch.write_text(self.git(tmp, "diff") + "\n")
+        self.addCleanup(patch.unlink)
+        return [patch]
+
+    def test_the_patch_series_does_not_make_the_version_dirty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            patches = self.repo(tmp)
+            self.assertTrue(self.git(tmp, "describe", "--tags", "--dirty").endswith("-dirty"))  # git's own answer
+            self.assertEqual(build_mp.circuitpython_version(tmp, patches), "11.0.0-alpha.1")
+
+    def test_an_edit_beyond_the_series_is_dirty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            patches = self.repo(tmp)
+            (Path(tmp) / "b.txt").write_text("edited\n")
+            self.assertEqual(build_mp.circuitpython_version(tmp, patches), "11.0.0-alpha.1-dirty")
+
+    def test_an_edit_to_a_file_the_series_patches_is_dirty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            patches = self.repo(tmp)
+            (Path(tmp) / "a.txt").write_text("patched and then some\n")
+            self.assertEqual(build_mp.circuitpython_version(tmp, patches), "11.0.0-alpha.1-dirty")
+
+    def test_commits_after_the_tag_and_micropython_tags_are_named_the_way_circuitpython_does(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            patches = self.repo(tmp)
+            self.git(tmp, "stash", "-q")
+            (Path(tmp) / "b.txt").write_text("two\n")
+            self.git(tmp, "commit", "-qam", "two")
+            self.git(tmp, "tag", "v1.29.0")  # MicroPython's tags are not CircuitPython's version
+            self.git(tmp, "stash", "pop", "-q")
+            short = self.git(tmp, "rev-parse", "--short", "HEAD")
+            version = build_mp.circuitpython_version(tmp, patches)
+            self.assertRegex(version, rf"^11\.0\.0-alpha\.1-1-g{short[:5]}")
+            self.assertFalse(version.endswith("-dirty"))
+
+    def test_no_tags_means_no_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            patches = self.repo(tmp, tagged=False)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertIsNone(build_mp.circuitpython_version(tmp, patches))
+
+
 class FrozenManifest(unittest.TestCase):
     """A variant of ours, of a port or of a board, may bring its own manifest."""
 

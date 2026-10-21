@@ -1304,6 +1304,34 @@ def cp_make_args(port, make_extra):
     return out if found else out + [f"CFLAGS_EXTRA={CP_UNIX_CFLAGS}"]
 
 
+def circuitpython_version(cp, patches):
+    """What CircuitPython's own build would print for the commit `cp` is at: its
+    `git describe` of the tag, such as 11.0.0-alpha.1, or None without tags.
+
+    Our patch series is laid on the checkout as uncommitted edits, so
+    CircuitPython's py/version.py sees them and appends -dirty. The build
+    records which patches it carries (circuitpython_patches), so they are not
+    what "dirty" means here; edits beyond them still are. That is checked by
+    applying the series to a scratch index and asking git whether the files
+    match it. The result goes to the build as CP_VERSION, which py/version.py
+    takes in place of asking git."""
+    described = git_out(cp, "describe", "--tags", "--first-parent", "--match", "[!v]*", "HEAD")
+    if not described:
+        say("CircuitPython has no tags here; its version will show a commit, not a version")
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        env = dict(os.environ, GIT_INDEX_FILE=str(Path(tmp) / "index"))
+        git = ["git", "-C", str(cp)]
+        ok = subprocess.run(git + ["read-tree", "HEAD"], env=env, capture_output=True).returncode == 0
+        for patch in patches:
+            ok = ok and subprocess.run(git + ["apply", "--cached", str(patch)], env=env,
+                                       capture_output=True).returncode == 0
+        # --ignore-submodules: ci_fetch_deps moves submodules, which no patch of ours touches.
+        edited = not ok or subprocess.run(git + ["diff", "--quiet", "--ignore-submodules=all"], env=env,
+                                          capture_output=True).returncode != 0
+    return described + ("-dirty" if edited else "")
+
+
 def build_circuitpython(args, make_extra, ws):
     if os.name == "nt":
         die("--interpreter circuitpython builds from Linux or WSL")
@@ -1315,6 +1343,7 @@ def build_circuitpython(args, make_extra, ws):
     cp = ensure_circuitpython()
     lock = lock_beside(cp)  # noqa: F841 -- held until exit
     cp_patches = prepare_circuitpython(cp)
+    version = circuitpython_version(cp, sorted(CP_PATCHES.glob("*.patch")))
 
     port = args.port or choose("CircuitPython port:", cp_ports())
     if port not in cp_ports():
@@ -1379,6 +1408,9 @@ def build_circuitpython(args, make_extra, ws):
     if library.tree:
         env["PYDEVICES_LIBRARY"] = library.tree.as_posix()
     env["PYDEVICES_INTERPRETER"] = "circuitpython"
+    if version:
+        # py/version.py takes this instead of asking git, whose answer carries -dirty for our patches.
+        env["CP_VERSION"] = version
     # The unix port is a desktop: pydevices freezes its host-only files there.
     env["PYDEVICES_PLATFORM"] = "desktop" if port == "unix" else "board"
     env["PATH"] = os.pathsep.join([str(CP_VENV / "bin"), env.get("PATH", "")])
@@ -1434,6 +1466,8 @@ def build_circuitpython(args, make_extra, ws):
     rec = dict(want, complete=True)
     rec["circuitpython"] = git_out(cp, "describe", "--tags", "--always", "--dirty")
     rec["circuitpython_patches"] = cp_patches
+    if version:
+        rec["circuitpython_version"] = version
     if frozen:
         rec["frozen_libraries"] = cp_frozen_libraries_record(cp, cp_board_frozen_dirs(cp, port, board) if board else [])
     rec["module_revisions"] = revisions
