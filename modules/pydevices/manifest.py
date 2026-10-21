@@ -19,8 +19,8 @@ require("bledev", library="omnipython-lib", opt=3)
 # packages' files are taken, from the library tree.
 #
 # A board's build leaves them out (build_mp.py sets PYDEVICES_PLATFORM to
-# "board" for every port but unix, windows and webassembly, CircuitPython's
-# unix port included): they are 26 files of desktop-only code, and on a
+# "board" for every port but unix, windows and webassembly, and the same for
+# CircuitPython, whose only desktop port is unix): they are 26 files of desktop-only code, and on a
 # CircuitPython board their names are more than a frozen-string pool of 64 KB
 # can spare. With it unset, as when freeze_list.py lists a desktop manifest,
 # they are frozen.
