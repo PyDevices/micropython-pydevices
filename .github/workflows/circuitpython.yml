@@ -118,7 +118,9 @@ jobs:
           import sys
           assert sys.implementation.name == "circuitpython"
           import pygraphics, usdl2, pngio, tsmux, ppa, cameraif, mdns, _usbhost
-          import jpegio, audiodynamics
+          import jpegio, audiodynamics, audiograph
+          # audiopump.Ring is the stream sample: Python-made audio CircuitPython's mixer can play.
+          from audiopump import Ring
           # jpegio is CircuitPython's own decoder there: ours adds only the encoder's C API.
           assert hasattr(jpegio, "JpegDecoder")
           assert cameraif.available() is False
@@ -134,9 +136,34 @@ jobs:
                   pass
               else:
                   raise AssertionError(name + " should exist only on the ESP32-P4")
-          print("imported: pygraphics usdl2 pngio tsmux ppa cameraif mdns _usbhost jpegio audiodynamics")
+          print("imported: pygraphics usdl2 pngio tsmux ppa cameraif mdns _usbhost jpegio audiodynamics audiograph audiopump.Ring")
           PY
           ./builds/circuitpython/unix/coverage/micropython imports.py
+
+      # The stream sample, pulled through CircuitPython's own audiomixer and
+      # checked sample by sample.
+      - name: audiopump.Ring through audiomixer
+        run: timeout 300 ./builds/circuitpython/unix/coverage/micropython modules/audiodsp/tests/circuitpython/ring_through_mixer.py
+
+      # audiograph renders the same samples here as on CPython: the probe runs
+      # on both, and the comparison is the gate, at 0 counts. The planted
+      # faults are run first and must each be caught, or the gate proves
+      # nothing.
+      - name: audiograph renders what CPython's audiograph renders
+        run: |
+          python3 -m venv .graph-venv
+          ./.graph-venv/bin/python -m pip install -q ./modules/audiodsp
+          cd modules/audiodsp
+          for fault in lsb late; do
+            if ../../.graph-venv/bin/python tests/parity/verify_graph.py \
+                 --circuitpython "$GITHUB_WORKSPACE/builds/circuitpython/unix/coverage/micropython" \
+                 --fault $fault; then
+              echo "the planted fault $fault passed, so this gate proves nothing" >&2
+              exit 1
+            fi
+          done
+          ../../.graph-venv/bin/python tests/parity/verify_graph.py \
+            --circuitpython "$GITHUB_WORKSPACE/builds/circuitpython/unix/coverage/micropython"
 
       - name: displayif, headless - usdl2 opens a window, the lifecycle API holds
         env:

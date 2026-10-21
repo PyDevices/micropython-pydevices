@@ -7,9 +7,10 @@ or missing for you, open an
 More modules in CircuitPython-compatible builds
 ([what builds today](docs/build-plan.md#which-modules-build-on-circuitpython)):
 
-- **Python-generated audio on CircuitPython.** A stream sample, the audio
-  pump's C side, that plays a ring your Python code fills through
-  `audiobusio.I2SOut`. CircuitPython's own samples take only C; audioif waits on it.
+- **audioif on CircuitPython.** Python-made audio plays there now:
+  `audiopump.Ring`, in audiodsp, is a sample your code fills and
+  `audiobusio.I2SOut` plays. audioif itself still doesn't build, since it links
+  against the pump's driver layer and `cp_compat`.
 - **castif casting on CircuitPython's ESP32-P4 builds.** castif and h264enc
   build there and h264enc encodes, but the port has no network until
   CircuitPython drives the boards' ESP32-C6 radio, so a cast can't start yet.
