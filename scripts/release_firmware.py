@@ -68,7 +68,7 @@ CELLS = [
          board="ESP32_GENERIC_S3", variant="LCD_7", flash="8MB", modules="all",
          chip="esp32s3", offset=0, kind="esp32", deps="idf"),
     dict(id="mp-s3-lcd43", label="ESP32-S3-Touch-LCD-4.3", interpreter="micropython", port="esp32",
-         board="ESP32_GENERIC_S3", variant="SPIRAM_OCT", flash="8MB", modules="all",
+         board="ESP32_GENERIC_S3", variant="LCD_4_3", flash="8MB", modules="all",
          chip="esp32s3", offset=0, kind="esp32", deps="idf"),
     dict(id="mp-s3-tembed", label="LilyGO T-Embed S3", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_S3", variant="T_EMBED", flash="16MB", modules="all",
