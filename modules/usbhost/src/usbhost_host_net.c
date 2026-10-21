@@ -32,11 +32,7 @@
 #include "usb/usb_host.h"
 #include "py/mperrno.h"
 
-extern int usbhost_host_dev_lookup(uint32_t dev_id, usb_device_handle_t *out);
-extern int usbhost_xfer_claim(uint32_t dev_id, uint8_t itf, uint8_t alt);
-extern int usbhost_xfer_release(uint32_t dev_id, uint8_t itf);
-extern void usbhost_host_lock(void);
-extern void usbhost_host_unlock(void);
+#include "usbhost_host.h"
 
 // The host task hands completions back once per tick (10 ms at 100 Hz), so
 // each transfer turns over about 100 times a second. RX transfers are big
