@@ -179,11 +179,30 @@ def ensure_micropython(ws):
 
 
 def fetch_history(mp):
-    """Commits and tags, no file contents, onto a depth-1 clone, so `git describe`
-    can say which release the pinned commit follows. Without them the build's
-    sys.version is a bare commit hash, and the image shows no version."""
-    say("fetching MicroPython's tags and commit history (no files) for its version")
-    run(["git", "-C", str(mp), "fetch", "-q", "--filter=tree:0", "--tags", "--unshallow", "origin"])
+    """The commits since the release tag the checkout follows, and that tag, onto
+    a depth-1 clone, so `git describe` can say which release the pinned commit
+    follows. Without them the build's sys.version is a bare commit hash, and the
+    image shows no version. A few seconds: it is the cycle's commits (a couple of
+    hundred), not the history. (A `--unshallow --filter` fetch of everything
+    hung on GitHub's runners.)
+
+    The tag is the one mpconfig.h names: upstream tags the commit that sets the
+    version, vX.Y.Z at a release and vX.Y.Z-preview at the start of a cycle."""
+    if git_out(mp, "describe", "--tags", "--exact-match"):
+        return  # the pin is a tag
+    text = (mp / "py" / "mpconfig.h").read_text()
+    n = [re.search(rf"define MICROPY_VERSION_{k} (\d+)", text) for k in ("MAJOR", "MINOR", "MICRO", "PRERELEASE")]
+    if not all(n):
+        say("py/mpconfig.h has no version; sys.version will show a commit")
+        return
+    tag = "v" + ".".join(m.group(1) for m in n[:3]) + ("-preview" if int(n[3].group(1)) else "")
+    head = git_out(mp, "rev-parse", "HEAD")
+    say(f"fetching MicroPython's commits since {tag}, for its version")
+    # --shallow-exclude stops at the tag's child; one more level reaches the tag's commit.
+    for cmd in (["--shallow-exclude=" + tag, head], ["--deepen=1", head], [f"refs/tags/{tag}:refs/tags/{tag}"]):
+        if subprocess.run(["git", "-C", str(mp), "fetch", "-q", "origin", *cmd]).returncode != 0:
+            say(f"could not fetch {tag}; sys.version will show a commit")
+            return
 
 
 def micropython_version(mp, upstream):
