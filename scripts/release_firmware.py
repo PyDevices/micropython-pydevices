@@ -155,11 +155,20 @@ def matrix(pico2):
 
 def micropython_version():
     """The checkout's own version, vX.Y.Z with -preview while upstream says so.
-    git describe can't say it: a shallow clone has no tags."""
+    It names the set's files; the image's own sys.version tag is checked apart."""
     h = (REPO / "micropython" / "py" / "mpconfig.h").read_text()
     nums = [re.search(rf"define MICROPY_VERSION_{k} (\d+)", h).group(1) for k in ("MAJOR", "MINOR", "MICRO")]
     pre = int(re.search(r"define MICROPY_VERSION_PRERELEASE (\d+)", h).group(1))
     return "v" + ".".join(nums) + ("-preview" if pre else "")
+
+
+def check_version_tag(tag, elf, cell_id):
+    """The image has to print a version. A build that couldn't ask git for one
+    (a clone without tags) prints the commit's hash instead, and still links."""
+    if not tag:
+        raise Failed(f"{cell_id}: the build recorded no version, so its sys.version would show a commit hash")
+    if tag.encode() not in Path(elf).read_bytes():
+        raise Failed(f"{cell_id}: {Path(elf).name} does not contain the version {tag}")
 
 
 def build_dir(c):
@@ -216,6 +225,9 @@ def build(cell_id, out, ws):
         shutil.copyfile(f, dest)
         files[role] = {"file": dest.name, "size": dest.stat().st_size, "sha256": sha256(dest)}
     shutil.copyfile(src / "pydevices-build.json", out / "build-record.json")
+    if c["interpreter"] == "micropython":
+        check_version_tag(record.get("micropython_version"), out / f"elf{EXTENSION['elf']}", c["id"])
+        print(f"  sys.version tag: {record['micropython_version']}", flush=True)
 
     meta = {k: c[k] for k in ("id", "label", "interpreter", "port", "board", "variant", "chip", "flash", "modules")}
     meta["flash_offset"] = None if c["offset"] is None else hex(c["offset"])
