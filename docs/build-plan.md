@@ -423,7 +423,7 @@ four cells of [`release-firmware.yml`](../.github/workflows/release-firmware.yml
 | castif, h264enc, tflite, vision | no | no | CMake-only ESP32-P4 and S3 modules, with no unix build to import; they need ESP-IDF registry components (esp_h264, TensorFlow Lite Micro) that CircuitPython's espressif port, built with the component manager off, would have to fetch |
 | lvgl-micropython | no | no | CircuitPython's binding is `lvgl-circuitpython`, passed by path |
 | micropython-lib | no | no | MicroPython's own upstream packages |
-| pydevices, palettes, pdwidgets | frozen | frozen | Python only. On unix, pydevices also freezes its desktop files (the boards drop them); pdwidgets and palettes on top of that pass CircuitPython's 64 KB frozen-string pool |
+| pydevices, palettes, pdwidgets | frozen | frozen | Python only. On unix, pydevices also freezes its desktop files (the boards drop them), and pdwidgets and palettes with it: together their names pass CircuitPython's 64 KB frozen-string pool, so `build_mp.py` builds the unix port with four-byte qstr offsets (patches 0001 and 0010). Boards keep two-byte offsets |
 
 ## Traps we already know
 

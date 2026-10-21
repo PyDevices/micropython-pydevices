@@ -1283,6 +1283,27 @@ def build_dir_for(build, want, clean, revisions):
     return rec_path
 
 
+# The unix port freezes pdwidgets and palettes beside pydevices and the C
+# modules, and their names together pass the 64 KB a ROM qstr pool's two-byte
+# offsets can address. Four-byte offsets (patches/circuitpython/0001 and 0010)
+# lift that for about two bytes of flash per qstr: fine on a desktop, so only
+# the unix port asks. A board's cell is the same as before.
+CP_UNIX_CFLAGS = "-DMICROPY_QSTR_OFFSET_BYTES=4"
+
+
+def cp_make_args(port, make_extra):
+    """make's arguments with what a CircuitPython port needs from us added.
+    A CFLAGS_EXTRA of the caller's is kept, with ours appended to it."""
+    if port != "unix":
+        return list(make_extra)
+    out, found = [], False
+    for a in make_extra:
+        if a.startswith("CFLAGS_EXTRA="):
+            a, found = f"{a} {CP_UNIX_CFLAGS}", True
+        out.append(a)
+    return out if found else out + [f"CFLAGS_EXTRA={CP_UNIX_CFLAGS}"]
+
+
 def build_circuitpython(args, make_extra, ws):
     if os.name == "nt":
         die("--interpreter circuitpython builds from Linux or WSL")
@@ -1298,6 +1319,7 @@ def build_circuitpython(args, make_extra, ws):
     port = args.port or choose("CircuitPython port:", cp_ports())
     if port not in cp_ports():
         die(f"no CircuitPython port '{port}' (have: {', '.join(cp_ports())})")
+    make_extra = cp_make_args(port, make_extra)
     board, variant = args.board, args.variant
     if cp_boards(port):
         board = board or choose("Board:", cp_boards(port))

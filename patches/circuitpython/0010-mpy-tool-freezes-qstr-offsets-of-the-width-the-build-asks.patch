@@ -1,0 +1,57 @@
+The frozen qstr blob mpy-tool.py writes has the same 16-bit offsets as the
+firmware's own pools, so freezing more than 64 KB of names stopped the build
+("frozen qstr blob is too large") even for a build that sets
+MICROPY_QSTR_OFFSET_BYTES=4. mpy-tool.py now reads OFFSET_BYTES from the qstr
+header it freezes against, like the other qstr settings, and checks the blob
+against 1 << (8 * OFFSET_BYTES) and counts the offsets at that width. A build
+that doesn't set it gets 2, as before. The unix port, with pdwidgets and palettes
+frozen, needs 4.
+
+diff --git a/tools/mpy-tool.py b/tools/mpy-tool.py
+index 8541d1a..1a03f07 100755
+--- a/tools/mpy-tool.py
++++ b/tools/mpy-tool.py
+@@ -1679,7 +1679,8 @@ def freeze_mpy(firmware_qstr_idents, compiled_modules):
+             qstr_content += config.MICROPY_QSTR_BYTES_IN_HASH
+         print("};")
+     # CIRCUITPY-CHANGE: ROM pools store their strings in one NUL-separated blob
+-    # addressed by 16-bit offsets, with a trailing end-of-blob offset. See py/qstr.h.
++    # addressed by qstr_offset_t offsets (16-bit unless MICROPY_QSTR_OFFSET_BYTES
++    # says 4), with a trailing end-of-blob offset. See py/qstr.h.
+     print()
+     print("const char mp_qstr_frozen_const_blob[] =")
+     offsets = []
+@@ -1690,15 +1691,17 @@ def freeze_mpy(firmware_qstr_idents, compiled_modules):
+         offset += len(qbytes) + 1  # include NUL
+         qstr_content += len(qbytes) + 1
+     print("    ;")
+-    if offset >= qstrutil.QSTR_BLOB_MAX:
+-        raise SystemExit("frozen qstr blob is too large: %d bytes" % offset)
++    if offset >= 1 << (8 * config.MICROPY_QSTR_OFFSET_BYTES):
++        raise SystemExit(
++            "frozen qstr blob is too large: %d bytes (set MICROPY_QSTR_OFFSET_BYTES to 4)" % offset
++        )
+     print()
+     print("const qstr_offset_t mp_qstr_frozen_const_offsets[] = {")
+     for offset in offsets:
+         print("    %d," % offset)
+-        qstr_content += 2
++        qstr_content += config.MICROPY_QSTR_OFFSET_BYTES
+     print("    sizeof(mp_qstr_frozen_const_blob) - 1,")
+-    qstr_content += 2
++    qstr_content += config.MICROPY_QSTR_OFFSET_BYTES
+     print("};")
+     print()
+     print("extern const qstr_pool_t mp_qstr_const_pool;")
+@@ -2173,9 +2176,11 @@ def main(args=None):
+         firmware_qstr_idents = set(qstrutil.static_qstr_list_ident) | set(extra_qstrs.keys())
+         config.MICROPY_QSTR_BYTES_IN_LEN = int(qcfgs["BYTES_IN_LEN"])
+         config.MICROPY_QSTR_BYTES_IN_HASH = int(qcfgs["BYTES_IN_HASH"])
++        config.MICROPY_QSTR_OFFSET_BYTES = int(qcfgs.get("OFFSET_BYTES", "2"))
+     else:
+         config.MICROPY_QSTR_BYTES_IN_LEN = 1
+         config.MICROPY_QSTR_BYTES_IN_HASH = 1
++        config.MICROPY_QSTR_OFFSET_BYTES = 2
+         firmware_qstr_idents = set(qstrutil.static_qstr_list_ident)
+ 
+     # Create initial list of global qstrs.
