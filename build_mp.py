@@ -1106,7 +1106,11 @@ def cp_frozen_library_dirs(cp, board_dirs):
 
 def ensure_cp_frozen_libraries(cp):
     """Check out CP_FROZEN_LIBRARIES (shallow, with tags: their __version__ is
-    made from `git describe`), as ci_fetch_deps.py does for the boards that name them."""
+    made from `git describe`), as ci_fetch_deps.py does for the boards that name them,
+    and the semver tool the preprocessing imports, which it fetches only later."""
+    if not any((cp / "tools" / "python-semver").glob("semver*")):
+        run(["git", "submodule", "update", "--init", "--depth", "1", "tools/python-semver"], cwd=cp,
+            stdout=subprocess.DEVNULL)
     for name in CP_FROZEN_LIBRARIES:
         sub = f"frozen/{name}"
         if not any((cp / sub).glob("*.py")) and not (cp / sub / "asyncio").is_dir():
