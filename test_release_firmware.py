@@ -59,18 +59,18 @@ def fake_set(root, pico2=False):
 
 
 class Table(unittest.TestCase):
-    def test_nine_cells_by_default_and_the_pico2_only_when_asked(self):
-        self.assertEqual(len(rf.matrix(False)["include"]), 9)
+    def test_ten_cells_by_default_and_the_pico2_only_when_asked(self):
+        self.assertEqual(len(rf.matrix(False)["include"]), 10)
         ids = [c["id"] for c in rf.matrix(True)["include"]]
-        self.assertEqual(len(ids), 10)
+        self.assertEqual(len(ids), 11)
         self.assertIn("mp-pico2", ids)
         self.assertNotIn("mp-pico2", [c["id"] for c in rf.matrix(False)["include"]])
         self.assertEqual(len(set(ids)), len(ids))
 
-    def test_five_micropython_and_four_circuitpython(self):
+    def test_five_micropython_and_five_circuitpython(self):
         rows = rf.wanted(False)
         self.assertEqual(sum(c["interpreter"] == "micropython" for c in rows), 5)
-        self.assertEqual(sum(c["interpreter"] == "circuitpython" for c in rows), 4)
+        self.assertEqual(sum(c["interpreter"] == "circuitpython" for c in rows), 5)
 
     def test_every_cell_names_its_files(self):
         for c in rf.CELLS:
@@ -111,7 +111,7 @@ class Assemble(unittest.TestCase):
 
     def test_a_good_set_assembles(self):
         doc = self.run_assemble()
-        self.assertEqual(len(doc["builds"]), 9)
+        self.assertEqual(len(doc["builds"]), 10)
         self.assertTrue((self.out / "firmware.json").is_file())
         names = {f["name"] for b in doc["builds"] for f in b["files"]}
         for name in names:

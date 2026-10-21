@@ -34,7 +34,7 @@ class Stage(unittest.TestCase):
         sp.stage(self.fw, self.page)
         served = {f["name"] for b in self.doc["builds"] for f in b["files"] if f["role"] in ("flash", "uf2")}
         self.assertEqual({p.name for p in (self.page / "files").iterdir()}, served)
-        self.assertEqual(len(served), 9)
+        self.assertEqual(len(served), 10)
         self.assertEqual(json.loads((self.page / "firmware.json").read_text()), self.doc)
         ids = sorted(p.stem for p in (self.page / "manifests").iterdir())
         self.assertEqual(ids, sorted(b["id"] for b in self.doc["builds"] if b["chip"] != "rp2040"))
