@@ -583,5 +583,19 @@ class Coredump(unittest.TestCase):
             self.assertTrue(build_mp.has_coredump_partition(t))
 
 
+class CircuitPythonMakeArgs(unittest.TestCase):
+    """Only CircuitPython's unix port asks for four-byte qstr offsets."""
+
+    def test_unix_asks_and_boards_do_not(self):
+        self.assertEqual(build_mp.cp_make_args("unix", ["CIRCUITPY_X=0"]),
+                         ["CIRCUITPY_X=0", "CFLAGS_EXTRA=-DMICROPY_QSTR_OFFSET_BYTES=4"])
+        for port in ("espressif", "raspberrypi", "nordic"):
+            self.assertEqual(build_mp.cp_make_args(port, ["CIRCUITPY_X=0"]), ["CIRCUITPY_X=0"])
+
+    def test_a_callers_cflags_extra_keeps_its_flags(self):
+        self.assertEqual(build_mp.cp_make_args("unix", ["CFLAGS_EXTRA=-DFOO"]),
+                         ["CFLAGS_EXTRA=-DFOO -DMICROPY_QSTR_OFFSET_BYTES=4"])
+
+
 if __name__ == "__main__":
     unittest.main()

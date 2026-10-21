@@ -94,13 +94,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libffi-dev pkg-config libsdl2-dev
 
-      # pydevices comes with displayif for its SDLDisplay. pdwidgets and
-      # palettes stay out: with them the frozen strings pass CircuitPython's
-      # 64 KB pool.
+      # pydevices comes with displayif for its SDLDisplay. With pdwidgets and
+      # palettes the frozen strings pass CircuitPython's 64 KB pool, so the
+      # unix build uses four-byte qstr offsets (build_mp.py sets them).
       - name: Build CircuitPython's unix port with our C modules
         run: |
           python3 build_mp.py --interpreter circuitpython --port unix \
-            --modules pygraphics,audiodsp,displayif,pydevices,pngio,tsmux,ppa,jpegio,cameraif,mdns,usbhost
+            --modules pygraphics,audiodsp,displayif,pydevices,pdwidgets,palettes,pngio,tsmux,ppa,jpegio,cameraif,mdns,usbhost
 
       - name: Every module imports
         run: |
@@ -114,6 +114,8 @@ jobs:
           assert cameraif.available() is False
           # pydevices freezes CircuitPython's asyncio and the ticks under it.
           import asyncio, adafruit_ticks, bledev
+          # pdwidgets and palettes are frozen with it: more names than a 64 KB pool holds.
+          import pdwidgets, palettes
           print("imported: pygraphics usdl2 pngio tsmux ppa cameraif mdns _usbhost jpegio audiodynamics")
           PY
           ./builds/circuitpython/unix/coverage/micropython imports.py
