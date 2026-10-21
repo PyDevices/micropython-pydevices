@@ -242,7 +242,10 @@ that wants one (the wasm one) requires it by name.
    flash auto-suspend, which IDF supports only on particular flash chips. The
    partition tables went; the S3 keeps a coredump partition through
    [`variants/esp32/partitions.esp32s3.csv`](../variants/esp32/partitions.esp32s3.csv), found by the same convention as
-   the fragments.
+   the fragments. Flash core dumps are off in standard builds (2026-10-20): `--coredump`
+   layers [`sdkconfig.coredump`](../variants/esp32/sdkconfig.coredump) last and, for a chip with no
+   partition of its own (the P4), [`partitions.coredump.csv`](../variants/esp32/partitions.coredump.csv). The S3
+   table keeps its 64 KB slot unused, so no standard S3 filesystem moves.
 6. **Dropped (2026-10-05): the VARIANT_DIR spike.** Teaching the esp32 and rp2 ports to
    take a variant from outside the board dir would make the generated dir
    tidier, not possible; it already works without it. It isn't planned as an

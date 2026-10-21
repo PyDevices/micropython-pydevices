@@ -11,14 +11,8 @@
 # symbol is loaded after the defaults, so this line wins over the port's.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
-# Core dump to the coredump partition (partitions.esp32s3.csv beside this file). On a board
-# whose only serial line is the REPL, a panic prints nowhere anyone can see:
-# TinyUSB stops being serviced the instant the CPU faults, so the console dies
-# before the backtrace. The dump survives the reboot and reads back with
-# esptool + esp-coredump against the build's ELF.
-CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
-CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
-CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+# No core dump to flash in a standard build; ./build_mp.py --coredump makes a
+# troubleshooting build that has one (sdkconfig.coredump beside this file).
 
 # More lwIP sockets. spremote alone holds the AP session, the dealer's TLS
 # websocket, mDNS and the pairing listener, and every pairing-HTTP client, DNS
