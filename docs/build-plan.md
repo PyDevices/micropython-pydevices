@@ -358,6 +358,8 @@ links, the output layout and the build record. What differs is one function:
   patches. The boards are ones CircuitPython has no definition for:
   `feather_rp2040_lvgl` (room for LVGL), `waveshare_esp32s3_touch_lcd_7`
   (its 800x480 panel as `board.DISPLAY`, one 4 MB app slot),
+  `waveshare_esp32s3_touch_lcd_43` (a generic S3 N8R8 board with its console
+  on the CH343 UART and one 4 MB app slot; its panel isn't set up yet),
   `lilygo_twatch_s3_single_app` (the T-Watch S3 with one 4 MB app slot, so LVGL
   fits), and the
   ESP32-P4 boards `waveshare_esp32p4_wifi6_dev_kit` (a revision 3 chip,
@@ -404,15 +406,15 @@ Builds from Linux or WSL only.
 What `--modules` can name on CircuitPython today, and why a module is missing
 where it is. "Unix" is CircuitPython's unix port, built and imported in
 [`circuitpython.yml`](../.github/workflows/circuitpython.yml); "boards" are the
-four cells of [`release-firmware.yml`](../.github/workflows/release-firmware.yml).
+five cells of [`release-firmware.yml`](../.github/workflows/release-firmware.yml).
 
 | Module | Unix | Boards | Notes |
 |---|---|---|---|
-| pygraphics | yes | all four | |
-| audiodsp | yes | the three ESP32 cells | the modules CircuitPython lacks; its audiocore, synthio and the rest stay CircuitPython's |
+| pygraphics | yes | all five | |
+| audiodsp | yes | the four ESP32 cells | the modules CircuitPython lacks; its audiocore, synthio and the rest stay CircuitPython's |
 | displayif | yes (`usdl2`) | no, on purpose | boards have CircuitPython's own `displayio` and display buses. pydevices' `SDLDisplay` runs on top of `usdl2` |
-| pngio | yes (was a build error) | all four | decodes with CircuitPython's older uzlib |
-| tsmux | yes | all four | |
+| pngio | yes (was a build error) | all five | decodes with CircuitPython's older uzlib |
+| tsmux | yes | all five | |
 | ppa | yes (software) | ESP32-P4 | the hardware path on the P4 |
 | jpegio | yes | ESP32-P4 | adds only the encoder's C API: CircuitPython has its own `jpegio` decoder |
 | cameraif | yes (`available()` is False) | ESP32-P4 | |
