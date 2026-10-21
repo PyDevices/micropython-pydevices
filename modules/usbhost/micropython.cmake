@@ -51,9 +51,10 @@ target_include_directories(usermod_usbhost INTERFACE
 if(ESP_PLATFORM)
     idf_component_get_property(usbhost_tusb_lib espressif__tinyusb COMPONENT_LIB)
     if(usbhost_tusb_lib)
-        # TinyUSB's device controller and core in IRAM (src/usbhost_isr_iram.lf),
-        # so machine.USBDevice's streaming endpoints keep running through a
-        # flash write.
+        # TinyUSB's device-side interrupt path in IRAM (src/usbhost_isr_iram.lf),
+        # so cache misses don't delay machine.USBDevice's streaming endpoints
+        # while a display or anything else keeps the cache busy. Only that
+        # path: the rest of TinyUSB stays in flash.
         __ldgen_add_fragment_files("${USBHOST_SRC_DIR}/usbhost_isr_iram.lf")
     endif()
     # The IDF defines ESP_PLATFORM for its own components but not for a user C

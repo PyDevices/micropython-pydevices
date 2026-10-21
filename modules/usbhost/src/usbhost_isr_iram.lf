@@ -1,12 +1,45 @@
-# The sound card's receive path, from the USB interrupt to the pump's wake-up,
-# in IRAM instead of flash (audio meter spike). Out of flash, every cache miss
-# in this path delays the endpoint re-arm, and anything that keeps the cache
-# busy -- a display pushing frames through PSRAM -- turns into lost
+# TinyUSB's device-side interrupt path in IRAM instead of flash: the DWC2
+# interrupt handler, the event handler it calls, the endpoint re-arm a
+# streaming endpoint makes from that interrupt, and the FIFO copies. Out of
+# flash, every cache miss here delays the re-arm, and anything that keeps the
+# cache busy -- a display pushing frames through PSRAM -- turns into lost
 # isochronous packets.
+#
+# Only that path. TinyUSB registers its interrupt without ESP_INTR_FLAG_IRAM,
+# so nothing here has to run with the cache off, and everything else -- set-up,
+# tear-down, enumeration, control transfers, tud_task() -- stays in flash,
+# where it costs no internal RAM.
 [mapping:usbhost_tinyusb_isr]
 archive: libespressif__tinyusb.a
 entries:
+    # The controller's interrupt handler and the static helpers it calls,
+    # whose names the compiler may change; the set-up calls below go back.
     dcd_dwc2 (noflash)
-    dwc2_common (noflash)
-    usbd (noflash)
-    tusb_fifo (noflash)
+    dcd_dwc2:dcd_init (default)
+    dcd_dwc2:dcd_deinit (default)
+    dcd_dwc2:dcd_connect (default)
+    dcd_dwc2:dcd_disconnect (default)
+    dcd_dwc2:dcd_remote_wakeup (default)
+    dcd_dwc2:dcd_set_address (default)
+    dcd_dwc2:dcd_edpt_open (default)
+    dcd_dwc2:dcd_edpt_close_all (default)
+    dcd_dwc2:dcd_edpt_clear_stall (default)
+    dcd_dwc2:dcd_int_enable (default)
+    dcd_dwc2:dcd_int_disable (default)
+    # The device core: events from the interrupt, and an endpoint re-armed
+    # from it.
+    usbd:dcd_event_handler (noflash)
+    usbd:usbd_edpt_xfer (noflash)
+    usbd:usbd_edpt_xfer_fifo (noflash)
+    usbd:usbd_edpt_busy (noflash)
+    usbd:usbd_edpt_claim (noflash)
+    usbd:usbd_edpt_release (noflash)
+    usbd:usbd_spin_lock (noflash)
+    usbd:usbd_spin_unlock (noflash)
+    usbd:usbd_int_set (noflash)
+    # Copies between the controller's FIFO and a buffer or a tu_fifo.
+    tusb_fifo:tu_hwfifo_write (noflash)
+    tusb_fifo:tu_hwfifo_read (noflash)
+    tusb_fifo:tu_fifo_write_n_access_mode (noflash)
+    tusb_fifo:tu_fifo_read_n_access_mode (noflash)
+    tusb_fifo:tu_fifo_peek_n_access_mode (noflash)
