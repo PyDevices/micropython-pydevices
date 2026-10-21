@@ -10,9 +10,9 @@ More modules in CircuitPython-compatible builds
 - **Python-generated audio on CircuitPython.** A stream sample, the audio
   pump's C side, that plays a ring your Python code fills through
   `audiobusio.I2SOut`. CircuitPython's own samples take only C; audioif waits on it.
-- **castif and h264enc on CircuitPython's ESP32-P4 builds.** Both talk to
-  ESP-IDF and lwIP directly, and need only the build glue and Espressif's
-  `esp_h264` encoder fetched at build time.
+- **castif casting on CircuitPython's ESP32-P4 builds.** castif and h264enc
+  build there and h264enc encodes, but the port has no network until
+  CircuitPython drives the boards' ESP32-C6 radio, so a cast can't start yet.
 - **usbhost on CircuitPython for the ESP32-P4.** CircuitPython's ESP32 builds
   have no USB host; the P4's second USB controller can run ours. The S3's one
   controller is CircuitPython's drive and REPL, so the S3 is left out.

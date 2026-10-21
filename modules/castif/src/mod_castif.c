@@ -295,7 +295,7 @@ static void tap_poll(castif_obj_t *c, int64_t now) {
         c->tap_bytes += n;
         uint32_t frames = n / c->tap_frame;
         rs_update(c, frames, now);
-        const int16_t *src = (const int16_t *)c->tap_in;
+        const int16_t *src = (const int16_t *)(const void *)c->tap_in;   // heap-allocated, so aligned
         int64_t behind = (int64_t)(audiopump_tap_position(tap) - c->tap_cursor) / c->tap_frame;
         for (uint32_t k = 0; k < frames; k++) {
             int32_t l, r;
@@ -363,7 +363,7 @@ static void cast_task(void *arg) {
         uint32_t pts = 90000 + (uint32_t)(((now - c->t0) * 9) / 100);
         int skip = 0;
         if (c->max_skip_us) {
-            const uint32_t *w = (const uint32_t *)c->fb;
+            const uint32_t *w = (const uint32_t *)(const void *)c->fb;
             uint32_t words = c->fb_len / 4;
             uint32_t hsh = 2166136261u;
             for (uint32_t i = 0; i < words; i += 512) hsh = (hsh ^ w[i]) * 16777619u;
@@ -490,6 +490,9 @@ static mp_obj_t castif_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
     const char *ip = mp_obj_str_get_str(pos_args[2]);
     int dst_port = mp_obj_get_int(pos_args[3]);
     int src_port = mp_obj_get_int(pos_args[4]);
+    #if CASTIF_NO_NETWORK
+    mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("castif: this firmware has no network"));
+    #endif
     self->fb_obj = pos_args[1];
     self->fb = fb.buf;
     self->fb_len = fb.len;

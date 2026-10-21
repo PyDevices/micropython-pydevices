@@ -102,13 +102,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libffi-dev pkg-config libsdl2-dev
 
+      # castif and h264enc build to nothing here (they are the ESP32-P4's); they
+      # are named so their micropython.mk is checked on a port without them.
       # pydevices comes with displayif for its SDLDisplay. With pdwidgets and
       # palettes the frozen strings pass CircuitPython's 64 KB pool, so the
       # unix build uses four-byte qstr offsets (build_mp.py sets them).
       - name: Build CircuitPython's unix port with our C modules
         run: |
           python3 build_mp.py --interpreter circuitpython --port unix \
-            --modules pygraphics,audiodsp,displayif,pydevices,pdwidgets,palettes,pngio,tsmux,ppa,jpegio,cameraif,mdns,usbhost
+            --modules pygraphics,audiodsp,displayif,pydevices,pdwidgets,palettes,pngio,tsmux,ppa,jpegio,cameraif,mdns,usbhost,castif,h264enc
 
       - name: Every module imports
         run: |
@@ -124,6 +126,14 @@ jobs:
           import asyncio, adafruit_ticks, bledev
           # pdwidgets and palettes are frozen with it: more names than a 64 KB pool holds.
           import pdwidgets, palettes
+          # castif and h264enc are the ESP32-P4's: named here, they build to nothing.
+          for name in ("castif", "h264enc"):
+              try:
+                  __import__(name)
+              except ImportError:
+                  pass
+              else:
+                  raise AssertionError(name + " should exist only on the ESP32-P4")
           print("imported: pygraphics usdl2 pngio tsmux ppa cameraif mdns _usbhost jpegio audiodynamics")
           PY
           ./builds/circuitpython/unix/coverage/micropython imports.py

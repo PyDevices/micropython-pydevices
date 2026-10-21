@@ -631,6 +631,9 @@ static mp_obj_t castif_hls_start(mp_obj_t self_in) {
     if (!h->enc) {
         mp_raise_ValueError(MP_ERROR_TEXT("castif.Hls: closed"));
     }
+    #if CASTIF_NO_NETWORK
+    mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("castif.Hls: this firmware has no network"));
+    #endif
     h->ls = socket(AF_INET, SOCK_STREAM, 0);
     int one = 1;
     setsockopt(h->ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));

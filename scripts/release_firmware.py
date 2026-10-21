@@ -75,7 +75,7 @@ CELLS = [
          chip="esp32s3", offset=0, kind="esp32", deps="idf"),
     dict(id="cp-p4-devkit", label="ESP32-P4-WIFI6-DEV-KIT", interpreter="circuitpython", port="espressif",
          board="waveshare_esp32p4_wifi6_dev_kit", variant=None, flash="16MB",
-         modules="audiodsp,pygraphics,pngio,tsmux,ppa,jpegio,cameraif,pydevices,pdwidgets,palettes,@lvgl-circuitpython",
+         modules="audiodsp,pygraphics,pngio,tsmux,ppa,jpegio,cameraif,castif,h264enc,pydevices,pdwidgets,palettes,@lvgl-circuitpython",
          chip="esp32p4", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-s3-lcd7", label="ESP32-S3-Touch-LCD-7", interpreter="circuitpython", port="espressif",
          board="waveshare_esp32s3_touch_lcd_7", variant=None, flash="8MB",

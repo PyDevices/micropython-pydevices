@@ -2,7 +2,7 @@
 # its port uses: esp-idf for esp32, emsdk for webassembly, SDL2 for windows
 # when displayif is selected, circuitpython for --interpreter circuitpython,
 # and the ESP-IDF components below for a CircuitPython espressif build with
-# cameraif.
+# cameraif or h264enc.
 # In a workspace deps/<name> may be a symlink to a shared checkout, and a
 # build refuses if it isn't the version below.
 # The ESP-IDF version is our choice, not upstream's recommendation.
@@ -27,3 +27,7 @@ circuitpython https://github.com/adafruit/circuitpython.git                     
 esp_cam_sensor  https://components-file.espressif.com/components/espressif/esp_cam_sensor/2.6.0/espressif__esp_cam_sensor-v2.6.0.zip    2.6.0
 esp_sccb_intf   https://components-file.espressif.com/components/espressif/esp_sccb_intf/0.0.9/espressif__esp_sccb_intf-v0.0.9.zip      0.0.9
 cmake_utilities https://components-file.espressif.com/components/espressif/cmake_utilities/0.5.3/espressif__cmake_utilities-v0.5.3.zip  0.5.3
+# esp_h264, the ESP32-P4's H.264 encoder, for h264enc on CircuitPython's
+# espressif port: the version modules/h264enc/components/h264enc_esp_h264 asks
+# MicroPython's build for.
+esp_h264        https://components-file.espressif.com/components/espressif/esp_h264/1.4.1/espressif__esp_h264-v1.4.1.zip              1.4.1
