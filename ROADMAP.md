@@ -13,9 +13,9 @@ More modules in CircuitPython-compatible builds
 - **castif casting on CircuitPython's ESP32-P4 builds.** castif and h264enc
   build there and h264enc encodes, but the port has no network until
   CircuitPython drives the boards' ESP32-C6 radio, so a cast can't start yet.
-- **usbhost on CircuitPython for the ESP32-P4.** CircuitPython's ESP32 builds
-  have no USB host; the P4's second USB controller can run ours. The S3's one
-  controller is CircuitPython's drive and REPL, so the S3 is left out.
+- **usbhost on a CircuitPython ESP32-P4 board.** The host builds into
+  CircuitPython's ESP32-P4 firmware but hasn't run on a board yet: first a
+  device enumerated and read. Tethering waits for the port's network.
 - **The USB host drivers on CircuitPython's own `usb.core`**, on the RP2040
   and i.MX: planned in [pydevices](https://github.com/PyDevices/pydevices/blob/main/ROADMAP.md#usb).
 

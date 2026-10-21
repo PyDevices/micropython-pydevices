@@ -9,6 +9,11 @@ It builds on the ESP32-S2, S3 and P4, the parts with a USB OTG controller, on
 ESP-IDF's USB host library. Its CMake glue skips every other part, so a
 firmware for those still builds, without the host.
 
+On CircuitPython the host builds for the ESP32-P4, where the boards leave the
+high-speed controller free. Phone tethering is left out there, because the
+port has no network yet. Every other CircuitPython build gets `_usbhost`
+without the host.
+
 ## The packages are in pydevices
 
 Everything you call lives in [pydevices](https://github.com/PyDevices/pydevices),
@@ -55,6 +60,13 @@ the host borrow the OTG controller from the device stack, and the ESP-IDF
 settings in [sdkconfig](sdkconfig) and [sdkconfig.esp32s3](sdkconfig.esp32s3)
 (hub support, a larger control-transfer buffer, and on the S3 a FIFO split
 that favours IN) are appended whenever usbhost is selected.
+
+On CircuitPython, `build_mp.py` also fetches Espressif's `usb` component,
+which holds the USB host library from ESP-IDF 6 on:
+
+```bash
+python3 build_mp.py --interpreter circuitpython --port espressif --board waveshare_esp32p4_wifi6_touch_lcd_4b --modules usbhost
+```
 
 ## Examples
 
