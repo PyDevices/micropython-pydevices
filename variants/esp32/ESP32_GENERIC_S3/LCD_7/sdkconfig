@@ -22,30 +22,8 @@ CONFIG_ESP_WIFI_RX_BA_WIN=8
 CONFIG_LWIP_TCP_WND_DEFAULT=16384
 CONFIG_LWIP_TCP_RECVMBOX_SIZE=16
 
-# 1 ms tick. At 100 Hz, MicroPython's sleep_ms() under one tick falls through
-# to mp_hal_delay_us() and busy-waits with the GIL held: appdev's 10 ms loop
-# kept the UI thread 54 % busy while idle and starved every other Python
-# thread, and 2-5 ms native waits rounded down to zero ticks.
-CONFIG_FREERTOS_HZ=1000
-
-# Caches sized for LVGL. Its code runs from flash and its objects and
-# framebuffers live in PSRAM, which the RGB scanout is streaming from at the
-# same time; with the port's 16 KB instruction cache and 32-byte lines every
-# LVGL call ran 5-10x slower than its code. Measured on the remote's UI
-# (2026-09-25): 64-byte lines took a full-screen redraw from 176 to 146 ms;
-# a 32 KB instruction cache then took a list row from 66 to 44 ms and the
-# redraw to 117 ms.
-#
-# A 64 KB data cache on top, measured while the board also decodes and
-# streams audio: full redraw 205 -> 147 ms, panel switch 88 -> 59 ms, 30
-# list rows built 780 -> 399 ms and laid out 608 -> 335 ms. The same layout
-# runs ~216x faster on a desktop, so this board is memory-bound, and the
-# data cache is the lever. Together the caches take 48 KB of internal RAM:
-# free internal went 54 -> 23 KB. Soaked 30 min of real use (about 25 skips
-# and track picks, Wi-Fi streaming and a USB host running): the minimum
-# stayed at 17 KB, with no allocation failures, Wi-Fi drops or audio
-# stalls. (The 24-byte failure above came from every malloc under 8 KB
-# landing in internal RAM; ALWAYSINTERNAL=512 sends those to PSRAM now.)
-CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
-CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
-CONFIG_ESP32S3_DATA_CACHE_64KB=y
+# The 1 ms tick and the larger caches come from every S3's settings now. With
+# them, free internal RAM under the remote's UI went 54 -> 23 KB, and a 30 min
+# soak of real use stayed above 17 KB with no allocation failures, Wi-Fi drops
+# or audio stalls. (A 24-byte failure on this board came from every malloc
+# under 8 KB landing in internal RAM; ALWAYSINTERNAL=512 sends those to PSRAM.)
