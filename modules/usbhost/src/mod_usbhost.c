@@ -433,7 +433,9 @@ static MP_DEFINE_CONST_FUN_OBJ_3(usbhost_host_poll_obj, usbhost_host_poll_py);
 #if USBHOST_HAVE_HOST
 #include "usbhost_host_stream.h"
 
-#if defined(__has_include)
+// USBHOST_NO_AUDIOPUMP: the header can be on the path while the pump isn't
+// built (CircuitPython's audiodsp has no pump).
+#if defined(__has_include) && !defined(USBHOST_NO_AUDIOPUMP)
 #if __has_include("audiopump/audiopump_ring.h")
 #include "audiopump/audiopump_ring.h"
 #endif

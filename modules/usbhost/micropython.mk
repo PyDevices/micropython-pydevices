@@ -57,6 +57,10 @@ USER_ESP_IDF_COMPONENTS += usb
 # public headers are named here.
 CFLAGS_USERMOD += -isystem $(USBHOST_USB)/include
 
+# CircuitPython's audiodsp builds without its audio pump, so a stream can't
+# feed an audiopump.Ring there, even when the pump's header is on the path.
+CFLAGS_USERMOD += -DUSBHOST_NO_AUDIOPUMP=1
+
 # A phone's USB tethering becomes an ESP-IDF network interface, which needs
 # lwIP. CircuitPython's ESP32-P4 port has no network yet (it doesn't drive the
 # boards' ESP32-C6), so there it's left out and Tether() says so.
