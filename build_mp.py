@@ -188,7 +188,7 @@ LVGL_MODULE = "lvgl-micropython"
 
 def ensure_modules(ws):
     for name, url, commit in read_lock("modules.lock"):
-        if name == LVGL_BINDINGS:
+        if name in (LVGL_BINDINGS, LIBRARY):
             continue
         dest = MODULES_DIR / name
         if dest.exists() or dest.is_symlink():
@@ -258,6 +258,86 @@ def lvgl_bindings(ws, module_dirs):
     sparse(part / "lvgl", lvgl_url, lvgl_sha[0], ["src"])
     part.rename(dest)
     return dest
+
+
+# omnipython-lib is the repository of our Python-only packages: pydevices,
+# palettes, pdwidgets, appkit, audioinstruments, audioeffects, and every board
+# config and driver. It is pinned in modules.lock beside the modules but is not
+# one: a build asks its tools/libbuild.py for the library tree, one directory
+# per package with a manifest.py beside its sources, and registers that tree
+# with add_library(). A manifest then require()s a package from it. Packages
+# with C stay modules.
+#
+# The checkout lands in modules/.omnipython-lib (the dot keeps it out of
+# "all"): in the workspace a link to the sibling checkout, which wins like
+# every other module, anywhere else a clone at the pinned commit. The tree is
+# assembled into deps/omnipython-lib on every build that needs it; the outside
+# packages the library pins by tag (pygraphics, audiocomponents' two) are
+# cloned once into deps/omnipython-lib-sources.
+LIBRARY = "omnipython-lib"
+
+
+def library_checkout(ws):
+    """modules/.omnipython-lib: the library repository, at its modules.lock commit
+    (or the workspace's own checkout of it)."""
+    rows = {row[0]: row[1:] for row in read_lock("modules.lock")}
+    if LIBRARY not in rows:
+        die(f"modules.lock has no {LIBRARY} row, which the library packages come from")
+    url, commit = rows[LIBRARY]
+    dest = MODULES_DIR / f".{LIBRARY}"
+    if dest.is_symlink():
+        if (dest / "tools" / "libbuild.py").is_file():
+            return dest
+        dest.unlink()
+    elif dest.is_dir():
+        if git_out(dest, "rev-parse", "HEAD") == commit:
+            return dest
+        say(f"{dest} is not at modules.lock's {commit[:12]}; fetching it again")
+        shutil.rmtree(dest)
+    # Called pydevices until the rename; either name is the same repository.
+    for sibling in ((ws / LIBRARY, ws / "pydevices") if ws else ()):
+        if (sibling / "tools" / "libbuild.py").is_file():
+            link(dest, sibling)
+            return dest
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        die(f"modules.lock pins {LIBRARY} at {commit!r}: it takes a full 40-character commit")
+    clone_at(url, commit, dest)
+    return dest
+
+
+class Library:
+    """The library tree, assembled the first time a build asks for it."""
+
+    def __init__(self, ws):
+        self.ws = ws
+        self.source = None
+        self.tree = None
+
+    def build(self):
+        if self.tree is None:
+            self.source = library_checkout(self.ws)
+            out = DEPS / LIBRARY
+            DEPS.mkdir(exist_ok=True)
+            say(f"assembling the {LIBRARY} tree from {self.source.resolve()}")
+            r = subprocess.run(
+                [sys.executable, str(self.source / "tools" / "libbuild.py"), "build", "--tree-only",
+                 "--root", str(self.source), "--out", str(out), "--cache", str(DEPS / f"{LIBRARY}-sources"),
+                 "--library-name", LIBRARY], text=True, capture_output=True)
+            if r.returncode != 0:
+                die(f"{self.source / 'tools' / 'libbuild.py'} failed:\n{r.stdout}{r.stderr}")
+            self.tree = out / "library"
+        return self.tree
+
+    def names(self):
+        """Every package in the tree."""
+        return {p.name for p in self.build().iterdir() if (p / "manifest.py").is_file()}
+
+
+def uses_library(module_dirs, manifest):
+    """Whether this build's manifests ask for the library: a module's, a path
+    module's, or the variant's own. They say so by naming it."""
+    files = [d / "manifest.py" for d in module_dirs] + [manifest]
+    return any(f.is_file() and LIBRARY in f.read_text() for f in files)
 
 
 def dep_version(name, path):
@@ -414,11 +494,13 @@ def module_choices():
     return sorted(p.name for p in MODULES_DIR.iterdir() if p.is_dir() and not p.name.startswith("."))
 
 
-def resolve_modules(spec):
+def resolve_modules(spec, library=None):
     """The comma list as modules/manifest.py will read it (paths made
-    absolute), and the module directories it amounts to ("all" expanded),
-    which the esp32 conventions and the build record need."""
-    names, dirs = [], []
+    absolute), the module directories it amounts to ("all" expanded), which
+    the esp32 conventions and the build record need, and the library packages
+    it names. A name that is no module of ours but a package of the library is
+    required from it; `library` is the Library to ask, built only then."""
+    names, dirs, packages = [], [], []
     for item in (s.strip() for s in spec.split(",")):
         if not item:
             continue
@@ -432,24 +514,30 @@ def resolve_modules(spec):
             names.append("all")
             # modules/all/manifest.py's rule: every module but the opt-in ones.
             dirs += [MODULES_DIR / n for n in module_choices() if n != "all" and not (MODULES_DIR / n / "OPT_IN").is_file()]
-        else:
-            if not (MODULES_DIR / item).is_dir():
-                die(f"no module '{item}' in {MODULES_DIR} (have: {', '.join(module_choices())})")
+        elif (MODULES_DIR / item).is_dir():
             names.append(item)
             dirs.append(MODULES_DIR / item)
+        elif library and item in library.names():
+            names.append(item)
+            packages.append(item)
+        else:
+            have = module_choices() + (sorted(library.names()) if library else [])
+            die(f"no module '{item}' in {MODULES_DIR} (have: {', '.join(have)})")
     unique = []
     for d in dirs:
         if d.resolve() not in [u.resolve() for u in unique]:
             unique.append(d)
-    return ",".join(names), unique
+    return ",".join(names), unique, sorted(set(packages))
 
 
-def record(dirs, bindings=None):
-    """A row per module, and one for the lvgl-bindings lvgl-micropython
-    compiles when the build has it: which commit went in, and whether it had
-    uncommitted changes."""
+def record(dirs, bindings=None, library=None):
+    """A row per module, one for the lvgl-bindings lvgl-micropython compiles
+    when the build has it, and one for the omnipython-lib the build's library
+    packages came from: which commit went in, and whether it had uncommitted
+    changes."""
     rows = {}
-    named = [(module_name(d), d) for d in dirs] + ([(LVGL_BINDINGS, bindings)] if bindings else [])
+    named = ([(module_name(d), d) for d in dirs] + ([(LVGL_BINDINGS, bindings)] if bindings else [])
+             + ([(LIBRARY, library)] if library else []))
     for name, d in named:
         real = d.resolve()
         rev = git_out(real, "describe", "--always", "--dirty", "--abbrev=12") or "(not a git checkout)"
@@ -922,14 +1010,82 @@ def module_name(d):
     return real.name
 
 
+# MicroPython's own upstream packages (aioble, usb-device, ...): CircuitPython
+# has its own, so a CircuitPython build never takes this module's manifest.
+MP_ONLY_MODULES = {"micropython-lib"}
+
+
+def cp_frozen_manifest_dir(d):
+    """Whether this module's manifest.py freezes Python into a CircuitPython
+    build: it has one, it names no c_module() (those reach CircuitPython
+    through USER_C_MODULES), and it isn't one of MicroPython's own."""
+    real = d.resolve()
+    manifest = real / "manifest.py"
+    return (manifest.is_file() and module_name(d) not in MP_ONLY_MODULES
+            and "c_module(" not in manifest.read_text())
+
+
+def cp_board_frozen_dirs(cp, port, board):
+    """The directories a CircuitPython board freezes with FROZEN_MPY_DIRS in
+    its mpconfigboard.mk. Setting FROZEN_MANIFEST on the make line beats the
+    board's own generated manifest, so a build with a manifest of ours freezes
+    these itself."""
+    mk = cp / "ports" / port / "boards" / board / "mpconfigboard.mk"
+    dirs = []
+    for line in mk.read_text().splitlines() if mk.is_file() else []:
+        m = re.match(r"\s*FROZEN_MPY_DIRS\s*\+?=\s*([^#]*)", line)
+        for word in (m.group(1).split() if m else []):
+            word = word.replace("$(TOP)", str(cp))
+            if "$(" in word:
+                die(f"{mk} freezes {word}: build_mp.py reads only $(TOP) paths in FROZEN_MPY_DIRS")
+            dirs.append(word)
+    return dirs
+
+
+def cp_frozen_manifest(cp, port, board, variant, module_dirs, library_packages, build, library):
+    """The FROZEN_MANIFEST of a CircuitPython build that freezes our Python, or
+    None when it freezes none: the port's own base (the unix coverage variant's
+    manifest), the board's FROZEN_MPY_DIRS content, the Python of the modules
+    named (palettes, pdwidgets, lvgl-circuitpython's fs_driver, ...), and the
+    library packages named. Returns (manifest path, make arguments)."""
+    manifests = [d for d in module_dirs if cp_frozen_manifest_dir(d)]
+    if not manifests and not library_packages:
+        return None, []
+    lines = ["# Generated by build_mp.py: what this CircuitPython build freezes."]
+    extra = []
+    base = cp / "ports" / port / "variants" / (variant or "coverage") / "manifest.py"
+    if not board and base.is_file():
+        lines.append(f'include("{base.as_posix()}")')
+    board_dirs = cp_board_frozen_dirs(cp, port, board) if board else []
+    if board_dirs:
+        # What circuitpy_mpconfig.mk does with FROZEN_MPY_DIRS when it makes the
+        # manifest itself.
+        out = build / "frozen_mpy_board"
+        shutil.rmtree(out, ignore_errors=True)
+        out.mkdir(parents=True)
+        run([sys.executable, str(cp / "tools" / "preprocess_frozen_modules.py"), "-o", str(out), *board_dirs],
+            env=dict(os.environ, PYTHONPATH=str(cp / "tools" / "python-semver")), stdout=subprocess.DEVNULL)
+        for f in sorted(out.rglob("*.py")):
+            lines.append(f'freeze_as_mpy("{out.as_posix()}", "{f.relative_to(out).as_posix()}")')
+        extra.append("FROZEN_MPY_DIRS=")
+    if library_packages or any(LIBRARY in (d / "manifest.py").read_text() for d in manifests):
+        lines.append(f'include("{(MODULES_DIR / "library.py").as_posix()}")')
+    for d in manifests:
+        lines.append(f'include("{d.resolve().as_posix()}")')
+    for name in library_packages:
+        lines.append(f'require("{name}", library="{LIBRARY}", opt=3)')
+    manifest = build / "frozen-manifest.py"
+    manifest.write_text("\n".join(lines) + "\n")
+    return manifest, [f"FROZEN_MANIFEST={manifest.as_posix()}", *extra]
+
+
 def cp_user_c_modules(module_dirs, link_dir):
     """The directory holding each module's micropython.mk, for USER_C_MODULES.
 
     CircuitPython's py/py.mk carries MicroPython 1.29's USER_C_MODULES block,
     so the micropython.mk our MicroPython builds use is the one it reads.
-    Python is not frozen here yet: CircuitPython freezes through its own
-    FROZEN_MPY_DIRS, not manifest.py, so a module without C is refused rather
-    than silently left out.
+    A module without C is Python only: cp_frozen_manifest() freezes its
+    manifest.py.
 
     Each is given to make through a link named for the module, in link_dir:
     py.mk puts a module's objects under BUILD/<its directory's name>/, so two
@@ -939,7 +1095,9 @@ def cp_user_c_modules(module_dirs, link_dir):
         real = d.resolve()
         found = next((c for c in (real, real / "code") if (c / "micropython.mk").is_file()), None)
         if not found:
-            die(f"module '{d.name}' has no micropython.mk; CircuitPython builds take C modules only, so far")
+            if cp_frozen_manifest_dir(d):
+                continue  # Python only: frozen through cp_frozen_manifest()
+            die(f"module '{d.name}' has no micropython.mk and no manifest.py that freezes Python for CircuitPython")
         found_dirs.append((module_name(d), found))
     names = [n for n, _ in found_dirs]
     if len(set(names)) != len(names):
@@ -1070,12 +1228,16 @@ def build_circuitpython(args, make_extra, ws):
             die("--modules: not given, and there is no terminal to ask on")
         say("Modules: " + ", ".join(module_choices()))
         spec = input('Which (comma list; full paths for others; empty for none)? ').strip()
-    spec, module_dirs = resolve_modules(spec)
+    library = Library(ws)
+    spec, module_dirs, library_packages = resolve_modules(spec, library)
     refuse_lvgl_micropython([module_name(d) for d in module_dirs])
+    if library_packages or any(LIBRARY in (d.resolve() / "manifest.py").read_text()
+                               for d in module_dirs if cp_frozen_manifest_dir(d)):
+        library.build()
 
     # The unix port's own default variant is coverage.
     build = OUT_DIR / "circuitpython" / port / (board or variant or "coverage")
-    module_set = sorted(d.name if d.parent == MODULES_DIR else str(d) for d in module_dirs)
+    module_set = sorted([d.name if d.parent == MODULES_DIR else str(d) for d in module_dirs] + library_packages)
     components = []
     if port == "espressif":
         for d in module_dirs:
@@ -1090,15 +1252,20 @@ def build_circuitpython(args, make_extra, ws):
     if components:
         want["esp_idf_components"] = [f"{n} {dep_version(n, d)}" for n, d in zip(components, component_dirs)]
     bindings = lvgl_bindings(ws, module_dirs)
-    revisions = record(module_dirs, bindings)
+    revisions = record(module_dirs, bindings, library.source)
     rec_path = build_dir_for(build, want, args.clean, revisions)
     user_c = cp_user_c_modules(module_dirs, build / "usermods")
+    frozen, frozen_args = (None, []) if any(a.startswith("FROZEN_MANIFEST=") for a in make_extra) else \
+        cp_frozen_manifest(cp, port, board, variant, module_dirs, library_packages, build, library)
 
     env = {k: v for k, v in os.environ.items()
            if k not in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "VARIANT_DIR", "PYTHONPATH",
                         "BINDINGS_DIR")}
     if bindings:
         env["BINDINGS_DIR"] = str(bindings.resolve())
+    if library.tree:
+        env["PYDEVICES_LIBRARY"] = library.tree.as_posix()
+    env["PYDEVICES_INTERPRETER"] = "circuitpython"
     env["PATH"] = os.pathsep.join([str(CP_VENV / "bin"), env.get("PATH", "")])
     env["VIRTUAL_ENV"] = str(CP_VENV)
     # Only the submodules this target needs, the way CircuitPython's CI does:
@@ -1141,9 +1308,10 @@ def build_circuitpython(args, make_extra, ws):
         make.append(f"VARIANT={variant}")
     if component_dirs:
         make.append("USER_ESP_IDF_COMPONENT_DIRS=" + " ".join(str(d) for d in component_dirs))
-    make += make_extra
+    make += frozen_args + make_extra
     say(f"CircuitPython {dep_version('circuitpython', cp)} {port} {board or variant or 'coverage'}; "
-        f"USER_C_MODULES: {' '.join(str(d) for d in user_c) or '(none)'}")
+        f"USER_C_MODULES: {' '.join(str(d) for d in user_c) or '(none)'}"
+        + (f"; frozen: {frozen}" if frozen else ""))
     prefix = cp_espressif_env(port_dir, board) if port == "espressif" else ""
     rc = subprocess.run([BASH, "-c", prefix + shlex.join(make)], env=env).returncode
     if rc != 0:
@@ -1271,7 +1439,10 @@ def main():
             die("--modules: not given, and there is no terminal to ask on")
         say("Modules: " + ", ".join(module_choices()))
         spec = input('Which (comma list; full paths for others; "all"; empty for none)? ').strip()
-    spec, module_dirs = resolve_modules(spec)
+    library = Library(ws)
+    spec, module_dirs, library_packages = resolve_modules(spec, library)
+    if library_packages or uses_library(module_dirs, frozen_manifest(port, board, variant)):
+        library.build()
 
     # A troubleshooting build has its own folder, so it never replaces the
     # standard image beside it.
@@ -1282,13 +1453,13 @@ def main():
     # module is added, and a build dir from before would otherwise be reused,
     # its frozen content generated against a qstr pool the new module has
     # since changed (frozen_content.c then redeclares MP_QSTR_Image, ...).
-    module_set = sorted(d.name if d.parent == MODULES_DIR else str(d) for d in module_dirs)
+    module_set = sorted([d.name if d.parent == MODULES_DIR else str(d) for d in module_dirs] + library_packages)
     want = {"port": port, "board": board, "variant": variant, "flash": flash, "modules": spec,
             "module_set": module_set}
     # Each module's commit too: a module that moved keeps its name, and make
     # would reuse frozen content and qstr headers from before it moved.
     bindings = lvgl_bindings(ws, module_dirs)
-    revisions = record(module_dirs, bindings)
+    revisions = record(module_dirs, bindings, library.source)
     build_dir_for(build, want, args.clean, revisions)
 
     env = dict(os.environ)
@@ -1296,6 +1467,8 @@ def main():
                  "BINDINGS_DIR"):
         env.pop(leak, None)
     env["PYDEVICES_MODULES"] = spec
+    if library.tree:
+        env["PYDEVICES_LIBRARY"] = library.tree.as_posix()
     if bindings:
         env["BINDINGS_DIR"] = bindings.resolve().as_posix()
     if os.name == "nt":

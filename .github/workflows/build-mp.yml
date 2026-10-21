@@ -9,6 +9,10 @@ on:
     paths:
       - 'build_mp.py'
       - 'test_build_mp.py'
+      - 'test_freeze_list.py'
+      - 'scripts/freeze_list.py'
+      - 'modules/library.py'
+      - 'modules.lock'
       - 'UPSTREAM'
       - 'patches/micropython/**'
       - 'patches/tinyusb/**'
@@ -20,6 +24,10 @@ on:
     paths:
       - 'build_mp.py'
       - 'test_build_mp.py'
+      - 'test_freeze_list.py'
+      - 'scripts/freeze_list.py'
+      - 'modules/library.py'
+      - 'modules.lock'
       - 'UPSTREAM'
       - 'patches/micropython/**'
       - 'patches/tinyusb/**'
@@ -39,7 +47,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Unit tests
-        run: python3 -m unittest test_build_mp -v
+        run: python3 -m unittest test_build_mp test_freeze_list -v
       - name: provenance.json is current
         run: python3 -m unittest test_provenance -v
 

@@ -8,8 +8,6 @@ or missing for you, open an
   now, against ESP-IDF 6, with definitions for the Waveshare ESP32-S3 and
   ESP32-P4 boards. Next is displayif's desktop display, then the modules that
   don't build there yet.
-- **Freezing our Python packages into CircuitPython-compatible builds**,
-  through CircuitPython's own frozen-module mechanism.
 
 ## Module roadmaps
 

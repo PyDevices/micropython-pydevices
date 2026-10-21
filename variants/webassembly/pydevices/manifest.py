@@ -20,4 +20,5 @@ include("../../../modules", base=False)
 # browser canvas, and a page sets the panel size with boarddev.env_set
 # before the import. A board_config.py the page writes beside the script
 # still wins.
-include("../../../modules/pydevices/board_configs/desktop")
+# The board config comes from omnipython-lib, so this build assembles it.
+include("../../desktop-board.py")

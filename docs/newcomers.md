@@ -227,7 +227,10 @@ With no `--variant`, that last directory is `default` on esp32 and rp2, and
 Three choices make a build: the board (or not, on the desktop ports), the
 variant (always optional, as with upstream's `make`), and the modules. A
 module is a directory with a `manifest.py`, or a C module with its glue,
-like ulab. A module never brings another; nothing checks dependencies, so
+like ulab. Our Python-only packages come from omnipython-lib: `pydevices`,
+`palettes`, `pdwidgets` and `audiocomponents` are modules whose manifest
+requires them from it, and any other package of it (`appkit`, a board config)
+can be named too. A module never brings another; nothing checks dependencies, so
 name ulab when you name audiocomponents, tflite or vision, or use `all`.
 `all` is every module except the opt-in ones (an `OPT_IN` file says why):
 tflite and vision are built only when named.

@@ -172,6 +172,114 @@ class LvglBindings(unittest.TestCase):
             self.assertIn("full 40-character commit", str(cm.exception))
 
 
+class LibraryPackages(unittest.TestCase):
+    """omnipython-lib: packages a build requires from the library tree, not modules/."""
+
+    class FakeLibrary:
+        def __init__(self, names):
+            self._names = set(names)
+            self.asked = 0
+
+        def names(self):
+            self.asked += 1
+            return self._names
+
+    def modules_dir(self, tmp, *names):
+        modules = Path(tmp) / "modules"
+        for n in names:
+            (modules / n).mkdir(parents=True)
+        saved = build_mp.MODULES_DIR
+        build_mp.MODULES_DIR = modules
+        self.addCleanup(setattr, build_mp, "MODULES_DIR", saved)
+        return modules
+
+    def test_a_module_is_a_module_and_never_asks_the_library(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            modules = self.modules_dir(tmp, "displayif", "palettes")
+            lib = self.FakeLibrary({"palettes", "appkit"})
+            spec, dirs, packages = build_mp.resolve_modules("displayif,palettes", lib)
+            self.assertEqual((spec, dirs, packages), ("displayif,palettes", [modules / "displayif", modules / "palettes"], []))
+            self.assertEqual(lib.asked, 0)
+
+    def test_a_name_that_is_no_module_but_a_library_package_is_required_from_the_library(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            modules = self.modules_dir(tmp, "displayif")
+            lib = self.FakeLibrary({"appkit", "esp32-s3-touch-lcd-7"})
+            spec, dirs, packages = build_mp.resolve_modules("displayif,appkit,esp32-s3-touch-lcd-7", lib)
+            self.assertEqual(spec, "displayif,appkit,esp32-s3-touch-lcd-7")
+            self.assertEqual(dirs, [modules / "displayif"])
+            self.assertEqual(packages, ["appkit", "esp32-s3-touch-lcd-7"])
+
+    def test_a_name_in_neither_is_refused_and_lists_both(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.modules_dir(tmp, "displayif")
+            with self.assertRaises(SystemExit) as cm:
+                build_mp.resolve_modules("nosuch", self.FakeLibrary({"appkit"}))
+            self.assertIn("no module 'nosuch'", str(cm.exception))
+            self.assertIn("displayif", str(cm.exception))
+            self.assertIn("appkit", str(cm.exception))
+
+    def test_all_stays_every_module_but_the_opt_in_ones(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            modules = self.modules_dir(tmp, "all", "a", "b", "optional")
+            (modules / "optional" / "OPT_IN").write_text("why\n")
+            _spec, dirs, packages = build_mp.resolve_modules("all", self.FakeLibrary({"appkit"}))
+            self.assertEqual(sorted(d.name for d in dirs), ["a", "b"])
+            self.assertEqual(packages, [])
+
+    def test_a_manifest_that_names_the_library_needs_it_assembled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plain, wants, variant = root / "plain", root / "wants", root / "variant.py"
+            plain.mkdir()
+            wants.mkdir()
+            (plain / "manifest.py").write_text("c_module('.')\n")
+            (wants / "manifest.py").write_text('require("palettes", library="omnipython-lib")\n')
+            variant.write_text("freeze('.')\n")
+            self.assertFalse(build_mp.uses_library([plain], variant))
+            self.assertTrue(build_mp.uses_library([plain, wants], variant))
+            variant.write_text("# needs omnipython-lib\n")
+            self.assertTrue(build_mp.uses_library([plain], variant))
+
+    def test_a_short_commit_is_refused_when_the_library_must_be_cloned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "modules").mkdir()
+            (repo / "modules.lock").write_text("omnipython-lib https://example.invalid/lib.git 46e1654\n")
+            saved = build_mp.REPO, build_mp.MODULES_DIR
+            build_mp.REPO, build_mp.MODULES_DIR = repo, repo / "modules"
+            try:
+                with self.assertRaises(SystemExit) as cm:
+                    build_mp.library_checkout(None)
+            finally:
+                build_mp.REPO, build_mp.MODULES_DIR = saved
+            self.assertIn("full 40-character commit", str(cm.exception))
+
+    def test_the_workspace_checkout_of_the_library_wins_over_the_pin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp) / "ws"
+            (ws / "pydevices" / "tools").mkdir(parents=True)
+            (ws / "pydevices" / "tools" / "libbuild.py").write_text("")
+            repo = Path(tmp) / "repo"
+            (repo / "modules").mkdir(parents=True)
+            (repo / "modules.lock").write_text("omnipython-lib https://example.invalid/lib.git " + "a" * 40 + "\n")
+            saved = build_mp.REPO, build_mp.MODULES_DIR
+            build_mp.REPO, build_mp.MODULES_DIR = repo, repo / "modules"
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    dest = build_mp.library_checkout(ws)
+            finally:
+                build_mp.REPO, build_mp.MODULES_DIR = saved
+            self.assertEqual(dest.resolve(), (ws / "pydevices").resolve())
+
+    def test_the_build_record_names_the_library_commit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = LvglBindings.git_repo(None, Path(tmp) / "lib", "libbuild.py")
+            rows = build_mp.record([], None, lib)
+            self.assertEqual(list(rows), ["omnipython-lib"])
+            self.assertEqual(len(rows["omnipython-lib"]["commit"]), 40)
+
+
 class RefuseLvglMicropython(unittest.TestCase):
     """CircuitPython's LVGL binding is lvgl-circuitpython, not lvgl-micropython."""
 
@@ -366,7 +474,7 @@ class Coredump(unittest.TestCase):
     cells = [c for c in rf.CELLS if c["interpreter"] == "micropython" and c["port"] == "esp32"]
 
     def fragment(self, c, coredump):
-        _, module_dirs = build_mp.resolve_modules(c["modules"])
+        _, module_dirs, _ = build_mp.resolve_modules(c["modules"])
         text, _ = build_mp.esp32_fragment(c["chip"], module_dirs, c["board"], c["variant"], c["flash"], None, coredump)
         return text
 

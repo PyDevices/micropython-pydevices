@@ -4,4 +4,5 @@
 # directory comes before .frozen on sys.path. Board images never carry it,
 # since no board variant includes it.
 include("../../../modules/manifest.py")
-include("../../../modules/pydevices/board_configs/desktop")
+# The board config comes from omnipython-lib, so this build assembles it.
+include("../../desktop-board.py")

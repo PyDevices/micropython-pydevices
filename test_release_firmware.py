@@ -123,7 +123,7 @@ class Assemble(unittest.TestCase):
         self.assertEqual(doc["run"], "https://run")
         self.assertEqual(doc["pins"]["UPSTREAM"], (rf.REPO / "UPSTREAM").read_text().strip())
         self.assertIn("esp-idf", doc["pins"]["deps.lock"])
-        self.assertIn("pydevices", doc["pins"]["modules.lock"])
+        self.assertIn("omnipython-lib", doc["pins"]["modules.lock"])
         self.assertEqual(doc["pins"]["lvgl-circuitpython"], "b" * 40)
         s3 = next(b for b in doc["builds"] if b["id"] == "mp-s3-lcd7")
         self.assertEqual(s3["flash_offset"], "0x0")

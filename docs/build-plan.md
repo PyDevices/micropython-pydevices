@@ -28,7 +28,7 @@ micropython-pydevices/
 ├── UPSTREAM                 the MicroPython commit we build on (b70ae1aca657, v1.30.0-preview-160)
 ├── VERSION                  our version (scheme still open, below)
 ├── build_mp.py              the one command; Python so it runs anywhere
-├── modules.lock             one line per module: name, git URL, commit (and lvgl-bindings, below)
+├── modules.lock             one line per module: name, git URL, commit (and lvgl-bindings and omnipython-lib, below)
 ├── deps.lock                one line per dependency: name, URL, version (ESP-IDF v5.5.4, emsdk 6.0.1, SDL2 2.30.10)
 ├── micropython/             ignored: symlink to a sibling checkout, or a clone of UPSTREAM
 ├── deps/                    ignored: esp-idf/, emsdk/, SDL2/, symlinked or fetched on demand
@@ -40,10 +40,13 @@ micropython-pydevices/
 │   ├── usbhost/             tracked: lives only here (moved from usbif, 2026-10-19, history kept); ESP32-S2, S3 and P4
 │   ├── mdns/                tracked: lives only here; esp32, rp2, unix, windows
 │   ├── audioif/, cameraif/, displayif/  tracked: moved here 2026-10-19 from their own repos, history kept
+│   ├── library.py           tracked: registers omnipython-lib for the manifests that require from it
+│   ├── pydevices/, palettes/, pdwidgets/, audiocomponents/   tracked: a manifest each, requiring the package(s) from omnipython-lib
+│   ├── micropython-lib/     tracked: a manifest requiring the upstream packages our APIs lean on
 │   ├── audiodsp -> ../../audiodsp          ignored symlinks to sibling checkouts,
-│   ├── audiocomponents -> ...               clones at the modules.lock commit anywhere else
-│   ├── lvgl-micropython, palettes,
-│   ├── pdwidgets, pydevices, pygraphics, ulab
+│   ├── lvgl-micropython,                    clones at the modules.lock commit anywhere else
+│   ├── pygraphics, ulab
+│   ├── .omnipython-lib      ignored: the library repository, a link or a clone at its modules.lock commit
 │   ├── .lvgl-bindings       ignored: what lvgl-micropython compiles; a link, or a sparse fetch at its modules.lock commit
 │   └── jpegio                later: see "Open"
 ├── patches/
@@ -197,19 +200,62 @@ h264enc is selected: any selected module's `components/<name>/` is added that
 way, by convention. Its own glue skips every other port and chip,
 the way audioif's skips non-esp32 ports, so `all` needs no exception for it.
 
-## Python-only modules, frozen or not
+## Python-only packages come from omnipython-lib
 
-pydevices, palettes, pdwidgets and audiocomponents are Python only. You
-choose per build: name one in `--modules` and it's frozen; leave it out and
-the board installs it with mip as today. `all` takes them, because all means
-all. Today that's what the wasm build wants, since pages load without fetching
-anything. For MCU builds `pydevices/lib` moves too fast to freeze as a habit,
-so name what you want rather than reaching for `all`.
+pydevices, palettes, pdwidgets and audiocomponents' two packages are Python
+only, so they are not checkouts in `modules/`: they are packages of
+omnipython-lib, the repository of our Python-only packages (the pydevices
+repository, until its rename). `modules.lock` pins it like a module
+(`omnipython-lib`), and a build that needs it asks its `tools/libbuild.py
+build --tree-only` for the library tree: one directory per package with a
+`manifest.py` beside its sources. `modules/library.py` registers that tree
+with `add_library("omnipython-lib", ...)`, and a manifest then says
+`require("palettes", library="omnipython-lib", opt=3)`. In the workspace the
+checkout is a link to the sibling `pydevices`, which wins over the pin like
+every other module; anywhere else it is a clone at the pinned commit. The tree
+goes to `deps/omnipython-lib`, and the outside packages the library builds from
+other repositories at a tag (audiocomponents' instruments and effects) are
+cloned once into `deps/omnipython-lib-sources`.
 
-Later, once the PyDevices/mip repo is retooled into our own package library,
-these come in with `require("<name>", library=<ours>)` instead. Their
-symlinks then leave `modules/`, so `all` no longer takes them, and a manifest
-that wants one (the wasm one) requires it by name.
+You still choose per build: name `pydevices`, `palettes`, `pdwidgets` or
+`audiocomponents` in `--modules` and it's frozen (each is a small manifest in
+`modules/` that requires its packages); leave it out and the board installs it
+with mip. `all` takes them, because all means all. Any other package of the
+library can be named the same way: `--modules appkit`, or a board config such
+as `esp32-s3-touch-lcd-7` with its drivers, which the package requires. A
+package with C stays a module (pygraphics, the device modules).
+
+`modules/pydevices` freezes what `lib/` always held: the library's `pydevices`
+and `bledev`, plus the host-only files of `audiodev`, `bledev`, `displaydev`
+and `multimer` that mip ships in `pydevices-desktop` (not its `mip.py`,
+`pngio.py` or `mdns.py`, which would stand in front of the firmware's own).
+Boards still carry those host-only files; leaving them out is a separate,
+smaller change.
+
+`modules/micropython-lib` freezes the upstream packages the aligned APIs need
+(`aioble`, `sdcard`, `bmi270`, `__future__`, `usb-device` and its device
+classes) with `require()` from the micropython-lib checkout the MicroPython
+tree carries, so an OmniPython firmware never asks anyone to `mip.install`
+them. It is in `all`.
+
+CircuitPython-compatible builds freeze the same way. A module that names no
+`c_module()` and has a `manifest.py` (palettes, pdwidgets, pydevices,
+`lvgl-circuitpython`'s `fs_driver`) is frozen, and so is any library package
+you name; `build_mp.py` writes one `frozen-manifest.py` into the build
+directory and hands it to CircuitPython's make as `FROZEN_MANIFEST`. That
+manifest starts with the unix port's coverage manifest on the unix port and
+with the board's own `FROZEN_MPY_DIRS` content on a board that has some
+(setting `FROZEN_MANIFEST` beats the manifest CircuitPython would make from
+them, so the build freezes them itself). C modules still reach CircuitPython
+through `USER_C_MODULES`, and `micropython-lib` is MicroPython's own and is
+left out.
+
+`scripts/freeze_list.py list` evaluates a build's manifest and writes every
+file it freezes, by name, with the hash of its source and of what is frozen
+(a required package's files get a `__version__` line, as mip installs them),
+and the version of every package a `require()` brought in; `compare` says what
+differs between two lists: run it on a build's manifest before and after a
+change to see exactly what the change did to the firmware.
 
 ## Order of work
 
