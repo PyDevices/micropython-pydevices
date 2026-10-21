@@ -21,6 +21,12 @@ on Linux or WSL.
         beside them in <out-dir>. Exits 1 if any check fails. It never
         uploads or publishes anything.
 
+    release_firmware.py notes <firmware.json> [--out FILE]
+        Check that the set's tag may go on a draft Release and write the
+        Release's notes (to FILE, or stdout). A set built from preview pins
+        only takes a tag that starts with "staged-", so publishing it by
+        accident would look wrong. This is what the workflow's draft step runs.
+
     release_firmware.py cells
         List the cells.
 
@@ -416,6 +422,63 @@ def summary(doc):
     return "\n".join(lines) + "\n"
 
 
+# ---- the draft Release -----------------------------------------------------
+
+REPO_SLUG = "PyDevices/micropython-pydevices"
+STAGED_TAG = re.compile(r"staged-[A-Za-z0-9][A-Za-z0-9._-]*")
+FINAL_TAG = re.compile(r"v\d+\.\d+\.\d+-\d{8}")
+
+
+def check_draft_tag(doc):
+    """A set built from preview pins (D3) only gets a tag that says it is staged."""
+    tag = doc["tag"]
+    if doc["preview"]:
+        if not STAGED_TAG.fullmatch(tag):
+            raise Failed(f"this set is built from preview pins ({'; '.join(doc['preview_reasons'])}), "
+                         f"so its tag must start with 'staged-', not '{tag}'")
+    elif not (FINAL_TAG.fullmatch(tag) or STAGED_TAG.fullmatch(tag)):
+        raise Failed(f"'{tag}' is neither v<MicroPython version>-<YYYYMMDD> nor staged-<name>")
+
+
+def write_command(b, f):
+    """The esptool line that writes one ESP flash image, or None for a file that isn't one."""
+    if f["role"] != "flash":
+        return None
+    return f"esptool --chip {b['chip']} write-flash {b['flash_offset']} {f['name']}"
+
+
+def notes(doc):
+    """The draft Release's body, for whoever opens it."""
+    tag = doc["tag"]
+    lines = []
+    if doc["preview"]:
+        lines += ["> **Staged, not for release.** " + "; ".join(doc["preview_reasons"]) +
+                  ". This draft stays private until a set is built from tagged versions.", ""]
+    lines += [f"OmniPython firmware {tag}: MicroPython {doc['micropython']}"
+              + (f" and CircuitPython-compatible {doc['circuitpython']}" if doc.get("circuitpython") else "")
+              + f", built by [this run]({doc['run']}) on {doc['built'][:10]}.", "",
+              "**Before you flash,** copy your files off the board, `secrets.py` above all. A build can move the "
+              "filesystem, and a flash across a layout change leaves it empty. Coming from another firmware "
+              "(MicroPython to CircuitPython or back), run `esptool --chip <chip> erase-flash` first.", "",
+              "| Board | Interpreter | File to flash | How |", "|---|---|---|---|"]
+    for b in doc["builds"]:
+        f = next(x for x in b["files"] if x["role"] in ("flash", "uf2"))
+        how = ("copy it onto the board's BOOTSEL drive" if f["role"] == "uf2"
+               else f"`{write_command(b, f)}`")
+        kind = "MicroPython" if b["interpreter"] == "micropython" else "CircuitPython-compatible"
+        lines.append(f"| {b['label']} | {kind} {b['interpreter_version']} | `{f['name']}` | {how} |")
+    lines += ["",
+              "Each build also ships its `.elf` and `.map`, and the ESP32 builds their `.app.bin` (the application "
+              "alone, for a board that keeps its other partitions) and partition table. The `.elf` that matches a "
+              "flashed build is what turns a crash report or core dump into a source-level backtrace. "
+              "`firmware.json` lists every file's sha256, size, flash offset and the pins the set was built from.", "",
+              "Every file here is attested. Check one with:", "",
+              "```",
+              f"gh attestation verify <file> --repo {REPO_SLUG}",
+              "```", ""]
+    return "\n".join(lines)
+
+
 # ---- command line ----------------------------------------------------------
 
 def main(argv=None):
@@ -434,6 +497,9 @@ def main(argv=None):
     a.add_argument("--tag", default="")
     a.add_argument("--run-url", default="")
     a.add_argument("--lvgl-circuitpython-commit", default="")
+    n = sub.add_parser("notes")
+    n.add_argument("firmware_json")
+    n.add_argument("--out")
     sub.add_parser("cells")
     args = ap.parse_args(argv)
     try:
@@ -443,6 +509,14 @@ def main(argv=None):
             for c in CELLS:
                 print(f"{c['id']:20} {c['interpreter']:14} {c['board']} {c['variant'] or ''}"
                       f"{'  (off by default)' if c.get('optional') else ''}")
+        elif args.cmd == "notes":
+            doc = json.loads(Path(args.firmware_json).read_text())
+            check_draft_tag(doc)
+            text = notes(doc)
+            if args.out:
+                Path(args.out).write_text(text)
+            else:
+                print(text)
         elif args.cmd == "build":
             build(args.cell, args.out, args.ws)
         elif args.cmd == "assemble":

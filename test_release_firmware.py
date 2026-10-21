@@ -256,5 +256,61 @@ class Assemble(unittest.TestCase):
         self.fails_with("no cell")
 
 
+class DraftRelease(unittest.TestCase):
+    """The draft Release's tag rule and notes. A preview set may only be staged."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root)
+        indir = self.root / "in"
+        indir.mkdir()
+        fake_set(indir)
+        self.doc = rf.assemble(indir, self.root / "out", False, "staged-20261020", "https://run", "b" * 40)
+
+    def test_a_preview_set_takes_only_a_staged_tag(self):
+        rf.check_draft_tag(self.doc)
+        self.doc["tag"] = "v1.30.0-20261020"
+        with self.assertRaises(rf.Failed) as cm:
+            rf.check_draft_tag(self.doc)
+        self.assertIn("preview pins", str(cm.exception))
+
+    def test_a_final_set_takes_a_dated_version_or_a_staged_tag(self):
+        self.doc.update(preview=False, preview_reasons=[])
+        for tag in ("v1.30.0-20261101", "staged-1"):
+            self.doc["tag"] = tag
+            rf.check_draft_tag(self.doc)
+        for tag in ("v1.30.0", "1.30.0-20261101", "latest", "v1.30.0-2026"):
+            self.doc["tag"] = tag
+            with self.assertRaises(rf.Failed, msg=tag):
+                rf.check_draft_tag(self.doc)
+
+    def test_the_notes_warn_name_every_board_and_say_how_to_verify(self):
+        text = rf.notes(self.doc)
+        self.assertIn("Staged, not for release", text)
+        self.assertIn("secrets.py", text)
+        self.assertIn("gh attestation verify", text)
+        for b in self.doc["builds"]:
+            self.assertIn(b["label"], text)
+        self.assertIn("esptool --chip esp32p4 write-flash 0x2000 omnipython-mp-esp32_generic_p4-wifi6_dev_kit_h2-staged-20261020.bin", text)
+        self.assertIn("--chip esp32s3 write-flash 0x0 ", text)
+        self.assertIn("BOOTSEL drive", text)
+
+    def test_a_final_set_has_no_staged_banner(self):
+        self.doc.update(preview=False, preview_reasons=[], tag="v1.30.0-20261101")
+        self.assertNotIn("Staged", rf.notes(self.doc))
+
+    def test_the_command_refuses_a_bad_tag_and_writes_notes_for_a_good_one(self):
+        j = self.root / "out" / "firmware.json"
+        out = self.root / "notes.md"
+        self.assertEqual(rf.main(["notes", str(j), "--out", str(out)]), 0)
+        self.assertIn("OmniPython firmware staged-20261020", out.read_text())
+        bad = json.loads(j.read_text())
+        bad["tag"] = "v1.30.0-20261020"
+        j.write_text(json.dumps(bad))
+        out.unlink()
+        self.assertEqual(rf.main(["notes", str(j), "--out", str(out)]), 1)
+        self.assertFalse(out.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
