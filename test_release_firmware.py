@@ -278,6 +278,32 @@ class VersionTag(unittest.TestCase):
             rf.check_version_tag("v1.30.0-preview.160.gb70ae1aca6", self.elf(b"MicroPython 2818d7fb1d-dirty on"), "x")
 
 
+class FrozenLibraries(unittest.TestCase):
+    """A CircuitPython image without asyncio and adafruit_ticks must not pass."""
+
+    LIBS = ["Adafruit_CircuitPython_asyncio 3.1.1", "Adafruit_CircuitPython_Ticks 1.1.7"]
+
+    def elf(self, body):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        f = Path(d) / "elf.elf"
+        f.write_bytes(body)
+        return f
+
+    def test_an_image_with_both_passes(self):
+        rf.check_frozen_libraries(self.LIBS, self.elf(b"..asyncio/core.py..adafruit_ticks.py.."), "x")
+
+    def test_a_record_with_no_libraries_fails(self):
+        for libs in (None, [], self.LIBS[:1], self.LIBS[1:]):
+            with self.assertRaisesRegex(rf.Failed, "names no frozen"):
+                rf.check_frozen_libraries(libs, self.elf(b"asyncio/core.py adafruit_ticks.py"), "x")
+
+    def test_an_image_without_the_files_fails(self):
+        for body in (b"adafruit_ticks.py", b"asyncio/core.py", b""):
+            with self.assertRaisesRegex(rf.Failed, "does not contain"):
+                rf.check_frozen_libraries(self.LIBS, self.elf(body), "x")
+
+
 class DraftRelease(unittest.TestCase):
     """The draft Release's tag rule and notes. A preview set may only be staged."""
 

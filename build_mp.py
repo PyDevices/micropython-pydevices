@@ -1090,6 +1090,40 @@ def cp_board_frozen_dirs(cp, port, board):
     return dirs
 
 
+# CircuitPython's asyncio and the clock it runs on. A build that freezes our
+# Python freezes these too, because bledev, appkit and the rest `import asyncio`
+# and no CircuitPython board freezes one of its own by default. The pair come
+# from CircuitPython's frozen/ submodules, the way a board's FROZEN_MPY_DIRS
+# would name them.
+CP_FROZEN_LIBRARIES = ("Adafruit_CircuitPython_asyncio", "Adafruit_CircuitPython_Ticks")
+
+
+def cp_frozen_library_dirs(cp, board_dirs):
+    """CP_FROZEN_LIBRARIES' directories, less any the board already freezes."""
+    have = {Path(d).name for d in board_dirs}
+    return [str(cp / "frozen" / n) for n in CP_FROZEN_LIBRARIES if n not in have]
+
+
+def ensure_cp_frozen_libraries(cp):
+    """Check out CP_FROZEN_LIBRARIES (shallow, with tags: their __version__ is
+    made from `git describe`), as ci_fetch_deps.py does for the boards that name them."""
+    for name in CP_FROZEN_LIBRARIES:
+        sub = f"frozen/{name}"
+        if not any((cp / sub).glob("*.py")) and not (cp / sub / "asyncio").is_dir():
+            run(["git", "submodule", "update", "--init", "--depth", "1", sub], cwd=cp, stdout=subprocess.DEVNULL)
+        if not git_out(cp / sub, "describe", "--tags", "--exact-match"):
+            run(["git", "fetch", "--tags", "--depth", "1"], cwd=cp / sub, stdout=subprocess.DEVNULL)
+
+
+def cp_frozen_libraries_record(cp, board_dirs):
+    """name and version of each library cp_frozen_manifest froze, for the build record."""
+    out = []
+    for d in cp_frozen_library_dirs(cp, board_dirs):
+        version = git_out(d, "describe", "--tags", "--exact-match") or git_out(d, "describe", "--tags", "--always")
+        out.append(f"{Path(d).name} {version}")
+    return out
+
+
 def cp_frozen_manifest(cp, port, board, variant, module_dirs, library_packages, build, library):
     """The FROZEN_MANIFEST of a CircuitPython build that freezes our Python, or
     None when it freezes none: the port's own base (the unix coverage variant's
@@ -1105,16 +1139,19 @@ def cp_frozen_manifest(cp, port, board, variant, module_dirs, library_packages, 
     if not board and base.is_file():
         lines.append(f'include("{base.as_posix()}")')
     board_dirs = cp_board_frozen_dirs(cp, port, board) if board else []
-    if board_dirs:
+    frozen_dirs = board_dirs + cp_frozen_library_dirs(cp, board_dirs)
+    if frozen_dirs:
+        ensure_cp_frozen_libraries(cp)
         # What circuitpy_mpconfig.mk does with FROZEN_MPY_DIRS when it makes the
         # manifest itself.
         out = build / "frozen_mpy_board"
         shutil.rmtree(out, ignore_errors=True)
         out.mkdir(parents=True)
-        run([sys.executable, str(cp / "tools" / "preprocess_frozen_modules.py"), "-o", str(out), *board_dirs],
+        run([sys.executable, str(cp / "tools" / "preprocess_frozen_modules.py"), "-o", str(out), *frozen_dirs],
             env=dict(os.environ, PYTHONPATH=str(cp / "tools" / "python-semver")), stdout=subprocess.DEVNULL)
         for f in sorted(out.rglob("*.py")):
             lines.append(f'freeze_as_mpy("{out.as_posix()}", "{f.relative_to(out).as_posix()}")')
+    if board_dirs:
         extra.append("FROZEN_MPY_DIRS=")
     if library_packages or any(LIBRARY in (d / "manifest.py").read_text() for d in manifests):
         lines.append(f'include("{(MODULES_DIR / "library.py").as_posix()}")')
@@ -1371,6 +1408,8 @@ def build_circuitpython(args, make_extra, ws):
     rec = dict(want, complete=True)
     rec["circuitpython"] = git_out(cp, "describe", "--tags", "--always", "--dirty")
     rec["circuitpython_patches"] = cp_patches
+    if frozen:
+        rec["frozen_libraries"] = cp_frozen_libraries_record(cp, cp_board_frozen_dirs(cp, port, board) if board else [])
     rec["module_revisions"] = revisions
     rec_path.write_text(json.dumps(rec, indent=1) + "\n")
     say(f"\nBuilt into {build}")

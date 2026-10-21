@@ -171,6 +171,21 @@ def check_version_tag(tag, elf, cell_id):
         raise Failed(f"{cell_id}: {Path(elf).name} does not contain the version {tag}")
 
 
+def check_frozen_libraries(libraries, elf, cell_id):
+    """A CircuitPython image that freezes our Python has to carry asyncio and
+    the clock under it, adafruit_ticks: bledev and the rest import asyncio, and
+    no CircuitPython board freezes one. The build record names the libraries it
+    froze, and the image has to hold their files."""
+    names = " ".join(libraries or [])
+    for lib in ("Adafruit_CircuitPython_asyncio", "Adafruit_CircuitPython_Ticks"):
+        if lib not in names:
+            raise Failed(f"{cell_id}: the build record names no frozen {lib}")
+    data = Path(elf).read_bytes()
+    for module in (b"asyncio/core.py", b"adafruit_ticks.py"):
+        if module not in data:
+            raise Failed(f"{cell_id}: {Path(elf).name} does not contain the frozen {module.decode()}")
+
+
 def build_dir(c):
     if c["interpreter"] == "circuitpython":
         return REPO / "builds" / "circuitpython" / c["port"] / c["board"]
@@ -229,10 +244,16 @@ def build(cell_id, out, ws):
         check_version_tag(record.get("micropython_version"), out / f"elf{EXTENSION['elf']}", c["id"])
         print(f"  sys.version tag: {record['micropython_version']}", flush=True)
 
+    if c["interpreter"] == "circuitpython":
+        check_frozen_libraries(record.get("frozen_libraries"), out / f"elf{EXTENSION['elf']}", c["id"])
+        print(f"  frozen libraries: {', '.join(record['frozen_libraries'])}", flush=True)
+
     meta = {k: c[k] for k in ("id", "label", "interpreter", "port", "board", "variant", "chip", "flash", "modules")}
     meta["flash_offset"] = None if c["offset"] is None else hex(c["offset"])
     meta["flash_bytes"] = int(c["flash"][:-2]) * MB
     meta["kind"] = c["kind"]
+    if c["interpreter"] == "circuitpython":
+        meta["frozen_libraries"] = record["frozen_libraries"]
     meta["files"] = files
     meta["build_seconds"] = seconds
     meta["interpreter_version"] = (micropython_version() if c["interpreter"] == "micropython"

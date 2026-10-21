@@ -246,7 +246,12 @@ directory and hands it to CircuitPython's make as `FROZEN_MANIFEST`. That
 manifest starts with the unix port's coverage manifest on the unix port and
 with the board's own `FROZEN_MPY_DIRS` content on a board that has some
 (setting `FROZEN_MANIFEST` beats the manifest CircuitPython would make from
-them, so the build freezes them itself). C modules still reach CircuitPython
+them, so the build freezes them itself). A build that freezes any of our
+Python also freezes CircuitPython's `asyncio` and `adafruit_ticks` from its
+`frozen/` submodules (unless the board already does), because `bledev` and the
+rest `import asyncio` and no CircuitPython board freezes one. The build record
+lists them as `frozen_libraries`, and a release cell fails if its image
+doesn't hold them. C modules still reach CircuitPython
 through `USER_C_MODULES`, and `micropython-lib` is MicroPython's own and is
 left out.
 

@@ -112,6 +112,8 @@ jobs:
           # jpegio is CircuitPython's own decoder there: ours adds only the encoder's C API.
           assert hasattr(jpegio, "JpegDecoder")
           assert cameraif.available() is False
+          # pydevices freezes CircuitPython's asyncio and the ticks under it.
+          import asyncio, adafruit_ticks, bledev
           print("imported: pygraphics usdl2 pngio tsmux ppa cameraif mdns _usbhost jpegio audiodynamics")
           PY
           ./builds/circuitpython/unix/coverage/micropython imports.py
