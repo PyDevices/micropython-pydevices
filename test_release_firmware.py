@@ -62,9 +62,11 @@ class Table(unittest.TestCase):
     def test_ten_cells_by_default_and_the_pico2_only_when_asked(self):
         self.assertEqual(len(rf.matrix(False)["include"]), 10)
         ids = [c["id"] for c in rf.matrix(True)["include"]]
-        self.assertEqual(len(ids), 11)
+        self.assertEqual(len(ids), 12)
         self.assertIn("mp-pico2", ids)
+        self.assertIn("mp-pico-plus2-w", ids)
         self.assertNotIn("mp-pico2", [c["id"] for c in rf.matrix(False)["include"]])
+        self.assertNotIn("mp-pico-plus2-w", [c["id"] for c in rf.matrix(False)["include"]])
         self.assertEqual(len(set(ids)), len(ids))
 
     def test_five_micropython_and_five_circuitpython(self):
