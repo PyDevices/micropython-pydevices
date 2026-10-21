@@ -10,7 +10,8 @@ ESP-IDF's USB host library. Its CMake glue skips every other part, so a
 firmware for those still builds, without the host.
 
 On CircuitPython the host builds for the ESP32-P4, where the boards leave the
-high-speed controller free. Phone tethering is left out there, because the
+high-speed controller free. It hasn't run on a CircuitPython board yet, so
+treat it as untried there. Phone tethering is left out there, because the
 port has no network yet. Every other CircuitPython build gets `_usbhost`
 without the host.
 
