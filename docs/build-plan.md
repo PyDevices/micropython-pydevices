@@ -358,8 +358,8 @@ links, the output layout and the build record. What differs is one function:
   patches. The boards are ones CircuitPython has no definition for:
   `feather_rp2040_lvgl` (room for LVGL), `waveshare_esp32s3_touch_lcd_7`
   (its 800x480 panel as `board.DISPLAY`, one 4 MB app slot),
-  `waveshare_esp32s3_touch_lcd_43` (a generic S3 N8R8 board with its console
-  on the CH343 UART and one 4 MB app slot; its panel isn't set up yet),
+  `waveshare_esp32s3_touch_lcd_43` (the same 800x480 panel as `board.DISPLAY`
+  and one 4 MB app slot, like the LCD-7),
   `lilygo_twatch_s3_single_app` (the T-Watch S3 with one 4 MB app slot, so LVGL
   fits), and the
   ESP32-P4 boards `waveshare_esp32p4_wifi6_dev_kit` (a revision 3 chip,

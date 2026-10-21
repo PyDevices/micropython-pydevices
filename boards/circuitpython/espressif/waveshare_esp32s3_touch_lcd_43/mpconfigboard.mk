@@ -1,15 +1,14 @@
 # Waveshare ESP32-S3-Touch-LCD-4.3: ESP32-S3 (8 MB flash, 8 MB octal PSRAM),
-# a CH343 USB-UART bridge, an 800x480 RGB panel and a touch controller.
-# CircuitPython has no definition for it; this is ours, and it is a generic
-# S3 N8R8 board (CircuitPython's espressif_esp32s3_devkitc_1_n8r8) with two
-# changes this board needs. The panel and touch aren't set up yet: there is
-# no board.DISPLAY.
+# an 800x480 RGB panel (ST7262) and a GT911 touch controller. CircuitPython has
+# no definition for it; this is ours, and it is the LCD-7's with the 4.3's name:
+# the two boards share their pin map, expander and panel.
 #
-# The console is the UART on GPIO43/44, which the CH343 brings out on the
-# "UART" USB-C connector, so esptool flashes it with no buttons. The S3's own
-# USB sits behind a multiplexer on the board's I/O expander, and is left off
-# here: native USB needs a USB VID and PID of its own, and the creator and
-# creation IDs below stand in until this board has registered ones.
+# The console is the UART on GPIO43/44, which the board's CH343 bridge brings
+# out on its "UART" USB-C connector, so esptool flashes it with no buttons.
+# The S3's own USB goes to the second connector through a multiplexer the
+# CH422G expander drives (shared with CAN), and is left off here: native USB
+# needs a USB VID and PID of its own, and the creator and creation IDs below
+# stand in until this board has registered ones.
 CIRCUITPY_CREATOR_ID = 0x00000000
 CIRCUITPY_CREATION_ID = 0x00000000
 
@@ -37,3 +36,5 @@ CIRCUITPY_DUALBANK = 0
 
 # LVGL links its own AnimatedGIF decoder (lvgl-circuitpython's micropython.mk).
 CIRCUITPY_GIFIO = 0
+
+CIRCUITPY_DOTCLOCKFRAMEBUFFER = 1
