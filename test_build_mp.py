@@ -474,7 +474,7 @@ class Coredump(unittest.TestCase):
     cells = [c for c in rf.CELLS if c["interpreter"] == "micropython" and c["port"] == "esp32"]
 
     def fragment(self, c, coredump):
-        _, module_dirs = build_mp.resolve_modules(c["modules"])
+        _, module_dirs, _ = build_mp.resolve_modules(c["modules"])
         text, _ = build_mp.esp32_fragment(c["chip"], module_dirs, c["board"], c["variant"], c["flash"], None, coredump)
         return text
 
