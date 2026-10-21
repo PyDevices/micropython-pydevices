@@ -1,1 +1,10 @@
 # Settings for this board alone, applied after CircuitPython's own for the S3.
+
+# Caches sized for LVGL. Its code runs from flash and its draw buffers and
+# objects live in PSRAM, which the panel is scanning out of at the same time;
+# with the S3's default 16 KB instruction cache, 32 KB data cache and 32-byte
+# lines, an LVGL frame spends most of its time waiting on memory. These take
+# 48 KB of internal RAM.
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
