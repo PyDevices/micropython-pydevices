@@ -4,3 +4,17 @@
 # components/spi_flash/Kconfig), and this board's flash is one we've proven.
 CONFIG_SPI_FLASH_AUTO_SUSPEND=y
 CONFIG_SPI_FLASH_AUTO_CHECK_SUSPEND_STATUS=y
+
+# A 1 ms tick and caches sized for LVGL, as on the LCD-4.3 and LCD-7 builds.
+# The T-Embed's panel is on SPI and lv_test_timer's kit run is capped at 30 fps
+# by the display's 33 ms frame period either way, so the gain shows with that
+# period set to 1 ms (PYDEVICES_REFRESH_MS=1), median of three runs:
+#   port defaults                59.5 fps (55.9 averaged over the whole run)
+#   all four settings below      66.9 fps (64.1), and each
+#                                blit_rect call takes 1.5 ms instead of 2.0 ms
+# Free internal RAM at the REPL with the display up goes from 175,867 B to
+# 161,295 B (the largest block grows from 102,388 B to 118,772 B).
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
