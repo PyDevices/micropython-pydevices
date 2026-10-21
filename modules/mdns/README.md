@@ -27,7 +27,8 @@ It builds on four ports, each on what that system already has:
 | windows | Windows' own mDNS service, through its DNS-SD API |
 
 `--modules all` includes it. The browser build can't send multicast, so it
-has no `mdns`, and CircuitPython builds keep CircuitPython's own. On CPython,
+has no `mdns`. CircuitPython's boards keep CircuitPython's own; its unix port has none, so
+`--interpreter circuitpython --port unix` adds this one. On CPython,
 `mdns.py` in pydevices-desktop gives the same API over python-zeroconf.
 
 ## API

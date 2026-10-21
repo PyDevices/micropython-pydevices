@@ -334,8 +334,8 @@ links, the output layout and the build record. What differs is one function:
   merge on, CircuitPython's `py/py.mk` carries MicroPython 1.29's
   `USER_C_MODULES` block unchanged, so a module's `micropython.mk` is the one
   our MicroPython builds read. CircuitPython freezes Python its own way
-  (`FROZEN_MPY_DIRS`), so a module with no `micropython.mk` is refused for
-  now rather than left out quietly. Each module is handed to make through a
+  (`FROZEN_MPY_DIRS`), so a module with no `micropython.mk` and no Python to
+  freeze is refused rather than left out quietly. Each module is handed to make through a
   link named for it, in `usermods/` in the build dir: make puts a module's
   objects under a directory named like the module's, and two worktrees
   checked out under the same branch name would otherwise share one.
@@ -394,6 +394,32 @@ each object, where it lands last; and atmel-samd has no C heap, so
 
 Builds from Linux or WSL only.
 
+### Which modules build on CircuitPython
+
+What `--modules` can name on CircuitPython today, and why a module is missing
+where it is. "Unix" is CircuitPython's unix port, built and imported in
+[`circuitpython.yml`](../.github/workflows/circuitpython.yml); "boards" are the
+four cells of [`release-firmware.yml`](../.github/workflows/release-firmware.yml).
+
+| Module | Unix | Boards | Notes |
+|---|---|---|---|
+| pygraphics | yes | all four | |
+| audiodsp | yes | the three ESP32 cells | the modules CircuitPython lacks; its audiocore, synthio and the rest stay CircuitPython's |
+| displayif | yes (`usdl2`) | no, on purpose | boards have CircuitPython's own `displayio` and display buses. pydevices' `SDLDisplay` runs on top of `usdl2` |
+| pngio | yes (was a build error) | all four | decodes with CircuitPython's older uzlib |
+| tsmux | yes | all four | |
+| ppa | yes (software) | ESP32-P4 | the hardware path on the P4 |
+| jpegio | yes | ESP32-P4 | adds only the encoder's C API: CircuitPython has its own `jpegio` decoder |
+| cameraif | yes (`available()` is False) | ESP32-P4 | |
+| mdns | yes (was left out) | no, on purpose | CircuitPython's boards have an `mdns` of their own; its unix port had none |
+| usbhost | yes, as `_usbhost`, with no host engine (was a build error) | not yet | the host engine runs on ESP-IDF's USB host library, and CircuitPython's boards have a USB host of their own |
+| audioif | no | no | links against audiodsp's audio pump and `cp_compat`, which audiodsp's CircuitPython glue doesn't build; boards have `audiobusio` of their own |
+| ulab | CircuitPython's own | CircuitPython's own | |
+| castif, h264enc, tflite, vision | no | no | CMake-only ESP32-P4 and S3 modules, with no unix build to import; they need ESP-IDF registry components (esp_h264, TensorFlow Lite Micro) that CircuitPython's espressif port, built with the component manager off, would have to fetch |
+| lvgl-micropython | no | no | CircuitPython's binding is `lvgl-circuitpython`, passed by path |
+| micropython-lib | no | no | MicroPython's own upstream packages |
+| pydevices, palettes, pdwidgets | frozen | frozen | Python only. On unix, pydevices also freezes its desktop files (the boards drop them); pdwidgets and palettes on top of that pass CircuitPython's 64 KB frozen-string pool |
+
 ## Traps we already know
 
 **`BUILD=` and the mpy-cross sub-make.** Passed on its own, `BUILD=` reaches
@@ -432,5 +458,5 @@ Deferred, because the build script doesn't need them:
   sensor and H.264 replace cameraif (and castif's encoder) stays open. esp-vision's
   `tflite` and image stack are in as modules; where `sensor` stands is in
   [esp-vision.md](esp-vision.md).
-- **CircuitPython-compatible builds** take C modules only, so far; see
-  [CircuitPython-compatible builds](#circuitpython-compatible-builds).
+- **CircuitPython-compatible builds** and the modules that don't build there
+  yet: [Which modules build on CircuitPython](#which-modules-build-on-circuitpython).
