@@ -373,6 +373,24 @@ class FrozenManifest(unittest.TestCase):
                 build_mp.VARIANTS_DIR, build_mp.MODULES_DIR = saved
 
 
+class CircuitPythonFrozenLibraries(unittest.TestCase):
+    """A CircuitPython build that freezes our Python freezes asyncio and
+    adafruit_ticks too, unless the board already does."""
+
+    def test_both_when_the_board_freezes_neither(self):
+        dirs = build_mp.cp_frozen_library_dirs(Path("/cp"), [])
+        self.assertEqual([Path(d).name for d in dirs],
+                         ["Adafruit_CircuitPython_asyncio", "Adafruit_CircuitPython_Ticks"])
+
+    def test_not_again_what_the_board_has(self):
+        dirs = build_mp.cp_frozen_library_dirs(Path("/cp"), ["/cp/frozen/Adafruit_CircuitPython_asyncio"])
+        self.assertEqual([Path(d).name for d in dirs], ["Adafruit_CircuitPython_Ticks"])
+
+    def test_nothing_when_the_board_has_both(self):
+        both = [f"/cp/frozen/{n}" for n in build_mp.CP_FROZEN_LIBRARIES]
+        self.assertEqual(build_mp.cp_frozen_library_dirs(Path("/cp"), both), [])
+
+
 class ForeignSources(unittest.TestCase):
     """foreign_sources() names an object compiled from outside its module, and only that."""
 

@@ -75,19 +75,19 @@ CELLS = [
          chip="esp32s3", offset=0, kind="esp32", deps="idf"),
     dict(id="cp-p4-devkit", label="ESP32-P4-WIFI6-DEV-KIT", interpreter="circuitpython", port="espressif",
          board="waveshare_esp32p4_wifi6_dev_kit", variant=None, flash="16MB",
-         modules="audiodsp,pygraphics,pydevices,pdwidgets,palettes,@lvgl-circuitpython",
+         modules="audiodsp,pygraphics,pngio,tsmux,ppa,jpegio,cameraif,pydevices,pdwidgets,palettes,@lvgl-circuitpython",
          chip="esp32p4", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-s3-lcd7", label="ESP32-S3-Touch-LCD-7", interpreter="circuitpython", port="espressif",
          board="waveshare_esp32s3_touch_lcd_7", variant=None, flash="8MB",
-         modules="audiodsp,pygraphics,pydevices,pdwidgets,palettes,@lvgl-circuitpython",
+         modules="audiodsp,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,@lvgl-circuitpython",
          chip="esp32s3", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-twatch", label="LilyGO T-Watch S3", interpreter="circuitpython", port="espressif",
          board="lilygo_twatch_s3_single_app", variant=None, flash="16MB",
-         modules="audiodsp,pygraphics,pydevices,pdwidgets,palettes,@lvgl-circuitpython",
+         modules="audiodsp,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,@lvgl-circuitpython",
          chip="esp32s3", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-feather-rp2040", label="Adafruit Feather RP2040 + display wing", interpreter="circuitpython",
          port="raspberrypi", board="feather_rp2040_lvgl", variant=None, flash="8MB",
-         modules="pygraphics,pydevices,pdwidgets,palettes,@lvgl-circuitpython", chip="rp2040", offset=None, kind="rp2", deps="none"),
+         modules="pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,@lvgl-circuitpython", chip="rp2040", offset=None, kind="rp2", deps="none"),
     # Off by default until a board is on the bench to run it on.
     dict(id="mp-pico2", label="Raspberry Pi Pico 2", interpreter="micropython", port="rp2",
          board="RPI_PICO2", variant=None, flash="4MB", modules="all",
@@ -171,6 +171,21 @@ def check_version_tag(tag, elf, cell_id):
         raise Failed(f"{cell_id}: {Path(elf).name} does not contain the version {tag}")
 
 
+def check_frozen_libraries(libraries, elf, cell_id):
+    """A CircuitPython image that freezes our Python has to carry asyncio and
+    the clock under it, adafruit_ticks: bledev and the rest import asyncio, and
+    no CircuitPython board freezes one. The build record names the libraries it
+    froze, and the image has to hold their files."""
+    names = " ".join(libraries or [])
+    for lib in ("Adafruit_CircuitPython_asyncio", "Adafruit_CircuitPython_Ticks"):
+        if lib not in names:
+            raise Failed(f"{cell_id}: the build record names no frozen {lib}")
+    data = Path(elf).read_bytes()
+    for module in (b"asyncio/core.py", b"adafruit_ticks.py"):
+        if module not in data:
+            raise Failed(f"{cell_id}: {Path(elf).name} does not contain the frozen {module.decode()}")
+
+
 def build_dir(c):
     if c["interpreter"] == "circuitpython":
         return REPO / "builds" / "circuitpython" / c["port"] / c["board"]
@@ -229,10 +244,16 @@ def build(cell_id, out, ws):
         check_version_tag(record.get("micropython_version"), out / f"elf{EXTENSION['elf']}", c["id"])
         print(f"  sys.version tag: {record['micropython_version']}", flush=True)
 
+    if c["interpreter"] == "circuitpython":
+        check_frozen_libraries(record.get("frozen_libraries"), out / f"elf{EXTENSION['elf']}", c["id"])
+        print(f"  frozen libraries: {', '.join(record['frozen_libraries'])}", flush=True)
+
     meta = {k: c[k] for k in ("id", "label", "interpreter", "port", "board", "variant", "chip", "flash", "modules")}
     meta["flash_offset"] = None if c["offset"] is None else hex(c["offset"])
     meta["flash_bytes"] = int(c["flash"][:-2]) * MB
     meta["kind"] = c["kind"]
+    if c["interpreter"] == "circuitpython":
+        meta["frozen_libraries"] = record["frozen_libraries"]
     meta["files"] = files
     meta["build_seconds"] = seconds
     meta["interpreter_version"] = (micropython_version() if c["interpreter"] == "micropython"

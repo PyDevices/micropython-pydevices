@@ -4,10 +4,10 @@ Work here mostly follows bug reports and requests, so if something is broken
 or missing for you, open an
 [issue](https://github.com/PyDevices/micropython-pydevices/issues). Planned:
 
-- **More modules in CircuitPython-compatible builds.** The ESP32 boards build
-  now, against ESP-IDF 6, with definitions for the Waveshare ESP32-S3 and
-  ESP32-P4 boards. Next is displayif's desktop display, then the modules that
-  don't build there yet.
+- **More modules in CircuitPython-compatible builds.** Next are audioif (it
+  needs audiodsp's audio pump built for CircuitPython), usbhost's host engine
+  on boards, and castif, h264enc, tflite and vision (ESP-IDF registry
+  components on the espressif port). [What builds today](docs/build-plan.md#which-modules-build-on-circuitpython).
 
 ## Module roadmaps
 

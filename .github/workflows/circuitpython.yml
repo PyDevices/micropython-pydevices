@@ -2,6 +2,8 @@
 # it: build_mp.py fetches CircuitPython at its deps.lock tag and pygraphics at
 # its modules.lock commit, builds the unix port with pygraphics as a user C
 # module, and the result has to import it, draw, and read the pixels back.
+# The second job builds the unix port with every C module that builds there
+# and imports and runs each one.
 name: circuitpython
 
 on:
@@ -12,6 +14,7 @@ on:
       - 'deps.lock'
       - 'modules.lock'
       - 'patches/circuitpython/**'
+      - 'modules/**'
       - '.github/workflows/circuitpython.yml'
   pull_request:
     paths:
@@ -19,6 +22,7 @@ on:
       - 'deps.lock'
       - 'modules.lock'
       - 'patches/circuitpython/**'
+      - 'modules/**'
       - '.github/workflows/circuitpython.yml'
   workflow_dispatch:
 
@@ -78,3 +82,82 @@ jobs:
               assert not node.playing
           PY
           timeout 60 ./builds/circuitpython/unix/coverage/micropython empty_source.py
+
+  unix-modules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the unix port's build dependencies, and SDL2 for displayif
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev pkg-config libsdl2-dev
+
+      # pydevices comes with displayif for its SDLDisplay. pdwidgets and
+      # palettes stay out: with them the frozen strings pass CircuitPython's
+      # 64 KB pool.
+      - name: Build CircuitPython's unix port with our C modules
+        run: |
+          python3 build_mp.py --interpreter circuitpython --port unix \
+            --modules pygraphics,audiodsp,displayif,pydevices,pngio,tsmux,ppa,jpegio,cameraif,mdns,usbhost
+
+      - name: Every module imports
+        run: |
+          cat > imports.py <<'PY'
+          import sys
+          assert sys.implementation.name == "circuitpython"
+          import pygraphics, usdl2, pngio, tsmux, ppa, cameraif, mdns, _usbhost
+          import jpegio, audiodynamics
+          # jpegio is CircuitPython's own decoder there: ours adds only the encoder's C API.
+          assert hasattr(jpegio, "JpegDecoder")
+          assert cameraif.available() is False
+          # pydevices freezes CircuitPython's asyncio and the ticks under it.
+          import asyncio, adafruit_ticks, bledev
+          print("imported: pygraphics usdl2 pngio tsmux ppa cameraif mdns _usbhost jpegio audiodynamics")
+          PY
+          ./builds/circuitpython/unix/coverage/micropython imports.py
+
+      - name: displayif, headless - usdl2 opens a window, the lifecycle API holds
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          MP=./builds/circuitpython/unix/coverage/micropython
+          timeout 60 $MP -c "
+          import usdl2
+          assert usdl2.SDL_Init(usdl2.SDL_INIT_VIDEO) == 0, usdl2.SDL_GetError()
+          win = usdl2.SDL_CreateWindow(
+              'displayif smoke', usdl2.SDL_WINDOWPOS_UNDEFINED, usdl2.SDL_WINDOWPOS_UNDEFINED,
+              320, 240, usdl2.SDL_WINDOW_SHOWN)
+          assert win, usdl2.SDL_GetError()
+          print('usdl2 window created:', win)
+          usdl2.SDL_DestroyWindow(win)
+          usdl2.SDL_Quit()"
+          timeout 60 $MP modules/displayif/tests/test_lifecycle_api.py
+
+      - name: pydevices' SDLDisplay draws on it
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          cat > sdl_display.py <<'PY'
+          import sys
+          from displaydev.sdldisplay import SDLDisplay
+          d = SDLDisplay(width=160, height=120)
+          d.fill_rect(0, 0, 160, 120, 0x0000)
+          d.fill_rect(0, 0, 10, 10, 0xF800)
+          d.show()
+          print(sys.implementation.name, type(d).__name__, d.width, d.height)
+          assert (d.width, d.height) == (160, 120)
+          d.deinit()
+          PY
+          timeout 60 ./builds/circuitpython/unix/coverage/micropython sdl_display.py
+
+      - name: pngio, tsmux and ppa pass their own tests
+        run: |
+          MP=./builds/circuitpython/unix/coverage/micropython
+          timeout 300 $MP -X heapsize=32M modules/pngio/tests/test_pngio.py
+          timeout 300 $MP modules/tsmux/tests/test_tsmux.py
+          timeout 300 $MP -X heapsize=16M modules/ppa/tests/test_ppa.py
+
+      - name: mdns - the API, and a service found by the process that advertised it
+        run: timeout 300 ./builds/circuitpython/unix/coverage/micropython modules/mdns/tests/test_mdns.py

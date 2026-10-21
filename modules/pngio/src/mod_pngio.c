@@ -20,6 +20,16 @@
 
 #if MICROPY_PY_DEFLATE
 #include "lib/uzlib/uzlib.h"
+#ifdef TINF_DATA_ERROR
+// CircuitPython carries the older uzlib: the decompressor is TINF_DATA, the
+// source callback takes it and the owner is in `self`, the status is TINF_*,
+// and the zlib header has a call of its own. Same inflate underneath.
+#define PNGIO_OLD_UZLIB 1
+typedef TINF_DATA uzlib_uncomp_t;
+#define UZLIB_DONE TINF_DONE
+#else
+#define PNGIO_OLD_UZLIB 0
+#endif
 #endif
 
 // --- PngEncoder ----------------------------------------------------------------
@@ -180,8 +190,13 @@ typedef struct {
     size_t len, pos;
 } pngio_inflate_t;
 
+#if PNGIO_OLD_UZLIB
+static int pngio_next_byte(uzlib_uncomp_t *d) {
+    pngio_inflate_t *z = d->self;
+#else
 static int pngio_next_byte(void *data) {
     pngio_inflate_t *z = data;
+#endif
     const uint8_t *p;
     size_t n;
     while (pngio_next_idat(z->png, z->len, &z->pos, &p, &n)) {
@@ -268,13 +283,23 @@ static mp_obj_t pngio_decoder_decode(size_t n_args, const mp_obj_t *pos, mp_map_
     memset(z, 0, sizeof(*z));
     z->png = src.buf;
     z->len = src.len;
+    #if PNGIO_OLD_UZLIB
+    z->d.self = z;
+    #else
     z->d.source_read_data = z;
+    #endif
     z->d.source_read_cb = pngio_next_byte;
     const char *why = NULL;
+    #if PNGIO_OLD_UZLIB
+    if (uzlib_zlib_parse_header(&z->d) < 0) {
+        why = "PNG image data has no zlib header";
+    }
+    #else
     int wbits;
     if (uzlib_parse_zlib_gzip_header(&z->d, &wbits) != UZLIB_HEADER_ZLIB) {
         why = "PNG image data has no zlib header";
     }
+    #endif
     const size_t line = 1 + info->rowbytes;
     uint8_t *window = m_new(uint8_t, 32768);
     uint8_t *rows = m_new(uint8_t, 2 * line);

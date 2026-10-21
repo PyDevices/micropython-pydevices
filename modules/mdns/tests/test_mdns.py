@@ -36,17 +36,25 @@ def find_ours(server, port=None, timeout=2):
     return None
 
 
+# CircuitPython's unix build reports errors tersely: the exception, no message.
+TERSE = sys.implementation.name == "circuitpython"
+
+
+def says(got, want):
+    return got == want or (TERSE and got == "")
+
+
 INSTANCE = "mdns test %d" % (time.ticks_ms() & 0xFFFF)
 
 check("Server and RemoteService are the module's", hasattr(mdns, "Server") and hasattr(mdns, "RemoteService"))
 check("Server needs a network_interface", raises(TypeError, mdns.Server) is not None)
 check("network_interface must be None or an address",
-      raises(ValueError, mdns.Server, 42) == "network_interface must be None or an IPv4 address")
+      says(raises(ValueError, mdns.Server, 42), "network_interface must be None or an IPv4 address"))
 
 server = mdns.Server(None)
 check("hostname is a name", isinstance(server.hostname, str) and len(server.hostname) > 0, server.hostname)
 check("instance_name defaults to the hostname", server.instance_name == server.hostname)
-check("one Server at a time", raises(RuntimeError, mdns.Server, None) == "mDNS already initialized")
+check("one Server at a time", says(raises(RuntimeError, mdns.Server, None), "mDNS already initialized"))
 check("find takes keywords only", raises(TypeError, server.find, "_mpytest", "_tcp") is not None)
 check("advertise_service takes keywords only", raises(TypeError, server.advertise_service, "_mpytest", "_tcp", 1) is not None)
 check("txt_records must be strings",
