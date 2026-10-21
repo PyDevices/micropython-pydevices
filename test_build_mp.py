@@ -393,21 +393,17 @@ class Coredump(unittest.TestCase):
                 with self.subTest(str(f.relative_to(here))):
                     self.assertNotIn("COREDUMP", f.read_text())
 
-    def test_the_s3_table_keeps_its_slot_either_way(self):
-        # The same table in both builds: a standard image and a troubleshooting
-        # one put the filesystem in the same place.
-        for c in (c for c in self.cells if c["chip"] == "esp32s3"):
-            std = build_mp.esp32_table(c["chip"], c["board"], c["variant"])
-            dbg = build_mp.esp32_table(c["chip"], c["board"], c["variant"], True)
-            self.assertEqual(std, dbg)
-            self.assertTrue(build_mp.has_coredump_partition(std))
-
-    def test_the_p4_standard_build_adds_no_partition_and_the_opt_in_does(self):
-        for c in (c for c in self.cells if c["chip"] == "esp32p4"):
-            self.assertIsNone(build_mp.esp32_table(c["chip"], c["board"], c["variant"]))
-            dbg = build_mp.esp32_table(c["chip"], c["board"], c["variant"], True)
-            self.assertEqual(dbg.name, "partitions.coredump.csv")
-            self.assertTrue(build_mp.has_coredump_partition(dbg))
+    def test_tables_are_the_same_with_or_without_the_flag_and_only_the_s3_has_the_slot(self):
+        # build_mp.py picks one table whatever the flag says; a standard S3 image
+        # and a troubleshooting one share it, so the filesystem doesn't move. The
+        # P4 has no table of ours, so --coredump refuses there.
+        for c in self.cells:
+            table = build_mp.esp32_table(c["chip"], c["board"], c["variant"])
+            with self.subTest(c["id"]):
+                if c["chip"] == "esp32s3":
+                    self.assertTrue(build_mp.has_coredump_partition(table))
+                else:
+                    self.assertIsNone(table)
 
     def test_a_table_without_the_partition_is_seen(self):
         with tempfile.TemporaryDirectory() as tmp:

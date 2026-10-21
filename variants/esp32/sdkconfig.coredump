@@ -1,6 +1,6 @@
 # A --coredump build, for troubleshooting: a crash writes a core dump to the
-# "coredump" partition in flash (partitions.esp32s3.csv, or partitions.coredump.csv
-# for a chip with no table of its own). It survives the reboot, and reads back with
+# "coredump" partition in flash (partitions.esp32s3.csv has one; build_mp.py
+# refuses a board whose table has none). It survives the reboot, and reads back with
 # esptool and esp-coredump against the build's ELF. Standard builds leave this
 # out: the dump costs flash time on a crash and a partition they don't need.
 # Appended after every other fragment, so none of them can turn it off.

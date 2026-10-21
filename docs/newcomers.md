@@ -255,18 +255,13 @@ in its `coredump` partition across the reboot; read it back with `esptool` and
 `micropython.elf`. The decode only matches the ELF of the same commit and
 options, so build the troubleshooting image from the commit your board runs.
 
-Where the partition comes from decides whether your files survive:
-
-- **ESP32-S3.** The standard table already holds a 64 KB `coredump` partition,
-  which a standard build leaves unused so the filesystem doesn't move. A
-  troubleshooting build uses the same table, so you can flash its app image
-  (`micropython.bin`, at the app offset) onto a board running a standard image
-  and keep the files on it.
-- **ESP32-P4 and other chips.** The standard table has no such partition, so the
-  build uses [`variants/esp32/partitions.coredump.csv`](../variants/esp32/partitions.coredump.csv), which adds 64 KB ahead
-  of the filesystem. **That moves the filesystem 64 KB later, so a board flashed
-  with the full image comes up with an empty one.** Copy your files off first.
-  The build prints this when it applies.
+The dump needs a `coredump` partition, and only the ESP32-S3 table has one
+today. A standard S3 build leaves it unused, which is why the filesystem sits
+where it always did, and a troubleshooting build uses the same table: you can
+flash its app image (`micropython.bin`, at the app offset) onto a board
+running a standard image and keep the files on it. On a board whose table has
+no such partition, such as the ESP32-P4, `--coredump` stops with "this board's
+table has no coredump partition yet" instead of moving your filesystem.
 
 It finds out by trying: the first link fails, loudly, and only then does it
 build again. On esp32 that is a red `Error: app partition is too small for
@@ -316,9 +311,8 @@ in this order:
 
 The partition table is found the same way, the most specific
 `partitions.csv` winning ([`variants/esp32/partitions.esp32s3.csv`](../variants/esp32/partitions.esp32s3.csv) adds a
-coredump partition on the S3, left unused in a standard build so the
-filesystem sits where it always did); without one, the board's own is used.
-Either way autosize grows the app partition when the image doesn't fit.
+coredump partition on the S3, which a standard build leaves unused);
+without one, the board's own is used. Either way autosize grows the app partition when the image doesn't fit.
 
 ## Where things are
 

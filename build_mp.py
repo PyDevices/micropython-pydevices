@@ -591,16 +591,11 @@ def esp32_fragment(chip, module_dirs, board, variant, flash, table, coredump=Fal
     return "\n".join(parts) + "\n", used
 
 
-def esp32_table(chip, board, variant, coredump=False):
+def esp32_table(chip, board, variant):
     """Our partition table, by the same convention as the fragments, the most
-    specific one found winning; None keeps the board's own. With coredump, a
-    chip with no table of its own gets partitions.coredump.csv, upstream's
-    4 MB-plus table with the coredump partition added."""
+    specific one found winning; None keeps the board's own."""
     found = [VARIANTS_DIR / "esp32" / board / variant / "partitions.csv"] if variant else []
-    found += [VARIANTS_DIR / "esp32" / f"partitions.{chip}.csv"]
-    if coredump:
-        found += [VARIANTS_DIR / "esp32" / "partitions.coredump.csv"]
-    found += [VARIANTS_DIR / "esp32" / "partitions.csv"]
+    found += [VARIANTS_DIR / "esp32" / f"partitions.{chip}.csv", VARIANTS_DIR / "esp32" / "partitions.csv"]
     return next((t.resolve() for t in found if t.is_file()), None)
 
 
@@ -1373,10 +1368,10 @@ def main():
             chip = esp32_chip(base)
             gen = build / board
             frag = build / "sdkconfig.pydevices"
-            table = esp32_table(chip, board, variant, args.coredump)
+            table = esp32_table(chip, board, variant)
             if args.coredump and not (table and has_coredump_partition(table)):
-                die(f"--coredump needs a partition table with a coredump partition, and {table or 'the board' + chr(39) + 's own'} has none")
-            adds_slot = bool(table and table.name == "partitions.coredump.csv")
+                die("--coredump: this board's table has no coredump partition yet, and the dump needs one. "
+                    "The ESP32-S3 boards' table has it.")
             tinyusb = tinyusb_component(mp, chip)
             for attempt in (1, 2):
                 text, used = esp32_fragment(chip, module_dirs, board, variant, flash, table, args.coredump)
@@ -1416,9 +1411,6 @@ def main():
                 say(f"partition layout in this image{fs}:\n" + "\n".join("  " + l for l in rows))
                 if args.coredump:
                     say("This is a troubleshooting build: a crash writes a core dump to the 'coredump' partition.")
-                    if adds_slot:
-                        say("  Its table adds that partition ahead of the filesystem, so the filesystem starts 64 KB later than in a\n"
-                            "  standard build of this board. A board flashed with it comes up with an empty one; copy your files back.")
         elif port == "rp2":
             shell(make + ["submodules"])
             storage = None
