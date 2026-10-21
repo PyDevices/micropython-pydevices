@@ -304,6 +304,28 @@ class FrozenLibraries(unittest.TestCase):
                 rf.check_frozen_libraries(self.LIBS, self.elf(body), "x")
 
 
+class CircuitpythonVersionTag(unittest.TestCase):
+    """A CircuitPython image prints "<version> on <date>"; a -dirty one must not pass for a clean record."""
+
+    def elf(self, body):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        f = Path(d) / "elf.elf"
+        f.write_bytes(body)
+        return f
+
+    def test_the_clean_version_in_the_banner_passes(self):
+        rf.check_version_tag("11.0.0-alpha.1", self.elf(b"\0Adafruit CircuitPython 11.0.0-alpha.1 on 2026-10-21\0"), "x", b" on ")
+
+    def test_an_image_that_printed_dirty_fails(self):
+        with self.assertRaisesRegex(rf.Failed, "does not contain"):
+            rf.check_version_tag("11.0.0-alpha.1", self.elf(b"Adafruit CircuitPython 11.0.0-alpha.1-dirty on 2026-10-21"), "x", b" on ")
+
+    def test_a_build_that_recorded_no_version_fails(self):
+        with self.assertRaisesRegex(rf.Failed, "no version"):
+            rf.check_version_tag(None, self.elf(b"CircuitPython 11.0.0-alpha.1 on"), "x", b" on ")
+
+
 class DraftRelease(unittest.TestCase):
     """The draft Release's tag rule and notes. A preview set may only be staged."""
 
