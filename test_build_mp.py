@@ -300,6 +300,48 @@ class RefuseLvglMicropython(unittest.TestCase):
         self.assertIn("lvgl-circuitpython", str(cm.exception))
 
 
+class MicropythonVersion(unittest.TestCase):
+    """sys.version names the upstream commit's release, from tags a CI clone has to fetch."""
+
+    def repo(self, tmp):
+        def git(*a):
+            subprocess.run(["git", "-C", tmp, "-c", "user.name=t", "-c", "user.email=t@t", *a],
+                           check=True, capture_output=True)
+        git("init", "-q")
+        (Path(tmp) / "f").write_text("1")
+        git("add", "f")
+        git("commit", "-qm", "one")
+        git("tag", "v1.30.0-preview")
+        for n in "23":
+            (Path(tmp) / "f").write_text(n)
+            git("commit", "-qam", n)
+        head = subprocess.run(["git", "-C", tmp, "rev-parse", "HEAD"], text=True, capture_output=True).stdout.strip()
+        # The overlay, committed on top, as apply_patches.prepare does.
+        (Path(tmp) / "f").write_text("overlay")
+        git("commit", "-qam", "overlay")
+        return head
+
+    def test_version_of_the_upstream_commit_not_the_overlay(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            upstream = self.repo(tmp)
+            tag, short = build_mp.micropython_version(tmp, upstream)
+            self.assertEqual(tag, f"v1.30.0-preview.2.g{upstream[:10]}")
+            self.assertEqual(short, upstream[:10])
+
+    def test_only_edits_beyond_the_overlay_are_dirty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            upstream = self.repo(tmp)
+            (Path(tmp) / "f").write_text("edited")
+            self.assertTrue(build_mp.micropython_version(tmp, upstream)[0].endswith(".dirty"))
+
+    def test_no_tags_means_no_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            upstream = self.repo(tmp)
+            subprocess.run(["git", "-C", tmp, "tag", "-d", "v1.30.0-preview"], check=True, capture_output=True)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertIsNone(build_mp.micropython_version(tmp, upstream))
+
+
 class FrozenManifest(unittest.TestCase):
     """A variant of ours, of a port or of a board, may bring its own manifest."""
 

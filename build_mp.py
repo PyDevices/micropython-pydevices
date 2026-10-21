@@ -175,6 +175,35 @@ def ensure_micropython(ws):
     else:
         # UPSTREAM is a tag or a full commit: clone --branch takes only the first.
         clone_at("https://github.com/micropython/micropython", (REPO / "UPSTREAM").read_text().strip(), MP)
+        fetch_history(MP)
+
+
+def fetch_history(mp):
+    """Commits and tags, no file contents, onto a depth-1 clone, so `git describe`
+    can say which release the pinned commit follows. Without them the build's
+    sys.version is a bare commit hash, and the image shows no version."""
+    say("fetching MicroPython's tags and commit history (no files) for its version")
+    run(["git", "-C", str(mp), "fetch", "-q", "--filter=tree:0", "--tags", "--unshallow", "origin"])
+
+
+def micropython_version(mp, upstream):
+    """(MICROPY_GIT_TAG, MICROPY_GIT_HASH) for a build of the overlay on `upstream`:
+    what upstream's own build would print at that commit, v1.30.0-preview.160.gb70ae1aca6.
+
+    The version names the upstream commit, not the local overlay commit on top
+    of it, which no one else has and git cannot find. The overlay is part of
+    what this repository is, and pydevices-build.json records which patches a
+    build carries, so it does not make the build "dirty"; only edits beyond it
+    do (a submodule carrying our recorded patches doesn't count either)."""
+    described = git_out(mp, "describe", "--tags", "--match", "v[1-9].*", "--abbrev=10", upstream)
+    if not described:
+        say("MicroPython has no tags here; sys.version will show a commit, not a version")
+        return None
+    parts = described.split("-", 1)
+    tag = parts[0] + ("-" + parts[1].replace("-", ".") if len(parts) > 1 else "")
+    if git_out(mp, "status", "--porcelain", "--untracked-files=no", "--ignore-submodules=all"):
+        tag += ".dirty" if "-" in tag else "-dirty"
+    return tag, git_out(mp, "rev-parse", "--short=10", upstream)
 
 
 # lvgl-bindings is pinned in modules.lock beside the modules, but it is not a
@@ -1401,6 +1430,7 @@ def main():
                     pass
     upstream = (REPO / "UPSTREAM").read_text().strip()
     apply_patches.prepare(mp, upstream, apply_patches.series(), refresh=True)
+    version = micropython_version(mp, upstream)
 
     port = args.port or choose("Port:", ports())
     if port not in ports():
@@ -1467,6 +1497,11 @@ def main():
                  "BINDINGS_DIR"):
         env.pop(leak, None)
     env["PYDEVICES_MODULES"] = spec
+    # The frozen pydevices leaves its host-only files off a board's image.
+    env["PYDEVICES_PLATFORM"] = "desktop" if port in ("unix", "windows", "webassembly") else "board"
+    if version:
+        # makeversionhdr.py takes these instead of asking git, which a shallow clone can't answer.
+        env["MICROPY_GIT_TAG"], env["MICROPY_GIT_HASH"] = version
     if library.tree:
         env["PYDEVICES_LIBRARY"] = library.tree.as_posix()
     if bindings:
@@ -1633,6 +1668,8 @@ def main():
     if port == "rp2" and rp2_storage:
         rec["rp2_storage_bytes"] = rp2_storage
     rec["micropython"] = git_out(mp, "describe", "--always", "--abbrev=12")
+    if version:
+        rec["micropython_version"] = version[0]
     rec["module_revisions"] = revisions
     rec["micropython_lib"] = apply_patches.lib_record(mp)
     if port == "esp32" and tinyusb:

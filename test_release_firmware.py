@@ -256,6 +256,28 @@ class Assemble(unittest.TestCase):
         self.fails_with("no cell")
 
 
+class VersionTag(unittest.TestCase):
+    """An image that prints a commit hash instead of a version must not pass."""
+
+    def elf(self, body):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        f = Path(d) / "elf.elf"
+        f.write_bytes(body)
+        return f
+
+    def test_the_tag_in_the_image_passes(self):
+        rf.check_version_tag("v1.30.0-preview.160.gb70ae1aca6", self.elf(b"\0MicroPython v1.30.0-preview.160.gb70ae1aca6 on \0"), "x")
+
+    def test_a_build_that_recorded_no_version_fails(self):
+        with self.assertRaisesRegex(rf.Failed, "no version"):
+            rf.check_version_tag(None, self.elf(b"MicroPython 2818d7fb1d-dirty"), "x")
+
+    def test_an_image_with_a_commit_instead_fails(self):
+        with self.assertRaisesRegex(rf.Failed, "does not contain"):
+            rf.check_version_tag("v1.30.0-preview.160.gb70ae1aca6", self.elf(b"MicroPython 2818d7fb1d-dirty on"), "x")
+
+
 class DraftRelease(unittest.TestCase):
     """The draft Release's tag rule and notes. A preview set may only be staged."""
 
