@@ -61,10 +61,21 @@
 // 1 kHz event stream over that window is ~1500 events. Full HID/MIDI traffic
 // at that rate through a stall this long is a pathological case rather than a
 // working one, so the ring holds a generous fraction of it and reports
-// overflow instead of pretending. 256 records is 2 KB at 8 bytes each.
+// overflow instead of pretending. 256 records is 3 KB at 12 bytes each.
 #define USBHOST_EVENT_CAPACITY (256)
 
-static usbhost_event_t usbhost_event_slots[USBHOST_EVENT_CAPACITY];
+// The ring's records are taken from the heap the first time a host starts,
+// PSRAM first, and kept from then on: internal RAM is what Wi-Fi, BLE and a
+// display's DMA need, and a firmware that never starts a host spends nothing.
+// Only the host task writes them and only the interpreter reads them, neither
+// from an interrupt, so PSRAM serves. Without the engine nothing is ever
+// queued, and a one-record ring (which holds nothing) stands in.
+#if USBHOST_HAVE_HOST
+#include "esp_heap_caps.h"
+static usbhost_event_t *usbhost_event_slots;
+#else
+static usbhost_event_t usbhost_event_none[1];
+#endif
 static usbhost_ringbuf_t usbhost_events;
 static bool usbhost_host_running = false;
 
@@ -80,7 +91,26 @@ static void usbhost_arm_soft_reset(void);
 void usbhost_host_emit(const usbhost_event_t *event);
 #endif
 void usbhost_host_emit(const usbhost_event_t *event) {
-    usbhost_rb_push(&usbhost_events, event);
+    if (usbhost_events.slots != NULL) {
+        usbhost_rb_push(&usbhost_events, event);
+    }
+}
+
+// The ring's records, ready for usbhost_rb_init(); raises MemoryError if the
+// heap can't give them.
+static void usbhost_events_reserve(void) {
+    #if USBHOST_HAVE_HOST
+    if (usbhost_event_slots == NULL) {
+        usbhost_event_slots = heap_caps_calloc_prefer(USBHOST_EVENT_CAPACITY, sizeof(usbhost_event_t), 2,
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_DEFAULT);
+        if (usbhost_event_slots == NULL) {
+            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("no memory for the USB host's event queue"));
+        }
+    }
+    usbhost_rb_init(&usbhost_events, usbhost_event_slots, USBHOST_EVENT_CAPACITY);
+    #else
+    usbhost_rb_init(&usbhost_events, usbhost_event_none, 1);
+    #endif
 }
 
 static const struct {
@@ -183,7 +213,7 @@ static mp_obj_t usbhost_host_start(size_t n_args, const mp_obj_t *pos_args, mp_m
     // running host must be a no-op, not a wipe of queued events -- learned
     // when the NUCLEO's attach events vanished under an idempotent restart.
     if (!usbhost_host_running) {
-        usbhost_rb_init(&usbhost_events, usbhost_event_slots, USBHOST_EVENT_CAPACITY);
+        usbhost_events_reserve();
     }
     #if USBHOST_HAVE_HOST
     if (!usbhost_host_running) {

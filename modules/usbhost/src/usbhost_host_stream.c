@@ -41,6 +41,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_heap_caps.h"
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
 #include "usb/usb_host.h"
@@ -82,15 +83,22 @@ typedef struct {
     volatile usbhost_stream_stats_t st;
 } usbhost_stream_t;
 
-static usbhost_stream_t usbhost_streams[USBHOST_HOST_STREAMS];
+// The slots are taken from the heap when the first stream opens, PSRAM first,
+// and kept from then on, so a firmware that never streams spends no internal
+// RAM on them. Nothing reads them from an interrupt: the library calls
+// usbhost_stream_cb() from whoever pumps the client's events. The packets are
+// in the transfers, which come from DMA-capable internal RAM
+// (usbhost_stream_open_locked()). NULL until the first stream.
+static usbhost_stream_t *usbhost_streams;
 
 // The producers' gate on each playback stream's ring: the interpreter's
 // writes and a C sink's, from any task (shared/usbhost_pcm_sink.h). Outside
 // the slots because a slot is cleared for each stream, and a gate's
 // generations must carry on from one stream to the next, so a sink issued
-// for a stream that closed stays closed.
+// for a stream that closed stays closed. Static, in internal RAM, because
+// the gates take read-modify-write atomics, which the ESP32-S3 can't do on
+// PSRAM; they are 32 bytes each.
 static usbhost_pcm_sink_t usbhost_stream_gates[USBHOST_HOST_STREAMS];
-static bool usbhost_stream_gates_ready;
 
 static uint32_t usbhost_stream_gate_room(void *slot) {
     const usbhost_stream_t *s = slot;
@@ -111,14 +119,22 @@ static void usbhost_stream_gate_wait(void) {
     vTaskDelay(1);      // one real tick: lets a writer on this core finish
 }
 
-static void usbhost_stream_gates_setup(void) {
-    if (!usbhost_stream_gates_ready) {
+// The slots, and the gates pointed at them, on first use. False if the heap
+// can't give them.
+static bool usbhost_stream_gates_setup(void) {
+    if (usbhost_streams == NULL) {
+        usbhost_stream_t *slots = heap_caps_calloc_prefer(USBHOST_HOST_STREAMS, sizeof(*slots), 2,
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_DEFAULT);
+        if (slots == NULL) {
+            return false;
+        }
         for (int i = 0; i < USBHOST_HOST_STREAMS; i++) {
-            usbhost_pcm_sink_init(&usbhost_stream_gates[i], &usbhost_stream_gate_ops, &usbhost_streams[i],
+            usbhost_pcm_sink_init(&usbhost_stream_gates[i], &usbhost_stream_gate_ops, &slots[i],
                 usbhost_stream_gate_wait);
         }
-        usbhost_stream_gates_ready = true;
+        usbhost_streams = slots;    // last: every reader tests this one
     }
+    return true;
 }
 
 static inline int usbhost_stream_index(const usbhost_stream_t *s) {
@@ -126,6 +142,9 @@ static inline int usbhost_stream_index(const usbhost_stream_t *s) {
 }
 
 static usbhost_stream_t *usbhost_stream_find(uint32_t dev_id, uint8_t ep) {
+    if (usbhost_streams == NULL) {
+        return NULL;
+    }
     for (int i = 0; i < USBHOST_HOST_STREAMS; i++) {
         usbhost_stream_t *s = &usbhost_streams[i];
         if (s->used && s->dev_id == dev_id && s->ep == ep) {
@@ -285,6 +304,9 @@ static void usbhost_stream_stop_locked(usbhost_stream_t *s) {
 // The streams on one interface of a device (itf < 0: all of it), as the
 // transfer layer gives the interface up; device_gone when it's unplugged.
 void usbhost_stream_stop_itf(void *dev, int itf, bool device_gone) {
+    if (usbhost_streams == NULL) {
+        return;
+    }
     for (int i = 0; i < USBHOST_HOST_STREAMS; i++) {
         usbhost_stream_t *s = &usbhost_streams[i];
         if (s->used && s->dev == (usb_device_handle_t)dev && (itf < 0 || s->itf == itf)) {
@@ -297,6 +319,9 @@ void usbhost_stream_stop_itf(void *dev, int itf, bool device_gone) {
 }
 
 void usbhost_stream_close_all(void) {
+    if (usbhost_streams == NULL) {
+        return;
+    }
     usbhost_host_lock();
     for (int i = 0; i < USBHOST_HOST_STREAMS; i++) {
         usbhost_stream_stop_locked(&usbhost_streams[i]);
@@ -305,6 +330,9 @@ void usbhost_stream_close_all(void) {
 }
 
 uint32_t usbhost_stream_free_slots(void) {
+    if (usbhost_streams == NULL) {
+        return (1u << USBHOST_HOST_STREAMS) - 1;
+    }
     uint32_t bits = 0;
     for (int i = 0; i < USBHOST_HOST_STREAMS; i++) {
         if (!usbhost_streams[i].used) {
@@ -317,7 +345,9 @@ uint32_t usbhost_stream_free_slots(void) {
 // --- the surface ----------------------------------------------------------
 
 static int usbhost_stream_open_locked(uint32_t dev_id, uint8_t ep, const usbhost_stream_cfg_t *cfg) {
-    usbhost_stream_gates_setup();
+    if (!usbhost_stream_gates_setup()) {
+        return -MP_ENOMEM;
+    }
     usb_device_handle_t dev;
     if (usbhost_host_dev_lookup(dev_id, &dev) != 0) {
         return -MP_ENODEV;
