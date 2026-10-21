@@ -176,7 +176,7 @@ on top. Add `--modules` to any of these:
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-4B | `--port esp32 --board ESP32_GENERIC_P4 --variant PRE_REV3_C6_WIFI --flash 32MB` |
 | Another ESP32-P4 board, chip revision 3 or later, with an ESP32-C6 for Wi-Fi | `--port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB` |
 | Waveshare ESP32-S3-Touch-LCD-7 | `--port esp32 --board ESP32_GENERIC_S3 --variant LCD_7 --flash 8MB` |
-| Waveshare ESP32-S3-Touch-LCD-4.3 | `--port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB` |
+| Waveshare ESP32-S3-Touch-LCD-4.3 | `--port esp32 --board ESP32_GENERIC_S3 --variant LCD_4_3 --flash 8MB` |
 | LilyGO T-Embed S3 | `--port esp32 --board ESP32_GENERIC_S3 --variant T_EMBED --flash 16MB` |
 | WT32-SC01 Plus | `--port esp32 --board ESP32_GENERIC_S3 --flash 16MB` |
 | Raspberry Pi Pico (RP2040) | `--port rp2 --board RPI_PICO` (not `--modules all`: see [The model](#the-model)) |
@@ -185,7 +185,7 @@ on top. Add `--modules` to any of these:
 A new board usually needs no file at all: pick the upstream board and
 variant that match its chip and PSRAM, and give `--flash` its flash size. Make
 a variant of ours only for settings that really are that board's, like the
-LCD-7's cache sizes; see [esp32 settings](#esp32-settings) below.
+LCD-7's and LCD-4.3's cache sizes and tick; see [esp32 settings](#esp32-settings) below.
 
 ## Flash it
 

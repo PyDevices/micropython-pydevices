@@ -17,7 +17,7 @@
 # build that has lvgl-micropython fetches it at this commit into
 # modules/.lvgl-bindings (a sibling checkout is linked there instead) and
 # hands it to lvgl-micropython, whose own LVGL_BINDINGS_COMMIT then goes unused.
-audiodsp          https://github.com/PyDevices/audiodsp.git           6773b91b4e014e1a3bba8b28e000ac95e75251df
+audiodsp          https://github.com/PyDevices/audiodsp.git           6042745509790bd8940c7630090cc6938f1df89d
 lvgl-bindings     https://github.com/PyDevices/lvgl-bindings.git      7740c2fae0daa10992f5f8fe54acf670a70e2d3b
 lvgl-micropython  https://github.com/PyDevices/lvgl-micropython.git   48937fcd87e574488178997e2bafe73d9bf02240
 pygraphics        https://github.com/PyDevices/pygraphics.git         2d7ca35847db78d450428cdc0cb5aa69ab81c809
