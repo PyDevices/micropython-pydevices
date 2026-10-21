@@ -4,8 +4,8 @@
 # esp_h264, which then exists as espressif__esp_h264. The usermod sources are
 # also compiled in the executable's own target, which sees only what is linked
 # here, so the headers' components are named explicitly. Every other port and
-# chip skips it whole, so `all` needs no exception for it; make ports never
-# look here (there is no micropython.mk).
+# chip skips it whole, so `all` needs no exception for it. CircuitPython
+# builds it through micropython.mk, with esp_h264 fetched by build_mp.py.
 if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32p4")
     add_library(usermod_h264enc INTERFACE)
     target_sources(usermod_h264enc INTERFACE ${CMAKE_CURRENT_LIST_DIR}/src/mod_h264enc.c)

@@ -7,6 +7,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// A firmware with no network stack (CircuitPython's ESP32-P4 port, which
+// doesn't drive the boards' radio yet) builds castif with CASTIF_NO_NETWORK=1:
+// castif_nonet.c stands in for lwIP, and starting a cast says why it can't.
+#ifndef CASTIF_NO_NETWORK
+#define CASTIF_NO_NETWORK 0
+#endif
+
 // h264enc encodes (modules/h264enc/src/h264enc.h).
 typedef struct h264enc_session h264enc_session_t;
 extern const char *h264enc_open(h264enc_session_t **out, int width, int height, int canvas_w, int canvas_h,

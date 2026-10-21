@@ -369,11 +369,12 @@ links, the output layout and the build record. What differs is one function:
   leaves out the camera's. With [`0006-espressif-esp-idf-components-a-user-c-module-asks-for.patch`](../patches/circuitpython/0006-espressif-esp-idf-components-a-user-c-module-asks-for.patch),
   a module's `micropython.mk` adds names to `USER_ESP_IDF_COMPONENTS`
   (cameraif: the CSI controller, the ISP and the sensor drivers; jpegio and
-  ppa: the P4's JPEG engine and PPA), and the make line's
+  ppa: the P4's JPEG engine and PPA; h264enc: `esp_h264`), and the make line's
   `USER_ESP_IDF_COMPONENT_DIRS` adds components ESP-IDF doesn't ship.
   CircuitPython builds with the component manager off, so for cameraif the
   build fetches `esp_cam_sensor`, `esp_sccb_intf` and `cmake_utilities` at
-  their `deps.lock` versions into `deps/` and passes them. On CircuitPython,
+  their `deps.lock` versions into `deps/` and passes them, and `esp_h264` the
+  same way for h264enc. On CircuitPython,
   jpegio is only the encoder's C API (CircuitPython has its own `jpegio`
   decoder module). The DEV-KIT's board sdkconfig enables the OV5647.
 - **mpy-cross is built first, on its own**, for the same reason as on
@@ -420,8 +421,8 @@ four cells of [`release-firmware.yml`](../.github/workflows/release-firmware.yml
 | usbhost | yes, as `_usbhost`, with no host engine (was a build error) | not yet | the host engine runs on ESP-IDF's USB host library. CircuitPython's ESP32 builds have no USB host, so on the ESP32-P4 ours can run on the second USB controller ([roadmap](../ROADMAP.md)); the S3's one controller is CircuitPython's drive and REPL. On the RP2040 and i.MX, CircuitPython's own `usb.core` is the host, and pydevices' HID, CDC and MSC drivers are planned for it |
 | audioif | no | no | links against audiodsp's audio pump and `cp_compat`, which audiodsp's CircuitPython glue doesn't build. CircuitPython's audio samples are fed only from C, so audio made in Python needs a stream sample, the pump's C side shaped as one ([roadmap](../ROADMAP.md)); boards have `audiobusio` of their own |
 | ulab | CircuitPython's own | CircuitPython's own | |
-| castif | no: it is the ESP32-P4's | not yet | talks to ESP-IDF and lwIP directly, the lwIP under CircuitPython's own `socketpool`, so it needs only a `micropython.mk` ([roadmap](../ROADMAP.md)) |
-| h264enc | no: it is the ESP32-P4's encoder | not yet | needs Espressif's `esp_h264` component, which CircuitPython's espressif port, built with the component manager off, would fetch through `deps.lock` the way cameraif's sensor components are ([roadmap](../ROADMAP.md)) |
+| castif | no: it is the ESP32-P4's | ESP32-P4, with no network yet | talks to lwIP directly, the lwIP under CircuitPython's own `socketpool`. CircuitPython's P4 port has no network until it drives the boards' ESP32-C6, so castif is built without one and `start()` says so ([roadmap](../ROADMAP.md)). Name tsmux, h264enc and ppa with it |
+| h264enc | no: it is the ESP32-P4's encoder | ESP32-P4 | Espressif's `esp_h264`, which CircuitPython's port, built with the component manager off, can't fetch itself, is pinned in `deps.lock` and fetched by `build_mp.py`, the way cameraif's sensor components are. Name ppa with it |
 | tflite, vision | no | no, on purpose | esp-vision's modules, for MicroPython only |
 | lvgl-micropython | no | no | CircuitPython's binding is `lvgl-circuitpython`, passed by path |
 | micropython-lib | no | no | MicroPython's own upstream packages |

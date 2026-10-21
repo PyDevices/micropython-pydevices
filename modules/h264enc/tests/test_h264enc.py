@@ -7,13 +7,23 @@ what the board can: every encode returns bytes, the first frame and every
 while this one is open raises OSError "busy" without disturbing it.
 check_h264_ffmpeg.py then has ffmpeg decode the file on the PC.
 
-    run on the board with h264_frames.py beside it (mpftp probe; see the README)
+    run on the board with h264_frames.py beside it (mpftp probe; see the README),
+    MicroPython or CircuitPython, with a /jt folder for the stream
 """
 
 import sys
 import time
 
 import h264enc
+
+try:
+    from time import ticks_diff, ticks_ms
+except ImportError:  # CircuitPython: monotonic_ns doesn't wrap
+    def ticks_ms():
+        return time.monotonic_ns() // 1_000_000
+
+    def ticks_diff(a, b):
+        return a - b
 
 import h264_frames as frames
 
@@ -22,10 +32,10 @@ OUT = "/jt"
 
 
 def main():
-    t0 = time.ticks_ms()
+    t0 = ticks_ms()
     bg = frames.base()
     buf = bytearray(len(bg))
-    print("background built in %d ms" % time.ticks_diff(time.ticks_ms(), t0))
+    print("background built in %d ms" % ticks_diff(ticks_ms(), t0))
     enc = h264enc.Encoder(frames.W, frames.H, 30, 30, 3_000_000)
     print("Encoder", enc.width, "x", enc.height)
 
@@ -71,7 +81,7 @@ def main():
     except ValueError:
         pass
     print("after close(): a new Encoder opens; the closed one refuses encode()")
-    print("h264enc board test passed, %d frames, %.1f s" % (N, time.ticks_diff(time.ticks_ms(), t0) / 1000))
+    print("h264enc board test passed, %d frames, %.1f s" % (N, ticks_diff(ticks_ms(), t0) / 1000))
 
 
 main()

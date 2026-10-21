@@ -18,7 +18,9 @@ together, so the encoder keeps up with 30 fps.
 
 ESP32-P4 only, and C only: the module is skipped on every other chip and port,
 so `import h264enc` raises `ImportError` there. `--modules all` includes it;
-name it with `--modules h264enc` otherwise.
+name it with `--modules h264enc` otherwise. CircuitPython's ESP32-P4 boards
+take it too (`--interpreter circuitpython --modules h264enc,ppa`), and
+`build_mp.py` fetches Espressif's `esp_h264` for that build.
 
 ## API
 
