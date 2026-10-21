@@ -10,9 +10,11 @@ ESP-IDF's USB host library. Its CMake glue skips every other part, so a
 firmware for those still builds, without the host.
 
 On CircuitPython the host builds for the ESP32-P4, where the boards leave the
-high-speed controller free. It hasn't run on a CircuitPython board yet, so
-treat it as untried there. Phone tethering is left out there, because the
-port has no network yet. Every other CircuitPython build gets `_usbhost`
+high-speed controller free. On the Waveshare ESP32-P4-WIFI6-DEV-KIT it
+enumerates a webcam and a wireless keyboard-and-mouse dongle behind the
+board's hub (started with `full_speed=True`) and answers the dongle's HID
+requests; drives and streams haven't been tried there. Phone tethering is
+left out there, because the port has no network yet. Every other CircuitPython build gets `_usbhost`
 without the host.
 
 ## The packages are in pydevices
