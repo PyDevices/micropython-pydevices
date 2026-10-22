@@ -43,6 +43,7 @@
 #include "usb/usb_host.h"
 #include "usbhost_ticks.h"
 #include "usbhost_host_stream.h"
+#include "shared/usbhost_audio_interval.h"
 #include "usbhost_host.h"
 
 
@@ -169,6 +170,22 @@ static usbhost_xfer_claim_t *usbhost_xfer_find_claim(usb_device_handle_t dev, ui
 
 static void usbhost_xfer_drop_pipes(usb_device_handle_t dev, int itf, bool device_gone);
 
+// A full-speed audio stream is polled every frame, whatever its endpoint's
+// bInterval says (usbhost_audio_interval.h). IDF reads the interval from its
+// copy of the configuration descriptor when the interface is claimed, so this
+// corrects the copy first. The copy is heap memory the library keeps for the
+// device; the const is the library's promise not to change it, ours to keep
+// for everything but this one byte.
+static void usbhost_xfer_audio_fs_interval(usb_device_handle_t dev, uint8_t itf, uint8_t alt) {
+    usb_device_info_t info;
+    const usb_config_desc_t *cfg;
+    if (usb_host_device_info(dev, &info) != ESP_OK || info.speed != USB_SPEED_FULL
+        || usb_host_get_active_config_descriptor(dev, &cfg) != ESP_OK) {
+        return;
+    }
+    usbhost_audio_fs_interval_fix((uint8_t *)cfg, cfg->wTotalLength, itf, alt);
+}
+
 // 1 for a fresh claim (the host's pipes start at DATA0), 0 when the
 // interface was already claimed at that alternate, or a negative errno.
 int usbhost_xfer_claim(uint32_t dev_id, uint8_t itf, uint8_t alt) {
@@ -200,6 +217,7 @@ int usbhost_xfer_claim(uint32_t dev_id, uint8_t itf, uint8_t alt) {
             goto out;
         }
     }
+    usbhost_xfer_audio_fs_interval(dev, itf, alt);
     esp_err_t err = usb_host_interface_claim(usbhost_host_client_get(), dev, itf, alt);
     if (err != ESP_OK) {
         r = err == ESP_ERR_NOT_FOUND ? -MP_ENOENT : -MP_EBUSY;

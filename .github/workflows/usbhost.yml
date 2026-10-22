@@ -73,6 +73,15 @@ jobs:
           cc -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -Isrc \
              -o /tmp/test_iso_stream tests/test_iso_stream.c
           /tmp/test_iso_stream
+          cc -std=c11 -Wall -Wextra -Werror -Isrc -o /tmp/test_audio_interval tests/test_audio_interval.c
+          /tmp/test_audio_interval
+          cc -std=c11 -Wall -Wextra -Werror -Isrc -DUSBHOST_AI_PLANT_NO_FIX \
+             -o /tmp/test_audio_interval_planted tests/test_audio_interval.c
+          if /tmp/test_audio_interval_planted > /tmp/planted.log 2>&1; then
+            cat /tmp/planted.log
+            echo "leaving the interval alone was NOT caught"; exit 1
+          fi
+          echo "planted fault caught:"; grep FAIL /tmp/planted.log | head -3
       - name: The pacing, framing and downmix tests can fail
         run: |
           for fault in USBHOST_UVC_FRAME_PLANT_NO_SYNC USBHOST_ISO_PACE_PLANT_DROP_REMAINDER USBHOST_DOWNMIX_PLANT_LEFT_ONLY; do
