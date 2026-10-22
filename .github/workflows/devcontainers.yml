@@ -1,0 +1,94 @@
+# Each dev container in .devcontainer/ builds its port from nothing, as a
+# codespace does: the image is made from the Dockerfile (install.sh --deps for
+# that port, on a clean Ubuntu), the container is created with its deps/ volume
+# empty, and build_mp.py fetches MicroPython, the modules and the port's
+# toolchain before it builds. One job per config, one build each.
+#
+# It runs when a config changes, and weekly, which also catches a change to
+# install.sh's package list or to a pin that stops a port building from a
+# clean machine.
+name: Dev containers
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.devcontainer/**'
+      - 'scripts/serve_workbench.sh'
+      - '.github/workflows/devcontainers.yml'
+  pull_request:
+    paths:
+      - '.devcontainer/**'
+      - 'scripts/serve_workbench.sh'
+      - '.github/workflows/devcontainers.yml'
+  schedule:
+    - cron: '41 4 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devcontainers-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: ${{ matrix.port }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.port == 'esp32' && 150 || 75 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - port: unix
+            run: |
+              ./build_mp.py --port unix --variant pydevices --modules all
+              builds/unix/pydevices/micropython -c "import sys; print(sys.implementation); import displaydev; print('displaydev imports')"
+          - port: webassembly
+            run: |
+              ./build_mp.py --port webassembly --variant pydevices --modules all
+              b=builds/webassembly/pydevices
+              printf 'import sys\nprint(sys.implementation)\nimport displaydev\nprint("displaydev imports")\n' > /tmp/check.py
+              node $b/micropython.mjs /tmp/check.py
+              # workbench, with this build in it, on the port the config forwards
+              WORKBENCH_PORT=8000 scripts/serve_workbench.sh < /dev/null > /tmp/serve.log 2>&1 &
+              srv=$!
+              for i in $(seq 60); do curl -fs -o /dev/null http://127.0.0.1:8000/ && break; sleep 2; done
+              cat /tmp/serve.log
+              curl -fsS http://127.0.0.1:8000/index.html | grep -qi '<html'
+              curl -fsS -o /tmp/served.wasm http://127.0.0.1:8000/assets/pydevices/micropython.wasm
+              cmp /tmp/served.wasm $b/micropython.wasm
+              echo "workbench serves this build's micropython.wasm"
+              kill $srv
+          - port: rp2
+            run: |
+              ./build_mp.py --port rp2 --board RPI_PICO2 --modules all
+              ls -l builds/rp2/RPI_PICO2/default/firmware.uf2
+          - port: windows
+            run: |
+              ./build_mp.py --port windows --variant pydevices --modules all
+              ls -l builds/windows/pydevices/micropython.exe
+          - port: esp32
+            run: |
+              ./build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB --modules all
+              ls -l builds/esp32/ESP32_GENERIC_S3/SPIRAM_OCT/firmware.bin
+    steps:
+      - uses: actions/checkout@v7
+
+      # ESP-IDF's compilers for every chip, its clone and an S3 build with
+      # every module come to about 7 GB, beside the image.
+      - name: Room for ESP-IDF
+        if: matrix.port == 'esp32'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h / | tail -1
+
+      - name: Build the ${{ matrix.port }} container and build its port in it
+        uses: devcontainers/ci@v0.3
+        with:
+          configFile: .devcontainer/${{ matrix.port }}/devcontainer.json
+          push: never
+          runCmd: |
+            set -e
+            ${{ matrix.run }}

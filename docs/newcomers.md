@@ -34,6 +34,42 @@ The desktop `pydevices` variants freeze a board config that imports
 repository whose `lib/` holds it) or `all`; without it `import board_config`
 fails.
 
+## In a codespace
+
+You can build without installing anything, in a GitHub codespace or in a dev
+container on your own machine. Each port has its own container, holding only
+that port's packages: unix, webassembly, rp2, windows and esp32.
+
+On GitHub, open the repository's **Code** menu, then **Codespaces**, **...**,
+**New with options**, and choose your port under "Dev container
+configuration". With VS Code and Docker on your own machine, open your clone
+and run **Dev Containers: Reopen in Container**, which asks for the port.
+
+When the container is ready, its terminal prints the build line for its port,
+and you build as you would anywhere else:
+
+```bash
+./build_mp.py --port rp2 --board RPI_PICO2 --modules all
+```
+
+The first build fetches the port's toolchain into `deps/`, a volume that
+outlives the container, so rebuilding the container doesn't fetch it again.
+The esp32 container fetches ESP-IDF and its compilers (about 4 GB) while it's
+being created, so your first build starts compiling; it asks for a 4-core
+machine.
+
+To flash, take the file to the machine your board is plugged into. In the
+Explorer, open `builds/` down to your build, right-click `firmware.bin` (or
+`firmware.uf2` on rp2) and choose **Download**. Then write it with
+`mpftp firmware flash --artifact firmware.bin` (`--uf2` for a `.uf2`), or with
+esptool as in [Flash it](#flash-it).
+
+The webassembly container opens your build in workbench, the browser IDE.
+Build, then run `scripts/serve_workbench.sh`: it downloads the newest
+workbench release, puts your `micropython.wasm` in it and serves it on port
+8000, which the container forwards and your browser opens. Click the
+simulator button (the display icon) and the REPL that starts is your build.
+
 ## What each port needs
 
 [`build_mp.py`](../build_mp.py) fetches the big pieces itself: MicroPython, the modules,
@@ -44,7 +80,7 @@ fetch are your distribution's packages. On Debian or Ubuntu (WSL included):
 |---|---|
 | every port | `git make cmake python3 gcc g++` |
 | unix | `pkg-config libsdl2-dev libffi-dev` (the desktop display) |
-| esp32 | `ninja-build python3-venv` |
+| esp32 | `ninja-build python3-venv libusb-1.0-0` (ESP-IDF's installer checks the openocd it fetches, which needs libusb) |
 | rp2 | `gcc-arm-none-eabi libnewlib-arm-none-eabi` |
 | windows, cross-built from Linux | `gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 libtool libltdl-dev autoconf automake` (the binutils package has `windres`) |
 | webassembly | `nodejs` |
@@ -53,15 +89,17 @@ All of it in one line:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git make cmake ninja-build \
-    python3 python3-venv python3-pip gcc g++ pkg-config libffi-dev libsdl2-dev \
-    gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 libtool libltdl-dev \
-    autoconf automake \
+    python3 python3-venv python3-pip libusb-1.0-0 gcc g++ pkg-config libffi-dev \
+    libsdl2-dev gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 libtool \
+    libltdl-dev autoconf automake \
     gcc-arm-none-eabi libnewlib-arm-none-eabi nodejs
 ```
 
 The installer prints only what your machine is missing, one `apt-get install`
 line per port and marked with it, so you can leave out the ports you won't
-build. It also says which ports build now. Other distributions carry the same
+build. It also says which ports build now, and it can install a port's
+packages for you: `curl -fsSL https://pydevices.github.io/install.sh | sh -s
+-- --deps rp2` (or `all`). Other distributions carry the same
 tools under their own names; a build for a port that's still missing
 something stops and says so.
 

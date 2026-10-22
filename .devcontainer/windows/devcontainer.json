@@ -1,0 +1,15 @@
+{
+  "name": "windows: micropython.exe, cross-built from Linux",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": "..",
+    "args": {
+      "PORT": "windows"
+    }
+  },
+  "mounts": [
+    "source=pydevices-deps-${devcontainerId},target=${containerWorkspaceFolder}/deps,type=volume"
+  ],
+  "onCreateCommand": "sh .devcontainer/on-create.sh",
+  "postCreateCommand": "echo 'To build: ./build_mp.py --port windows --variant pydevices --modules all'"
+}

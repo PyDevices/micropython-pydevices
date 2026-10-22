@@ -4,6 +4,10 @@ Work here mostly follows bug reports and requests, so if something is broken
 or missing for you, open an
 [issue](https://github.com/PyDevices/micropython-pydevices/issues).
 
+- **Your own firmware from the firmware page.** A build you made, in a
+  codespace or anywhere else, goes onto your board from the browser with the
+  firmware page's "Install from a file", as the released images do.
+
 More modules in CircuitPython-compatible builds
 ([what builds today](docs/build-plan.md#which-modules-build-on-circuitpython)):
 
