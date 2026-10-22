@@ -26,9 +26,9 @@ is in the firmware.
 diff --git a/ports/espressif/CMakeLists.txt b/ports/espressif/CMakeLists.txt
 --- a/ports/espressif/CMakeLists.txt
 +++ b/ports/espressif/CMakeLists.txt
-@@ -8,6 +8,20 @@
- set(COMPONENTS bt driver esp_driver_dac esp_driver_gpio esp_driver_gptimer esp_driver_i2c esp_driver_i2s esp_driver_ledc esp_driver_pcnt esp_driver_rmt esp_driver_sdmmc esp_driver_spi esp_driver_touch_sens esp_driver_tsens esp_driver_uart esp-tls esp_adc esp_event esp_netif esp_psram esp_security esp_wifi esptool_py freertos log lwip main mbedtls mdns pthread soc ulp wpa_supplicant esp_lcd vfs esp_stdio sdmmc esp-camera)
- set(EXTRA_COMPONENT_DIRS "esp-protocols/components/mdns" "esp-camera")
+@@ -13,6 +13,20 @@ if(CIRCUITPY_ESP_HOSTED)
+     list(APPEND COMPONENTS esp-hosted)
+ endif()
  
 +# ESP-IDF components a user C module needs that this list leaves out
 +# (USER_ESP_IDF_COMPONENTS, which the module's micropython.mk adds to), and
@@ -45,12 +45,12 @@ diff --git a/ports/espressif/CMakeLists.txt b/ports/espressif/CMakeLists.txt
 +list(REMOVE_DUPLICATES COMPONENTS)
 +
  include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+ set(ENV{ESP_IDF_VERSION} "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}")
  project(circuitpython)
- 
 diff --git a/ports/espressif/Makefile b/ports/espressif/Makefile
 --- a/ports/espressif/Makefile
 +++ b/ports/espressif/Makefile
-@@ -879,13 +879,19 @@
+@@ -935,13 +935,19 @@ endif
  
  SDKCONFIGS := esp-idf-config/sdkconfig.defaults;$(DEBUG_SDKCONFIG);$(FLASH_SIZE_SDKCONFIG);$(FLASH_MODE_SDKCONFIG);$(FLASH_SPEED_SDKCONFIG);$(PSRAM_SDKCONFIG);$(PSRAM_SIZE_SDKCONFIG);$(PSRAM_MODE_SDKCONFIG);$(PSRAM_SPEED_SDKCONFIG);$(BLE_SDKCONFIG)$(NATIVE_SDKCONFIG);$(TARGET_SDKCONFIG);boards/$(BOARD)/sdkconfig
  
@@ -66,12 +66,12 @@ diff --git a/ports/espressif/Makefile b/ports/espressif/Makefile
  QSTR_GLOBAL_REQUIREMENTS += $(BUILD)/esp-idf/config/sdkconfig.h
  $(BUILD)/esp-idf/config/sdkconfig.h: boards/$(BOARD)/sdkconfig boards/$(BOARD)/mpconfigboard.mk CMakeLists.txt | $(BUILD)/esp-idf
  	$(STEPECHO) "Create $@"
--	$(Q)env IDF_PATH=$(IDF_PATH) IDF_COMPONENT_MANAGER=0 cmake -S . -B $(BUILD)/esp-idf -DSDKCONFIG=$(BUILD)/esp-idf/sdkconfig -DSDKCONFIG_DEFAULTS="$(SDKCONFIGS)" -DCMAKE_TOOLCHAIN_FILE=$(IDF_PATH)/tools/cmake/toolchain-$(IDF_TARGET).cmake -DIDF_TARGET=$(IDF_TARGET) -GNinja
-+	$(Q)env IDF_PATH=$(IDF_PATH) IDF_COMPONENT_MANAGER=0 cmake -S . -B $(BUILD)/esp-idf -DSDKCONFIG=$(BUILD)/esp-idf/sdkconfig -DSDKCONFIG_DEFAULTS="$(SDKCONFIGS)" -DCMAKE_TOOLCHAIN_FILE=$(IDF_PATH)/tools/cmake/toolchain-$(IDF_TARGET).cmake -DIDF_TARGET=$(IDF_TARGET) $(USER_ESP_IDF_CMAKE_ARGS) -GNinja
+-	$(Q)env IDF_PATH=$(IDF_PATH) IDF_COMPONENT_MANAGER=0 cmake -S . -B $(BUILD)/esp-idf -DSDKCONFIG=$(BUILD)/esp-idf/sdkconfig -DSDKCONFIG_DEFAULTS="$(SDKCONFIGS)" -DCMAKE_TOOLCHAIN_FILE=$(IDF_PATH)/tools/cmake/toolchain-$(IDF_TARGET).cmake -DIDF_TARGET=$(IDF_TARGET) -DCIRCUITPY_ESP_HOSTED=$(CIRCUITPY_ESP_HOSTED) -GNinja
++	$(Q)env IDF_PATH=$(IDF_PATH) IDF_COMPONENT_MANAGER=0 cmake -S . -B $(BUILD)/esp-idf -DSDKCONFIG=$(BUILD)/esp-idf/sdkconfig -DSDKCONFIG_DEFAULTS="$(SDKCONFIGS)" -DCMAKE_TOOLCHAIN_FILE=$(IDF_PATH)/tools/cmake/toolchain-$(IDF_TARGET).cmake -DIDF_TARGET=$(IDF_TARGET) -DCIRCUITPY_ESP_HOSTED=$(CIRCUITPY_ESP_HOSTED) $(USER_ESP_IDF_CMAKE_ARGS) -GNinja
  	$(Q)$(PYTHON) tools/check-sdkconfig.py \
  		CIRCUITPY_DUALBANK=$(CIRCUITPY_DUALBANK) \
  		CIRCUITPY_STORAGE_EXTEND=$(CIRCUITPY_STORAGE_EXTEND) \
-@@ -996,6 +1002,21 @@
+@@ -1124,6 +1130,21 @@ endif
  ifneq ($(CIRCUITPY_SDIOIO),0)
  	ESP_IDF_COMPONENTS_LINK += sdmmc esp_driver_sdmmc esp_driver_sd_intf esp_hal_sd
  endif
@@ -96,7 +96,7 @@ diff --git a/ports/espressif/Makefile b/ports/espressif/Makefile
 diff --git a/ports/espressif/supervisor/port.c b/ports/espressif/supervisor/port.c
 --- a/ports/espressif/supervisor/port.c
 +++ b/ports/espressif/supervisor/port.c
-@@ -413,6 +413,9 @@
+@@ -436,6 +436,9 @@ void *esp_native_code_commit(void *buf, size_t len, void *reloc) {
  }
  #endif
  
@@ -106,7 +106,7 @@ diff --git a/ports/espressif/supervisor/port.c b/ports/espressif/supervisor/port
  void reset_port_early(void) {
      // esp-camera adds an I2C device on the ESP I2C bus, and keeps it there. This
      // is unlike busio.I2C, which adds and removes the device on each operation.
-@@ -421,6 +424,13 @@
+@@ -444,6 +447,13 @@ void reset_port_early(void) {
      #if CIRCUITPY_ESPCAMERA
      espcamera_reset();
      #endif

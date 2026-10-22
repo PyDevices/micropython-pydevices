@@ -331,7 +331,7 @@ interpreter is shared: the module names and `modules.lock`, the workspace
 links, the output layout and the build record. What differs is one function:
 
 - **The checkout.** CircuitPython is pinned in `deps.lock` like a toolchain
-  (`11.0.0-alpha.1`, whose core is MicroPython 1.29) and cloned into
+  (`11.0.0-alpha.2`, whose core is MicroPython 1.29) and cloned into
   `deps/circuitpython`, always our own clone, never a link to a sibling
   checkout. A build fetches only the submodules its target needs, with
   CircuitPython's own `tools/ci_fetch_deps.py` (a board's name, or `tests`
@@ -347,7 +347,7 @@ links, the output layout and the build record. What differs is one function:
   objects under a directory named like the module's, and two worktrees
   checked out under the same branch name would otherwise share one.
 - **espressif brings its own ESP-IDF.** CircuitPython's espressif port builds
-  with the ESP-IDF in `ports/espressif/esp-idf` (6.0 for 11.0.0-alpha.1), not
+  with the ESP-IDF in `ports/espressif/esp-idf` (6.1 for 11.0.0-alpha.2), not
   the `esp-idf` in `deps.lock`. Before make, the build initialises that tree's
   submodules shallowly (ESP-IDF's CMake would otherwise clone them with their
   whole history, gigabytes for `esp32-wifi-lib` alone), runs its `install.sh`
@@ -389,7 +389,7 @@ links, the output layout and the build record. What differs is one function:
   of each it passes Linux's 128 KB limit on one argument.
 
 The banner is CircuitPython's, unchanged: `Adafruit CircuitPython
-11.0.0-alpha.1 on <date>; <board name> with <chip>`. A module that has to
+11.0.0-alpha.2 on <date>; <board name> with <chip>`. A module that has to
 behave differently here can test `CIRCUITPY`, which every CircuitPython port
 sets, unix included; pygraphics also passes its own define from its
 `micropython.mk`, so it knows it came in as a user C module and not through

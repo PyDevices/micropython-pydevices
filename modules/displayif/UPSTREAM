@@ -11,9 +11,9 @@ CI builds the unix port from that pin. Nothing here repeats it, so it can't go s
   Verify locally with: git -C <your micropython checkout> rev-parse HEAD   # matches ../../UPSTREAM
 
 ## CircuitPython (usdl2 desktop path only, as a user C module)
-Tested against: 11.0.0-alpha.1 (CircuitPython 11 is the first line whose
+Tested against: 11.0.0-alpha.2 (CircuitPython 11 is the first line whose
 USER_C_MODULES block matches MicroPython 1.29's)
-  https://github.com/adafruit/circuitpython @ 520805e12
+  https://github.com/adafruit/circuitpython @ d53b2277c
 
 ## SDL2 (desktop usdl2 backend)
 Minimum: >= 2.0 (SDL_* API used by src/ports/desktop/usdl2/)

@@ -16,9 +16,9 @@ SDL2      https://github.com/libsdl-org/SDL/releases/download/release-2.30.10/SD
 espressif__tinyusb https://github.com/micropython/tinyusb-espressif.git                                     v0.21.0.1-micropython1
 # CircuitPython is the second interpreter, and the one pin that is a source
 # tree rather than a toolchain. Always our own checkout in deps/, never a link
-# to a sibling. 11.0.0-alpha.1 is commit 520805e12, the first release of the
-# 11.0 line, whose core is MicroPython 1.29, like UPSTREAM.
-circuitpython https://github.com/adafruit/circuitpython.git                                                  11.0.0-alpha.1
+# to a sibling. 11.0.0-alpha.2 is commit d53b2277c, whose core is MicroPython
+# 1.29, like UPSTREAM, and whose espressif port moved to ESP-IDF 6.1.
+circuitpython https://github.com/adafruit/circuitpython.git                                                  11.0.0-alpha.2
 # ESP-IDF components for cameraif on CircuitPython's espressif port: the camera
 # sensor drivers and the two components they need, from Espressif's component
 # registry, at the versions MicroPython's P4 build resolves. CircuitPython

@@ -210,7 +210,7 @@ jobs:
         run: timeout 300 ./builds/circuitpython/unix/coverage/micropython modules/mdns/tests/test_mdns.py
 
   # The ESP32-P4 host engine on CircuitPython: usbhost's C compiled against
-  # CircuitPython's own ESP-IDF 6 and Espressif's usb component, for the
+  # CircuitPython's own ESP-IDF 6.1 and Espressif's usb component, for the
   # DEV-KIT's board cell. Nothing else in CI compiles this path, since the
   # unix port builds usbhost to nothing, and a change to the shared engine
   # sources (modules/usbhost/src) can break it with every other check green.
