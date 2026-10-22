@@ -1,5 +1,7 @@
 # micropython-pydevices
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/PyDevices/micropython-pydevices)
+
 Build MicroPython firmware with PyDevices modules in it, for any port, with
 one command:
 
@@ -28,6 +30,10 @@ curl -fsSL https://pydevices.github.io/install.sh | sh
 It names the Debian packages each port still needs, with the `apt-get` line
 that installs them; [What each port needs](docs/newcomers.md#what-each-port-needs)
 is the same list.
+
+Or build in a codespace, with nothing to install: the badge above opens one,
+and [In a codespace](docs/newcomers.md#in-a-codespace) says how to pick your
+port and get the file out.
 
 On Windows you can build the windows port natively from PowerShell, with
 `python build_mp.py --port windows --variant pydevices --modules all`, once

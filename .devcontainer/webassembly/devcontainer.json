@@ -1,0 +1,24 @@
+{
+  "name": "webassembly: MicroPython in the browser, opened in workbench",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": "..",
+    "args": {
+      "PORT": "webassembly"
+    }
+  },
+  "mounts": [
+    "source=pydevices-deps-${devcontainerId},target=${containerWorkspaceFolder}/deps,type=volume"
+  ],
+  "onCreateCommand": "sh .devcontainer/on-create.sh",
+  "forwardPorts": [
+    8000
+  ],
+  "portsAttributes": {
+    "8000": {
+      "label": "workbench",
+      "onAutoForward": "openBrowser"
+    }
+  },
+  "postCreateCommand": "echo 'To build: ./build_mp.py --port webassembly --variant pydevices --modules all, then scripts/serve_workbench.sh'"
+}

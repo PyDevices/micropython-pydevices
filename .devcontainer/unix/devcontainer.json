@@ -1,0 +1,15 @@
+{
+  "name": "unix: MicroPython for Linux, with a desktop display",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": "..",
+    "args": {
+      "PORT": "unix"
+    }
+  },
+  "mounts": [
+    "source=pydevices-deps-${devcontainerId},target=${containerWorkspaceFolder}/deps,type=volume"
+  ],
+  "onCreateCommand": "sh .devcontainer/on-create.sh",
+  "postCreateCommand": "echo 'To build: ./build_mp.py --port unix --variant pydevices --modules all'"
+}
