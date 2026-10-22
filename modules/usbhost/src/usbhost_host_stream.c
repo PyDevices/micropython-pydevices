@@ -388,6 +388,8 @@ static int usbhost_stream_open_locked(uint32_t dev_id, uint8_t ep, const usbhost
     usb_device_info_t info;
     const bool high_speed = usb_host_device_info(dev, &info) == ESP_OK && info.speed == USB_SPEED_HIGH;
     // An isochronous bInterval is an exponent on either bus: 2^(b-1) slots.
+    // A full-speed audio endpoint has had its changed to 1 at the claim
+    // (usbhost_audio_interval.h), so this is the interval IDF polls at.
     const uint32_t interval = (binterval >= 1 && binterval <= 16) ? 1u << (binterval - 1) : 1;
     const usbhost_iso_queue_t q = usbhost_iso_queue_size(high_speed, interval, portTICK_PERIOD_MS);
 
