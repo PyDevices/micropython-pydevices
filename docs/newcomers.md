@@ -60,9 +60,16 @@ machine.
 
 To flash, take the file to the machine your board is plugged into. In the
 Explorer, open `builds/` down to your build, right-click `firmware.bin` (or
-`firmware.uf2` on rp2) and choose **Download**. Then write it with
-`mpftp firmware flash --artifact firmware.bin` (`--uf2` for a `.uf2`), or with
-esptool as in [Flash it](#flash-it).
+`firmware.uf2` on rp2) and choose **Download**. Then write it with mpftp,
+giving the build's port with `--port` and your board's serial port with `-d`,
+or with esptool as in [Flash it](#flash-it):
+
+```bash
+mpftp firmware flash --port esp32 --artifact firmware.bin -d COM3
+```
+
+For a `.uf2`, mpftp copies it to the board's drive instead:
+`mpftp firmware flash --port rp2 --uf2 --artifact firmware.uf2`.
 
 The webassembly container opens your build in workbench, the browser IDE.
 Build, then run `scripts/serve_workbench.sh`: it downloads the newest
