@@ -214,8 +214,10 @@ with `add_library("omnipython-lib", ...)`, and a manifest then says
 checkout is a link to the sibling `pydevices`, which wins over the pin like
 every other module; anywhere else it is a clone at the pinned commit. The tree
 goes to `deps/omnipython-lib`, and the outside packages the library builds from
-other repositories at a tag (audiocomponents' instruments and effects) are
-cloned once into `deps/omnipython-lib-sources`.
+other repositories at a tag (audiocomponents' instruments and effects,
+pygraphics) are cloned once into `deps/omnipython-lib-sources`. In the
+workspace they come from the sibling checkouts instead, as modules do, so a
+workspace build freezes the code beside it; the build says which.
 
 You still choose per build: name `pydevices`, `palettes`, `pdwidgets` or
 `audiocomponents` in `--modules` and it's frozen (each is a small manifest in
