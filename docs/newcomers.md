@@ -80,7 +80,7 @@ fetch are your distribution's packages. On Debian or Ubuntu (WSL included):
 |---|---|
 | every port | `git make cmake python3 gcc g++` |
 | unix | `pkg-config libsdl2-dev libffi-dev` (the desktop display) |
-| esp32 | `ninja-build python3-venv` |
+| esp32 | `ninja-build python3-venv libusb-1.0-0` (ESP-IDF's installer checks the openocd it fetches, which needs libusb) |
 | rp2 | `gcc-arm-none-eabi libnewlib-arm-none-eabi` |
 | windows, cross-built from Linux | `gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 libtool libltdl-dev autoconf automake` (the binutils package has `windres`) |
 | webassembly | `nodejs` |
@@ -89,9 +89,9 @@ All of it in one line:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git make cmake ninja-build \
-    python3 python3-venv python3-pip gcc g++ pkg-config libffi-dev libsdl2-dev \
-    gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 libtool libltdl-dev \
-    autoconf automake \
+    python3 python3-venv python3-pip libusb-1.0-0 gcc g++ pkg-config libffi-dev \
+    libsdl2-dev gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 libtool \
+    libltdl-dev autoconf automake \
     gcc-arm-none-eabi libnewlib-arm-none-eabi nodejs
 ```
 

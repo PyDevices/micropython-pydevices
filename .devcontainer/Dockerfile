@@ -6,7 +6,7 @@
 FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 
 ARG PORT
-ARG INSTALL_SH=https://raw.githubusercontent.com/PyDevices/PyDevices.github.io/install-deps/install.sh
+ARG INSTALL_SH=https://pydevices.github.io/install.sh
 
 # Downloaded first, not piped: a failed download must fail the image.
 RUN test -n "$PORT" \
