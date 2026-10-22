@@ -321,7 +321,9 @@ def lvgl_bindings(ws, module_dirs):
 # every other module, anywhere else a clone at the pinned commit. The tree is
 # assembled into deps/omnipython-lib on every build that needs it; the outside
 # packages the library pins by tag (pygraphics, audiocomponents' two) are
-# cloned once into deps/omnipython-lib-sources.
+# cloned once into deps/omnipython-lib-sources. In the workspace those come
+# from the sibling checkouts instead, the way every module does, so a
+# workspace build freezes the code beside it rather than the pinned tag.
 LIBRARY = "omnipython-lib"
 
 
@@ -367,14 +369,34 @@ class Library:
             out = DEPS / LIBRARY
             DEPS.mkdir(exist_ok=True)
             say(f"assembling the {LIBRARY} tree from {self.source.resolve()}")
+            sources = []
+            for name, sibling in self.sibling_sources():
+                say(f"  {name} from the sibling checkout {sibling}, not its pinned tag")
+                sources += ["--source", f"{name}={sibling}"]
             r = subprocess.run(
                 [sys.executable, str(self.source / "tools" / "libbuild.py"), "build", "--tree-only",
                  "--root", str(self.source), "--out", str(out), "--cache", str(DEPS / f"{LIBRARY}-sources"),
-                 "--library-name", LIBRARY], text=True, capture_output=True)
+                 "--library-name", LIBRARY, *sources], text=True, capture_output=True)
             if r.returncode != 0:
                 die(f"{self.source / 'tools' / 'libbuild.py'} failed:\n{r.stdout}{r.stderr}")
             self.tree = out / "library"
         return self.tree
+
+    def sibling_sources(self):
+        """[(package, checkout)] for each package the library's lib-lock.json pins
+        from another repository that the workspace has a checkout of."""
+        if not self.ws:
+            return []
+        try:
+            pinned = json.loads((self.source / "lib-lock.json").read_text())["pinned"]
+        except (OSError, ValueError, KeyError):
+            return []
+        out = []
+        for name, row in sorted(pinned.items()):
+            sibling = self.ws / row["repository"].rsplit("/", 1)[-1]
+            if (sibling / "lib" / name).is_dir():
+                out.append((name, sibling))
+        return out
 
     def names(self):
         """Every package in the tree."""
