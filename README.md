@@ -81,8 +81,8 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   - [`castif/`](modules/castif/): casts an ESP32-P4's screen and sound to a TV over Wi-Fi
     Display, or serves them as live HLS.
   - [`displayif/`](modules/displayif/): the display buses and panels under `displaydev`
-    (SPI, I2C, i80, QSPI, dot-clock RGB, MIPI-DSI, PicoDVI, RGB matrix, SDL2), with
-    CircuitPython's names.
+    (SPI, I2C, i80, QSPI, dot-clock RGB, MIPI-DSI, PicoDVI, RGB matrix, SDL2); the
+    dot-clock, MIPI-DSI, PicoDVI and RGB matrix modules keep CircuitPython's names.
   - [`h264enc/`](modules/h264enc/): RGB565 frames to H.264 on the ESP32-P4's hardware encoder.
   - [`jpegio/`](modules/jpegio/): JPEG decode and encode, with CircuitPython's `jpegio` API.
   - [`mdns/`](modules/mdns/): find and advertise services on the local network, with
