@@ -75,8 +75,14 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   (every module), `tflite/` and `vision/` (esp-vision's modules, from the pin
   in `.esp-vision/`; see [docs/esp-vision.md](docs/esp-vision.md)), the modules
   themselves, linked or cloned, and the C modules that live only here:
+  - [`audioif/`](modules/audioif/): the audio hardware under the audio pump, with
+    CircuitPython's `audiobusio.I2SOut` and `audioi2sin.I2SIn` on top.
+  - [`cameraif/`](modules/cameraif/): a MIPI-CSI camera as a MicroPython object, on the ESP32-P4.
   - [`castif/`](modules/castif/): casts an ESP32-P4's screen and sound to a TV over Wi-Fi
     Display, or serves them as live HLS.
+  - [`displayif/`](modules/displayif/): the display buses and panels under `displaydev`
+    (SPI, I2C, i80, QSPI, dot-clock RGB, MIPI-DSI, PicoDVI, RGB matrix, SDL2); the
+    dot-clock, MIPI-DSI, PicoDVI and RGB matrix modules keep CircuitPython's names.
   - [`h264enc/`](modules/h264enc/): RGB565 frames to H.264 on the ESP32-P4's hardware encoder.
   - [`jpegio/`](modules/jpegio/): JPEG decode and encode, with CircuitPython's `jpegio` API.
   - [`mdns/`](modules/mdns/): find and advertise services on the local network, with
@@ -85,6 +91,8 @@ New here? The [newcomer's guide](docs/newcomers.md) explains the model; the
   - [`ppa/`](modules/ppa/): scale, rotate, convert and fill pixel buffers, on the
     ESP32-P4's Pixel Processing Accelerator or in portable C elsewhere.
   - [`tsmux/`](modules/tsmux/): MPEG-TS and HLS segments from H.264.
+  - [`usbhost/`](modules/usbhost/): the USB host port and isochronous streams that
+    `usb.core` and the `usb.host.*` packages are built on (ESP32-S2, S3 and P4).
 - [`patches/micropython/`](patches/micropython/) — our patch series (`0001-…` to `0042-…`; there
   is no `0026`, whose fix moved into `patches/tinyusb/`), each justified
   in its own header; [`patches/apply_patches.py`](patches/apply_patches.py) applies it, plus
