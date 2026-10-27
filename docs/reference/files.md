@@ -1,0 +1,18 @@
+# Files and pins
+
+| Path | What it is |
+|---|---|
+| [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py) | The build command: [every option](build-command.md). It fills in `micropython/`, `modules/` and `deps/` if they're missing, prepares the MicroPython tree and runs the port's own `make`. |
+| [`UPSTREAM`](https://github.com/PyDevices/micropython-pydevices/blob/main/UPSTREAM) | The MicroPython commit everything applies to. |
+| [`modules.lock`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules.lock) | The commits `build_mp.py` fetches when a module isn't there. It also pins lvgl-bindings, the generated binding and LVGL that lvgl-micropython compiles: a build with lvgl-micropython fetches it into `modules/.lvgl-bindings`. Beside sibling checkouts, these are links to those checkouts instead. |
+| [`deps.lock`](https://github.com/PyDevices/micropython-pydevices/blob/main/deps.lock) | The toolchains `build_mp.py` fetches: ESP-IDF, emsdk, SDL2 for MinGW, the TinyUSB the esp32 port builds on, and the ESP-IDF components CircuitPython builds ask for. It also pins CircuitPython, for `--interpreter circuitpython`. |
+| [`provenance.json`](https://github.com/PyDevices/micropython-pydevices/blob/main/provenance.json) | The MicroPython pin and the checksum of every patch in `patches/micropython/` and `patches/tinyusb/`. |
+| [`modules/`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules) | [`manifest.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/manifest.py), the manifest every build freezes; `all/`; the modules, [linked or cloned](modules.md); and `.esp-vision/`, the pin for [esp-vision's modules](../how-it-works/esp-vision.md). |
+| [`patches/micropython/`](https://github.com/PyDevices/micropython-pydevices/tree/main/patches/micropython) | Our patch series, `0001-…` to `0042-…` (there is no `0026`, whose fix moved into `patches/tinyusb/`), each justified in its own header. |
+| [`patches/tinyusb/`](https://github.com/PyDevices/micropython-pydevices/tree/main/patches/tinyusb) | Patches to the TinyUSB the esp32 port builds on the S2, S3 and P4, which `build_mp.py` applies to `deps/espressif__tinyusb` (at its `deps.lock` tag) and builds in place of the port's own copy. |
+| [`patches/micropython-lib/`](https://github.com/PyDevices/micropython-pydevices/tree/main/patches/micropython-lib) | micropython-lib's own fixes from after the commit MicroPython's `lib/micropython-lib` points at. A firmware that freezes those packages, and a board whose `/lib` you fill from the submodule, both get them. |
+| [`patches/circuitpython/`](https://github.com/PyDevices/micropython-pydevices/tree/main/patches/circuitpython) | Our patches to CircuitPython, applied to `deps/circuitpython`. |
+| [`patches/apply_patches.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/patches/apply_patches.py) | Applies the MicroPython series, plus each module's own MicroPython patches, once, as one local commit. `--check` tests a change without applying it. |
+| [`variants/`](boards.md#variants) | Our variants and the esp32 settings. |
+| [`boards/circuitpython/`](boards.md#circuitpython-boards) | Boards CircuitPython has no definition for. |
+| [`scripts/`](https://github.com/PyDevices/micropython-pydevices/tree/main/scripts) | `exercise_build.sh`, `release_firmware.py`, `stage_firmware_page.py`, `serve_workbench.sh`, `freeze_list.py`, `update_provenance.py`. [Contributing](https://github.com/PyDevices/micropython-pydevices/blob/main/CONTRIBUTING.md) says what each is for. |

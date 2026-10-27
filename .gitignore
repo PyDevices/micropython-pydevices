@@ -30,3 +30,5 @@
 /.worktrees/
 __pycache__/
 /.micropython-build.lock
+/_site/
+/.venv-docs/
