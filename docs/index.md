@@ -4,50 +4,29 @@ micropython-pydevices builds firmware: MicroPython-compatible and
 CircuitPython-compatible interpreters with the PyDevices C modules compiled in,
 for boards, desktops and the browser. One command, `build_mp.py`, does it.
 
-- **[Get started](get-started/install.md)**: install the tools and build your
-  first firmware.
-- **[Guides](guides/build-for-a-board.md)**: build for a board, flash it, build
-  in a codespace or on Windows, and fit the image on a small flash.
-- **[Reference](reference/index.md)**: the build command, the modules, and the
-  boards and variants built.
-- **[How it works](how-it-works/index.md)**: the pinned upstream, the patches and
-  what a build does.
+## Get started
 
-```{toctree}
-:hidden:
-:caption: Get started
+- [Install](get-started/install.md)
+- [Build your first firmware](get-started/first-program.md)
 
-get-started/install
-get-started/first-program
-```
+## Guides
 
-```{toctree}
-:hidden:
-:caption: Guides
+- [Build for a board](guides/build-for-a-board.md)
+- [Choose modules](guides/choose-modules.md)
+- [Flash a board](guides/flash-a-board.md)
+- [Fit firmware on a small flash](guides/fit-firmware-on-a-small-flash.md)
+- [Build in a codespace](guides/build-in-a-codespace.md)
+- [Build on Windows](guides/build-on-windows.md)
+- [Build for CircuitPython](guides/build-for-circuitpython.md)
+- [Add a board variant](guides/add-a-board-variant.md)
+- [Build a troubleshooting image with a core dump](guides/build-a-troubleshooting-image.md)
+- [Use esp-vision's modules](guides/use-esp-vision-modules.md)
+- [Read build warnings](guides/read-build-warnings.md)
 
-guides/build-for-a-board
-guides/choose-modules
-guides/flash-a-board
-guides/fit-firmware-on-a-small-flash
-guides/build-in-a-codespace
-guides/build-on-windows
-guides/build-for-circuitpython
-guides/add-a-board-variant
-guides/build-a-troubleshooting-image
-guides/use-esp-vision-modules
-guides/read-build-warnings
-```
+## Reference
 
-```{toctree}
-:hidden:
-:caption: Reference
+- [Reference](reference/index.md)
 
-reference/index
-```
+## How it works
 
-```{toctree}
-:hidden:
-:caption: How it works
-
-how-it-works/index
-```
+- [How it works](how-it-works/index.md)

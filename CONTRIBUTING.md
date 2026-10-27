@@ -20,7 +20,7 @@ fix is a good first contribution.
 | `.devcontainer/` | One dev container per port. |
 | `docs/` | The documentation site. |
 
-The reference pages in [the docs](https://micropython-pydevices.readthedocs.io)
+The reference pages in [the docs](https://github.com/PyDevices/micropython-pydevices/blob/main/docs/index.md)
 describe what each of these does.
 
 ## Rules
