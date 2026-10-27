@@ -48,10 +48,10 @@ pedestrian test with one person blacked out.
 
 ## What it costs
 
-Built into an `all` image, the two modules added about 2.1 MB on the S3 (the
-LCD-7's app partition grew from 0x440000 to 0x6b0000, leaving about 1.2 MB of
-filesystem on 8 MB of flash) and about 3.1 MB on the P4 (`firmware.bin` 4.53 MB
-to 7.68 MB of 16 MB). Most of it is ESP-DL. That is why they are opt-in.
+Built into an `all` image, the two modules added about 2.5 MB on the S3 (the
+LCD-7's app partition grew from 0x470000 to 0x6d0000, leaving about 1 MB of
+filesystem on 8 MB of flash) and about 3.1 MB on the P4 (`firmware.bin` 4.6 MiB
+to 7.6 MiB of 16 MB). Most of it is ESP-DL. That is why they are opt-in.
 
 ## Not included
 

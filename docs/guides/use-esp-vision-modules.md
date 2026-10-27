@@ -18,7 +18,7 @@ are opt-in: `--modules all` leaves them out, so name them:
 esp-vision's stubs (`stubs/*.pyi` in esp-vision) document the API. The desktop
 ports skip both modules, and they build for MicroPython only.
 
-Built into an `all` image they add about 2 MB on the S3 and 3 MB on the P4,
+Built into an `all` image they add about 2.5 MB on the S3 and 3 MB on the P4,
 most of it ESP-DL, so check [that the image fits](fit-firmware-on-a-small-flash.md).
 
 `image.flush()` raises `OSError("preview flush failed: ESP_ERR_NOT_SUPPORTED")`,
