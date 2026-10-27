@@ -234,6 +234,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ccache gettext cmake ninja-build pkg-config libffi-dev
 
+      - name: The runner's Python, which the cached venvs are tied to
+        id: py
+        run: echo "version=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" >> "$GITHUB_OUTPUT"
+
       - name: Cache the toolchains
         uses: actions/cache@v6
         with:
@@ -241,7 +245,7 @@ jobs:
             deps/circuitpython
             deps/circuitpython-venv
             ~/.espressif
-          key: deps-cp-esp32p4-${{ hashFiles('deps.lock', 'patches/circuitpython/**') }}
+          key: deps-cp-esp32p4-py${{ steps.py.outputs.version }}-${{ hashFiles('deps.lock', 'patches/circuitpython/**') }}
 
       - name: Cache compiler output
         uses: actions/cache@v6
