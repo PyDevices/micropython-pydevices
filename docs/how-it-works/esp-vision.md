@@ -11,7 +11,7 @@ sibling clone at that commit (`../esp-vision`), or fetches that commit alone.
 The leading dot keeps it out of `--modules` and `all`, because esp-vision's own
 `micropython.cmake` is its whole firmware build, not a module.
 
-[`modules/tflite`](../../modules/tflite/) and [`modules/vision`](../../modules/vision/) are our glue around esp-vision's files:
+[`modules/tflite`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/tflite) and [`modules/vision`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/vision) are our glue around esp-vision's files:
 the ESP-IDF components esp-vision uses, at its versions; the include paths and
 definitions MicroPython's QSTR scan needs (it sees only a module's own paths,
 never a linked component's); and two pieces of our own.

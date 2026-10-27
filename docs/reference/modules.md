@@ -29,7 +29,7 @@ tracked here or linked from a sibling checkout or cloned at the commit in
 | `micropython-lib` | MicroPython's own upstream packages, frozen from the checkout the MicroPython tree carries. |
 | `tflite`, `vision` | [esp-vision's modules](../guides/use-esp-vision-modules.md), opt-in: `all` leaves them out. |
 
-[`modules/all`](../../modules/all/) is not a module but the rule behind `all`: every module beside it
+[`modules/all`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/all) is not a module but the rule behind `all`: every module beside it
 except those with an `OPT_IN` file.
 
 ## Which modules build on CircuitPython
