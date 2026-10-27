@@ -503,8 +503,10 @@ def notes(doc):
               + (f" and CircuitPython-compatible {doc['circuitpython']}" if doc.get("circuitpython") else "")
               + f", built by [this run]({doc['run']}) on {doc['built'][:10]}.", "",
               "**Before you flash,** copy your files off the board, `secrets.py` above all. A build can move the "
-              "filesystem, and a flash across a layout change leaves it empty. Coming from another firmware "
-              "(MicroPython to CircuitPython or back), run `esptool --chip <chip> erase-flash` first.", "",
+              "filesystem, and after a flash across a layout change MicroPython finds the old data where its "
+              "filesystem now starts, says it looks corrupted and mounts nothing. So when the partition table "
+              "changes, or you come from another firmware (MicroPython to CircuitPython or back), run "
+              "`esptool --chip <chip> erase-flash` first, then put your files back.", "",
               "| Board | Interpreter | File to flash | How |", "|---|---|---|---|"]
     for b in doc["builds"]:
         f = next(x for x in b["files"] if x["role"] in ("flash", "uf2"))
