@@ -24,3 +24,27 @@ for _pkg in (
     "usb-device-mouse",
 ):
     require(_pkg)
+
+# The frozen usb package also hides every other usb/ in /lib, so our USB
+# packages, which install there, can't be added with mip on this firmware.
+# They go in with it: the device classes always (they need only usb.device),
+# and usb.core with the host classes when the build carries usbhost, whose
+# _usbhost they run on.
+import os
+
+include("../library.py")
+for _pkg in ("usb-device-audio", "usb-device-video", "usb-device-msc"):
+    require(_pkg, library="omnipython-lib")
+_names = [n.strip() for n in os.environ.get("PYDEVICES_MODULES", "").split(",")]
+_usbhost = os.path.realpath("../usbhost")
+if any(n in ("all", "usbhost") or os.path.realpath(n) == _usbhost for n in _names if n):
+    for _pkg in (
+        "usb-core",
+        "usb-host-audio",
+        "usb-host-video",
+        "usb-host-net",
+        "usb-host-hid",
+        "usb-host-msc",
+        "usb-host-cdc",
+    ):
+        require(_pkg, library="omnipython-lib")
