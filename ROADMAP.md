@@ -9,7 +9,7 @@ or missing for you, open an
   firmware page's "Install from a file", as the released images do.
 
 More modules in CircuitPython-compatible builds
-([what builds today](docs/build-plan.md#which-modules-build-on-circuitpython)):
+([what builds today](docs/reference/modules.md#which-modules-build-on-circuitpython)):
 
 - **castif casting on CircuitPython's ESP32-P4 builds.** castif and h264enc
   build there and h264enc encodes, but the port has no network until
