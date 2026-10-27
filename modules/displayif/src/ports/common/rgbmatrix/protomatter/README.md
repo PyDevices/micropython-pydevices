@@ -30,14 +30,14 @@ here.
 top of the 1.7.1 baseline, made to integrate with displayif's MicroPython
 usermod build and CircuitPython patch layer:
 
-- `arch/rp2040.h` — includes `../../hardware_pwm/include/hardware/pwm.h`
+- [`arch/rp2040.h`](arch/rp2040.h) — includes `../../hardware_pwm/include/hardware/pwm.h`
   instead of `hardware/pwm.h` (displayif's PIO/hardware layout), and adds a
   `DISPLAYIF_RGBMATRIX_USE_PROTOMATTER`-guarded include for the CIRCUITPY
   branch.
-- `arch/teensy4.h` — narrows the CPU guard to `__IMXRT1062__` only (drops
+- [`arch/teensy4.h`](arch/teensy4.h) — narrows the CPU guard to `__IMXRT1062__` only (drops
   `CPU_MIMXRT1062` / `CPU_MIMXRT1064`, which are Arduino/Teensyduino-only
   macros not present in this build).
-- `arch/samd51.h`, `arch/samd-common.h`, `arch/esp32-s3.h`, `arch/arch.h` —
+- [`arch/samd51.h`](arch/samd51.h), [`arch/samd-common.h`](arch/samd-common.h), [`arch/esp32-s3.h`](arch/esp32-s3.h), [`arch/arch.h`](arch/arch.h) —
   differ beyond formatting; not yet diffed line-by-line against 1.7.1.
 
 Exact import date and whether these arch changes were applied at vendoring

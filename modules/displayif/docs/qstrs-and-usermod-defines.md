@@ -53,7 +53,7 @@ A guarded name is only safe if something else collects it:
 
 1. **It is in MicroPython's static pool** (`py/qstrdefs.h`) — `__init__`,
    `__name__` and the rest. jpegio relied on this for `MP_QSTR___init__`
-   while it lived here (it's now micropython-pydevices' `modules/jpegio`), which
+   while it lived here (it's now micropython-pydevices' [`modules/jpegio`](../../jpegio/)), which
    is why the checker has a `CORE_POOL` list, empty today. Add to that list only with the reason written down; the pool is
    MicroPython's, and it changes between versions.
 2. **The same file references it unguarded elsewhere.**
@@ -81,7 +81,7 @@ pass does, with no INTERFACE define:
 | before | 0 | 14 |
 | after | 14 | 14 |
 
-jpegio's README (now micropython-pydevices' `modules/jpegio/README.md`) has the
+jpegio's README (now micropython-pydevices' [`modules/jpegio/README.md`](../../jpegio/README.md)) has the
 same story from the day it was found, with the LVGL decoder's specifics.
 
 <!-- sources: displayif#24; the jpegio fix fb4fd6a; micropython v1.29.0
