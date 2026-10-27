@@ -1,0 +1,5 @@
+# A 1 ms FreeRTOS tick instead of the port's 10 ms. time.sleep_ms(1) and every
+# task delay then wake on the millisecond, which is what a display's
+# buffer-swap wait and a Python audio feeder's nap are written for. The ESP32-S3
+# builds already run at 1 ms.
+CONFIG_FREERTOS_HZ=1000
