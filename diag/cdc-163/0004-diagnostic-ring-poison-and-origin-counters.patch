@@ -1,0 +1,139 @@
+Diagnostic only, for the micropython-pydevices#163 bench build: never merge, never put under patches/.
+Applies on top of patches/tinyusb/0001 and 0002 (the base of the 0003 counters patch), in the
+espressif__tinyusb managed component. Not compiled by its author.
+---
+--- a/src/portable/synopsys/dwc2/dcd_dwc2.c
++++ b/src/portable/synopsys/dwc2/dcd_dwc2.c
+@@ -711,6 +711,7 @@
+     xfer->buffer = NULL;
+     xfer->ff = ff;
+     xfer->total_len = total_bytes;
++    _diag_pulled[epnum] = 0;
+     xfer->iso_retry = xfer->interval; // Reset ISO retry counter to interval value
+ 
+     // Schedule packets to be sent within interrupt
+@@ -862,6 +863,35 @@
+ #endif
+ 
+ #if CFG_TUD_DWC2_SLAVE_ENABLE
++// Diagnostic counters for micropython-pydevices#163 (read with machine.mem32 at this symbol's address):
++// [0] bytes poisoned in the CDC TX ring after the interrupt pulled them, [1] IN transfers that completed with the
++// bytes pulled from the ring different from the length they were scheduled with, [2] ring pulls that returned fewer
++// bytes than asked, [3] ring pulls that found the ring's index span larger than its depth (tu_fifo corrected the read
++// index), [4] tu_fifo_clear() calls, [5] tu_edpt_stream_write_xfer() calls made from interrupt context,
++// [6] ring writes that found the stream in overwritable mode, [7] IN transfers whose DIEPTSIZ (XferSize or
++// packet count) was not back at 0 when the transfer-complete interrupt arrived.
++__attribute__((used)) volatile uint32_t tud_dwc2_epin_diag[8];
++// Bytes pulled from the software FIFO for the IN transfer now in flight, per endpoint.
++static uint16_t _diag_pulled[16];
++// 0xE5 never appears in the repro's repr() output (ASCII only), so a 0xE5 on the wire is a read of consumed ring space.
++#define DIAG_POISON 0xE5
++
++static void diag_poison_consumed(tu_fifo_t *ff, uint16_t rd_idx_before, uint16_t n) {
++  if (n == 0) {
++    return;
++  }
++  const uint16_t depth = ff->depth;
++  uint16_t ptr = (rd_idx_before >= depth) ? (uint16_t)(rd_idx_before - depth) : rd_idx_before;
++  const uint16_t lin = (uint16_t)(depth - ptr);
++  if (n <= lin) {
++    memset(ff->buffer + ptr, DIAG_POISON, n);
++  } else {
++    memset(ff->buffer + ptr, DIAG_POISON, lin);
++    memset(ff->buffer, DIAG_POISON, (uint16_t)(n - lin));
++  }
++  tud_dwc2_epin_diag[0] += n;
++}
++
+ static uint16_t epin_write_tx_fifo(dwc2_regs_t *dwc2, uint8_t epnum) {
+   dwc2_dep_t *const epin = &dwc2->ep[0][epnum];
+   xfer_ctl_t *const xfer = XFER_CTL_BASE(epnum, TUSB_DIR_IN);
+@@ -890,7 +920,13 @@
+     // Push packet to Tx-FIFO
+     volatile uint32_t *tx_fifo = dwc2->fifo[epnum];
+     if (xfer->ff) {
+-      tu_hwfifo_write_from_fifo(tx_fifo, xfer->ff, xact_bytes, NULL);
++      const uint16_t rd_before = xfer->ff->rd_idx;
++      const uint16_t got = tu_hwfifo_write_from_fifo(tx_fifo, xfer->ff, xact_bytes, NULL);
++      if (got < xact_bytes) {
++        tud_dwc2_epin_diag[2]++;
++      }
++      _diag_pulled[epnum] += got;
++      diag_poison_consumed(xfer->ff, rd_before, got);
+       total_bytes_written += xact_bytes;
+     } else {
+       tu_hwfifo_write(tx_fifo, xfer->buffer, xact_bytes, NULL);
+@@ -1013,6 +1049,15 @@
+       // EP0 can only handle one packet. Schedule another packet to be transmitted.
+       edpt_schedule_packets(rhport, epnum, TUSB_DIR_IN);
+     } else {
++      if (xfer->ff && _diag_pulled[epnum] != xfer->total_len) {
++        tud_dwc2_epin_diag[1]++;
++      }
++      {
++        const dwc2_ep_tsize_t done = {.value = epin->tsiz};
++        if (done.xfer_size != 0 || done.packet_count != 0) {
++          tud_dwc2_epin_diag[7]++;
++        }
++      }
+       dcd_event_xfer_complete(rhport, epnum | TUSB_DIR_IN_MASK, xfer->total_len, XFER_RESULT_SUCCESS, true);
+     }
+   }
+--- a/src/common/tusb_fifo.c
++++ b/src/common/tusb_fifo.c
+@@ -78,7 +78,10 @@
+ }
+ 
+ // clear fifo by resetting read and write indices
++extern volatile uint32_t tud_dwc2_epin_diag[8]; // micropython-pydevices#163 diagnostic, see dcd_dwc2.c
++
+ void tu_fifo_clear(tu_fifo_t *f) {
++  tud_dwc2_epin_diag[4]++;
+   ff_lock(f->mutex_wr);
+   ff_lock(f->mutex_rd);
+ 
+@@ -468,6 +471,7 @@
+ 
+   // Check overflow and correct if required
+   if (count > f->depth) {
++    tud_dwc2_epin_diag[3]++;
+     rd_idx = correct_read_index(f, wr_idx);
+     count  = f->depth;
+   }
+@@ -531,6 +535,10 @@
+   TU_LOG(TU_FIFO_DBG, "rd = %3u, wr = %3u, count = %3u, remain = %3u, n = %3u:  ", rd_idx, wr_idx,
+          tu_ff_overflow_count(f->depth, wr_idx, rd_idx), tu_ff_remaining_local(f->depth, wr_idx, rd_idx), n);
+ 
++  if (f->overwritable) {
++    tud_dwc2_epin_diag[6]++;
++  }
++
+   if (!f->overwritable) {
+     // limit up to full
+     const uint16_t remain = tu_ff_remaining_local(f->depth, wr_idx, rd_idx);
+--- a/src/tusb.c
++++ b/src/tusb.c
+@@ -329,6 +329,9 @@
+   }
+ 
+   s->is_host = is_host;
++  if (is_tx) {
++    memset(ff_buf, 0xE5, ff_bufsize); // micropython-pydevices#163 diagnostic: see dcd_dwc2.c DIAG_POISON
++  }
+   tu_fifo_config(&s->ff, ff_buf, ff_bufsize, overwritable);
+ 
+   #if OSAL_MUTEX_REQUIRED
+@@ -398,7 +401,13 @@
+   return true;
+ }
+ 
++extern volatile uint32_t tud_dwc2_epin_diag[8]; // micropython-pydevices#163 diagnostic, see dcd_dwc2.c
++extern int xPortInIsrContext(void);
++
+ uint32_t tu_edpt_stream_write_xfer(tu_edpt_stream_t *s) {
++  if (xPortInIsrContext()) {
++    tud_dwc2_epin_diag[5]++;
++  }
+   const uint16_t ff_count = tu_fifo_count(&s->ff);
+   TU_VERIFY(ff_count > 0, 0); // skip if no data
+   TU_VERIFY(stream_claim(s), 0);
