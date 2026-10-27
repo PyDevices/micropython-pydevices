@@ -14,4 +14,3 @@ globals().update(configure(
 ))
 
 # Planning notes and upstream reports that live here until they move.
-exclude_patterns += ["build-plan.md", "upstream"]
