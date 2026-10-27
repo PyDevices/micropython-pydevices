@@ -129,6 +129,9 @@
  "tinyusb_patches": {
   "0001-dcd_dwc2-disable-an-endpoint-without-waiting-on-isr-cleared-flags.patch": {
    "sha256": "9a15fb67a1c948b9c1554e3e8759a3271da423c37532d690b846ed0643572687"
+  },
+  "0002-dcd_dwc2-count-down-an-in-transfer-instead-of-re-reading-xfersize.patch": {
+   "sha256": "187639d773849fe832596cff631f2147ab9fdbd2be320fe38c5a39e624fae5d1"
   }
  }
 }
