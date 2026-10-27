@@ -1,0 +1,94 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 12:00:00 -0500
+Subject: [PATCH] dcd_dwc2: count down an IN transfer's bytes instead of
+ reading XferSize back between packets.
+
+In slave mode, epin_write_tx_fifo() writes as many packets of an IN
+transfer as the endpoint's TX FIFO has room for. Before each packet it
+read DIEPTSIZ again and took XferSize as the bytes still to write, up
+to DIEPTSIZ's packet count.
+
+The packet count is no bound. It falls when the core sends a packet,
+not when one is written, so while the host is slow to read it still
+counts packets that already sit in the FIFO, and the loop goes round
+again after the transfer's last packet. Only XferSize then stops it, and
+only if the read sees the packet that was just written. If it doesn't,
+the loop writes one packet more than the transfer has. For the CDC TX
+stream (a software FIFO, CFG_TUD_EDPT_DEDICATED_HWFIFO) that packet is
+the next bytes the application has queued, taken out of the software
+FIFO ahead of the transfer that should carry them; if fewer are
+queued, the last word is padded with up to three zero bytes. For a
+buffer transfer it is whatever lies past the end of the buffer.
+
+On an ESP32-P4 (full-speed controller, native USB CDC console) long
+console output read by a slow host now and then carried zero bytes
+that were never printed, most often 3 of them right after a line and
+before its "\r\n", which is where the CDC FIFO runs dry while the
+board waits for the host (micropython-pydevices#163). A Python
+os.dupterm() stream attached beside the CDC saw every write intact.
+
+The loop now reads DIEPTSIZ once, counts the bytes down itself and
+stops when the transfer has none left. handle_epin_slave() decides to
+mask the TX FIFO empty interrupt from the same count, not from a read
+taken after the writes. Where the read-back was already current this
+changes nothing.
+
+Based-on: micropython/tinyusb-espressif v0.21.0.1-micropython1 (5c5c660)
+---
+diff --git a/src/portable/synopsys/dwc2/dcd_dwc2.c b/src/portable/synopsys/dwc2/dcd_dwc2.c
+index 740b795..f579d47 100644
+--- a/src/portable/synopsys/dwc2/dcd_dwc2.c
++++ b/src/portable/synopsys/dwc2/dcd_dwc2.c
+@@ -866,15 +866,21 @@ static uint16_t epin_write_tx_fifo(dwc2_regs_t *dwc2, uint8_t epnum) {
+   dwc2_dep_t *const epin = &dwc2->ep[0][epnum];
+   xfer_ctl_t *const xfer = XFER_CTL_BASE(epnum, TUSB_DIR_IN);
+ 
+-  dwc2_ep_tsize_t tsiz           = {.value = epin->tsiz};
+-  const uint16_t  remain_packets = tsiz.packet_count;
++  const dwc2_ep_tsize_t tsiz      = {.value = epin->tsiz};
++  const uint16_t        remain_packets = tsiz.packet_count;
++
++  // Bytes of this transfer not yet written to the FIFO. XferSize is read once here and counted down below, not read
++  // back between packets: read straight after a FIFO write it can still include the packet just written, and then
++  // the loop writes one packet more than the transfer has left. From a software FIFO that packet is the next
++  // transfer's bytes, zero-padded to a whole word; from a buffer it is whatever lies past the buffer's end. The
++  // packet count doesn't stop it: it also counts packets written but not yet sent, which pile up while the host is
++  // slow to read.
++  uint16_t remain_bytes = (uint16_t) tsiz.xfer_size;
+ 
+   uint16_t total_bytes_written = 0;
+   // Process every single packet (only whole packets can be written to fifo)
+-  for (uint16_t i = 0; i < remain_packets; i++) {
+-    tsiz.value                  = epin->tsiz;
+-    const uint16_t remain_bytes = (uint16_t)tsiz.xfer_size;
+-    const uint16_t xact_bytes   = tu_min16(remain_bytes, xfer->max_size);
++  for (uint16_t i = 0; i < remain_packets && remain_bytes > 0; i++) {
++    const uint16_t xact_bytes = tu_min16(remain_bytes, xfer->max_size);
+ 
+     // Check if dtxfsts has enough space available
+     if (xact_bytes > ((epin->dtxfsts & DTXFSTS_INEPTFSAV_Msk) << 2)) {
+@@ -891,6 +897,7 @@ static uint16_t epin_write_tx_fifo(dwc2_regs_t *dwc2, uint8_t epnum) {
+       xfer->buffer += xact_bytes;
+       total_bytes_written += xact_bytes;
+     }
++    remain_bytes -= xact_bytes;
+   }
+   return total_bytes_written;
+ }
+@@ -1014,11 +1021,12 @@ static void handle_epin_slave(uint8_t rhport, uint8_t epnum, dwc2_diepint_t diep
+   // - 64 bytes or
+   // - Half/Empty of TX FIFO size (configured by GAHBCFG.TXFELVL)
+   if (diepint_bm.txfifo_empty && tu_bit_test(dwc2->diepempmsk, epnum)) {
+-    epin_write_tx_fifo(dwc2, epnum);
++    // What is left to write, read before writing: read back after, it can still show the last packet as unwritten.
++    const dwc2_ep_tsize_t tsiz = {.value = epin->tsiz};
++    const uint16_t written = epin_write_tx_fifo(dwc2, epnum);
+ 
+     // Turn off TXFE if all bytes are written.
+-    dwc2_ep_tsize_t tsiz = {.value = epin->tsiz};
+-    if (tsiz.xfer_size == 0) {
++    if (written >= tsiz.xfer_size) {
+       dwc2->diepempmsk &= ~(1u << epnum);
+     }
+   }
