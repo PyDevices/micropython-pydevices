@@ -54,9 +54,8 @@ path.
 
 **Upstream's generic esp32 boards give the app 1.94 MiB**
 (`partitions-4MiBplus.csv`), and the kitchen sink is about 4.5 MiB on a P4 and
-4.1 MiB on an S3. Autosize
-handles that, but only if the flash size is right: gen_esp32part refuses a table
-larger than the configured flash. Hence `--flash`.
+4.1 MiB on an S3. Autosize handles that, but only if the flash size is right:
+gen_esp32part refuses a table larger than the configured flash. Hence `--flash`.
 
 **`make clean` on esp32 is `idf.py fullclean`**, which deletes the whole port's
 `managed_components/`. Never run it against a build directory that doesn't exist

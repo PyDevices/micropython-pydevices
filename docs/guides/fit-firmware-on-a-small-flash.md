@@ -26,8 +26,8 @@ compile runs twice.
 
 How much fits depends on the flash. On a Pico 2 (4 MB), `all` builds and fits,
 using 93 % of its 2560 KB firmware region and leaving a 1536 KB filesystem. On
-a Pico (2 MB) it can't: the image is bigger than the whole flash, so the build stops at the first link with
-the overflow error. Name what your project uses instead:
+a Pico (2 MB) it can't: the image is bigger than the whole flash, so the build
+stops at the first link with the overflow error. Name what your project uses instead:
 
 ```bash
 ./build_mp.py --port rp2 --board RPI_PICO --modules displayif,jpegio,pygraphics,palettes,pdwidgets
