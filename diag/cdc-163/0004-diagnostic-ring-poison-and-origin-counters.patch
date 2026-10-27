@@ -1,6 +1,6 @@
 Diagnostic only, for the micropython-pydevices#163 bench build: never merge, never put under patches/.
 Applies on top of patches/tinyusb/0001 and 0002 (the base of the 0003 counters patch), in the
-espressif__tinyusb managed component. Not compiled by its author.
+espressif__tinyusb managed component. Compile-checked 2026-10-27 against the DEV-KIT build's flags.
 ---
 --- a/src/portable/synopsys/dwc2/dcd_dwc2.c
 +++ b/src/portable/synopsys/dwc2/dcd_dwc2.c
@@ -8,7 +8,7 @@ espressif__tinyusb managed component. Not compiled by its author.
      xfer->buffer = NULL;
      xfer->ff = ff;
      xfer->total_len = total_bytes;
-+    _diag_pulled[epnum] = 0;
++    { extern uint16_t tud_dwc2_diag_pulled[16]; tud_dwc2_diag_pulled[epnum] = 0; }
      xfer->iso_retry = xfer->interval; // Reset ISO retry counter to interval value
  
      // Schedule packets to be sent within interrupt
@@ -25,7 +25,7 @@ espressif__tinyusb managed component. Not compiled by its author.
 +// packet count) was not back at 0 when the transfer-complete interrupt arrived.
 +__attribute__((used)) volatile uint32_t tud_dwc2_epin_diag[8];
 +// Bytes pulled from the software FIFO for the IN transfer now in flight, per endpoint.
-+static uint16_t _diag_pulled[16];
++uint16_t tud_dwc2_diag_pulled[16];
 +// 0xE5 never appears in the repro's repr() output (ASCII only), so a 0xE5 on the wire is a read of consumed ring space.
 +#define DIAG_POISON 0xE5
 +
@@ -58,7 +58,7 @@ espressif__tinyusb managed component. Not compiled by its author.
 +      if (got < xact_bytes) {
 +        tud_dwc2_epin_diag[2]++;
 +      }
-+      _diag_pulled[epnum] += got;
++      tud_dwc2_diag_pulled[epnum] += got;
 +      diag_poison_consumed(xfer->ff, rd_before, got);
        total_bytes_written += xact_bytes;
      } else {
@@ -67,7 +67,7 @@ espressif__tinyusb managed component. Not compiled by its author.
        // EP0 can only handle one packet. Schedule another packet to be transmitted.
        edpt_schedule_packets(rhport, epnum, TUSB_DIR_IN);
      } else {
-+      if (xfer->ff && _diag_pulled[epnum] != xfer->total_len) {
++      if (xfer->ff && tud_dwc2_diag_pulled[epnum] != xfer->total_len) {
 +        tud_dwc2_epin_diag[1]++;
 +      }
 +      {
