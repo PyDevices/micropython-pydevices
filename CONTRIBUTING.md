@@ -57,7 +57,7 @@ python3 scripts/update_provenance.py
 
 ## Exercise a build from a bare clone
 
-`scripts/exercise_build.sh` builds every desktop port and two esp32 boards from
+[`scripts/exercise_build.sh`](scripts/exercise_build.sh) builds every desktop port and two esp32 boards from
 a bare clone, checks the failure paths, and writes a report of what should match
 on any machine. It needs no board. For a report on builds you already have, name
 their folders:

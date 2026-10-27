@@ -37,7 +37,7 @@ Explorer, open `builds/` down to your build, right-click `firmware.bin` (or
 ## Try a webassembly build in workbench
 
 The webassembly container opens your build in workbench, the browser IDE.
-Build, then run `scripts/serve_workbench.sh`: it downloads the newest workbench
+Build, then run [`scripts/serve_workbench.sh`](../../scripts/serve_workbench.sh): it downloads the newest workbench
 release, puts your `micropython.wasm` in it and serves it on port 8000, which
 the container forwards and your browser opens. Click the simulator button (the
 display icon) and the REPL that starts is your build.

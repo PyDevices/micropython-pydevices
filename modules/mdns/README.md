@@ -83,9 +83,9 @@ dotted string or `None` if no address came back. (CircuitPython's is an
 
 ## Tests
 
-`tests/test_mdns.py` runs on a unix or Windows build: the API, its errors,
+[`tests/test_mdns.py`](tests/test_mdns.py) runs on a unix or Windows build: the API, its errors,
 and a service the process advertises and finds itself.
-`tests/check_mdns_zeroconf.py` runs that build against python-zeroconf in
+[`tests/check_mdns_zeroconf.py`](tests/check_mdns_zeroconf.py) runs that build against python-zeroconf in
 another process, both ways.
 
 ```bash

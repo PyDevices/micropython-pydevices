@@ -36,14 +36,14 @@ Our variants, in `variants/`.
 | esp32 | `ESP32_GENERIC_P4` `WIFI6_DEV_KIT`, `WIFI6_DEV_KIT_H2` | The P4 DEV-KIT, with the USB device on the two different connectors in the table above. |
 | rp2 | `RPI_PICO2_W` `PIMORONI_PICO_PLUS2_W` | The Pimoroni Pico Plus 2 W. |
 
-The esp32 `variants/esp32/` folder also holds the `sdkconfig` fragments and
+The esp32 [`variants/esp32/`](../../variants/esp32/) folder also holds the `sdkconfig` fragments and
 partition table every esp32 or every chip gets:
 [Add a board variant](../guides/add-a-board-variant.md) says how they combine.
 
 ## CircuitPython boards
 
 With `--interpreter circuitpython`, boards are CircuitPython's own. These are
-ours, in `boards/circuitpython/`, for boards CircuitPython has no definition for:
+ours, in [`boards/circuitpython/`](../../boards/circuitpython/), for boards CircuitPython has no definition for:
 
 | Board | What it is |
 |---|---|

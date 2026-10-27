@@ -2,7 +2,7 @@
 
 **Status:** source-integrated component — built into firmware from source as a user C module, not installed as a package. By design it has no versioned releases and is **not** in PyDevices' publishing set (unlike `pydevices` / `pydevices-desktop`). Maturity: **Alpha**. Issues: [micropython-pydevices issues](https://github.com/PyDevices/micropython-pydevices/issues).
 
-Native display **interface** modules for PyDevices `displaydev`. Portable code in `src/ports/common/`; SoC-specific code under `src/ports/<mp-port>/`.
+Native display **interface** modules for PyDevices `displaydev`. Portable code in [`src/ports/common/`](src/ports/common/); SoC-specific code under `src/ports/<mp-port>/`.
 
 New here? Read the [newcomer's guide](docs/newcomers.md) for the board-to-
 backend map, firmware integration boundary, and lifecycle rules.
@@ -137,7 +137,7 @@ Then run the lifecycle API test under the same interpreter:
 
 ## Third-party
 
-`src/ports/common/rgbmatrix/protomatter/` vendors
+[`src/ports/common/rgbmatrix/protomatter/`](src/ports/common/rgbmatrix/protomatter/) vendors
 [adafruit/Adafruit_Protomatter](https://github.com/adafruit/Adafruit_Protomatter)
 (BSD). See [UPSTREAM](UPSTREAM) and
 [the protomatter/ README](src/ports/common/rgbmatrix/protomatter/README.md)
