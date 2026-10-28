@@ -13,8 +13,8 @@ Copy them to your computer and play the playlist with ffplay or VLC.
 A real stream serves the same playlist and segments over HTTP while the
 encoder runs; the Segmenter keeps the newest ones for that.
 
-Needs: an ESP32-P4 board, and firmware built with h264enc, tsmux and ppa
-(``--modules all`` has all three).
+Needs: an ESP32-P4 board, and firmware built with h264enc, tsmux, ppa
+and pygraphics (``--modules all`` has them all).
 
 Run it:
 
@@ -28,6 +28,7 @@ Tested on: an ESP32-P4 board with ESP32-C6 Wi-Fi (``ESP32_GENERIC_P4``,
 
 import h264enc
 import tsmux
+from pygraphics import RGB565, FrameBuffer
 
 # Change these to match your setup.
 WIDTH = 320  # a multiple of 16
@@ -36,14 +37,13 @@ FPS = 30
 SECONDS = 4
 BOX = 48
 
-# RGB565 colours, in the board's byte order.
-BLUE = b"\x1f\x00"
-WHITE = b"\xff\xff"
+# RGB565 colours.
+BLUE = 0x001F
+WHITE = 0xFFFF
 
-# Make the background once, and a frame buffer to draw into.
-background = BLUE * (WIDTH * HEIGHT)
-frame = bytearray(background)
-box_row = WHITE * BOX
+# A frame buffer to draw into, and pygraphics to draw on it.
+frame = bytearray(WIDTH * HEIGHT * 2)
+canvas = FrameBuffer(frame, WIDTH, HEIGHT, RGB565)
 
 # A keyframe every second, so every one-second segment can start with one.
 encoder = h264enc.Encoder(WIDTH, HEIGHT, fps=FPS, gop=FPS)
@@ -52,12 +52,10 @@ segmenter = tsmux.Segmenter(segments=3, target=1000)
 frames = FPS * SECONDS
 for n in range(frames):
     # Draw the frame: background first, then the square.
-    frame[:] = background
+    canvas.fill(BLUE)
     x = n * (WIDTH - BOX) // frames
     y = (HEIGHT - BOX) // 2
-    for row in range(y, y + BOX):
-        start = (row * WIDTH + x) * 2
-        frame[start : start + BOX * 2] = box_row
+    canvas.fill_rect(x, y, BOX, BOX, WHITE)
 
     # Encode it and add it to the stream. Timestamps count 90 kHz ticks.
     access_unit = encoder.encode(frame)

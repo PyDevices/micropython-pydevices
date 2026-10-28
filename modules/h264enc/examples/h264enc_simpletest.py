@@ -8,8 +8,8 @@ each one on the ESP32-P4's hardware H.264 encoder, and writes the video
 to ``clip.h264``. Copy the file to your computer and play it with
 ffplay or VLC.
 
-Needs: an ESP32-P4 board, and firmware built with h264enc and ppa
-(``--modules all`` has both).
+Needs: an ESP32-P4 board, and firmware built with h264enc, ppa and
+pygraphics (``--modules all`` has them all).
 
 Run it:
 
@@ -22,6 +22,7 @@ Tested on: an ESP32-P4 board with ESP32-C6 Wi-Fi (``ESP32_GENERIC_P4``,
 """
 
 import h264enc
+from pygraphics import RGB565, FrameBuffer
 
 # Change these to match your setup.
 WIDTH = 320  # a multiple of 16
@@ -31,14 +32,13 @@ FRAMES = 60
 BOX = 48
 FILENAME = "clip.h264"
 
-# RGB565 colours, in the board's byte order.
-BLUE = b"\x1f\x00"
-WHITE = b"\xff\xff"
+# RGB565 colours.
+BLUE = 0x001F
+WHITE = 0xFFFF
 
-# Make the background once, and a frame buffer to draw into.
-background = BLUE * (WIDTH * HEIGHT)
-frame = bytearray(background)
-box_row = WHITE * BOX
+# A frame buffer to draw into, and pygraphics to draw on it.
+frame = bytearray(WIDTH * HEIGHT * 2)
+canvas = FrameBuffer(frame, WIDTH, HEIGHT, RGB565)
 
 # Start the encoder: one keyframe every second.
 encoder = h264enc.Encoder(WIDTH, HEIGHT, fps=FPS, gop=FPS)
@@ -46,12 +46,10 @@ encoder = h264enc.Encoder(WIDTH, HEIGHT, fps=FPS, gop=FPS)
 with open(FILENAME, "wb") as f:
     for n in range(FRAMES):
         # Draw the frame: background first, then the square.
-        frame[:] = background
+        canvas.fill(BLUE)
         x = n * (WIDTH - BOX) // FRAMES
         y = (HEIGHT - BOX) // 2
-        for row in range(y, y + BOX):
-            start = (row * WIDTH + x) * 2
-            frame[start : start + BOX * 2] = box_row
+        canvas.fill_rect(x, y, BOX, BOX, WHITE)
 
         # Encode it, and write the result straight to the file.
         f.write(encoder.encode(frame))
