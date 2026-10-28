@@ -15,7 +15,7 @@ while True:
     # serve hls.playlist() as stream.m3u8 and hls.segment(n) as seg<n>.ts
 ```
 
-`examples/roku/roku_companion_p4_video.py` in pydevices-examples is that loop
+`examples/roku/roku_companion_p4_video.py` in gallery is that loop
 whole, with the HTTP server, playing on a TV.
 
 [`examples/tsmux_simpletest.py`](examples/tsmux_simpletest.py) cuts encoded video into HLS segments and a playlist that ffplay or VLC streams.
@@ -38,7 +38,7 @@ are held.
 
 For the Roku, 1-second segments and 3 kept give the least delay that still
 plays steadily, about 7-10 s (measured from a PC before the P4 could do it:
-pydevices-examples `spikes/roku_hls/FINDINGS.md`).
+gallery `spikes/roku_hls/FINDINGS.md`).
 
 ### `tsmux.Muxer(*, lpcm=False)`
 
