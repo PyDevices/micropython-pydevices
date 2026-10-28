@@ -19,10 +19,11 @@ Needs: an ESP32-P4 board, and firmware built with h264enc, tsmux and ppa
 Run it:
 
     mpremote run tsmux_simpletest.py
-    mpremote cp :stream.m3u8 :seg*.ts .
+    mpremote cp :stream.m3u8 :seg0.ts :seg1.ts :seg2.ts .
     ffplay stream.m3u8
 
-Tested on: not yet run.
+Tested on: Waveshare ESP32-P4 board with a 720x720 panel, MicroPython 1.30
+preview with ``--modules all``.
 """
 
 import h264enc
