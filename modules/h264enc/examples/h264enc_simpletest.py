@@ -17,8 +17,8 @@ Run it:
     mpremote cp :clip.h264 .
     ffplay clip.h264
 
-Tested on: Waveshare ESP32-P4 board with a 720x720 panel, MicroPython 1.30
-preview with ``--modules all``.
+Tested on: an ESP32-P4 board with ESP32-C6 Wi-Fi (``ESP32_GENERIC_P4``,
+``C6_WIFI``), MicroPython 1.30 preview built with ``--modules all``.
 """
 
 import h264enc
