@@ -42,6 +42,8 @@ the chip's JPEG engine instead. The P4 can decode on its engine too, when you
 ask: `JpegDecoder(hardware=True)`. See [Encoding](#encoding) and
 [Hardware decode](#hardware-decode-esp32-p4).
 
+[`examples/jpegio_simpletest.py`](examples/jpegio_simpletest.py) encodes a picture to JPEG and decodes it back, at full size and at one eighth.
+
 ## API
 
 ### `jpegio.JpegDecoder(*, hardware=False)`

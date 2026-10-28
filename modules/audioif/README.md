@@ -30,6 +30,8 @@ hooks are one thread and no hardware, which is how the WebAssembly build has
 always run — but a build that should say `'esp32'` and says `'none'` has a
 link problem, and now it says so out loud.
 
+[`examples/audioif_simpletest.py`](examples/audioif_simpletest.py) plays a tone through an I2S amplifier, or into a file on a desktop build.
+
 ## `audiobusio.I2SOut` — the public face
 
 ```python

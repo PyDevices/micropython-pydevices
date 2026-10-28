@@ -18,6 +18,8 @@ every port (`--modules all` has it). On CPython, `pngio.py` in
 pydevices-desktop gives the same API over Pillow, so `pip install pillow` is
 all a desktop needs.
 
+[`examples/pngio_simpletest.py`](examples/pngio_simpletest.py) saves a picture as a PNG, loads it back, and checks every pixel.
+
 ## API
 
 ### `pngio.PngEncoder(level=1)`

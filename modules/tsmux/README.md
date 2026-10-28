@@ -18,6 +18,8 @@ while True:
 `examples/roku/roku_companion_p4_video.py` in pydevices-examples is that loop
 whole, with the HTTP server, playing on a TV.
 
+[`examples/tsmux_simpletest.py`](examples/tsmux_simpletest.py) cuts encoded video into HLS segments and a playlist that ffplay or VLC streams.
+
 ## API
 
 ### `tsmux.Segmenter(segments=3, target=1000)`
