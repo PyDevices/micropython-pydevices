@@ -11,13 +11,16 @@ Needs: an I2S amplifier such as a MAX98357A wired to the three pins below.
 On a desktop build there is no amplifier; set SINK to a file name and the
 audio is written there instead, as signed 16-bit stereo samples.
 
-A board whose DAC is a codec (an ES8311, say) must switch the codec on
-first and usually wants main_clock= as well; its board_config does both.
+A board whose DAC is a codec (an ES8311, say) needs two more things: the
+codec switched on before this runs (board_config.audio_power() on a
+PyDevices board), and MAIN_CLOCK set to the pin that clocks it.
 
 Run it:
     mpremote run audioif_simpletest.py
 
-Tested on: the unix port of MicroPython, writing to a file.
+Tested on: the unix port of MicroPython, writing to a file, and a
+Waveshare ESP32-P4-WIFI6-Touch-LCD-4B through its ES8311 codec (pins 12,
+10 and 9, MAIN_CLOCK 13).
 """
 
 import array
@@ -31,6 +34,7 @@ import audiocore
 BIT_CLOCK = 12
 WORD_SELECT = 10
 DATA = 9
+MAIN_CLOCK = None  # a codec's MCLK pin, or None for an amplifier
 SINK = None  # desktop only: a file name such as "tone.raw"
 FREQUENCY = 440
 SAMPLE_RATE = 22050
@@ -44,10 +48,12 @@ for i in range(length):
 tone = audiocore.RawSample(sine_wave, sample_rate=SAMPLE_RATE)
 
 # Open the I2S bus and loop the cycle.
+options = {}
+if MAIN_CLOCK is not None:
+    options["main_clock"] = MAIN_CLOCK
 if SINK:
-    i2s = audiobusio.I2SOut(BIT_CLOCK, WORD_SELECT, DATA, sink=SINK)
-else:
-    i2s = audiobusio.I2SOut(BIT_CLOCK, WORD_SELECT, DATA)
+    options["sink"] = SINK
+i2s = audiobusio.I2SOut(BIT_CLOCK, WORD_SELECT, DATA, **options)
 i2s.play(tone, loop=True)
 print("Playing %d Hz for %d seconds" % (SAMPLE_RATE // length, SECONDS))
 time.sleep(SECONDS)
