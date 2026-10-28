@@ -165,7 +165,8 @@ static mp_obj_t pngio_decoder_open(mp_obj_t self_in, mp_obj_t source) {
     pngio_decoder_obj_t *self = MP_OBJ_TO_PTR(self_in);
     self->opened = false;
     mp_buffer_info_t b;
-    if (!mp_get_buffer(source, &b, MP_BUFFER_READ)) {
+    // A str has the buffer protocol too, so test for a path first.
+    if (mp_obj_is_str(source) || !mp_get_buffer(source, &b, MP_BUFFER_READ)) {
         source = pngio_read_all(source);
         mp_get_buffer_raise(source, &b, MP_BUFFER_READ);
     }

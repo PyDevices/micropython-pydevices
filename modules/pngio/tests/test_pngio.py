@@ -167,6 +167,19 @@ def main():
     expect_raises(ValueError, lambda: d.decode(bytearray(100)), "needs")
     expect_raises(RuntimeError, lambda: pngio.PngDecoder().decode(bytearray(128)), "open()")
     print("each raises, naming the problem")
+
+    print("== 6. open() takes a path and a stream, as well as bytes")
+    import os
+    path = "pngio_open_test.png"
+    with open(path, "wb") as f:
+        f.write(good)
+    try:
+        assert pngio.PngDecoder().open(path) == (8, 8)
+        with open(path, "rb") as f:
+            assert pngio.PngDecoder().open(f) == (8, 8)
+    finally:
+        os.remove(path)
+    print("a path and a stream each open")
     print("pngio tests passed, %d ms" % (ticks() - t0))
 
 
