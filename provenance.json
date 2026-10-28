@@ -127,6 +127,9 @@
   },
   "0043-micropython-shared-tinyusb-cdc-read-write-space-once.patch": {
    "sha256": "203d16ed4fcb0666936072fcecf0def8e80935b9514ddcaf0637999bb0fcdc93"
+  },
+  "0044-micropython-esp32-inisetup-new-filesystem-over-stale-flash.patch": {
+   "sha256": "217ddd09c806be0d78bb22bbdda5692985b2ad7f325029f2dc7f6cbd7a9fb41a"
   }
  },
  "tinyusb_patches": {
