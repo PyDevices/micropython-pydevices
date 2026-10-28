@@ -22,6 +22,8 @@ name it with `--modules h264enc` otherwise. CircuitPython's ESP32-P4 boards
 take it too (`--interpreter circuitpython --modules h264enc,ppa`), and
 `build_mp.py` fetches Espressif's `esp_h264` for that build.
 
+[`examples/h264enc_simpletest.py`](examples/h264enc_simpletest.py) encodes two seconds of a moving square to an H.264 file.
+
 ## API
 
 ### `h264enc.Encoder(width, height, fps=30, gop=30, bitrate=3_000_000, qp_min=10, qp_max=45, *, canvas_w=0, canvas_h=0, out_size=0)`

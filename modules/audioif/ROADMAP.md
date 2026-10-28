@@ -17,3 +17,9 @@ to [issues](https://github.com/PyDevices/micropython-pydevices/issues).
 - A one-channel read from a multi-mic codec returns the average of the
   enabled mics, with a way to ask for a single mic; boards state which mics
   are live.
+
+## Examples
+
+- Audio from one board to another over I2S, with no network: a sender that
+  plays through `I2SOut`, and a receiver that records it with `I2SIn`. They
+  take three wires and a ground, and either end can be any I2S device.
