@@ -124,6 +124,9 @@
   },
   "0042-micropython-shared-tinyusb-a-streams-buffer-outlives-the-stream.patch": {
    "sha256": "81e435488c71cc5e69b3edd19c04896ed08575979cb466273a5d7ed9682caa95"
+  },
+  "0043-micropython-shared-tinyusb-cdc-read-write-space-once.patch": {
+   "sha256": "203d16ed4fcb0666936072fcecf0def8e80935b9514ddcaf0637999bb0fcdc93"
   }
  },
  "tinyusb_patches": {

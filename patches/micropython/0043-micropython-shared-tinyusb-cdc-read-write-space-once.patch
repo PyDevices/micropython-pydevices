@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 21:00:00 -0500
+Subject: [PATCH] shared/tinyusb: read the CDC TX space once per write.
+
+Long output over the native USB CDC console now and then carried bytes
+from past the end of the string being printed: the line, then NUL bytes
+padding it to its heap block, sometimes the next object's header
+(micropython-pydevices#163). Seen on an ESP32-S3 (LilyGo T-Embed) and an
+ESP32-P4, both on TinyUSB 0.21.
+
+mp_usbd_cdc_tx_strn() limits each write to the space in the TX FIFO with
+
+    n = MIN(n, tud_cdc_write_available());
+
+MIN() is a macro, so tud_cdc_write_available() runs twice: once in the
+comparison and again for the result. When the FIFO is nearly full the
+first call returns less than what is left of the string, and if the USB
+interrupt completes an IN transfer before the second call, that one
+returns the larger, freed space. n then exceeds len - i and tud_cdc_write()
+copies past the end of str.
+
+A ring recording the loop's state on every pass caught it on the T-Embed:
+a 0x2cf-byte string with 0x29f bytes sent asked to write 0x40, with only
+0x30 left, while len, str and i were all intact. The second run caught a
+0xc0-byte write with 0x84 left.
+
+The space is now read once into a local.
+
+Based-on: micropython b70ae1aca (v1.30.0-preview-160)
+---
+ shared/tinyusb/mp_usbd_cdc.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/shared/tinyusb/mp_usbd_cdc.c b/shared/tinyusb/mp_usbd_cdc.c
+index a5f60c8..4a84966 100644
+--- a/shared/tinyusb/mp_usbd_cdc.c
++++ b/shared/tinyusb/mp_usbd_cdc.c
+@@ -114,7 +114,12 @@ mp_uint_t mp_usbd_cdc_tx_strn(const char *str, mp_uint_t len) {
+             // (If not connected then we write everything to the fifo, expecting
+             // it to overwrite old data so it will have latest data buffered
+             // when host connects.)
+-            n = MIN(n, tud_cdc_write_available());
++            //
++            // Read the space once: MIN() is a macro, and the USB interrupt can
++            // free space between two calls, so the second could return more
++            // than is left of str.
++            uint32_t available = tud_cdc_write_available();
++            n = MIN(n, available);
+         }
+ 
+         uint32_t n2 = tud_cdc_write(str + i, n);
+-- 
+2.43.0
+
