@@ -16,6 +16,12 @@ with mip): a hosted MIDI device as a ``(midi_in, midi_out)`` pair on
 ``usb.core``, the same pair ``adafruit_midi`` reads and writes on any other
 MIDI transport.
 
+**An Android phone works too.** Pull down the USB notification and choose
+MIDI (on Samsung, "USB controlled by" > "MIDI"); a pad or keyboard app on the
+phone, such as MIDIPadidi, then plays into the board like any controller.
+A phone is a high-speed device, so it needs no ``FULL_SPEED`` behind a hub,
+and it still works if you set it for a keyboard on the same hub.
+
 **Behind a hub on an ESP32-P4,** set ``FULL_SPEED = True`` below. A
 keyboard is a full-speed device, and the P4's high-speed port can't reach one
 through a hub without a transaction translator, which the ESP-IDF host lacks.
