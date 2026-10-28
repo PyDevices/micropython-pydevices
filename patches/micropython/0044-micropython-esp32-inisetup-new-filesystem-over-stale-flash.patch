@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 00:00:00 -0500
+Subject: [PATCH] esp32/inisetup: make a new filesystem over stale flash.
+
+When the partition table leaves the filesystem out, the port puts it in
+the flash after the last partition, so its start follows the size of the
+app. Flashing an image with a smaller app over one with a larger app
+moves the filesystem down onto flash that still holds the old firmware
+(micropython-pydevices#185).
+
+_boot.py then can't mount it, and check_bootsec() finds a first sector
+that isn't blank. It calls fs_corrupted(), which prints a warning every
+three seconds forever. _boot.py runs before mp_usbd_init(), so on a
+board with a native USB console the port never appears and the warning
+is never seen.
+
+check_bootsec() now also looks for a filesystem: a FAT boot sector's
+55 AA, or the "littlefs" name in the superblock of block 0 or block 1.
+When neither is there, nothing on that flash is anyone's files, and it
+makes a new filesystem. A filesystem that is there but won't mount still
+goes to fs_corrupted() as before.
+
+Based-on: micropython b70ae1aca (v1.30.0-preview-160)
+---
+--- a/ports/esp32/modules/inisetup.py
++++ b/ports/esp32/modules/inisetup.py
+@@ -12,9 +12,22 @@
+             break
+     if empty:
+         return True
++    if not holds_filesystem(buf):
++        # The filesystem's start moved, onto flash left over from an earlier, larger
++        # image. There are no files here to keep, so make a new filesystem.
++        print("No filesystem found where it starts now, so making a new one.")
++        return True
+     fs_corrupted()
+ 
+ 
++def holds_filesystem(buf):
++    # A FAT boot sector ends in 55 AA; littlefs names itself in block 0 or block 1.
++    if buf[510:512] == b"\x55\xaa" or buf[8:16] == b"littlefs":
++        return True
++    bdev.readblocks(1, buf)
++    return buf[8:16] == b"littlefs"
++
++
+ def fs_corrupted():
+     import time
+     import micropython
+-- 
+2.43.0
+
