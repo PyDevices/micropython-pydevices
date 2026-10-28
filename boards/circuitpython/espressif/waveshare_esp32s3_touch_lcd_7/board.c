@@ -14,6 +14,7 @@
 #include "shared-bindings/framebufferio/FramebufferDisplay.h"
 #include "shared-bindings/microcontroller/Pin.h"
 #include "shared-module/displayio/__init__.h"
+#include "supervisor/shared/settings.h"
 
 // The CH422G takes each register as its own I2C address.
 #define CH422G_WR_SET (0x24)  // bit 0: IO0-IO7 are outputs
@@ -58,12 +59,25 @@ static const mcu_pin_obj_t *blue_pins[] = {
 };
 
 static void display_init(void) {
+    mp_int_t frequency;
+    if (settings_get_int("CIRCUITPY_DISPLAY_FREQUENCY", &frequency) != SETTINGS_OK) {
+        frequency = 14000000;
+    }
+
     dotclockframebuffer_framebuffer_obj_t *framebuffer = &allocate_display_bus_or_raise()->dotclock;
     framebuffer->base.type = &dotclockframebuffer_framebuffer_type;
 
-    // 14 MHz rather than the panel's 16: the scanout streams from PSRAM, and at
-    // 16 MHz it takes enough of PSRAM's bandwidth that the board's Wi-Fi loses
-    // packets. The same timings as board.TFT_TIMINGS.
+    // CircuitPython's driver streams the frame straight from PSRAM. When PSRAM
+    // is busy and a scanline isn't fetched in time, the picture slides sideways.
+    // Two 10-row buffers in internal RAM, refilled from PSRAM a few rows
+    // ahead, keep the scanout off PSRAM's critical path. The driver leaves this
+    // field alone, so setting it before the call is all it takes. MicroPython's
+    // builds for this panel use bounce buffers too.
+    framebuffer->panel_config.bounce_buffer_size_px = 800 * 10;
+
+    // 14 MHz by default rather than the panel's 16: the scanout takes enough of
+    // PSRAM's bandwidth at 16 MHz that the board's Wi-Fi loses packets.
+    // settings.toml's CIRCUITPY_DISPLAY_FREQUENCY changes it.
     common_hal_dotclockframebuffer_framebuffer_construct(
         framebuffer,
         &pin_GPIO5,     // de
@@ -73,7 +87,7 @@ static void display_init(void) {
         red_pins, MP_ARRAY_SIZE(red_pins),
         green_pins, MP_ARRAY_SIZE(green_pins),
         blue_pins, MP_ARRAY_SIZE(blue_pins),
-        14000000,       // frequency
+        frequency,
         800, 480,       // width, height
         4, 8, 8, false, // horizontal: pulse, back porch, front porch, idle low
         4, 8, 8, false, // vertical: pulse, back porch, front porch, idle low
