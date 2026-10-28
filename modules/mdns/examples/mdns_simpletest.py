@@ -17,7 +17,7 @@ Run it:
     mpremote run mdns_simpletest.py
 
 Tested on: the MicroPython unix port, built with ``--modules all``, and
-CPython 3.12 with pydevices-desktop.
+CPython with pydevices-desktop on Linux and Windows.
 """
 
 import mdns

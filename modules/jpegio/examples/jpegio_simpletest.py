@@ -10,7 +10,8 @@ prints the sizes and one pixel from each decode, so you can see the
 picture survived the trip.
 
 Needs: a MicroPython firmware built with jpegio (``--modules jpegio`` or
-``all``). No display or camera.
+``all``). No display or camera. CircuitPython's own jpegio decodes but
+doesn't encode, so this example is for MicroPython.
 
 Run it:
 

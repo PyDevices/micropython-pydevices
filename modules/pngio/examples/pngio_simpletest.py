@@ -18,7 +18,7 @@ Run it:
     mpremote cp :stripes.png .
 
 Tested on: the MicroPython unix port, built with ``--modules all``, and
-CPython 3.12 with pydevices-desktop.
+CPython with pydevices-desktop on Linux and Windows.
 """
 
 import pngio
