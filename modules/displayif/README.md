@@ -20,6 +20,8 @@ Use this repo when a `pydevices` board config needs a native display interface t
 failure modes (P4 `mipidsi`, Qualia `dotclockframebuffer.DotClockFramebuffer`):
 [docs/soft-reset-and-bring-up.md](docs/soft-reset-and-bring-up.md).
 
+[`examples/displayif_simpletest.py`](examples/displayif_simpletest.py) draws with pygraphics straight into a MIPI-DSI panel's framebuffer.
+
 ## Native modules
 
 
