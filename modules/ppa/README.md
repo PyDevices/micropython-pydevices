@@ -22,6 +22,8 @@ YUV 4:2:0 conversion 32 ms against 199 ms, and a fill 7 ms.
 `--modules all` includes it; name it with `--modules ppa` otherwise. The
 software path builds on every port; the PPA is used only on the ESP32-P4.
 
+[`examples/ppa_simpletest.py`](examples/ppa_simpletest.py) scales and turns a tiny picture and prints where each pixel went.
+
 ## API
 
 Buffers are anything with the buffer protocol: `bytearray`, `memoryview`, a

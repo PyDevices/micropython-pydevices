@@ -31,6 +31,8 @@ has no `mdns`. CircuitPython's boards keep CircuitPython's own; its unix port ha
 `--interpreter circuitpython --port unix` adds this one. On CPython,
 `mdns.py` in pydevices-desktop gives the same API over python-zeroconf.
 
+[`examples/mdns_simpletest.py`](examples/mdns_simpletest.py) advertises a web service and lists the ones it finds, itself included.
+
 ## API
 
 ### `mdns.Server(network_interface)`
