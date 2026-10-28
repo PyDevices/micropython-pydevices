@@ -10,10 +10,11 @@ pairing is the same scripts on two boards, not a special `pair_*` file.
 |---|---|---|
 | **UAC** | [`usb_soundcard.py`](usb_soundcard.py) (through audiodsp's pump) | [`usb_speaker.py`](usb_speaker.py), [`usb_mic.py`](usb_mic.py) |
 | **UVC** | [`usb_webcam.py`](usb_webcam.py) (MJPEG or YUY2, at the size the host picks) | [`uvc_display.py`](uvc_display.py) (MJPEG via `jpegio` when present) |
-| **MIDI** | [`midi_harmonizer.py`](midi_harmonizer.py), [`midi_harmonizer_ui.py`](midi_harmonizer_ui.py), [`midi_device_in.py`](midi_device_in.py) | [`midi_host.py`](midi_host.py) |
+| **MIDI** | [`midi_harmonizer.py`](midi_harmonizer.py), [`midi_harmonizer_ui.py`](midi_harmonizer_ui.py), [`midi_device_in.py`](midi_device_in.py) | [`midi_host.py`](midi_host.py) (a keyboard, or an Android phone in USB MIDI mode) |
 | **HID** | [`hid_keyboard.py`](hid_keyboard.py), [`hid_mouse.py`](hid_mouse.py) | [`hid_host.py`](hid_host.py) |
 | **MSC** | [`sd_drive.py`](sd_drive.py), [`ram_drive.py`](ram_drive.py) | [`usb_drive_mount.py`](usb_drive_mount.py), [`usb_drive_read.py`](usb_drive_read.py), [`usb_drive_log.py`](usb_drive_log.py) |
 | **CDC** | MicroPython's own console | [`usb_serial.py`](usb_serial.py) |
+| **NET** | — | [`phone_tether.py`](phone_tether.py) (the internet through an Android phone's USB tethering) |
 | **enum** | — | [`host_enum.py`](host_enum.py) (lists what is plugged in, watches attach and detach) |
 
 ## Board-to-board pairings
