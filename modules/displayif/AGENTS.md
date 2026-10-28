@@ -6,4 +6,3 @@
 - Don't patch the `micropython/` tree for soft-reset teardown; use a usermod `--wrap` or the registry. Fix root causes here rather than special-casing a board config.
 - After any teardown change, check on a board: construct, soft-reset, construct again. It must succeed without a hard reset ([the checklist](docs/soft-reset-and-bring-up.md)).
 - Only `usdl2` builds for CircuitPython (unix, through the root `micropython.mk`); MCU interfaces stay on stock CircuitPython. The module and port map is [docs/port-matrix.md](docs/port-matrix.md).
-- A frozen module wins over `/lib` on both interpreters, so a changed display module never runs on a board until you rebuild the firmware.
