@@ -1,59 +1,8 @@
-# AGENTS.md — displayif
+# AGENTS.md
 
-Native MicroPython display **interface** modules for PyDevices `displaydev` (`USER_C_MODULES`).
-Portable code in `src/ports/common/`; SoC code under `src/ports/<mp-port>/`;
-desktop SDL (`usdl2`) under `src/ports/desktop/usdl2/`. The `jpegio` JPEG
-decoder moved to micropython-pydevices' `modules/jpegio` (2026-10-06). CircuitPython: MCU
-interfaces stay on stock CP; only `usdl2` builds there, on unix, as a user C module
-(root `micropython.mk`).
-
-**Before editing lifecycle / soft-reset / a new board bring-up**, read:
-
-1. [docs/idempotent-lifecycle.md](docs/idempotent-lifecycle.md) — required `deinit` / soft-reset contract (**implemented** for all real backends)
-2. [docs/soft-reset-and-bring-up.md](docs/soft-reset-and-bring-up.md) — proven failure modes and methods from **ESP32-P4 `mipidsi`** and **Qualia S3 `dotclockframebuffer.DotClockFramebuffer`** (+ LVGL); applies to other ports/interfaces
-3. [docs/port-matrix.md](docs/port-matrix.md) — module/port matrix and pydevices board-config map
-
-Those two interfaces are the reference bring-ups: keep their scanout / blit /
-attr / soft-reset patterns when changing siblings.
-
-## Layout
-
-| Path | Contents |
-|------|----------|
-| `src/include/` | Public headers (`displayif/` subdir) |
-| `src/ports/` | Port C sources + per-port `micropython.mk` / `.cmake` (`common/`, `esp32/`, `desktop/usdl2/`, …) |
-| `docs/` | Markdown docs (root keeps `README.md` and `AGENTS.md` only) |
-| `docs/ports/` | Per-port notes moved from former `ports/*/README.md` |
-| `tests/` | Unit tests only (e.g. `test_lifecycle_api.py`) |
-| `tools/` | Developer / hardware smoke tests (`*_smoke.py`), `test_usdl2.py`, `sdl2_dev_env.sh` |
-
-Root `micropython.mk` / `micropython.cmake` stay at the repo root for `USER_C_MODULES`.
-CircuitPython reads the same root `micropython.mk` (unix `usdl2` only).
-
-## Hard rules
-
-- **Fix root causes in displayif** (or the owning binding). Do not require hard reset, and do not special-case pydevices board configs to avoid second init.
-- **Never put an `MP_QSTR_` name behind a define this usermod supplies** (a `target_compile_definitions(... INTERFACE ...)`): the CMake QSTR pass cannot see it and the port fails with `'MP_QSTR_<name>' undeclared`, while unix stays green. `python3 tools/check_qstr_reachability.py` — [docs/qstrs-and-usermod-defines.md](docs/qstrs-and-usermod-defines.md).
-- **Do not patch `micropython/`** for soft-reset teardown when a usermod `--wrap` or registry hook will do (see soft-reset docs). Do not commit upstream MicroPython trees.
-- **Every** accelerated backend that owns DMA/IRQ/PIO/SDK handles must register with `displayif_register_soft_reset()` and tear down from the same path used by `deinit` / `__del__` / idempotent ctors.
-- Desktop `usdl2` registers the same way (SDL timers + `SDL_Quit`); wired on unix/windows MP and CP unix.
-- Host teardowns run from `--wrap=gc_sweep_all` (before the heap is wiped). They must **not** `m_free` GC memory — only release non-GC host resources.
-
-## Build / flash (agent workflow)
-
-Public docs stay sibling-clone + stock `make` / `idf.py`. When working with a connected MCU via mpftp:
-
-```bash
-mpftp firmware build --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI
-mpftp firmware flash -d COM4
-```
-
-Prefer **mpftp** for board serial / firmware when that skill/session is available; do not assume `build_mp.sh` for MCU flash.
-
-## Soft-reset smoke (minimum)
-
-After changing any host teardown or wrap:
-
-1. Construct the interface (or `import board_config` / example).
-2. Soft-reset (`mpftp soft-reset` or `machine.soft_reset()`).
-3. Construct / import again — must succeed **without** hard reset or Guru Meditation.
+- Run `python3 tools/check_qstr_reachability.py` after you touch a `micropython.mk` or CMake file. Never put an `MP_QSTR_` name behind a define this usermod supplies: unix stays green and the real port fails with `'MP_QSTR_<name>' undeclared` ([why](docs/qstrs-and-usermod-defines.md)).
+- Before you change lifecycle, soft-reset or a board bring-up, read [idempotent-lifecycle.md](docs/idempotent-lifecycle.md) and [soft-reset-and-bring-up.md](docs/soft-reset-and-bring-up.md). The `mipidsi` and `dotclockframebuffer` bring-ups are the reference; keep their scanout, blit, attribute and soft-reset patterns when you change a sibling.
+- Anything that owns DMA, IRQ, PIO or SDK handles registers with `displayif_register_soft_reset()` and tears down on the same path as `deinit` and `__del__`. Teardown runs before the heap is wiped, so release host resources and never `m_free` GC memory.
+- Don't patch the `micropython/` tree for soft-reset teardown; use a usermod `--wrap` or the registry. Fix root causes here rather than special-casing a board config.
+- After any teardown change, check on a board: construct, soft-reset, construct again. It must succeed without a hard reset ([the checklist](docs/soft-reset-and-bring-up.md)).
+- Only `usdl2` builds for CircuitPython (unix, through the root `micropython.mk`); MCU interfaces stay on stock CircuitPython. The module and port map is [docs/port-matrix.md](docs/port-matrix.md).
