@@ -47,14 +47,15 @@ RGB and DSI framebuffers prefer **PSRAM** (`MALLOC_CAP_SPIRAM`). Ensure `CONFIG_
 ## 🚀 Build
 
 Tested against the MicroPython this repository pins ([UPSTREAM](../../UPSTREAM)), the CircuitPython
-10.2.1 oracle, and SDL2 >= 2.0 (desktop `usdl2`) — see [this module's UPSTREAM](UPSTREAM) for the
+11.0.0-alpha.2 oracle, and SDL2 >= 2.0 (desktop `usdl2`) — see [this module's UPSTREAM](UPSTREAM) for the
 other pins and how to verify them locally.
 
-On MicroPython 1.29 or later, clone this repository anywhere and add one line
-to the manifest your build already uses:
+On MicroPython 1.29 or later, clone micropython-pydevices anywhere (displayif is
+its `modules/displayif` folder) and add one line to the manifest your build
+already uses:
 
 ```python
-include("/path/to/displayif/manifest.py")
+include("/path/to/micropython-pydevices/modules/displayif/manifest.py")
 ```
 
 On unix that manifest is `ports/unix/variants/standard/manifest.py`; on esp32
@@ -129,7 +130,7 @@ usdl2.SDL_Quit()"
 
 A live SDL window appears on a desktop session. Headless CI runs the same
 import/init smoke with `SDL_VIDEODRIVER=dummy` so it works without a display
-server — see [.github/workflows/clean-build.yml](.github/workflows/clean-build.yml).
+server — see [displayif.yml](../../.github/workflows/displayif.yml).
 
 Then run the lifecycle API test under the same interpreter:
 
