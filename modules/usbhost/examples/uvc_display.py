@@ -23,6 +23,9 @@ Run it:
 
 Success is the camera's picture on the display and a line every 25 frames
 giving the frame rate.
+
+Tested on: an ESP32-P4-WIFI6-DEV-KIT hosting a Logitech C920e (MJPEG, 800x448
+at 5 fps) on a 5-inch 800x480 display.
 """
 
 import appdev
