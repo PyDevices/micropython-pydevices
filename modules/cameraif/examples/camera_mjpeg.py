@@ -1,41 +1,39 @@
-"""Serve the camera to any browser on the network, as MJPEG.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Serve the camera to any browser on your network as MJPEG.
 
-    mpremote cp secrets.py :
-    mpremote run camera_mjpeg.py
+Run it, then open the URL it prints. Chrome, Firefox, Safari and VLC all play
+the stream without a plugin or an app. MJPEG is one long HTTP response that
+never ends, carrying JPEG after JPEG separated by a marker string named in
+the Content-Type. There is no handshake and no codec state, so a client that
+joins halfway through gets the next whole frame, and a dropped frame costs
+nothing. The ESP32-P4 encodes JPEG in hardware, so the board spends its time
+moving bytes, not making them.
 
-then open the URL it prints. Chrome, Firefox, Safari and VLC all play this
-without a plugin, an app, or a page of JavaScript.
-
-**What MJPEG is.** One long HTTP response that never ends, carrying JPEG
-after JPEG separated by a marker string that was named in the Content-Type.
-Every browser has understood it since the 1990s, which is why every cheap IP
-camera still speaks it. There is no handshake, no negotiation, no codec
-state -- a client that joins halfway through gets the next whole frame and is
-immediately correct. That is the property worth having on a microcontroller:
-no frame depends on any other, so a dropped one costs nothing.
-
-Its weakness is the flip side of the same coin. Nothing between frames is
-shared, so a scene that barely changes costs as much as one that changes
-completely, and the bitrate is simply frame size times frame rate.
-
-**Why this can work at all.** The P4 encodes JPEG in hardware, so the board
-spends its time moving bytes rather than making them. A software encoder in
-MicroPython would be several seconds per frame.
-
-**What actually limits it: the network, not the camera.** Measured on an
-ESP32-P4 whose Wi-Fi is an ESP32-C6 co-processor across a hosted link, at
-800x800:
+The network limits the frame rate, not the camera. At 800x800 over an
+ESP32-P4 whose Wi-Fi is an ESP32-C6 co-processor across a hosted link:
 
     quality 70    ~73 KB/frame     7 fps    ~4.3 Mbit/s
     quality 40    ~38 KB/frame    15 fps    ~4.6 Mbit/s
 
-Same bitrate either way, twice the frame rate: that is a link running flat
-out, and the only knob that helps is making the frames smaller. Which is why
-quality is a URL parameter here (``/stream?q=40``) rather than a constant you
-have to edit and re-upload -- the right value depends on your network, not
-on this file.
-The camera itself delivers 35 fps and the encoder keeps up with it; on a
-board with native Wi-Fi, or over Ethernet, this goes much faster.
+The same bitrate gives twice the frame rate at the smaller size, which means
+the link is running flat out, and smaller frames are the only way to go faster.
+So quality is a URL parameter (``/stream?q=40``) rather than a constant: the
+right value depends on your network. A board with native Wi-Fi, or Ethernet,
+goes much faster. Success is live video in the browser.
+
+Needs: an ESP32-P4 board with a MIPI-CSI camera, set up in board_config,
+firmware built with cameraif, and a ``secrets.py`` on the board with ``SSID``
+and ``PASSWORD`` for your Wi-Fi.
+
+Run it:
+
+    mpremote cp secrets.py :
+    mpremote run camera_mjpeg.py
+
+Tested on: an ESP32-P4 board with an OV5647 camera at 800x800, with Wi-Fi
+through an ESP32-C6.
 """
 
 import socket
@@ -43,10 +41,12 @@ import time
 
 import board_config
 
+# Change these to match your setup.
 PORT = 80
-QUALITY = 70
-BOUNDARY = "frameboundary"
+QUALITY = 70  # 1 to 100; /stream?q=40 overrides it for one viewer
+BOUNDARY = "frameboundary"  # separates the JPEGs in the stream
 
+# The page the browser gets: it shows the stream full size.
 PAGE = """<!DOCTYPE html>
 <html><head><title>ESP32-P4 camera</title>
 <style>body{margin:0;background:#111;display:flex;align-items:center;
@@ -91,10 +91,13 @@ def send_all(sock, data):
 
 
 def stream_to(client, cam, quality=QUALITY):
+    """Send JPEGs to one client until it hangs up."""
+    # The headers announce a response that never ends, in parts.
     send_all(client, bytes(
         "HTTP/1.0 200 OK\r\n"
         "Content-Type: multipart/x-mixed-replace; boundary=%s\r\n"
         "Cache-Control: no-store\r\n\r\n" % BOUNDARY, "ascii"))
+    # Send each frame with its own part header, and report the rate.
     frames = 0
     t0 = time.ticks_ms()
     while True:
@@ -114,11 +117,13 @@ def stream_to(client, cam, quality=QUALITY):
 
 
 def main():
+    # Join Wi-Fi with the details in secrets.py, then open the camera.
     ip = connect()
     cam = board_config.camera
     print("camera %s %dx%d" % ((cam.sensor()[0],) + cam.size()[:2]))
     print("open  http://%s/" % ip)
 
+    # Serve one client at a time.
     server = socket.socket()
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("0.0.0.0", PORT))

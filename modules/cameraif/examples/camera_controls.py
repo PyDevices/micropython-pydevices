@@ -1,22 +1,26 @@
-"""What this camera can actually be told to do -- discovered, not assumed.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""List what the camera can be told to do, then try each control.
+
+Sensor drivers differ in how much of the hardware they expose, so this
+program asks first. ``cam.controls()`` returns only the parameters the driver
+in your firmware advertises, with the range it gives for each, and
+everything else is driven from that. Copy this shape rather than hard-coding
+a list: code that assumes ``gain()`` exists raises OSError on the next sensor.
+The OV5647's driver, for one, offers exactly three parameters and can't read
+any of them back, so the program shows those as ``None``. At the end the
+sensor's test pattern runs, which is the most useful debugging tool here.
+Success is the picture changing on the panel as each control moves.
+
+Needs: an ESP32-P4 board with a MIPI-CSI camera and a display, both set up
+in board_config, and firmware built with cameraif.
+
+Run it:
 
     mpremote run camera_controls.py
 
-Sensor drivers vary enormously in how much of the hardware they expose. The
-OV5647's driver in `esp_cam_sensor`, for instance, implements exactly three
-parameters, offers no gain control at all, and cannot read any of them back:
-its `get_para_value` returns NOT_SUPPORTED unconditionally. A different
-sensor may offer a dozen.
-
-So this example asks first. `cam.controls()` returns only the parameters the
-driver in *your* firmware advertises, with the range it advertises for each,
-and everything below is driven from that. Copy this shape rather than
-hard-coding a control list -- code that assumes `gain()` exists works
-beautifully on the sensor it was written for and raises OSError on the next
-one.
-
-The sensor's test pattern gets a section of its own at the end. It is the
-most useful debugging tool here.
+Tested on: an ESP32-P4 board with an OV5647 camera.
 """
 
 import time
@@ -24,6 +28,7 @@ import time
 import board_config
 from board_config import display_drv as display
 
+# Open the camera and get the panel's framebuffer.
 cam = board_config.camera
 _fb = display.framebuffers()[0]
 
@@ -44,6 +49,7 @@ def main():
     for name, w, h in cam.formats():
         print("   %-48s %dx%d" % (name, w, h))
 
+    # Ask the driver which controls it has, and list them with their ranges.
     controls = cam.controls()
     print("\ncontrols this driver implements:")
     for name in sorted(controls):

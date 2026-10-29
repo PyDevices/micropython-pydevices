@@ -1,43 +1,37 @@
-"""A camera you actually use: live view on the panel, BOOT button takes the shot.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Preview the camera on the panel and take a photo with the BOOT button.
+
+Point the camera at something and press the BOOT button, and a JPEG appears
+on the board's filesystem. Press again for another. The board_config module
+publishes the BOOT button as ``boot_button``, a plain input. This program wraps
+it in ``GPIOButtons``, and ``appdev`` turns that into ordinary KEYDOWN events,
+the same ones a USB keyboard would produce, so nothing here depends on which
+GPIO the button is.
+
+``appdev`` is the scheduler. It polls the inputs, dispatches the events and
+keeps the program alive after the last line runs, so there is no ``while
+True`` here. The preview runs on ``app.every()`` because repainting is
+periodic work, and the shutter on ``app.on()`` because it happens when it
+happens. Anything drawn must be followed by ``display_drv.show()``, which puts
+the back buffer on the glass. The shutter handler only sets a flag, and the
+next tick does the work, so all camera use stays in one place.
+
+Hold the button for a moment: a preview frame costs about 54 ms, so the
+button is read a handful of times a second, and a very quick tap can fall
+between two reads. Ctrl-C can't stop the program, because ``appdev`` drives it
+from a hardware timer. Press the board's reset button instead.
+
+Needs: an ESP32-P4 board with a MIPI-CSI camera, a display and a BOOT
+button, set up in board_config, firmware built with cameraif, and the
+``appdev`` and ``keypad_gpio`` modules.
+
+Run it, then press BOOT:
 
     mpremote run camera_still.py
-
-Point it at something, press the BOOT button, and a JPEG appears on the
-board's filesystem. Press again for another. Fetch them with::
-
     mpremote ls
     mpremote cp :photo_001.jpg .
-
-**How the button gets here.** `board_config` publishes the BOOT button as
-`boot_button`, a plain input. This file wraps it in `GPIOButtons`, and
-`appdev` turns that into ordinary KEYDOWN events -- the same events a USB
-keyboard would produce. Nothing in this file knows which GPIO it is, which is
-why the same file works on a board that wires its BOOT button somewhere else.
-
-**On the shape of this file.** `appdev` is the scheduler. It polls the input
-devices, dispatches the events, and keeps the program alive after the last
-line runs -- so there is no `while True` here and no `app.run()` at the
-bottom. The preview is on `app.every()` because repainting is genuinely
-periodic work of our own; the shutter is on `app.on()` because it happens
-when it happens. Anything drawn must be followed by `display_drv.show()`,
-which is what actually puts the back buffer on the glass.
-
-**Why the shutter only sets a flag.** Both callbacks are dispatched by the
-same scheduler, so the button can fire between preview frames. Taking the
-picture inside the handler would put a second piece of camera work next to
-the first; recording the request and letting the next tick do exactly one
-thing keeps all the hardware use in one place.
-
-**Hold the button for a moment.** The scheduler alternates between preview
-frames and input polling, and a preview frame costs about 54 ms, so the
-button is read a handful of times a second rather than continuously. A very
-quick tap can fall between two reads.
-
-**Stopping it.** Ctrl-C will not: `appdev` drives this from a hardware timer,
-and interrupting the callback leaves the timer armed to fire the next one.
-Press the board's reset button, or::
-
-    python -m esptool --chip esp32p4 --port COMn --after hard_reset chip-id
 """
 
 import appdev
@@ -46,10 +40,11 @@ import keys
 from board_config import display_drv as display
 from keypad_gpio import GPIOButtons
 
-QUALITY = 90
+# Change these to match your setup.
+QUALITY = 90  # 1 to 100; higher is sharper and larger
 # The preview costs about 54 ms a frame, so a period below that would eat the
 # scheduler the input polling shares.
-PREVIEW_MS = 100
+PREVIEW_MS = 100  # milliseconds between preview frames
 
 app = appdev.App(board_config)
 cam = board_config.camera
@@ -63,6 +58,7 @@ app.add_keypad(shutter_button.read)
 # into it with the PPA, by DMA, so the live view costs the CPU one call.
 framebuffer = display.framebuffers()[0]
 
+# State shared by the button handler and the tick.
 count = 0
 shot_requested = False
 
@@ -130,6 +126,7 @@ def tick(_=None):
         display.show()
 
 
+# Run the shutter handler on a key press and the tick on a timer.
 app.on(app.events.KEYDOWN, shutter)
 app.every(PREVIEW_MS, tick)
 
