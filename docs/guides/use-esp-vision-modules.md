@@ -48,7 +48,10 @@ probability = model.predict([fill])[0][0][0]  # uint8: 255 is certain
 ```
 
 [`tflite_streaming_simpletest.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/tflite/examples/tflite_streaming_simpletest.py)
-runs one.
+runs one, and
+[`tflite_wakeword.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/tflite/examples/tflite_wakeword.py)
+listens for a wake word, with audiodsp's `audiofeatures` making the slices
+and ESPHome's detection rules in Python.
 
 ## Run long scripts as `main.py`
 
