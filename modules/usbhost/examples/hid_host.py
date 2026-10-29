@@ -26,6 +26,11 @@ ESP-IDF host lacks.
 Run it, then type on the keyboard:
 
     mpftp run examples/hid_host.py
+
+Tested on: an ESP32-P4-WIFI6-DEV-KIT on MicroPython
+v1.30.0-preview.160.gb70ae1aca6 (built 2026-10-21), with FULL_SPEED = True and
+an HP wireless keyboard dongle behind its onboard hub: the keyboard was found
+and opened. No key was typed, so the key reports are untested.
 """
 
 import time
