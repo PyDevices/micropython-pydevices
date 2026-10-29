@@ -13,8 +13,9 @@ direction are live-editable from two rows of buttons:
 Changing either sends All Notes Off first, so no harmony outlives the setting
 that created it. The display loop runs on a timer and the MIDI pump runs in
 the main program, as in ``midi_harmonizer.py``. Controller changes pass
-through. A pump inside the timer lost about half of what it sent, so the
-timer only sets a flag for it to send All Notes Off.
+through. When the writes came from the timer, about half of them never
+reached the computer; from the main program none went missing. So the timer
+only sets a flag for the main program to send All Notes Off.
 
 Needs: a board with a touchscreen and USB device support, a firmware with
 LVGL, a ``display_driver`` module that sets up the display and touch, and
@@ -75,7 +76,7 @@ def _rebuild_harmony():
         ivs.extend(-iv for iv in base)
     _harmony = tuple(ivs)
     # No harmony may outlive the setting that created it. The pump sends it:
-    # this runs inside the display loop, which must not write to the port.
+    # this runs inside the display loop, and writes from there went missing.
     _all_off = True
 
 
