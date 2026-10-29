@@ -11,7 +11,10 @@ direction are live-editable from two rows of buttons:
     direction:  Up | Down | Both
 
 Changing either sends All Notes Off first, so no harmony outlives the setting
-that created it. The MIDI pump rides an LVGL timer inside the display loop.
+that created it. The display loop runs on a timer and the MIDI pump runs in
+the main program, as in ``midi_harmonizer.py``. Controller changes pass
+through. A pump inside the timer lost about half of what it sent, so the
+timer only sets a flag for it to send All Notes Off.
 
 Needs: a board with a touchscreen and USB device support, a firmware with
 LVGL, a ``display_driver`` module that sets up the display and touch, and
@@ -21,14 +24,21 @@ Run it, then play into the board's MIDI port:
 
     mpftp run examples/midi_harmonizer_ui.py
 
-To keep it as the board's instrument, copy the file to the board as
-``/main.py``.
+Tested on: an ESP32-P4 panel board, played from a Windows computer: four notes
+with their note-offs and a controller change came back as 24 harmonized notes
+and the controller change.
+
+Interrupt to stop. To keep it as the board's instrument, copy the file to the
+board as ``/main.py``.
 """
+
+import time
 
 import display_driver  # noqa: F401 -- wires LVGL flush + input + event_loop
 import lvgl as lv
 
 import adafruit_midi
+from adafruit_midi.control_change import ControlChange
 from adafruit_midi.note_off import NoteOff
 from adafruit_midi.note_on import NoteOn
 from midiports import usb_device
@@ -44,6 +54,7 @@ DIRECTIONS = ("Up", "Down", "Both")
 
 _state = {"chord": 0, "direction": 0}
 _harmony = ()
+_all_off = False
 _styles = []
 
 # The board's own USB MIDI function: midiports' ports over micropython-lib's
@@ -54,7 +65,7 @@ _midi = adafruit_midi.MIDI(midi_in=_midi_in, midi_out=_port)
 
 
 def _rebuild_harmony():
-    global _harmony
+    global _harmony, _all_off
     base = CHORDS[_state["chord"]][1]
     d = DIRECTIONS[_state["direction"]]
     ivs = []
@@ -63,12 +74,12 @@ def _rebuild_harmony():
     if d in ("Down", "Both"):
         ivs.extend(-iv for iv in base)
     _harmony = tuple(ivs)
-    # No harmony may outlive the setting that created it.
-    _port.write(bytes([0xB0, 123, 0]))
+    # No harmony may outlive the setting that created it. The pump sends it:
+    # this runs inside the display loop, which must not write to the port.
+    _all_off = True
 
 
 _rebuild_harmony()
-
 
 
 def _emit(status, note, vel):
@@ -79,10 +90,14 @@ def _emit(status, note, vel):
             _port.write(bytes([status, h, vel]))
 
 
-def _pump(_t):
-    # Runs from LVGL's timer: drain everything waiting, harmonize notes, pass
-    # the rest through. adafruit_midi keeps its buffer between calls, so a
-    # message split across two timer ticks survives.
+def _pump():
+    # Drain everything waiting, harmonize notes, pass the rest through.
+    # adafruit_midi keeps its buffer between calls, so a message split across
+    # two passes survives.
+    global _all_off
+    if _all_off:
+        _all_off = False
+        _port.write(bytes([0xB0, 123, 0]))
     if not _midi_in.any():
         return
     while True:
@@ -92,7 +107,7 @@ def _pump(_t):
         if isinstance(msg, (NoteOn, NoteOff)):
             raw = msg.__bytes__()
             _emit(raw[0], raw[1], raw[2])
-        else:
+        elif isinstance(msg, ControlChange):
             _port.write(msg.__bytes__())
 
 
@@ -133,8 +148,6 @@ def build_ui():
 
         _matrix(scr, tuple(c[0] for c in CHORDS), "chord", 70, status)
         _matrix(scr, DIRECTIONS, "direction", 230, status)
-
-        lv.timer_create(_pump, 5, None)
     finally:
         if inst is not None:
             inst.enable()
@@ -142,3 +155,6 @@ def build_ui():
 
 build_ui()
 print("harmonizer ui up")
+while True:
+    _pump()
+    time.sleep_ms(2)
