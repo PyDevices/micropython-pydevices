@@ -1,23 +1,30 @@
-"""The board is a USB keyboard: type a short string into the computer.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Type a short string into the computer as a USB keyboard.
 
-This is CircuitPython's keyboard code, unchanged: ``usb_hid`` (our package
-over micropython-lib's ``usb-device-hid``) gives the same ``devices`` that
-CircuitPython's does, and Adafruit's ``adafruit_hid`` drives them. Any
-operating system's keyboard stack accepts it, with no driver to install.
+The board presents itself as a keyboard. ``usb_hid`` (our package over
+micropython-lib's ``usb-device-hid``) gives the same ``devices`` that
+CircuitPython's does, so Adafruit's ``adafruit_hid`` code runs unchanged.
+Any operating system accepts it with no driver. After typing, the program
+prints the Caps Lock state the computer last set, read from the keyboard's
+LED report. Success is the greeting appearing in whatever text box has focus.
 
-    mpftp run -d COM49 examples/hid_keyboard.py
+Needs: a board with USB device support and the ``usb-hid`` and
+``adafruit_hid`` packages. Install them with ``mip`` if your firmware
+doesn't freeze them:
 
-Install the packages first on a firmware that doesn't freeze them:
-``mip.install("github:PyDevices/pydevices/usb-hid")`` and
-``mip.install("github:PyDevices/pydevices/bledev_hid")`` for ``adafruit_hid``.
+    mip.install("github:PyDevices/pydevices/usb-hid")
+    mip.install("github:PyDevices/pydevices/bledev_hid")
 
-Click into a text box before it types. **Console**: the board's serial port
-stays up beside the keyboard, so the REPL survives on the same cable.
+Run it, with a text box focused on the computer:
 
-**LEDs.** After typing it prints the lock-key state the computer last set
-(Caps, Num, Scroll), from the keyboard's LED report, the same call a control
-surface would read.
+    mpftp run examples/hid_keyboard.py
+
+The board's serial port stays up beside the keyboard, so the REPL keeps
+working over the same cable.
 """
+
 import time
 
 import usb_hid

@@ -1,25 +1,31 @@
-"""A USB keyboard on the host port drives ordinary PyDevices key events.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Read a USB keyboard on the host port as PyDevices key events.
 
-The same application code, producing the same ``events.Key`` records, as an
-SDL keyboard on the desktop. ``usb.host.hid`` delivers the keyboard's key
-presses and releases as ``adafruit_hid`` Keycode values; ``KeyboardEvents``
-below turns each into the matching ``events.Key``.
+A keyboard plugged into the board produces the same ``events.Key`` records as
+an SDL keyboard on the desktop, so application code is the same on both.
+``usb.host.hid`` delivers key presses and releases as ``adafruit_hid``
+Keycode values, and ``KeyboardEvents`` below turns each into the matching
+``events.Key``. Type on the keyboard and each press and release prints.
 
-    mpftp run -d COM49 examples/hid_host.py
+A keyboard on a host doesn't light its own Caps Lock: the host tells it to.
+Pressing Caps, Num or Scroll Lock here toggles that LED with ``set_leds()``.
+When more keys are held than a report can carry, a keyboard fills every slot
+with ErrorRollOver (``0x01``). ``usb.host.hid`` ignores that report and keeps
+what it had, so the eventual releases still balance.
 
-**Pairing.** A commercial keyboard, or a PyDevices board running
-``hid_keyboard.py``. Needs an S3, or a P4 with the keyboard on a host port
-that supplies 5 V. Behind a hub on a P4, set ``FULL_SPEED = True`` below: a
-high-speed hub can't reach a full-speed keyboard without a transaction
-translator, which the ESP-IDF host lacks.
+Needs: a board with USB host support (firmware built with usbhost) and the
+``events`` and ``keys`` modules. The keyboard can be a commercial one or a
+board running ``hid_keyboard.py``. An ESP32-S3 needs a powered hub or OTG
+adapter. An ESP32-P4 needs the keyboard on a host port that supplies 5 V.
+Behind a hub on a P4, set ``FULL_SPEED = True`` below: a high-speed hub can't
+reach a full-speed keyboard without a transaction translator, which the
+ESP-IDF host lacks.
 
-**Lock keys.** A keyboard on a host doesn't light its own Caps Lock: the
-host tells it to. Pressing Caps, Num or Scroll Lock here toggles that LED
-with ``set_leds()``.
+Run it, then type on the keyboard:
 
-**Rollover.** When more keys are held than the report can carry, a keyboard
-fills every slot with ErrorRollOver (``0x01``). ``usb.host.hid`` ignores that
-report and keeps what it had, so the eventual releases still balance.
+    mpftp run examples/hid_host.py
 """
 
 import time
@@ -29,6 +35,7 @@ import keys
 import usb.core
 from usb.host.hid import KEY_DOWN, KEY_UP, KEYBOARD, Device
 
+# Change these to match your setup.
 # True when the device is behind a hub on an ESP32-P4: the host then runs at
 # full speed, so the hub passes a full-speed device through. Plugged straight
 # into the port, or on an S3, leave it False.
@@ -81,9 +88,12 @@ def main(seconds=30):
         usb.core.stop()
         return
 
+    # Open the keyboard in boot protocol, which every keyboard supports.
     kbd = Device(dev, protocol=KEYBOARD, boot=True)
     print("keyboard %04x:%04x %s %s -- type on it for %d s"
           % (dev.idVendor, dev.idProduct, dev.manufacturer, dev.product, seconds))
+    # Decode each report into a key event and print it. A lock key also
+    # flips its LED.
     decoder = KeyboardEvents()
     leds = 0
     t0 = time.ticks_ms()

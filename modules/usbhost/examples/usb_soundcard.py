@@ -1,24 +1,33 @@
-"""The board as a USB sound card: the computer plays, the board's speaker sounds.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Play a computer's audio through the board's speaker over USB.
 
-A computer sees a speaker ("Speakers (Espressif Device)" on Windows, a USB
-audio output on macOS and Linux) and plays to it: 48 kHz, stereo, 16-bit.
+The computer sees a speaker ("Speakers (Espressif Device)" on Windows, a USB
+audio output on macOS and Linux) and plays to it at 48 kHz, stereo, 16-bit.
 The samples go from the USB interrupt straight into audiodsp's pump, which
 plays them on the board's I2S codec, so Python never touches the audio. The
 loop here only keeps the clock feedback right and follows the computer's
-volume and mute.
+volume and mute. The computer's slider runs from -50 dB to 0 dB, and moves the
+board's volume linearly between silence and ``VOLUME``, the board's own
+listening level (85 % on the ESP32-P4 panel; 100 overdrives its amplifier).
+Success is hearing the computer's audio from the board.
 
-    mpftp run -d COM4 examples/usb_soundcard.py
+Needs: a board with an I2S codec, whose board config sets ``pcm_out``. The
+firmware needs machine.USBDevice's streaming endpoints, audiodsp and audioif,
+and the board needs micropython-lib's ``usb-device`` and usbhost's
+``usb-device-audio`` package:
 
-Needs a firmware with machine.USBDevice's streaming endpoints, audiodsp and
-audioif (``build_mp.py --modules pydevices,usbhost,audiodsp,audioif``),
-micropython-lib's ``usb-device`` and usbhost's ``usb-device-audio`` package on
-the board, and a board config whose ``pcm_out`` reaches an I2S codec.
+    build_mp.py --modules pydevices,usbhost,audiodsp,audioif
 
-The computer's volume slider runs from -50 dB to 0 dB; it moves the board's
-volume linearly between silence and ``VOLUME``, the board's own listening
-level (85 % on the ESP32-P4 panel; 100 overdrives its amplifier).
+Run it:
 
-The REPL's serial port stays up beside the speaker. Ctrl-C stops the card.
+    mpftp run examples/usb_soundcard.py
+
+The board's serial port stays up beside the speaker. Ctrl-C stops the card.
+Another board can be the computer: run ``usb_speaker.py`` on it.
+
+Tested on: an ESP32-P4 panel with an ES8311 codec.
 """
 
 import time
@@ -29,6 +38,7 @@ from audiodev import AudioFormat, pump
 from boarddev import pcm_out
 from usb.device.audio import SpeakerInterface
 
+# Change these to match your setup.
 VOLUME = 85
 FORMAT = AudioFormat(48000, 2, 16)
 

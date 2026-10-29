@@ -1,22 +1,29 @@
-"""Mount a USB flash drive hosted by the board, and list its files.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Mount a USB flash drive on the host port and list its files.
 
-    mpftp run -d COM49 examples/usb_drive_mount.py
-
-The host side of MSC reads blocks; MicroPython's FAT driver mounts block
-devices. ``usb.host.msc.Drive`` is the object between them, with
-readblocks / writeblocks / ioctl, so mounting a stick is one line::
+``usb.host.msc.Drive`` sits between the stick and MicroPython's FAT driver,
+with ``readblocks``, ``writeblocks`` and ``ioctl``, so mounting a stick is one
+line:
 
     vfs.mount(vfs.VfsFat(Drive(dev)), "/usb")
 
-Hand ``VfsFat`` the whole drive, not a partition: on a partitioned stick the
-filesystem does not start at block 0, and the FAT driver reads the MBR and
-finds the first FAT partition itself. This script prints the partition table
-first so you can see what it found.
+Hand ``VfsFat`` the whole drive, not a partition. On a partitioned stick the
+filesystem doesn't start at block 0, so the FAT driver reads the partition
+table and finds the first FAT partition itself. The program prints the
+partition table first so you can see what it found. It mounts read-only on
+purpose, so listing a stick somebody just plugged in leaves it as it was;
+``usb_drive_log.py`` is the one that writes.
 
-Mounted **read-only on purpose**: listing a stick somebody just plugged in
-should leave it exactly as it was. ``usb_drive_log.py`` is the one that
-writes.
+Needs: a board with USB host support (firmware built with usbhost) and a FAT
+USB flash drive on the host port.
+
+Run it:
+
+    mpftp run examples/usb_drive_mount.py
 """
+
 import os
 import time
 

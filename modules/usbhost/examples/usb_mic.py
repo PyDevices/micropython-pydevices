@@ -1,21 +1,26 @@
-"""Capture a few seconds from a hosted USB microphone.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Capture a few seconds from a USB microphone on the host port.
 
-The host-side mirror of what a device-side mic would be -- except the device
-side cannot present a microphone yet (speaker-only UAC; usbif#7). This script
-drives a commercial USB mic (or any UAC capture device) through
-``usb.host.audio.Microphone``: start it, and read PCM out a whole frame at a
-time.
+The board hosts a commercial USB microphone, or any USB Audio Class capture
+device, through ``usb.host.audio.Microphone``: start it, then read PCM out a
+whole frame at a time. The program prints the peak and RMS over the captured
+buffer, so you can see that real audio arrived and not silence. A good run
+over a speaking voice reports no dropped packets.
 
-    mpftp run -d COM49 examples/usb_mic.py
+Needs: a board with USB host support (firmware built with usbhost) and a USB
+microphone. An ESP32-S3 needs a powered hub or OTG adapter. Behind a hub on
+an ESP32-P4, set ``FULL_SPEED = True`` below: a USB microphone is a
+full-speed device, and the P4's high-speed port can't reach one through a hub
+without a transaction translator, which the ESP-IDF host lacks. At full speed
+the hub passes it straight through.
 
-Prints peak and RMS over the captured buffer so you can see that real audio
-arrived, not silence. Verified originally against a C-Media USB mic and
-a speaking voice (3,014 packets, zero dropped).
+Run it, and speak into the microphone:
 
-**Behind a hub on an ESP32-P4,** set ``FULL_SPEED = True`` below. A USB
-microphone is a full-speed device, and the P4's high-speed port can't reach one
-through a hub without a transaction translator, which the ESP-IDF host lacks.
-At full speed the hub passes it straight through.
+    mpftp run examples/usb_mic.py
+
+Tested on: a C-Media USB microphone.
 """
 
 import time
@@ -23,6 +28,7 @@ import time
 import usb.core
 from usb.host.audio import Microphone
 
+# Change these to match your setup.
 SECONDS = 3
 
 # True when the mic is behind a hub on an ESP32-P4: the host then runs at full

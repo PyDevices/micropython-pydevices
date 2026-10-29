@@ -1,21 +1,28 @@
-"""Append sensor readings to a hosted USB flash drive, read-write.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Append readings to a USB flash drive on the host port and read them back.
 
-    mpftp run -d COM49 examples/usb_drive_log.py
+A datalogger case: the board writes what it produced onto a stick, then
+carries on. The program mounts the stick's FAT filesystem read-write, appends
+to a log file, unmounts to flush, and remounts read-only to read the lines
+back. That proves the bytes reached the medium, not just a cache.
 
-The datalogger case: a board writing what it produced onto a stick, then
-carrying on. Mounts the stick's FAT filesystem read-write, appends to a
-log file, unmounts to flush, and remounts read-only to read the lines back
--- so the proof is that the bytes reached the medium, not a cache.
-
-The one-writer rule applies here exactly as it does on the device side: a
-filesystem with two writers is a corrupted filesystem, so nothing else
-should hold this stick while the board has it.
-
-``usb.host.msc.Drive`` writes with SCSI WRITE(10); whether a mount may write
+``usb.host.msc.Drive`` writes with SCSI WRITE(10). Whether a mount may write
 is the mount's choice. The other drive examples pass ``readonly=True``,
-because the safe answer to "may I write to the drive somebody just plugged
-in" is no. This is the case that deliberately says yes.
+because the safe answer to "may I write to the drive somebody just plugged in"
+is no. This is the one that says yes. As on the device side, a filesystem
+with two writers is a corrupted one, so nothing else should hold the stick
+while the board has it.
+
+Needs: a board with USB host support (firmware built with usbhost) and a FAT
+USB flash drive on the host port.
+
+Run it:
+
+    mpftp run examples/usb_drive_log.py
 """
+
 import os
 import time
 

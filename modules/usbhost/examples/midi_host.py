@@ -1,31 +1,33 @@
-"""Host a USB MIDI instrument: read what it plays, play notes back to it.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Read a USB MIDI instrument on the host port, and play notes back to it.
 
-    mpftp run -d COM49 examples/midi_host.py
+The board becomes the USB host and a commercial MIDI device plugs into it: a
+keyboard, a drum machine, a sound module. No computer is in the chain. This
+is the other half of ``midi_harmonizer.py``, where the board is a MIDI
+device driven by a host; here the roles are reversed. Both directions use
+the same plain MIDI byte stream, so code that parses or generates MIDI
+doesn't care which end it is on, and the USB-MIDI 32-bit packet framing never
+reaches you. The ports come from ``midiports.usb_host``: a hosted MIDI device
+as a ``(midi_in, midi_out)`` pair on ``usb.core``, the same pair
+``adafruit_midi`` reads and writes on any other MIDI transport.
 
-The board becomes the USB host and a commercial MIDI device plugs into it
--- a keyboard, a drum machine, a sound module. No PC anywhere in the chain.
+An Android phone works too. Pull down the USB notification and choose MIDI
+(on Samsung, "USB controlled by" > "MIDI"). A pad or keyboard app on the
+phone, such as MIDIPadidi, then plays into the board like any controller. A
+phone is a high-speed device, so it needs no ``FULL_SPEED`` behind a hub.
 
-This completes the other half of the MIDI story. `midi_harmonizer.py` has
-the board as a MIDI *device* being driven by a host; here the roles are
-reversed. Both directions use the same plain MIDI byte stream, so code
-that parses or generates MIDI does not care which end it is on -- the
-USB-MIDI 32-bit packet framing never reaches you.
+Needs: a board with USB host support (firmware built with usbhost) and the
+``midiports`` package from pydevices, installed with ``mip``. Behind a hub
+on an ESP32-P4, set ``FULL_SPEED = True`` below: a keyboard is a full-speed
+device, and the P4's high-speed port can't reach one through a hub without a
+transaction translator, which the ESP-IDF host lacks. At full speed the hub
+passes it straight through.
 
-The ports come from ``midiports.usb_host``, part of pydevices (install it
-with mip): a hosted MIDI device as a ``(midi_in, midi_out)`` pair on
-``usb.core``, the same pair ``adafruit_midi`` reads and writes on any other
-MIDI transport.
+Run it, then play on the instrument:
 
-**An Android phone works too.** Pull down the USB notification and choose
-MIDI (on Samsung, "USB controlled by" > "MIDI"); a pad or keyboard app on the
-phone, such as MIDIPadidi, then plays into the board like any controller.
-A phone is a high-speed device, so it needs no ``FULL_SPEED`` behind a hub,
-and it still works if you set it for a keyboard on the same hub.
-
-**Behind a hub on an ESP32-P4,** set ``FULL_SPEED = True`` below. A
-keyboard is a full-speed device, and the P4's high-speed port can't reach one
-through a hub without a transaction translator, which the ESP-IDF host lacks.
-At full speed the hub passes it straight through.
+    mpftp run examples/midi_host.py
 """
 
 import time
@@ -33,6 +35,7 @@ import time
 import usb.core
 from midiports import message_length, usb_host
 
+# Change these to match your setup.
 # True when the device is behind a hub on an ESP32-P4: the host then runs at
 # full speed, so the hub passes a full-speed device through. Plugged straight
 # into the port, or on an S3, leave it False.

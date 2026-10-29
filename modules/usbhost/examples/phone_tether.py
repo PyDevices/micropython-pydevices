@@ -1,27 +1,33 @@
-"""Get online through a phone: USB tethering on the board's host port.
-
-    mpftp run -d COM55 examples/phone_tether.py
-    mpftp monitor COM55 --seconds 150
-
-``run`` starts the script and returns; ``monitor`` shows what it prints while
-it waits for the phone.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Get the board online through an Android phone's USB tethering.
 
 Plug an Android phone into the board's host port, then turn on USB tethering
 on the phone (Settings > Connections > Mobile Hotspot and Tethering > USB
 tethering; the switch stays grey until the phone is plugged in). The phone
 presents an RNDIS network adapter, gives the board an address by DHCP, and
-shares its mobile data or Wi-Fi. This script waits for it, brings the link
-up, and fetches a web page over it.
-
-The board's own Wi-Fi is turned off first, so the page can only have come
-through the phone. Leave ``WIFI_OFF = False`` to keep Wi-Fi up and send
-sockets through the phone anyway with ``net.set_default()``.
+shares its mobile data or Wi-Fi. This program waits for it, brings the link
+up, and fetches a web page over it. Success is the page's first line
+printing. The board's own Wi-Fi is turned off first, so the page can only
+have come through the phone. Set ``WIFI_OFF = False`` to keep Wi-Fi up and
+send sockets through the phone anyway with ``net.set_default()``.
 
 The interface is ``usb.host.net.Tether``, from pydevices' ``usb-host-net``
-(install it with mip). It works on an ESP32-P4's high-speed port, directly or
-through a hub, and on an ESP32-S3's full-speed port. RNDIS is what Samsung
-and many other Android phones speak; CDC-ECM, CDC-NCM and iPhone tethering
-are not implemented.
+package. RNDIS is what Samsung and many other Android phones speak; CDC-ECM,
+CDC-NCM and iPhone tethering are not implemented.
+
+Needs: a board with USB host support (firmware built with usbhost) and the
+``usb-host-net`` package, installed with ``mip``. It works on an ESP32-P4's
+high-speed port, directly or through a hub, and on an ESP32-S3's full-speed
+port.
+
+Run it, and watch what it prints while it waits for the phone:
+
+    mpftp run examples/phone_tether.py
+    mpftp monitor --seconds 150
+
+``run`` starts the program and returns; ``monitor`` shows its output.
 """
 
 import socket
@@ -30,6 +36,7 @@ import time
 import usb.core
 from usb.host.net import Tether
 
+# Change these to match your setup.
 # True turns the board's Wi-Fi off first, so the page can only come through
 # the phone. False leaves Wi-Fi up and makes the phone the default route.
 WIFI_OFF = True

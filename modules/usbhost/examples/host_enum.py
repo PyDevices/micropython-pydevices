@@ -1,24 +1,31 @@
-"""List the USB devices on the host port and watch attach / detach.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""List the USB devices on the host port and watch them come and go.
 
-Uses ``usb.core``, whose ``find()`` is PyUSB's and CircuitPython's, so what
-you learn here carries over to any class driver written on it. Each device
-is printed with its vendor and product IDs, speed, and the manufacturer,
-product and serial strings it reports (any it lacks print as ``-``).
+Uses ``usb.core``, whose ``find()`` is the same as PyUSB's and
+CircuitPython's, so what you learn here carries over to any class driver
+written on it. Each device prints with its vendor and product IDs, its speed,
+and the manufacturer, product and serial strings it reports (any it lacks
+print as ``-``). Plug and unplug devices while it runs: each attach and
+detach is printed, along with the host's counters from ``usb.core.stats()``.
 
-    mpftp run -d COM49 examples/host_enum.py
+Needs: a board with USB host support (firmware built with usbhost). An
+ESP32-S3 needs a powered hub or OTG adapter, because the Waveshare touch
+boards don't switch VBUS. An ESP32-P4 hosts on a port that supplies 5 V.
+Behind a hub, a P4 sees full- and low-speed devices only when the host runs
+at full speed, so set ``FULL_SPEED = True`` below.
 
-Plug and unplug devices while it runs; each attach and detach is printed,
-along with the host's counters from ``usb.core.stats()``. On an S3 host that
-means a powered hub or OTG adapter (no VBUS switching on the Waveshare touch
-boards). A P4 hosts on a port that supplies 5 V. Behind a hub it sees full-
-and low-speed devices only when the host runs at full speed: set
-``FULL_SPEED = True`` below.
+Run it:
+
+    mpftp run examples/host_enum.py
 """
 
 import time
 
 import usb.core
 
+# Change these to match your setup.
 # True when devices are behind a hub on an ESP32-P4: the host then runs at
 # full speed, so the hub passes full- and low-speed devices through.
 FULL_SPEED = False
