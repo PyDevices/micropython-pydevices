@@ -945,7 +945,7 @@ static JRESULT mcu_output (
 			w = (*s++ & 0xF8) << 8;		/* RRRRR----------- */
 			w |= (*s++ & 0xFC) << 3;	/* -----GGGGGG----- */
 			w |= *s++ >> 3;				/* -----------BBBBB */
-			*d++ = w;				/* displayif: native byte order (ChaN R0.03 as released; CircuitPython byte-swaps here) */
+			*d++ = w;				/* jpegio: native byte order (ChaN R0.03 as released; CircuitPython byte-swaps here) */
 		} while (--n);
 	}
 

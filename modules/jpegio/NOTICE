@@ -1,0 +1,19 @@
+jpegio
+Copyright (c) 2026 PyDevices, MIT License (see the repository's LICENSE).
+
+This module includes code from other projects. Each folder under
+third_party/ carries the project's license and an ORIGIN.txt naming the
+upstream commit and every change made.
+
+third_party/tjpgd/
+  TJpgDec R0.03, Copyright (C) 2021 ChaN. ChaN's TJpgDec license.
+
+third_party/jpegenc/
+  The JPEG writer from stb_image_write v1.16, Copyright (c) 2017 Sean Barrett,
+  itself Jon Olick's public-domain jo_jpeg. MIT or public domain, at your
+  choice.
+
+src/jpegio.c
+  A port of CircuitPython's shared-bindings/jpegio and shared-module/jpegio,
+  Copyright (c) 2023 Jeff Epler for Adafruit Industries, MIT License. The
+  upstream copyright lines are kept in the file's header.

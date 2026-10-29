@@ -1,10 +1,12 @@
 # jpegio CMake glue (see micropython.mk for what the variables mean).
 
 set(JPEGIO_DIR ${CMAKE_CURRENT_LIST_DIR}/src)
+set(JPEGIO_THIRD_PARTY ${CMAKE_CURRENT_LIST_DIR}/third_party)
 
 add_library(usermod_jpegio INTERFACE)
 target_include_directories(usermod_jpegio INTERFACE
-    ${JPEGIO_DIR}/tjpgd
+    ${JPEGIO_THIRD_PARTY}/tjpgd
+    ${JPEGIO_THIRD_PARTY}/jpegenc
 )
 target_link_libraries(usermod INTERFACE usermod_jpegio)
 
@@ -15,8 +17,8 @@ target_sources(usermod_jpegio INTERFACE
     ${JPEGIO_DIR}/jpegio.c
     ${JPEGIO_DIR}/jpegio_enc.c
     ${JPEGIO_DIR}/jpegio_hw.c
-    ${JPEGIO_DIR}/jpegenc/jpegenc.c
-    ${JPEGIO_DIR}/tjpgd/tjpgd.c
+    ${JPEGIO_THIRD_PARTY}/jpegenc/jpegenc.c
+    ${JPEGIO_THIRD_PARTY}/tjpgd/tjpgd.c
 )
 
 # The ESP32-P4 encodes and decodes on its JPEG engine (esp_driver_jpeg, which

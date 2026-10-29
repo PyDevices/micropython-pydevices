@@ -1,0 +1,22 @@
+TJpgDec R0.03 with patch1, by ChaN
+Upstream: http://elm-chan.org/fsw/tjpgd/00index.html
+Taken from: CircuitPython's lib/tjpgd/src/
+  https://github.com/adafruit/circuitpython.git
+  identical, apart from the changes below, to the copy at commit
+  520805e12127bdb51722ba1caa5c670ecd8c4f72
+Files: tjpgd.c, tjpgd.h, tjpgdcnf.h (tjpgdcnf.h is CircuitPython's, verbatim:
+  JD_SZBUF 512, JD_FORMAT 1, JD_USE_SCALE 1, JD_TBLCLIP 1, JD_FASTDECODE 1)
+
+Changes:
+
+1. tjpgd.c, mcu_output: the RGB565 store is ChaN's original `*d++ = w;`.
+   CircuitPython byte-swaps there with `__builtin_bswap16(w)`; jpegio keeps
+   native byte order.
+
+2. tjpgd.h: the stdint.h guard tests for the header with __has_include
+   instead of testing for _WIN32. Upstream's comment says the test means "a
+   compiler without stdint.h", but mingw defines _WIN32 and ships stdint.h,
+   where uint32_t is `unsigned int` rather than the fallback's
+   `unsigned long`, so every mingw cross-build failed with conflicting types.
+   The fallback typedefs are kept for the compiler the comment meant, MSVC
+   before 2010. -DJD_HAS_STDINT=0/1 overrides the detection.
