@@ -25,6 +25,31 @@ most of it ESP-DL, so check [that the image fits](fit-firmware-on-a-small-flash.
 because esp-vision's preview streams frames to its own IDE and this build has no
 such connection.
 
+## Streaming models
+
+`tflite` also runs streaming (stateful) models, such as the microWakeWord
+models ESPHome publishes. They keep their state between calls in resource
+variables, and each `Model` has room for 20. Feed one a few slices at a time
+and read its output after each `predict()`.
+
+Their input is already int8, so fill the tensor with a callable rather than an
+ndarray, which `predict()` would quantize again. The callable gets the input
+tensor's own memory, its shape and its dtype:
+
+```python
+group = bytearray(stride * 40)  # the next stride slices, int8
+
+
+def fill(buffer, shape, dtype):
+    buffer[:] = group
+
+
+probability = model.predict([fill])[0][0][0]  # uint8: 255 is certain
+```
+
+[`tflite_streaming_simpletest.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/tflite/examples/tflite_streaming_simpletest.py)
+runs one.
+
 ## Run long scripts as `main.py`
 
 An mpftp `exec` that outlasts mpftp's wait resets the board over USB

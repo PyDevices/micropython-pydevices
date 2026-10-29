@@ -17,7 +17,7 @@ copied to the board:
 
 Run it:
 
-    mpftp run tflm_hello_world_test.py
+    mpftp run tflite_hello_world.py
 """
 
 import math

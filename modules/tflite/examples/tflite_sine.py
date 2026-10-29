@@ -9,7 +9,7 @@ the ``tflite`` module loads a model, fills its input and reads its output on
 this board. The program prints the model's tensors, the worst error and where
 it happened, and the time per prediction. The model is small and approximate:
 its own worst error is about 0.12, the same on the P4 and the S3.
-``tflm_hello_world_test.py`` is the pass or fail test.
+``tflite_hello_world.py`` is the pass or fail test.
 
 Needs: an ESP32-S3 or ESP32-P4 board with firmware built with tflite, and the
 model on the board:
@@ -18,7 +18,7 @@ model on the board:
 
 Run it:
 
-    mpftp run sine_check.py
+    mpftp run tflite_sine.py
 
 Tested on: an ESP32-P4 board on MicroPython v1.30.0-preview.160.gb70ae1aca6
 (built 2026-10-28).

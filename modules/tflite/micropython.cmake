@@ -1,5 +1,7 @@
 # tflite: esp-vision's py_tflite.cpp (TensorFlow Lite Micro), compiled as it
-# is from the pinned esp-vision checkout in modules/.esp-vision. ESP32-P4 and
+# is from the pinned esp-vision checkout in modules/.esp-vision, by way of
+# src/tflite_streaming.cpp, which includes it and adds what streaming
+# (stateful) models need: resource variables and their operators. ESP32-P4 and
 # ESP32-S3 only, the chips esp-vision builds it for: every other port and
 # chip skips it whole, so modules/all needs no exception. Make ports never
 # look here: there is no micropython.mk.
@@ -31,8 +33,8 @@ if(ESP_PLATFORM AND (IDF_TARGET STREQUAL "esp32p4" OR IDF_TARGET STREQUAL "esp32
         ${_tflm_dir}/third_party/kissfft)
 
     add_library(usermod_tflite INTERFACE)
-    target_sources(usermod_tflite INTERFACE ${ESP_VISION_SRC}/modules/py_tflite.cpp)
-    target_include_directories(usermod_tflite INTERFACE ${_tflite_ulab_parent} ${_tflm_inc})
+    target_sources(usermod_tflite INTERFACE ${CMAKE_CURRENT_LIST_DIR}/src/tflite_streaming.cpp)
+    target_include_directories(usermod_tflite INTERFACE ${ESP_VISION_SRC}/modules ${_tflite_ulab_parent} ${_tflm_inc})
     target_link_libraries(usermod_tflite INTERFACE idf::espressif__esp-tflite-micro idf::esp_hw_support)
     target_link_libraries(usermod INTERFACE usermod_tflite)
 endif()
