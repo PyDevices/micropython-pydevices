@@ -9,7 +9,9 @@ audio into 10 ms feature slices, the tflite model turns every few slices into
 a probability, and the detector in this file decides, following ESPHome's
 micro_wake_word: the mean of the last few probabilities must pass the model's
 cutoff, nothing fires in the first second, and after a detection the
-probabilities must fall back below the cutoff before the next.
+probabilities must fall back below the cutoff before the next. For a
+microphone, give the Frontend an audiopump tap with ``attach()`` instead of
+feeding it the file.
 
 Needs: an ESP32-S3 or ESP32-P4 board with firmware built with tflite, ulab
 and audiodsp, a model and its JSON manifest from ESPHome's
@@ -18,9 +20,6 @@ micro-wake-word-models, and a 16-bit PCM WAV file at 16 kHz or higher:
     mpftp put hey_jarvis.tflite /hey_jarvis.tflite
     mpftp put hey_jarvis.json /hey_jarvis.json
     mpftp put speech.wav /speech.wav
-
-For a microphone, give the Frontend an audiopump tap with ``attach()``
-instead of feeding it the file.
 
 Run it:
 
