@@ -53,6 +53,15 @@ compiles with `-std=gnu++2b`, esp-vision's own setting.
 Each test fails when it should: the hello-world test with its inputs offset, the
 pedestrian test with one person blacked out.
 
+Streaming models were checked on an ESP32-P4 board (Waveshare's ESP32-P4 WiFi6
+Touch LCD 4B). ESPHome's "Hey Jarvis" model was fed the int8 feature slices of
+six clips: three with the wake word, two ordinary sentences and loud noise.
+Its 1467 outputs were identical, byte for byte, to a TensorFlow Lite Micro
+reference running the same model on the same slices on a PC. One call, three
+slices, takes 1.5 to 2 ms there. The comparison sees a change of one step:
+with the reference keeping one clip's model state into the next, 11 outputs
+differed, each by 1 of 255.
+
 ## What it costs
 
 Built into an `all` image, the two modules added about 2.5 MB on the S3 (the
