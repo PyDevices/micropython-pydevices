@@ -13,6 +13,9 @@ Needs: Windows and CPython.
 Run it:
 
     python midi_in_count.py [substring-of-port-name] [seconds]
+
+Tested on: CPython 3.14.6 on Windows 11, reading the MIDI output of an
+ESP32-P4 board.
 """
 
 import ctypes, ctypes.wintypes as wt, sys, time

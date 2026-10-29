@@ -21,6 +21,9 @@ Run it:
 
     mpremote run camera_espcamera.py
     mpremote cp :espcamera.jpg .
+
+Tested on: an ESP32-P4 board with an IMX219 camera and a 720x720 panel, on
+MicroPython v1.30.0-preview.160.gb70ae1aca6 (built 2026-10-28).
 """
 
 import time
