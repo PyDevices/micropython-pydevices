@@ -1,7 +1,7 @@
 # jpegio: CircuitPython-compatible JPEG decoder (TJpgDec R0.03, CP's config).
 # Platform-neutral C, built on every port.
 #
-# The vendored src/tjpgd/tjpgd.c is the firmware's only TJpgDec. LVGL's own copy
+# The vendored third_party/tjpgd/tjpgd.c is the firmware's only TJpgDec. LVGL's own copy
 # is off by config (LV_USE_TJPGD 0 in lvgl-bindings' lv_conf.h on MicroPython),
 # so when lvgl-micropython is in the same build jpegio also compiles
 # lvgl_decoder.c: an LVGL image decoder on this TJpgDec, registered through
@@ -10,15 +10,17 @@
 
 JPEGIO_MOD_DIR := $(USERMOD_DIR)
 JPEGIO_DIR := $(JPEGIO_MOD_DIR)/src
+JPEGIO_THIRD_PARTY := $(JPEGIO_MOD_DIR)/third_party
 
 ifneq ($(wildcard $(TOP)/py/circuitpy_mpconfig.h),)
 # CircuitPython has a jpegio module of its own (the decoder, on its own
 # TJpgDec), so there this module adds no Python module and no decoder: only
 # the encoder's C API, jpegio_encode(), which cameraif's capture_jpeg() calls.
 # On an ESP32-P4 it encodes on the chip's JPEG engine, as on MicroPython.
+CFLAGS_USERMOD += -I$(JPEGIO_THIRD_PARTY)/jpegenc
 SRC_USERMOD_C += $(JPEGIO_DIR)/jpegio_enc.c
 SRC_USERMOD_LIB_C += $(JPEGIO_DIR)/jpegio_hw.c
-SRC_USERMOD_LIB_C += $(JPEGIO_DIR)/jpegenc/jpegenc.c
+SRC_USERMOD_LIB_C += $(JPEGIO_THIRD_PARTY)/jpegenc/jpegenc.c
 ifeq ($(IDF_TARGET),esp32p4)
 CFLAGS_USERMOD += -DJPEGIO_HW=1 \
 	-isystem $(TOP)/ports/espressif/esp-idf/components/esp_driver_jpeg/include \
@@ -30,16 +32,16 @@ USER_ESP_IDF_COMPONENTS += esp_driver_jpeg esp_hal_jpeg
 endif
 else
 
-CFLAGS_USERMOD += -I$(JPEGIO_DIR)/tjpgd
+CFLAGS_USERMOD += -I$(JPEGIO_THIRD_PARTY)/tjpgd -I$(JPEGIO_THIRD_PARTY)/jpegenc
 
 SRC_USERMOD_C += $(JPEGIO_DIR)/jpegio.c
 SRC_USERMOD_C += $(JPEGIO_DIR)/jpegio_enc.c
 
 # Library source: no qstrs, so it stays out of the QSTR scan. jpegio_hw.c is
 # the P4's JPEG engine on the CMake port; on these ports it is two stubs.
-SRC_USERMOD_LIB_C += $(JPEGIO_DIR)/tjpgd/tjpgd.c
+SRC_USERMOD_LIB_C += $(JPEGIO_THIRD_PARTY)/tjpgd/tjpgd.c
 SRC_USERMOD_LIB_C += $(JPEGIO_DIR)/jpegio_hw.c
-SRC_USERMOD_LIB_C += $(JPEGIO_DIR)/jpegenc/jpegenc.c
+SRC_USERMOD_LIB_C += $(JPEGIO_THIRD_PARTY)/jpegenc/jpegenc.c
 
 # lvgl-micropython is in this build if USER_C_MODULES names it -- either as a
 # module directory itself (MicroPython 1.29 c_module()) or as a parent

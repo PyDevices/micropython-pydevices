@@ -11,7 +11,7 @@ extern "C" {
 #include "tjpgdcnf.h"
 #include <string.h>
 
-/* Deviation from ChaN R0.03 (see src/jpegio/README.md): upstream selects the
+/* Deviation from ChaN R0.03 (see ORIGIN.txt): upstream selects the
 /  fallback typedefs with `#if defined(_WIN32)`, while its own comment says the
 /  test is meant to be "a compiler without stdint.h". mingw is both at once --
 /  it defines _WIN32 and ships stdint.h, where uint32_t is `unsigned int`, not

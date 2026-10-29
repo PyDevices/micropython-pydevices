@@ -253,12 +253,12 @@ to byte-swap for `RGB565_SWAPPED`); see above. And errors are typed
 - [`jpegio.c`](src/jpegio.c) — the module (`MP_REGISTER_MODULE(MP_QSTR_jpegio, ...)`) and
   `JpegDecoder`.
 - [`jpegio_enc.c`](src/jpegio_enc.c), [`jpegio.h`](src/jpegio.h) — `JpegEncoder` and the C API.
-- [`jpegenc/`](src/jpegenc/) — the software encoder, generated from stb_image_write by
+- [`third_party/jpegenc/`](third_party/jpegenc/) — the software encoder, generated from stb_image_write by
   [`tools/make_jpegenc.py`](tools/make_jpegenc.py) (rerun it to take a newer stb).
 - [`jpegio_hw.c`](src/jpegio_hw.c), [`jpegio_hw.h`](src/jpegio_hw.h) — the ESP32-P4's JPEG engine
   (`esp_driver_jpeg`), compiled in when `micropython.cmake` sees an esp32p4
   target; two stubs everywhere else.
-- [`tjpgd/`](src/tjpgd/) — vendored TJpgDec: `tjpgd.c`, `tjpgd.h`, `tjpgdcnf.h`. The
+- [`third_party/tjpgd/`](third_party/tjpgd/) — vendored TJpgDec: `tjpgd.c`, `tjpgd.h`, `tjpgdcnf.h`. The
   firmware's only TJpgDec, always compiled.
 - [`lvgl_decoder.c`](src/lvgl_decoder.c) / [`lvgl_decoder.h`](src/lvgl_decoder.h) — the LVGL image decoder on that
   TJpgDec; compiled only beside `lvgl-micropython` (below).
@@ -283,40 +283,14 @@ forces the decision. Without lvgl-micropython nothing links against LVGL
 `register_lvgl_decoder()` and `lvgl_decoders()`; see *Why these two names
 are unconditional* below.
 
-## NOTICE — stb_image_write
+## Credits
 
-[`jpegenc/jpegenc.c`](src/jpegenc/jpegenc.c) is the JPEG writer from Sean Barrett's
-[stb_image_write](https://github.com/nothings/stb) v1.16, itself Jon Olick's
-public-domain jo_jpeg. Its licence (MIT or public domain, your choice) is
-at the top of that file.
-
-## NOTICE — TJpgDec
-
-[`tjpgd/tjpgd.c`](src/tjpgd/tjpgd.c), [`tjpgd/tjpgd.h`](src/tjpgd/tjpgd.h) and [`tjpgd/tjpgdcnf.h`](src/tjpgd/tjpgdcnf.h) are ChaN's TJpgDec
-R0.03 with patch1, taken from CircuitPython's `lib/tjpgd/src/` (which
-imported it from http://elm-chan.org/fsw/tjpgd/00index.html), with two
-deviations. First, the RGB565 store in `mcu_output` is ChaN's original
-`*d++ = w;` where CircuitPython has `__builtin_bswap16(w)`. Second, the
-`stdint.h` guard at the top of `tjpgd.h` tests for the header with
-`__has_include` rather than for `_WIN32`: upstream's comment says it means
-"a compiler without stdint.h", but mingw defines `_WIN32` *and* ships
-`stdint.h`, where `uint32_t` is `unsigned int` rather than the fallback's
-`unsigned long`, so every mingw cross-build failed with conflicting types
-(displayif#25). The fallback typedefs are kept for the compiler the comment
-was written for, MSVC before 2010. Both CircuitPython's copy and ChaN's
-R0.03 still carry the platform test; LVGL's fork sidesteps it by including
-`stdint.h` unconditionally. The files keep ChaN's license header:
-
-> Copyright (C) 2021, ChaN, all right reserved.
->
-> The TJpgDec module is a free software and there is NO WARRANTY.
-> No restriction on use. You can use, modify and redistribute it for
-> personal, non-profit or commercial products UNDER YOUR RESPONSIBILITY.
-> Redistributions of source code must retain the above copyright notice.
-
-`jpegio.c` is a port of CircuitPython's `shared-bindings/jpegio` and
-`shared-module/jpegio` (Copyright (c) 2023 Jeff Epler for Adafruit
-Industries, MIT).
+The decoder is ChaN's TJpgDec and the software encoder is the JPEG writer
+from Sean Barrett's stb_image_write. Both are under
+[`third_party/`](third_party/), each with its license and an `ORIGIN.txt`
+that names the upstream commit and every change made. `jpegio.c` is a port
+of CircuitPython's jpegio by Jeff Epler for Adafruit Industries (MIT).
+[`NOTICE`](NOTICE) lists them all.
 
 ## LVGL image decoder
 

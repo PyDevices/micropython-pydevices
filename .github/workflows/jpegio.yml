@@ -84,7 +84,7 @@ jobs:
           find . -name '*.o' -exec nm -A {} + 2>/dev/null | grep ' T jd_prepare$' > jd.txt
           cat jd.txt
           test "$(wc -l < jd.txt)" = 1
-          grep -q '^./jpegio/src/tjpgd/tjpgd.o:' jd.txt
+          grep -q '^./jpegio/third_party/tjpgd/tjpgd.o:' jd.txt
           nm jpegio/src/jpegio.o | grep -q ' U jd_prepare$'
           nm jpegio/src/lvgl_decoder.o | grep -q ' U jd_decomp$'
 

@@ -1,0 +1,19 @@
+The JPEG writer from stb_image_write v1.16, by Sean Barrett, itself Jon
+Olick's public-domain jo_jpeg.cpp.
+Upstream: https://github.com/nothings/stb.git
+Commit: 2c980bb59875b0d32144a71867fbdebb2f77cd20
+Files: jpegenc.c (generated), jpegenc.h (ours)
+
+jpegenc.c is generated from stb_image_write.h by tools/make_jpegenc.py:
+
+    python3 tools/make_jpegenc.py <stb checkout> third_party/jpegenc/jpegenc.c
+
+Rerun it against a newer stb to take its changes. The encoding is stb's,
+verbatim. The changes are only how pixels come in and bytes go out:
+
+- pixels are read through a fetch callback (jpegenc.h), so RGB565 and
+  grayscale buffers of any stride encode without an RGB888 copy, where stb
+  reads an 8-bit RGB array;
+- 4:2:0 subsampling is an argument, where stb picks it from quality <= 90;
+- output goes through a write callback and a two-field context, without
+  stb's file and buffering machinery; no vertical flip.

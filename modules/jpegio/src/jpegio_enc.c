@@ -22,7 +22,7 @@
 
 #include "jpegio.h"
 #include "jpegio_hw.h"
-#include "jpegenc/jpegenc.h"
+#include "jpegenc.h"
 
 typedef struct _jpegio_jpegencoder_obj_t {
     mp_obj_base_t base;
