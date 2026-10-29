@@ -5,10 +5,10 @@
 
 Every note that arrives on the board's USB MIDI function goes back out with a
 major third and a perfect fifth stacked on top: melody in, triads out.
-Everything that is not a note (controllers, pitch bend, program changes,
-clock) passes through untouched. The program doesn't care what is on the
-other end. A DAW talking both directions down one cable works, because USB
-MIDI is full duplex, and so would any other MIDI port you point ``send`` at.
+Control changes pass through untouched, and other messages are dropped. The
+program doesn't care what is on the other end. A DAW talking both directions
+down one cable works, because USB MIDI is full duplex, and so would any other
+MIDI port you point ``send`` at.
 Success is hearing three notes for every one you play.
 
 Needs: a board with USB device support, the ``usb-device-midi`` and
@@ -30,6 +30,7 @@ Tested on: an ESP32-P4 board on MicroPython v1.30.0-preview.160.gb70ae1aca6
 import time
 
 import adafruit_midi
+from adafruit_midi.control_change import ControlChange
 from adafruit_midi.note_off import NoteOff
 from adafruit_midi.note_on import NoteOn
 from midiports import usb_device
@@ -73,8 +74,8 @@ def run():
                 break
             if isinstance(msg, (NoteOn, NoteOff)):
                 harmonize(msg)
-            else:
-                midi.send(msg, channel=getattr(msg, "channel", None) or 0)
+            elif isinstance(msg, ControlChange):
+                midi.send(msg, channel=msg.channel)
 
 
 # Start straight away, so the file works as the board's /main.py.
