@@ -24,6 +24,15 @@ More modules in CircuitPython-compatible builds
 tflite and vision stay MicroPython-only: they are esp-vision's modules, not
 ours to port.
 
+More models for tflite:
+
+- **YAMNet's full 521-class int8 model in tflite.** The published
+  yamnet-mel-int8-tflm conversion scores every class near 0.5 for any input;
+  a fresh int8 conversion of Google's YAMNet would run in the same resolver.
+- **micro_speech's own int8 audio preprocessor.** It needs TFLM's Signal
+  ops, which tflite doesn't register; until then `audiofeatures` makes the
+  same features.
+
 ## Module roadmaps
 
 The modules plan their own work; each roadmap is next to its code.
