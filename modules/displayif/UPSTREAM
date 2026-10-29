@@ -18,7 +18,7 @@ USER_C_MODULES block matches MicroPython 1.29's)
 ## SDL2 (desktop usdl2 backend)
 Minimum: >= 2.0 (SDL_* API used by src/ports/desktop/usdl2/)
 Tested locally against: 2.30.0 (`pkg-config --modversion sdl2`)
-CI installs Ubuntu's `libsdl2-dev` package (see .github/workflows/clean-build.yml).
+CI installs Ubuntu's `libsdl2-dev` package (see ../../.github/workflows/displayif.yml).
 
 ## Protomatter (vendored, src/ports/common/rgbmatrix/protomatter/)
 Vendored from https://github.com/adafruit/Adafruit_Protomatter (BSD).
