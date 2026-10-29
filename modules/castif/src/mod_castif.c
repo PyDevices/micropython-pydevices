@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // castif: the cast as a FreeRTOS task on core 0 of the ESP32-P4.
 //
 // PPA convert and hardware H.264 encode (h264enc's C API), MPEG-TS mux

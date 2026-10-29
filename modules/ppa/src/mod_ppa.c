@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // ppa for Python: scale, rotate, mirror, colour-convert, fill and blend.
 //
 //   ppa.srm(src, 640, 480, dst, 1280, 720)                  # scale to fill dst

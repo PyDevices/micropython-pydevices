@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // h264enc's C API, for native code that encodes without Python in the loop
 // (castif's core-0 cast task is the first user).
 //

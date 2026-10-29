@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // tsmux: H.264 access units and LPCM blocks to MPEG-TS packets (tsmux_core.h).
 //
 // Moved out of castif (media modules roadmap, Phase 4) without changing a byte

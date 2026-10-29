@@ -1,0 +1,50 @@
+# castif on a PC: its HLS segmenter, playlist and HTTP server compiled against
+# tsmux's muxer, fed tsmux's canned stream, and ffprobe decoding what it
+# served. The encoder task and the Python API need an ESP32-P4.
+name: castif
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/castif/**'
+      - 'modules/tsmux/src/**'
+      - 'modules/tsmux/tests/canned_160x96.h264'
+      - '.github/workflows/castif.yml'
+  pull_request:
+    paths:
+      - 'modules/castif/**'
+      - 'modules/tsmux/src/**'
+      - 'modules/tsmux/tests/canned_160x96.h264'
+      - '.github/workflows/castif.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Build the HLS test
+        working-directory: modules/castif
+        run: cc -O2 -Wall -Werror -Wno-unused-function -Itests/host -I../tsmux/src -o test_castif_hls tests/test_castif_hls.c ../tsmux/src/tsmux_core.c
+
+      - name: Segments, playlist and HTTP answers (and a planted fault fails)
+        working-directory: modules/castif
+        run: |
+          mkdir -p planted out
+          ! ./test_castif_hls planted --plant
+          ./test_castif_hls out
+
+      - name: ffprobe decodes each segment and the playlist
+        working-directory: modules/castif
+        run: python3 tests/check_castif_hls.py out

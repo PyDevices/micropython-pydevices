@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // h264enc: RGB565 frames to H.264 on the ESP32-P4's hardware encoder.
 //
 //   enc = h264enc.Encoder(720, 720, fps=30, gop=30, bitrate=3_000_000)

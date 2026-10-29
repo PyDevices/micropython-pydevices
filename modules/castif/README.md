@@ -36,6 +36,16 @@ CircuitPython builds it on the ESP32-P4 too. Its port doesn't drive the
 boards' ESP32-C6 radio yet, so there's no network, and `start()` raises
 `OSError`.
 
+## Tests
+
+[`tests/test_castif_hls.c`](tests/test_castif_hls.c) runs on a PC. It
+compiles `Hls`'s segmenter, playlist and HTTP server against tsmux, feeds
+them tsmux's canned stream, and fetches a segment over loopback. Then
+[`tests/check_castif_hls.py`](tests/check_castif_hls.py) has ffprobe decode
+every segment and the playlist it served. Each step's command is in
+[`castif.yml`](../../.github/workflows/castif.yml), which runs both on every
+change. The encoder task and the RTSP cast need an ESP32-P4.
+
 ## `castif.Hls(width, height, *, fps=20, bitrate=2_000_000, segments=3, target=900, port=8090, path=None)`
 
 `start()` begins serving `/stream.m3u8` and its `seg<N>.ts` segments on

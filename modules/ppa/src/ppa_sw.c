@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // ppa's software path: scale, rotate, mirror and colour convert in portable
 // C, for every port (and on the P4 when asked: the reference its PPA is
 // checked against). Fill and blend are the PPA's alone (D5).

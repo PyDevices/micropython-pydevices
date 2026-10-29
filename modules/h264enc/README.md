@@ -69,11 +69,16 @@ h264enc.
 
 ## Tests
 
-[`tests/test_h264enc.py`](tests/test_h264enc.py) runs on a P4 with [`tests/h264_frames.py`](tests/h264_frames.py) beside it:
+[`tests/hardware/test_h264enc.py`](tests/hardware/test_h264enc.py) runs on a P4 with [`tests/h264_frames.py`](tests/h264_frames.py) beside it:
 60 frames of a moving box, IDR placement, `force_idr()`, the busy rule. It
 writes `h264enc.h264`, and [`tests/check_h264_ffmpeg.py`](tests/check_h264_ffmpeg.py) has ffmpeg on the PC
 decode it: every frame, at 30 dB or better against the source (33.3 dB
 measured), and a frame-late comparison that must fail.
+
+Without a board, [`tests/encode_h264_ffmpeg.py`](tests/encode_h264_ffmpeg.py) has ffmpeg's x264 encode the
+same frames at the same settings, for `check_h264_ffmpeg.py` to score.
+[`h264enc.yml`](../../.github/workflows/h264enc.yml) runs both on every change, and builds a P4 firmware
+with h264enc to check it compiles and links.
 
 ## Build
 

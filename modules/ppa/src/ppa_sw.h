@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // ppa's software path (ppa_sw.c), and the checks both paths share.
 #ifndef PPA_SW_H
 #define PPA_SW_H

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // castif.Hls: live HLS from a framebuffer, as a FreeRTOS task on core 0.
 //
 //   hls = castif.Hls(1280, 720, fps=20, bitrate=2_000_000)
@@ -459,6 +460,11 @@ static void hls_serve(castif_hls_obj_t *h, int wait_ms) {
     }
 }
 
+// Everything above is plain C over BSD sockets. tests/test_castif_hls.c
+// compiles it on a PC, against tsmux, and checks the segments, the playlist
+// and the HTTP answers; the task and the Python API below need the board.
+#ifndef CASTIF_HOST_TEST
+
 // --- the task (core 0) ----------------------------------------------------------
 
 static void hls_task(void *arg) {
@@ -731,3 +737,5 @@ static MP_DEFINE_CONST_DICT(castif_hls_locals_dict, castif_hls_locals_dict_table
 MP_DEFINE_CONST_OBJ_TYPE(
     castif_hls_type, MP_QSTR_Hls, MP_TYPE_FLAG_NONE,
     make_new, castif_hls_make_new, locals_dict, &castif_hls_locals_dict);
+
+#endif // CASTIF_HOST_TEST
