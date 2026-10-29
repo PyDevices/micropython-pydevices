@@ -1,8 +1,22 @@
-#!/usr/bin/env python3
-"""Generate USBHOST_MIDI_Test.RPP: Canon in D (after Pachelbel) driving
-hardware MIDI out for usbhost board testing. Prints a verification report
-to stdout and writes the .RPP to the path given on argv[1].
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Write a REAPER project that plays Canon in D to a MIDI output.
+
+The project drives a hardware MIDI output with Pachelbel's Canon in D, to test
+a board's USB MIDI. The program prints a verification report and writes the
+project to the path given as its first argument, which is
+``USBHOST_MIDI_Test.RPP`` in this folder.
+
+Needs: CPython, and REAPER to open the project. ``DEVICE_INDEX`` below is the
+position of the board's MIDI output in REAPER's list of MIDI devices; change
+it to match your setup.
+
+Run it:
+
+    python build_canon.py USBHOST_MIDI_Test.RPP
 """
+
 import sys
 import uuid
 

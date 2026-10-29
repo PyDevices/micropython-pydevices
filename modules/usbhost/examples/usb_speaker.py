@@ -1,27 +1,31 @@
-"""Play a tone through a hosted USB speaker -- the S3 half of the sound card.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Play a tone through a USB speaker on the host port.
 
-A commercial USB audio interface, a headset, or a PyDevices board running
-``usb_soundcard.py`` all look the same here: ``usb.host.audio.Speaker`` opens
-the stream and you write PCM to it, a whole frame at a time.
+``usb.host.audio.Speaker`` opens the stream, and you write PCM to it a whole
+frame at a time. A commercial USB audio interface, a headset, or a board
+running ``usb_soundcard.py`` all look the same. Success is a 440 Hz tone from
+the speaker. A computer hosting that board works too, because standard
+classes are the protocol.
 
-    mpftp run -d COM49 examples/usb_speaker.py
+Needs: a board with USB host support (firmware built with usbhost) and a USB
+speaker. An ESP32-S3 needs a powered hub or OTG adapter, and two self-powered
+boards can back-feed VBUS unless the cable omits it; ``README.md`` in this
+folder explains. Hosted playback competes with hosted video for FIFO space,
+and the split is fixed when the host starts. This program asks for ``uac``
+alone with ``usb.core.start(classes=("uac",))``, which allows a periodic OUT
+packet of 200 bytes on an S3 and 800 on a P4. Those fit a USB Audio 2.0
+stream of 48 kHz stereo (196 bytes) and a USB-C DAC whose endpoint declares
+384. The host prints the split as it starts. A session that also asks for
+``uvc`` leans toward IN and can't open such a stream.
 
-**Headline pairing.** P4 runs ``usb_soundcard.py`` (device, audiodsp's pump into its ES8311).
-This script on an S3 hosts that P4 and plays through it. A PC hosting the P4
-works too -- standard classes are the protocol.
+Run it:
 
-**Power.** S3 host needs a powered hub or OTG adapter. Two self-powered boards
-can back-feed unless the cable omits VBUS; see ``examples/README.md``.
+    mpftp run examples/usb_speaker.py
 
-**FIFO split.** Hosted playback competes with hosted video for DWC FIFO
-space, and the split is fixed when the host starts (usbif#2). The host picks
-it from the classes it is started for: this script asks for ``uac`` alone
-(``usb.core.start(classes=("uac",))``),
-which gives periodic OUT 200 bytes on an S3, enough for 48 kHz stereo from a
-USB Audio 2.0 device (196), and 800 on a P4, enough for a USB-C DAC whose
-endpoint declares 384. The host prints the split and those limits as it
-starts. A session that also asks for ``uvc`` leans IN and
-cannot open such a stream.
+Tested on: an ESP32-S3 hosting an ESP32-P4 panel that was running
+``usb_soundcard.py``.
 """
 
 import math

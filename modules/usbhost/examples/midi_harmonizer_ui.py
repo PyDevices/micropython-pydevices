@@ -1,17 +1,28 @@
-# deps: lvgl
-"""The MIDI harmonizer with a control surface: the board's touchscreen
-picks the chord and the direction while notes flow.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Choose the harmony from the touchscreen while MIDI notes flow.
 
-Same contract as midi_harmonizer.py -- takes whatever MIDI it is handed,
-embellishes, sends it back out -- but HARMONY is now live-editable from
-two button rows:
+The same MIDI effect as ``midi_harmonizer.py``, which takes whatever MIDI it
+is handed, adds harmony and sends it back out. Here the chord and the
+direction are live-editable from two rows of buttons:
 
     chord:      Major | Minor | 7th | Power | Octave
     direction:  Up | Down | Both
 
-Changing either sends All Notes Off first, so no harmony ever outlives
-the setting that created it. The MIDI pump rides an LVGL timer inside
-the display loop; deploy standalone as /main.py, or `mpftp run` it.
+Changing either sends All Notes Off first, so no harmony outlives the setting
+that created it. The MIDI pump rides an LVGL timer inside the display loop.
+
+Needs: a board with a touchscreen and USB device support, a firmware with
+LVGL, a ``display_driver`` module that sets up the display and touch, and
+the ``usb-device-midi`` and ``adafruit_midi`` packages.
+
+Run it, then play into the board's MIDI port:
+
+    mpftp run examples/midi_harmonizer_ui.py
+
+To keep it as the board's instrument, copy the file to the board as
+``/main.py``.
 """
 
 import display_driver  # noqa: F401 -- wires LVGL flush + input + event_loop

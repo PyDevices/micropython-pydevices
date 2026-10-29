@@ -1,12 +1,20 @@
-"""Count MIDI messages arriving on a Windows MIDI input, with nothing but winmm.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Count the MIDI messages arriving on a Windows MIDI input.
+
+Lists the MIDI inputs, opens the first whose name contains a substring (or
+the first input at all), and prints how many short messages arrived and the
+last few. That proves a device's MIDI IN endpoint from the computer's side,
+with nothing installed beyond Python's standard library (it uses ``winmm``).
+
+Needs: Windows and CPython.
+
+Run it:
 
     python midi_in_count.py [substring-of-port-name] [seconds]
-
-Lists the inputs, opens the first whose name contains the substring (or the
-first input at all), and prints how many short messages arrived and the last
-few, so a device's MIDI IN endpoint can be proven from the PC side without
-installing anything.
 """
+
 import ctypes, ctypes.wintypes as wt, sys, time
 
 winmm = ctypes.WinDLL("winmm")

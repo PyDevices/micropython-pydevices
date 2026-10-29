@@ -1,20 +1,28 @@
-# A MIDI effect, not an audio effect: harmonize whatever this board is
-# handed. Every note that arrives on the USB MIDI function goes back out
-# with a major third and a perfect fifth stacked on top -- melody in,
-# triads out. Everything that is not a note (controllers, pitch bend,
-# program changes, clock) passes through untouched, which is what being a
-# well-mannered MIDI effect means.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
 #
-# The example neither knows nor cares who is on the other end. Tonight
-# that is a DAW talking both directions down one cable (USB MIDI is full
-# duplex); the day this board grows a second USB voice, the same loop
-# ships its output to a hardware synth instead by pointing `send` at the
-# other port. The music logic would not change.
-#
-# Deploy standalone by copying to /main.py: it starts at boot, needs no
-# console, and runs until reset -- the pattern for a board that lives its
-# life as an instrument. Interactively: `mpftp run examples/midi_harmonizer.py`
-# (detached) and interrupt to stop.
+# SPDX-License-Identifier: MIT
+"""Turn every MIDI note the board receives into a chord.
+
+Every note that arrives on the board's USB MIDI function goes back out with a
+major third and a perfect fifth stacked on top: melody in, triads out.
+Everything that is not a note (controllers, pitch bend, program changes,
+clock) passes through untouched. The program doesn't care what is on the
+other end. A DAW talking both directions down one cable works, because USB
+MIDI is full duplex, and so would any other MIDI port you point ``send`` at.
+Success is hearing three notes for every one you play.
+
+Needs: a board with USB device support, the ``usb-device-midi`` and
+``adafruit_midi`` packages, and a computer or keyboard that sends MIDI to the
+board.
+
+Run it, then play into the board's MIDI port:
+
+    mpftp run examples/midi_harmonizer.py
+
+Interrupt to stop. To keep the board as an instrument, copy the file to the
+board as ``/main.py``: it then starts at boot, needs no console and runs until
+reset.
+"""
 
 import time
 
@@ -23,14 +31,15 @@ from adafruit_midi.note_off import NoteOff
 from adafruit_midi.note_on import NoteOn
 from midiports import usb_device
 
+# Change these to match your setup.
 # The chord stack, in semitones above each played note. Change these and
 # the board becomes a different instrument: (12,) octaves, (3, 7) minor,
 # (4, 7, 10) dominant sevenths, (7,) power chords.
 HARMONY = (4, 7)
 
-# The board's own USB MIDI function, as adafruit_midi's two ports. The same
-# loop drives a hosted controller by opening other ports (midiports.uart for
-# a 5-pin cable, midiports.usbhost_shim for a keyboard on the board's USB host).
+# Open the board's own USB MIDI function as adafruit_midi's two ports. The
+# same loop drives other MIDI by opening other ports: midiports.uart for a
+# 5-pin cable, midiports.usbhost_shim for a keyboard on the board's USB host.
 midi_in, midi_out = usb_device.ports()
 midi = adafruit_midi.MIDI(midi_in=midi_in, midi_out=midi_out)
 
@@ -65,6 +74,5 @@ def run():
                 midi.send(msg, channel=getattr(msg, "channel", None) or 0)
 
 
-# The file is its own entry point: copied to /main.py it starts at boot,
-# which is what the header promises and what nothing here used to do.
+# Start straight away, so the file works as the board's /main.py.
 run()

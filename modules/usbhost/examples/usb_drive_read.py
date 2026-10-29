@@ -1,30 +1,34 @@
-"""Read a file off a hosted USB drive, check its hash, and time it.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Read a file off a USB drive, check its hash and time the read.
 
-    mpftp run -d COM49 examples/usb_drive_read.py
+The board hosts a USB drive, which can be a flash stick, a card reader, or
+another board running ``sd_drive.py``. It mounts the first FAT partition
+read-only, lists the top folder and reads one file end to end. It prints the
+file's SHA-256 and the read rate. To tell whether the bytes arrived whole,
+compare the hash with one taken on a computer, or set ``EXPECT_SHA256`` below
+and the program compares for you. ``FILE`` picks the file; leave it ``None``
+and the largest file in the top folder is read.
 
-The board hosts a USB drive (a flash stick, a card reader, or another board
-running ``sd_drive.py``), mounts its first FAT partition read-only, lists the
-top folder and reads one file end to end. It prints the file's SHA-256 and
-the read rate, so you can tell the bytes arrived whole: compare the hash with
-one taken on the PC, or set ``EXPECT_SHA256`` below and the script compares
-for you.
+MicroPython's FAT driver is built without exFAT, so a drive formatted exFAT
+(what a computer picks for cards over 32 GB) won't mount. A board that
+formats a large card itself with ``vfs.VfsFat.mkfs()`` makes it FAT32. Each
+SCSI command carries up to 64 blocks and its round trip is most of what the
+rate measures, so a larger ``CHUNK`` can mean fewer of them.
 
-``FILE`` picks the file; leave it ``None`` and the largest file in the top
-folder is read. Nothing is written: the partition is mounted read-only, so
-the drive is exactly as it was afterwards.
+Needs: a board with USB host support (firmware built with usbhost) and a FAT
+drive on the host port. ``usb_drive_mount.py`` is the shorter version that
+only lists, and ``usb_drive_log.py`` the one that writes.
 
-**Pairing.** ``sd_drive.py`` on an ESP32-P4 panel serves its microSD card as
-the drive; this script on an S3 hosts it. ``usb_drive_mount.py`` is the
-shorter version that only lists, and ``usb_drive_log.py`` the one that writes.
+Run it:
 
-**FAT only.** MicroPython's FAT driver is built without exFAT (upstream's
-default, and ours), so a drive formatted exFAT, which is what a PC picks for
-cards over 32 GB, won't mount. A board that formats a large card itself with
-``vfs.VfsFat.mkfs()`` makes it FAT32.
+    mpftp run examples/usb_drive_read.py
 
-**Rate.** Each SCSI command carries up to 64 blocks, and its round trip is
-most of what the rate measures; a larger ``CHUNK`` can mean fewer of them.
+Tested on: an ESP32-S3 hosting the microSD card of an ESP32-P4 board that
+was running ``sd_drive.py``.
 """
+
 import hashlib
 import os
 import time
@@ -33,6 +37,7 @@ import usb.core
 import vfs
 from usb.host.msc import Drive
 
+# Change these to match your setup.
 FILE = None             # a name in the top folder, or None for the largest
 EXPECT_SHA256 = None    # hex string to compare against, or None
 CHUNK = 4096            # bytes per read(); a multiple of the block size

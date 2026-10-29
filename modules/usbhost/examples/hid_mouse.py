@@ -1,14 +1,25 @@
-"""The board is a USB mouse: nudge the computer's pointer, then put it back.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Nudge the computer's pointer as a USB mouse, then put it back.
 
-CircuitPython's mouse code, unchanged: ``usb_hid`` gives CircuitPython's
-``devices`` and Adafruit's ``adafruit_hid`` moves the pointer.
+The board presents itself as a mouse. ``usb_hid`` gives CircuitPython's
+``devices`` and Adafruit's ``adafruit_hid`` moves the pointer, so the same
+code runs on CircuitPython. Success is the pointer moving 80 pixels right
+and back, and the program printing that it did.
 
-    mpftp run -d COM49 examples/hid_mouse.py
+Needs: a board with USB device support and the ``usb-hid`` and
+``adafruit_hid`` packages. Install them with ``mip`` if your firmware
+doesn't freeze them:
 
-Install the packages first on a firmware that doesn't freeze them:
-``mip.install("github:PyDevices/pydevices/usb-hid")`` and
-``mip.install("github:PyDevices/pydevices/bledev_hid")`` for ``adafruit_hid``.
+    mip.install("github:PyDevices/pydevices/usb-hid")
+    mip.install("github:PyDevices/pydevices/bledev_hid")
+
+Run it:
+
+    mpftp run examples/hid_mouse.py
 """
+
 import time
 
 import usb_hid
@@ -17,6 +28,7 @@ from adafruit_hid.mouse import Mouse
 usb_hid.enable()
 time.sleep(2)  # let the computer enumerate the mouse
 
+# Move the pointer right in small steps, then back the same way.
 mouse = Mouse(usb_hid.devices)
 for _ in range(40):
     mouse.move(x=2)

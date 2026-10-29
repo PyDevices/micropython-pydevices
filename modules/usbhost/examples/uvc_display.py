@@ -1,31 +1,33 @@
-"""Live camera preview: a hosted USB webcam shown on the board's own display.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Show a USB webcam's live video on the board's display.
 
-The board is the USB *host* here. ``usb.host.video.Camera`` reads a
-class-compliant UVC camera's descriptors, negotiates a video mode with it, and
-streams frames in over isochronous transfers -- then this script puts them on
-the display that ``board_config`` already set up. No PC in the loop at any
-point.
+The board is the USB host. ``usb.host.video.Camera`` reads a UVC camera's
+descriptors, negotiates a video mode, and streams frames in over isochronous
+transfers. This program puts them on the display that ``board_config`` set up,
+with no computer in the loop. A webcam offers far better resolutions in MJPEG
+than uncompressed (640x480 against 176x144 on one camera), so MJPEG is used
+when the firmware has ``jpegio``. Frames arrive as whole JPEGs, and
+``jpegio.JpegDecoder`` checks only the start marker, which is what UVC needs:
+a UVC MJPEG frame isn't JFIF-first, so LVGL's ``is_jpg()`` rejects it. Without
+``jpegio`` it falls back to uncompressed YUY2, converted here and blitted to
+``display_drv``. YUY2 is scaled up by whole numbers because nearest-neighbour
+at an integer factor is a few instructions per pixel and needs no buffer
+beyond one row.
 
-Run it on a board with a display and a camera on its host port::
+Needs: a board with USB host support (firmware built with usbhost), a
+display set up in ``board_config``, and a UVC webcam on the host port. A
+board running ``usb_webcam.py`` works as the camera, the same way a Logitech
+does. An ESP32-P4 can host too, on a port that supplies 5 V: the
+ESP32-P4-WIFI6-DEV-KIT's Type-A socket streams a webcam this way.
 
-    mpremote run uvc_display.py
+Run it:
 
-**MJPEG when ``jpegio`` is present.** A webcam offers far better resolutions
-in MJPEG than uncompressed -- on the bench camera, 640x480 against 176x144 --
-so MJPEG is preferred when the firmware has ``jpegio`` (micropython-pydevices' jpegio module). Frames
-arrive as whole JPEGs; ``jpegio.JpegDecoder`` sniffs SOI only, which is what
-UVC needs (a UVC MJPEG frame is not JFIF-first, so LVGL's ``is_jpg()`` rejects
-it). Without ``jpegio`` the example falls back to uncompressed YUY2, converted
-here and blitted to ``display_drv``.
+    mpftp run examples/uvc_display.py
 
-**Why YUY2 is upscaled by whole numbers.** Nearest-neighbour at an integer
-factor is a few instructions per pixel and needs no line buffer beyond one
-row. Anything smoother is a real resampler, which is a different example.
-
-**Pairing.** A PyDevices board presenting as a webcam (``usb_webcam.py`` on
-a P4) is a valid camera for this script on an S3, the same way a Logitech is.
-A P4 can be the host too, on a port that supplies 5 V: the
-ESP32-P4-WIFI6-DEV-KIT's direct Type-A socket streams a webcam this way.
+Tested on: an ESP32-S3 touch board hosting an ESP32-P4 running
+``usb_webcam.py``, and an ESP32-P4-WIFI6-DEV-KIT hosting a webcam.
 """
 
 import time
@@ -40,10 +42,11 @@ from usb.host.video import Camera
 
 app = appdev.App(board_config)
 
+# Change these to match your setup.
 # The camera's data endpoint is fed one packet per bus frame, so a mode is
 # only reachable if its negotiated payload fits the host's isochronous IN
 # limit. That limit is set by the DWC FIFO split the host chooses from the
-# classes it is started for (usbif#2): a session asking for "uvc" gets the
+# classes it is started for: a session asking for "uvc" gets the
 # IN-leaning split, 600 bytes. Camera tries modes largest-first and the first
 # one the camera and the bus both accept wins.
 IN_LIMIT = 600

@@ -1,21 +1,30 @@
-"""The board's SD card, as an ordinary USB drive on a PC.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Show the board's SD card to a computer as a USB drive.
 
-Plug the board into a computer, run this, and the card in its slot appears
-as a removable drive -- files copy on and off with the file manager, no
-recompile and no special tool at either end. That is the whole point of MSC
-as a device: fonts and graphics written in, sensor logs read out.
+Plug the board into a computer and run this: the card in its slot appears as
+a removable drive, and files copy on and off with the file manager. Fonts and
+graphics go in, sensor logs come out, with no special tool at either end.
+``usb-device-msc`` serves any object that implements MicroPython's block
+protocol, so the computer's reads and writes reach the card itself, whether
+that is ``machine.SDCard``, mip's ``sdcard.SDCard`` over SPI, or a flash
+partition. Success is the drive appearing on the computer.
 
-    mpftp run -d COM49 examples/sd_drive.py
+Only one side may write at a time. While the computer has the card, don't
+mount it on the board.
 
-It uses ``usb-device-msc``, which serves any object implementing MicroPython's
-standard block protocol, so the computer's reads and writes reach the card
-itself: ``machine.SDCard``, mip's ``sdcard.SDCard`` over SPI, a flash
-partition.
+Needs: a board with USB device support, an SD card slot, and the
+``usb-device-msc`` package. Install it with ``mip`` if your firmware doesn't
+freeze it:
 
-Install the package first on a firmware that doesn't freeze it:
-``mip.install("github:PyDevices/pydevices/usb-device-msc")``.
+    mip.install("github:PyDevices/pydevices/usb-device-msc")
 
-**One writer.** While the computer has the card, don't mount it on the board.
+Run it:
+
+    mpftp run examples/sd_drive.py
+
+Another board can host this one: run ``usb_drive_read.py`` on it.
 """
 
 import time
@@ -66,9 +75,8 @@ def card_geometry(card):
     ``ioctl(4)`` and ``ioctl(5)`` are the block count and block size, and a
     card that is absent, unpowered or still timing out answers them with
     ``-1`` rather than raising. Serving that to a host is serving a drive of
-    no blocks: the example used to print a negative size and then do nothing
-    at all, which reads as the example being broken rather than the card
-    (usbif#4). So refuse it here, while the reason is still known.
+    no blocks, which reads as the example being broken rather than the card.
+    So refuse it here, while the reason is still known.
     """
     blocks = card.ioctl(4, 0)
     block_size = card.ioctl(5, 0)

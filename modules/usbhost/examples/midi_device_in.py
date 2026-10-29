@@ -1,19 +1,25 @@
-# Device MIDI IN: prove the board receives MIDI from a computer.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
 #
-# A sequencer playing *into* the board is the direction a software
-# instrument needs most, so audiodsp can render what a DAW sends it. The
-# board's own USB MIDI function is midiports' port over micropython-lib's
-# usb-device-midi, beside the board's serial port, and adafruit_midi reads
-# it. Anything that can send MIDI drives it: a DAW track whose output is
-# this board, or a keyboard routed through one.
-#
-#   mpftp run usbhost/examples/midi_device_in.py -d COM49 --follow --timeout 90
-#
-# The tally at the end is the evidence: which message types arrived, how
-# many of each, and the spread of velocities and channels. A clean run shows
-# note-ons with varied velocities (a column of 64s would mean the source
-# sends a fixed velocity and the velocity byte is never really tested) and
-# note-offs matching them.
+# SPDX-License-Identifier: MIT
+"""Count the MIDI messages a computer sends to the board.
+
+The board presents a USB MIDI function (midiports' port over micropython-lib's
+``usb-device-midi``) beside its serial port, and ``adafruit_midi`` reads it.
+Anything that can send MIDI drives it: a DAW track whose output is this
+board, or a keyboard routed through one. The tally at the end shows which
+message types arrived, how many of each, and the spread of velocities and
+channels. A clean run shows note-ons with varied velocities and matching
+note-offs. A column of 64s means the source sends a fixed velocity, so the
+velocity byte was never really tested.
+
+Needs: a board with USB device support, the ``usb-device-midi`` and
+``adafruit_midi`` packages, and a computer that sends MIDI to the board.
+
+Run it, then play into the board's MIDI port:
+
+    mpftp run examples/midi_device_in.py --follow --timeout 90
+"""
+
 import time
 
 import adafruit_midi
@@ -26,6 +32,7 @@ from adafruit_midi.polyphonic_key_pressure import PolyphonicKeyPressure
 from adafruit_midi.program_change import ProgramChange
 from midiports import usb_device
 
+# Change these to match your setup.
 DURATION_MS = 20000  # how long to listen
 
 NAMES = (

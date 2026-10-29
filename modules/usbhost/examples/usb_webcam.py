@@ -1,28 +1,33 @@
-"""The board as a USB webcam: what its camera sees, on the computer.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Show what the board's camera sees to a computer, as a USB webcam.
 
-A computer sees a camera (UVC) and any video app can open it: the Camera app
+The computer sees a UVC camera, and any video app can open it: the Camera app
 on Windows, Photo Booth or QuickTime on macOS, Cheese or ffplay on Linux.
 cameraif captures each frame in the sensor mode nearest 4:3, the ESP32-P4's
-PPA scales it, the P4's JPEG engine encodes it, and machine.USBDevice's
-streaming endpoint sends it from the USB interrupt.
+PPA scales it, the JPEG engine encodes it, and machine.USBDevice's streaming
+endpoint sends it from the USB interrupt. MJPEG is the default, offered at
+640x480, 320x240 and 160x120 for the computer to choose. It asks for 15
+frames a second on a full-speed port (about 12 arrive at 640x480 in a lit
+room) and 30 on a high-speed one. Set ``FORMAT = "yuy2"`` to send
+uncompressed frames instead, which every host takes but which fill a
+full-speed port at 160x120. Success is live video in the computer's camera
+app.
 
-    mpftp run -d COM31 examples/usb_webcam.py
+Needs: an ESP32-P4 with a MIPI camera, and a board config whose
+``board_peripherals.camera()`` opens it. The firmware needs cameraif, ppa,
+jpegio and machine.USBDevice's streaming endpoints, and the board needs
+micropython-lib's ``usb-device`` with usbhost's ``usb-device-video``.
 
-or from a program: ``import usb_webcam; usb_webcam.main()``, or
+Run it:
+
+    mpftp run examples/usb_webcam.py
+
+Or from a program, with ``import usb_webcam; usb_webcam.main()``. Use
 ``main(packet=640)`` for a computer at full speed, which takes bigger packets
-than the 512 every host (an ESP32-S3 included) takes.
-
-Needs an ESP32-P4 with a MIPI camera and a board config whose
-``board_peripherals.camera()`` opens it, a firmware with cameraif, ppa,
-jpegio and machine.USBDevice's streaming endpoints, and micropython-lib's
-``usb-device`` with usbhost's ``usb-device-video`` on the board.
-
-MJPEG is the default, offered at 640x480, 320x240 and 160x120 for the
-computer to choose: 15 frames a second asked on a full-speed port (about 12
-arrive at 640x480 in a lit room) and 30 on a high-speed one.
-``FORMAT = "yuy2"`` sends uncompressed frames instead, which every host takes
-but which fill a full-speed port at 160x120.
-The REPL's serial port stays up beside the camera. Ctrl-C stops it.
+than the 512 every host (an ESP32-S3 included) takes. The board's serial port
+stays up beside the camera. Ctrl-C stops it.
 """
 
 import time
@@ -33,6 +38,7 @@ import uctypes
 import usb.device
 from usb.device.video import CameraInterface
 
+# Change these to match your setup.
 FORMAT = "mjpeg"
 QUALITY = 70
 
