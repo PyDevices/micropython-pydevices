@@ -14,7 +14,7 @@ The leading dot keeps it out of `--modules` and `all`, because esp-vision's own
 [`modules/tflite`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/tflite) and [`modules/vision`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/vision) are our glue around esp-vision's files:
 the ESP-IDF components esp-vision uses, at its versions; the include paths and
 definitions MicroPython's QSTR scan needs (it sees only a module's own paths,
-never a linked component's); and two pieces of our own.
+never a linked component's); and three pieces of our own.
 
 - **imlib compiles inside the module**, not as an ESP-IDF component. As a
   component it would wait for MicroPython's generated headers while being one of
@@ -23,6 +23,13 @@ never a linked component's); and two pieces of our own.
   `MICROPY_BOARD`, which names upstream's generic boards here. Ours takes them
   from one of esp-vision's boards per chip (`ESP32_P4X_FUNCTION_EV_BOARD`,
   `ESP32_S3_EYE`).
+- **`src/tflite_streaming.cpp`** lets `tflite` run streaming models. It
+  includes esp-vision's `py_tflite.cpp` unchanged, with two TensorFlow Lite
+  Micro types swapped for subclasses: an interpreter that owns 20 resource
+  variables (their bookkeeping in a 1 KB arena on a 32-bit chip, as ESPHome's
+  `micro_wake_word` sets up), and an op resolver that registers `CALL_ONCE`,
+  `VAR_HANDLE`, `READ_VARIABLE` and `ASSIGN_VARIABLE`. Every other operator
+  those models use is in esp-vision's list already.
 - **`src/vision_preview_none.c`** stands in for esp-vision's preview, which
   streams frames to its IDE over its own USB multiplexer.
 
