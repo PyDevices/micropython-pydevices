@@ -1,19 +1,27 @@
-"""The board watching the room, on its own screen.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Show the camera on the board's own screen.
 
 A MIPI-CSI camera in one side of the ESP32-P4 and a MIPI-DSI panel out the
-other, with nothing in between but the board -- no PC, no network, no USB.
+other, with nothing in between: no computer, no network, no USB. The program
+never touches a pixel. ``capture_scaled()`` hands the frame to the P4's Pixel
+Processing Accelerator, which reads the camera's buffer and writes the
+panel's scanout buffer by DMA, scaling on the way. The CPU issues one call per
+frame and waits. The whole 800x800 sensor image lands on the 720x720 panel,
+scaled and not cropped, so nothing at the edges is lost. Slicing each row out
+of the frame and blitting it is 720 calls per frame and measured 4.7 fps; this
+is 18.6, and the remaining cost is the panel's own refresh. Success is live
+video on the panel and a frame rate printed every 30 frames.
+
+Needs: an ESP32-P4 board with a MIPI-CSI camera and a MIPI-DSI display, both
+set up in board_config, and firmware built with cameraif.
+
+Run it:
 
     mpremote run camera_preview.py
 
-**Nothing here touches a pixel.** `capture_scaled()` hands the frame to the
-P4's Pixel Processing Accelerator, which reads the camera's buffer and writes
-the panel's scanout buffer by DMA, scaling on the way. The CPU issues one
-call per frame and then waits. The whole 800x800 sensor image lands on the
-720x720 panel -- scaled, not cropped, so nothing at the edges is lost.
-
-For contrast, the obvious version of this loop -- slice each row out of the
-frame and blit it -- is 720 calls per frame and measured 4.7 fps. This is
-18.6, and the remaining cost is the panel's own refresh, not the camera.
+Tested on: an ESP32-P4 board with an OV5647 camera and a 720x720 panel.
 """
 
 import time

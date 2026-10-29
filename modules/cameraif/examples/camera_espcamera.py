@@ -1,20 +1,26 @@
-"""CircuitPython's espcamera API, on a MIPI-CSI camera.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Use CircuitPython's espcamera API on a MIPI-CSI camera.
+
+On an ESP32-P4, cameraif is also importable as ``espcamera``, and it answers
+to espcamera's names: ``take()``, ``pixel_format``, ``frame_size``,
+``reconfigure()``, and the controls as properties (``vflip``, ``hmirror``,
+``aec_value``, ``colorbar``). Code written for espcamera runs here with one
+change, the constructor: espcamera's takes DVP data pins, and this camera is on
+the CSI connector. The program shows a live view on the panel, turns the
+picture over and back with ``vflip`` and ``hmirror``, and saves one JPEG.
+A control the sensor lacks raises ``AttributeError``, as in espcamera, so
+``hasattr(cam, "agc_gain")`` is how to ask. ``cam.controls()`` lists the ones
+the sensor's driver has.
+
+Needs: an ESP32-P4 board with a MIPI-CSI camera and a display, both set up
+in board_config, and firmware built with cameraif.
+
+Run it:
 
     mpremote run camera_espcamera.py
     mpremote cp :espcamera.jpg .
-
-On an ESP32-P4, cameraif is also importable as ``espcamera``, and it answers
-to espcamera's names: ``take()``, ``pixel_format`` and ``frame_size``,
-``reconfigure()``, and the controls as properties (``vflip``, ``hmirror``,
-``aec_value``, ``colorbar``, ...). Code written for espcamera runs here with
-one change, the constructor: espcamera's takes DVP data pins, and this camera
-is on the CSI connector. This example shows a live view on the board's panel,
-turns the picture over and back with ``vflip`` and ``hmirror``, and saves one
-JPEG.
-
-A control the sensor lacks raises ``AttributeError``, the same as espcamera,
-so ``hasattr(cam, "agc_gain")`` is how to ask. ``cam.controls()`` lists the
-ones the sensor's driver has.
 """
 
 import time
@@ -32,6 +38,7 @@ cam.reconfigure(pixel_format=espcamera.PixelFormat.RGB565,
                 frame_size=espcamera.FrameSize.HVGA)
 print("%s at 0x%02x, taking %dx%d" % (cam.sensor_name, cam.address, cam.width, cam.height))
 
+# Centre the picture on the panel.
 x = (display.width - cam.width) // 2
 y = (display.height - cam.height) // 2
 
@@ -51,6 +58,7 @@ def view(seconds, label):
     print("  %.1f fps" % (n * 1000 / time.ticks_diff(time.ticks_ms(), t0)))
 
 
+# Show the picture upright, then upside down, then mirrored.
 view(3, "upright")
 cam.vflip = True
 view(3, "vflip: upside down")
@@ -59,6 +67,7 @@ cam.hmirror = True
 view(3, "hmirror: as in a mirror")
 cam.hmirror = False
 
+# Report which controls this sensor has.
 for name in ("vflip", "hmirror", "aec_value", "agc_gain", "brightness"):
     print("%-10s %s" % (name, "yes" if hasattr(cam, name) else "not on this sensor"))
 

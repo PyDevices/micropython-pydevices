@@ -1,15 +1,23 @@
-"""List the sensor's formats, then open one by name.
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""List the camera's formats, then open one by name.
 
-``board_config.camera`` picks the driver's default. This example shows the
-board-agnostic constructor: pins from the board, format chosen from
-``formats()``. Adding a different camera is a build-time ``CONFIG_CAMERA_*``,
-not a code change here -- which is why the class is ``Camera``, not ``OV5647``.
+``board_config.camera`` uses the driver's default format. This example
+shows the board-agnostic constructor instead: pins from the board, format
+chosen from ``formats()``. Adding a different camera is a build-time
+``CONFIG_CAMERA_*`` setting, not a code change here, which is why the class is
+``Camera`` and not ``OV5647``. Only one ``Camera`` may exist, because the P4
+has one CSI controller, so the program closes the board's camera first and
+then opens a new one with an explicit format. Success is 60 frames shown on
+the panel and a frame rate printed.
+
+Needs: an ESP32-P4 board with a MIPI-CSI camera and a display, both set up
+in board_config, and firmware built with cameraif.
+
+Run it:
 
     mpremote run camera_formats.py
-
-Closes the board_config camera first (only one ``Camera`` may exist -- the
-P4 has one CSI controller), then constructs a fresh one with an explicit
-format.
 """
 
 import time
