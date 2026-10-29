@@ -1,0 +1,85 @@
+micropython-pydevices
+Copyright (c) 2026 PyDevices, MIT License (see LICENSE).
+
+Firmware built from this repository can contain code from other projects.
+Modules that vendor code keep it under their own third_party/ folder and
+list it in a NOTICE of their own:
+
+  modules/jpegio/NOTICE   TJpgDec (ChaN) and stb_image_write's JPEG writer
+
+The tflite and vision modules compile code fetched at build time from
+esp-vision, at the commit pinned in modules/.esp-vision/ESP_VISION.lock.
+Nothing from it is stored in this repository, but firmware built with
+either module contains it:
+
+esp-vision
+  https://github.com/espressif/esp-vision
+  Copyright 2026 Espressif Systems (Shanghai) CO LTD
+  Apache License 2.0, https://www.apache.org/licenses/LICENSE-2.0
+  tflite compiles modules/py_tflite.cpp; vision compiles its image stack,
+  platform layer and Python modules.
+
+  It carries, and vision compiles:
+  - imlib, from OpenMV, Copyright (C) 2013-2024 OpenMV, LLC. MIT License.
+  - AprilTag (imlib's apriltag.c), Copyright (C) 2013-2016 The Regents of
+    The University of Michigan. BSD 2-Clause License.
+
+TensorFlow Lite Micro
+  https://github.com/tensorflow/tflite-micro, through Espressif's
+  esp-tflite-micro ESP-IDF component (modules/tflite/components/tflite_micro)
+  Copyright The TensorFlow Authors. Apache License 2.0.
+
+The ESP-IDF components these modules require through idf_component.yml are
+downloaded by ESP-IDF's component manager and carry their own licenses.
+
+-----------------------------------------------------------------------
+imlib (OpenMV), MIT License:
+
+Copyright (C) 2013-2024 OpenMV, LLC.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+-----------------------------------------------------------------------
+AprilTag, BSD 2-Clause License:
+
+Copyright (C) 2013-2016, The Regents of The University of Michigan.
+
+This software was developed in the APRIL Robotics Lab under the
+direction of Edwin Olson, ebolson@umich.edu. This software may be
+available under alternative licensing terms; contact the address above.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
