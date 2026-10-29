@@ -33,6 +33,15 @@ More models for tflite:
   ops, which tflite doesn't register; until then `audiofeatures` makes the
   same features.
 
+Every module, the same kit:
+
+- **Type stubs and `__revision__` everywhere.** castif, h264enc, jpegio, mdns,
+  pngio, ppa, tsmux, tflite and vision get a `.pyi` for your editor and a
+  `__revision__` naming the commit your firmware built; tflite and vision a README.
+- **One pin file.** `UPSTREAM`, `modules.lock`, `deps.lock` and esp-vision's
+  `ESP_VISION.lock` become one `DEPENDENCIES.lock`: a dependency, its URL and
+  its full commit on each line.
+
 ## Module roadmaps
 
 The modules plan their own work; each roadmap is next to its code.

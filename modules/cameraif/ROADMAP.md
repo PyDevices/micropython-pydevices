@@ -4,6 +4,8 @@
   `FrameSize` the sensor can stream natively (the OV5647's `FHD`) costs no
   scaling and keeps the whole field of view.
 - `GRAYSCALE` straight from the ISP's luma, instead of a pass on the PPA.
+- Tests that run in CI without a camera, beside the lint it runs today, and
+  the simpletest renamed `cameraif_simpletest.py` to match every other module.
 
 Bugs, and things you need that don't work yet, go to
 [issues](https://github.com/PyDevices/micropython-pydevices/issues).

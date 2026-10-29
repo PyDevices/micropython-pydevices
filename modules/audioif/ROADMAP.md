@@ -23,3 +23,8 @@ to [issues](https://github.com/PyDevices/micropython-pydevices/issues).
 - Audio from one board to another over I2S, with no network: a sender that
   plays through `I2SOut`, and a receiver that records it with `I2SIn`. They
   take three wires and a ground, and either end can be any I2S device.
+
+## Housekeeping
+
+- The C sources move from the module's root into `src/`, where every other
+  module keeps them, so a reader finds the code in the same place everywhere.
