@@ -232,11 +232,14 @@ def micropython_version(mp, upstream):
 # own pin and fetch never come into a build made here.
 LVGL_BINDINGS = "lvgl-bindings"
 LVGL_MODULE = "lvgl-micropython"
+# lvgl-circuitpython is pinned in modules.lock too, but only the CircuitPython
+# release lane reads that row: it clones the commit and gives it to --modules by path.
+LVGL_CIRCUITPYTHON = "lvgl-circuitpython"
 
 
 def ensure_modules(ws):
     for name, url, commit in read_lock("modules.lock"):
-        if name in (LVGL_BINDINGS, LIBRARY):
+        if name in (LVGL_BINDINGS, LIBRARY, LVGL_CIRCUITPYTHON):
             continue
         dest = MODULES_DIR / name
         if dest.exists() or dest.is_symlink():

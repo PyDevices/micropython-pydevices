@@ -37,8 +37,8 @@ on:
         default: false
         type: boolean
       lvgl-circuitpython-ref:
-        description: lvgl-circuitpython branch, tag or commit for the CircuitPython builds
-        default: main
+        description: lvgl-circuitpython branch, tag or commit for the CircuitPython builds (left empty, it takes the commit modules.lock pins)
+        default: ''
         type: string
   schedule:
     - cron: '17 5 * * 1'
@@ -104,8 +104,10 @@ jobs:
       - name: lvgl-circuitpython, which the CircuitPython builds compile in
         if: matrix.interpreter == 'circuitpython'
         env:
-          LVGL_CP_REF: ${{ inputs.lvgl-circuitpython-ref || 'main' }}
+          LVGL_CP_REF: ${{ inputs.lvgl-circuitpython-ref }}
         run: |
+          # empty input: the commit modules.lock pins
+          LVGL_CP_REF="${LVGL_CP_REF:-$(awk '$1=="lvgl-circuitpython"{print $3}' "$GITHUB_WORKSPACE/modules.lock")}"
           mkdir -p "$RUNNER_TEMP/ws" && cd "$RUNNER_TEMP/ws"
           git clone --quiet --depth 1 --branch "$LVGL_CP_REF" https://github.com/PyDevices/lvgl-circuitpython.git \
             || { git clone --quiet https://github.com/PyDevices/lvgl-circuitpython.git \
@@ -198,8 +200,10 @@ jobs:
       - name: lvgl-circuitpython's commit
         id: lvgl
         env:
-          LVGL_CP_REF: ${{ inputs.lvgl-circuitpython-ref || 'main' }}
+          LVGL_CP_REF: ${{ inputs.lvgl-circuitpython-ref }}
         run: |
+          # empty input: the commit modules.lock pins
+          LVGL_CP_REF="${LVGL_CP_REF:-$(awk '$1=="lvgl-circuitpython"{print $3}' "$GITHUB_WORKSPACE/modules.lock")}"
           git clone --quiet --depth 1 --branch "$LVGL_CP_REF" https://github.com/PyDevices/lvgl-circuitpython.git lvgl-cp \
             || { git clone --quiet https://github.com/PyDevices/lvgl-circuitpython.git lvgl-cp \
                  && git -C lvgl-cp checkout --quiet "$LVGL_CP_REF"; }
