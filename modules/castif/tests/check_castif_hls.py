@@ -24,7 +24,13 @@ def frames(path, fmt=None):
 
 def main():
     out = sys.argv[1]
-    checks = [("seg%d.ts" % n, 30, None) for n in range(4, 11)] + [("stream.m3u8", 90, "hls")]
+    # the served playlist is live (no end tag), so ffmpeg would wait for the
+    # next one: probe a copy that ends where this one does
+    with open(os.path.join(out, "stream.m3u8")) as f:
+        live = f.read()
+    with open(os.path.join(out, "ended.m3u8"), "w") as f:
+        f.write(live + "#EXT-X-ENDLIST\n")
+    checks = [("seg%d.ts" % n, 30, None) for n in range(4, 11)] + [("ended.m3u8", 90, "hls")]
     bad = 0
     for name, want, fmt in checks:
         n, info = frames(os.path.join(out, name), fmt)
