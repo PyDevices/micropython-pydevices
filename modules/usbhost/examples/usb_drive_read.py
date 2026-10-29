@@ -27,6 +27,9 @@ Run it:
 
 Tested on: an ESP32-S3 hosting the microSD card of an ESP32-P4 board that
 was running ``sd_drive.py``.
+Also on an ESP32-P4-WIFI6-DEV-KIT running MicroPython
+v1.30.0-preview.160.gb70ae1aca6 (built 2026-10-21), reading a PNY 8 GB FAT flash
+drive behind its onboard hub.
 """
 
 import hashlib

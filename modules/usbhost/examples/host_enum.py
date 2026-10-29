@@ -19,6 +19,11 @@ at full speed, so set ``FULL_SPEED = True`` below.
 Run it:
 
     mpftp run examples/host_enum.py
+
+Tested on: an ESP32-P4-WIFI6-DEV-KIT on MicroPython
+v1.30.0-preview.160.gb70ae1aca6 (built 2026-10-21),
+hosting a PNY USB flash drive, a Logitech C920e webcam and a Samsung Galaxy S21
+behind its onboard hub; all three were listed and the attaches reported.
 """
 
 import time
