@@ -22,6 +22,9 @@ Run it, then play into the board's MIDI port:
 Interrupt to stop. To keep the board as an instrument, copy the file to the
 board as ``/main.py``: it then starts at boot, needs no console and runs until
 reset.
+
+Tested on: an ESP32-P4 board on MicroPython v1.30.0-preview.160.gb70ae1aca6
+(built 2026-10-28), plugged into a Windows computer.
 """
 
 import time

@@ -25,6 +25,10 @@ Run it:
     mpftp run examples/sd_drive.py
 
 Another board can host this one: run ``usb_drive_read.py`` on it.
+
+Tested on: an ESP32-P4 board with a 32 GB microSD card, on MicroPython
+v1.30.0-preview.160.gb70ae1aca6 (built 2026-10-28), plugged into a Windows
+computer.
 """
 
 import time

@@ -18,6 +18,9 @@ Needs: a board with USB device support, the ``usb-device-midi`` and
 Run it, then play into the board's MIDI port:
 
     mpftp run examples/midi_device_in.py --follow --timeout 90
+
+Tested on: an ESP32-P4 board on MicroPython v1.30.0-preview.160.gb70ae1aca6
+(built 2026-10-28), plugged into a Windows computer.
 """
 
 import time

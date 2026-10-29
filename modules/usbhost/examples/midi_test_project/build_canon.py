@@ -15,6 +15,8 @@ it to match your setup.
 Run it:
 
     python build_canon.py USBHOST_MIDI_Test.RPP
+
+Tested on: CPython 3.12.3 on Linux.
 """
 
 import sys

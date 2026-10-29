@@ -28,6 +28,10 @@ Or from a program, with ``import usb_webcam; usb_webcam.main()``. Use
 ``main(packet=640)`` for a computer at full speed, which takes bigger packets
 than the 512 every host (an ESP32-S3 included) takes. The board's serial port
 stays up beside the camera. Ctrl-C stops it.
+
+Tested on: an ESP32-P4 board with an IMX219 camera, on MicroPython
+v1.30.0-preview.160.gb70ae1aca6 (built 2026-10-28), plugged into a Windows
+computer.
 """
 
 import time

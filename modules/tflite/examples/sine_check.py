@@ -19,6 +19,9 @@ model on the board:
 Run it:
 
     mpftp run sine_check.py
+
+Tested on: an ESP32-P4 board on MicroPython v1.30.0-preview.160.gb70ae1aca6
+(built 2026-10-28).
 """
 
 import math
