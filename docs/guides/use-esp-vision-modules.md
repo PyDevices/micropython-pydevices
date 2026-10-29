@@ -52,6 +52,26 @@ runs one, and
 [`tflite_wakeword.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/tflite/examples/tflite_wakeword.py)
 listens for a wake word, with audiodsp's `audiofeatures` making the slices
 and ESPHome's detection rules in Python.
+[`tflite_wakeword_mic.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/tflite/examples/tflite_wakeword_mic.py)
+does the same live from the board's microphone. It reads the microphone with
+`board_peripherals.pcm_in()` and hands each block to the frontend's `feed()`:
+an audiopump `Tap` sees only what the board plays, so it can't carry a
+microphone.
+
+## Models that run
+
+These ran on an ESP32-P4 board, each with an example. The arena is what
+`Model.ram` reports, and the time is one `predict()`.
+
+| Model | Example | Arena | Time |
+|---|---|---|---|
+| microWakeWord hey_jarvis | [`tflite_wakeword_mic.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/tflite/examples/tflite_wakeword_mic.py) | 19,728 bytes | 1.8 ms |
+| micro_speech (yes, no) | [`tflite_micro_speech.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/tflite/examples/tflite_micro_speech.py) | 7,840 bytes | 6 ms |
+| yamnet-cry-distill-int8 (521 sounds) | [`tflite_sounds.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/tflite/examples/tflite_sounds.py) | 128,128 bytes | 28 ms |
+| person_detection | [`tflite_person_detect.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/tflite/examples/tflite_person_detect.py) | 102,416 bytes | 50 ms |
+| MobileNet-v2 int8 (ImageNet) | [`tflite_mobilenet.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/tflite/examples/tflite_mobilenet.py) | 2,608,176 bytes | 1.5 s |
+
+Each example's docstring says where to download its model.
 
 ## Run long scripts as `main.py`
 
