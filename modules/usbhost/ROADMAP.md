@@ -14,6 +14,8 @@ packages themselves are in pydevices' roadmap.
 - Fewer lost packets on the USB sound card. At 48 kHz on a high-speed port
   about one packet in 500 goes missing in bursts, where a 24 kHz wire loses
   none; the cause isn't found yet.
+- A `usbhost_simpletest.py`: the shortest program that lists what's plugged
+  in, as every other module's simpletest is.
 
 Bugs, and things you need that don't work yet, go to
 [issues](https://github.com/PyDevices/micropython-pydevices/issues).
