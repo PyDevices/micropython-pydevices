@@ -28,6 +28,11 @@ Run it, and watch what it prints while it waits for the phone:
     mpftp monitor --seconds 150
 
 ``run`` starts the program and returns; ``monitor`` shows its output.
+
+Tested on: an ESP32-P4-WIFI6-DEV-KIT on MicroPython
+v1.30.0-preview.160.gb70ae1aca6 (built 2026-10-21),
+hosting a Samsung Galaxy S21 with USB tethering on, behind its onboard hub: the
+board took an address by DHCP and fetched example.com over the phone.
 """
 
 import socket

@@ -28,6 +28,12 @@ passes it straight through.
 Run it, then play on the instrument:
 
     mpftp run examples/midi_host.py
+
+Tested on: an ESP32-P4-WIFI6-DEV-KIT on MicroPython
+v1.30.0-preview.160.gb70ae1aca6 (built 2026-10-21),
+hosting an Arturia KeyStep Pro behind its onboard hub, with FULL_SPEED = True:
+the device opened and the chord went out. No key was played, so the receive
+side is untested.
 """
 
 import time
