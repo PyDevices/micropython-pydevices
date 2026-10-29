@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // castif on a firmware with no network stack: CircuitPython's ESP32-P4 port,
 // which doesn't drive the boards' ESP32-C6 radio yet and so leaves lwIP out.
 //

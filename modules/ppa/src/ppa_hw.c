@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // ppa's clients, and the ESP32-P4's Pixel Processing Accelerator behind them.
 //
 // A client holds one PPA client per operation type (the PPA queues one

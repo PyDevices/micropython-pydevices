@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // tsmux: H.264 access units and LPCM blocks to MPEG-TS packets. Portable C
 // with no MicroPython in it: castif's cast task links it on core 0, and
 // mod_tsmux.c wraps it for Python on every port.

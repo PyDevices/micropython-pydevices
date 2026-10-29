@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // tflite with streaming (stateful) models: esp-vision's py_tflite.cpp, compiled
 // as it is, with two of its TensorFlow Lite Micro types swapped for ones that
 // add what streaming models need.

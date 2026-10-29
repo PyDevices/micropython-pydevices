@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // What castif calls in h264enc and tsmux, declared rather than included,
 // and weak, so castif builds and links without either in the firmware; Cast()
 // and Hls() then say what is missing. Shared by mod_castif.c and castif_hls.c.

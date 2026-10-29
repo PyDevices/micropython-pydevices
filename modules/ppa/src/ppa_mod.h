@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // ppa: scale, rotate, mirror, colour-convert, fill and blend on pixel buffers.
 // On the ESP32-P4 its Pixel Processing Accelerator does the work; elsewhere
 // (and on request) portable C does scale, rotate, mirror and colour convert.

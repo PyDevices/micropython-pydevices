@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // tsmux for Python: MPEG-TS from H.264 access units, and HLS segments.
 //
 //   m = tsmux.Muxer()                  # lpcm=True adds castif's audio track
