@@ -58,7 +58,7 @@ Tools such as **mpftp** (and Thonny-style workflows) soft-reset into a clean hea
 | `__del__` | **Unreliable** — must not be the only teardown path |
 | ESP-IDF / NXP SDK / PIO / DMA | **Still live** unless C code tears them down |
 
-Each module that owns host resources registers a **soft-reset teardown hook** that runs **before** the heap is wiped (`--wrap=gc_sweep_all` in `src/ports/common/soft_reset.c`).
+Each module that owns host resources registers a **soft-reset teardown hook** that runs **before** the heap is wiped (`--wrap=gc_sweep_all` in [`src/ports/common/soft_reset.c`](../src/ports/common/soft_reset.c)).
 
 ---
 
@@ -68,14 +68,14 @@ Stubs under `src/ports/common/notimpl/` and ctor-raise stubs stay stubs (no hard
 
 | Module | Python import | Real implementations | `displaydev` backend |
 |--------|---------------|----------------------|-------------------|
-| `spibus` | `spibus` | `src/ports/common/spi/mod_spibus.c` | BusDisplay |
-| `i2cbus` | `i2cbus` | `src/ports/common/i2c/mod_i2cbus.c` | BusDisplay |
-| `i80bus` | `i80bus` | `src/ports/esp32/mod_i80bus.c`, `src/ports/rp2/mod_i80bus.c`, `src/ports/mimxrt/mod_i80bus.c`, `src/ports/samd/mod_i80bus.c` (+ `src/ports/common/i80bus/`) | BusDisplay |
-| `qspibus` | `qspibus` | `src/ports/esp32/mod_qspibus.c` (S3); `src/ports/common/notimpl/mod_qspibus.c` elsewhere | BusDisplay |
-| `dotclockframebuffer` | `dotclockframebuffer` | `src/ports/esp32/mod_dotclockframebuffer.c`, `src/ports/mimxrt/mod_dotclockframebuffer_elcdif.c` | FBDisplay |
-| `mipidsi` | `mipidsi` | `src/ports/esp32/mod_mipidsi.c`, `src/ports/mimxrt/mod_mipidsi.c` (+ `mimxrt1176_dsi_display.*`) | FBDisplay |
-| `picodvi` | `picodvi` | `src/ports/rp2/mod_picodvi.c` (+ `picodvi_rp2040.*`, `picodvi_rp2350.*`) | FBDisplay |
-| `rgbmatrix` | `rgbmatrix` | `src/ports/common/rgbmatrix/mod_rgbmatrix.c` (+ per-port `rgbmatrix_pm.c`) | FBDisplay |
+| `spibus` | `spibus` | [`src/ports/common/spi/mod_spibus.c`](../src/ports/common/spi/mod_spibus.c) | BusDisplay |
+| `i2cbus` | `i2cbus` | [`src/ports/common/i2c/mod_i2cbus.c`](../src/ports/common/i2c/mod_i2cbus.c) | BusDisplay |
+| `i80bus` | `i80bus` | [`src/ports/esp32/mod_i80bus.c`](../src/ports/esp32/mod_i80bus.c), [`src/ports/rp2/mod_i80bus.c`](../src/ports/rp2/mod_i80bus.c), [`src/ports/mimxrt/mod_i80bus.c`](../src/ports/mimxrt/mod_i80bus.c), [`src/ports/samd/mod_i80bus.c`](../src/ports/samd/mod_i80bus.c) (+ `src/ports/common/i80bus/`) | BusDisplay |
+| `qspibus` | `qspibus` | [`src/ports/esp32/mod_qspibus.c`](../src/ports/esp32/mod_qspibus.c) (S3); [`src/ports/common/notimpl/mod_qspibus.c`](../src/ports/common/notimpl/mod_qspibus.c) elsewhere | BusDisplay |
+| `dotclockframebuffer` | `dotclockframebuffer` | [`src/ports/esp32/mod_dotclockframebuffer.c`](../src/ports/esp32/mod_dotclockframebuffer.c), [`src/ports/mimxrt/mod_dotclockframebuffer_elcdif.c`](../src/ports/mimxrt/mod_dotclockframebuffer_elcdif.c) | FBDisplay |
+| `mipidsi` | `mipidsi` | [`src/ports/esp32/mod_mipidsi.c`](../src/ports/esp32/mod_mipidsi.c), [`src/ports/mimxrt/mod_mipidsi.c`](../src/ports/mimxrt/mod_mipidsi.c) (+ `mimxrt1176_dsi_display.*`) | FBDisplay |
+| `picodvi` | `picodvi` | [`src/ports/rp2/mod_picodvi.c`](../src/ports/rp2/mod_picodvi.c) (+ `picodvi_rp2040.*`, `picodvi_rp2350.*`) | FBDisplay |
+| `rgbmatrix` | `rgbmatrix` | [`src/ports/common/rgbmatrix/mod_rgbmatrix.c`](../src/ports/common/rgbmatrix/mod_rgbmatrix.c) (+ per-port `rgbmatrix_pm.c`) | FBDisplay |
 
 **Out of scope:** MCU CircuitPython bindings (stock CP display stack); changing pydevices board configs to avoid re-init. Desktop `usdl2` is the CP exception (unix).
 
@@ -99,7 +99,7 @@ Verify with grep if unsure (`displayif_register_soft_reset`, `*_host_teardown`).
 | `rgbmatrix` | yes | yes | yes (Protomatter) | PM core in BSS; bitbang path has no host IRQs |
 | `usdl2` desktop | via `SDL_Quit` | n/a (module) | yes | Stops SDL timers (`malloc` entries), `SDL_Quit`; MP unix/windows + CP unix |
 
-Shared: `src/include/displayif/soft_reset.h` + `src/ports/common/soft_reset.c` (`--wrap=gc_sweep_all` primary; `--wrap=mp_deinit` idempotent second pass). ESP32 also implements `displayif_port_pre_gc_sweep()` to stop `machine.Timer` before the sweep. When initialized LVGL is linked, the common pre-GC path weakly checks `lv_is_initialized()` and calls `lv_deinit()` after timers stop and before display hardware teardown, while LVGL's GC-backed global root is still valid. Desktop `usdl2` links the same wraps from `src/ports/desktop/usdl2/micropython.mk`, on MicroPython and CircuitPython alike.
+Shared: [`src/include/displayif/soft_reset.h`](../src/include/displayif/soft_reset.h) + [`src/ports/common/soft_reset.c`](../src/ports/common/soft_reset.c) (`--wrap=gc_sweep_all` primary; `--wrap=mp_deinit` idempotent second pass). ESP32 also implements `displayif_port_pre_gc_sweep()` to stop `machine.Timer` before the sweep. When initialized LVGL is linked, the common pre-GC path weakly checks `lv_is_initialized()` and calls `lv_deinit()` after timers stop and before display hardware teardown, while LVGL's GC-backed global root is still valid. Desktop `usdl2` links the same wraps from `src/ports/desktop/usdl2/micropython.mk`, on MicroPython and CircuitPython alike.
 
 ---
 
@@ -161,7 +161,7 @@ For **each** real module/port above:
 5. **Import board_config twice across soft reset** — no `ESP_ERR_NOT_FOUND` / interrupt failure (proven on ESP32-P4 `mipidsi` and Qualia `dotclockframebuffer.DotClockFramebuffer`).  
 6. Stubs unchanged (still raise / notimpl).  
 7. No silent “ignore error and continue” that leaves hardware half-initialized.  
-8. Tests: `tests/test_lifecycle_api.py` (import-only); hardware soft-reset smoke documented in `tools/README.md` / [soft-reset-and-bring-up.md](soft-reset-and-bring-up.md).
+8. Tests: [`tests/test_lifecycle_api.py`](../tests/test_lifecycle_api.py) (import-only); hardware soft-reset smoke documented in [`tools/README.md`](../tools/README.md) / [soft-reset-and-bring-up.md](soft-reset-and-bring-up.md).
 
 ---
 

@@ -4,12 +4,12 @@ All interface code and **per-port build glue** live under `src/ports/`. Folder n
 
 | Directory | When included | MP port |
 |-----------|---------------|---------|
-| `common/` | MCU builds only | esp32, mimxrt, samd, rp2, … |
-| `esp32/` | esp32 builds | `esp32` |
-| `mimxrt/` | mimxrt builds | `mimxrt` |
-| `samd/` | samd builds | `samd` |
-| `rp2/` | rp2 builds | `rp2` |
-| `desktop/usdl2/` | Desktop SDL (`import usdl2`) | `unix`, `windows` |
+| [`common/`](../../src/ports/common/) | MCU builds only | esp32, mimxrt, samd, rp2, … |
+| [`esp32/`](../../src/ports/esp32/) | esp32 builds | `esp32` |
+| [`mimxrt/`](../../src/ports/mimxrt/) | mimxrt builds | `mimxrt` |
+| [`samd/`](../../src/ports/samd/) | samd builds | `samd` |
+| [`rp2/`](../../src/ports/rp2/) | rp2 builds | `rp2` |
+| [`desktop/usdl2/`](../../src/ports/desktop/usdl2/) | Desktop SDL (`import usdl2`) | `unix`, `windows` |
 
 MCU hardware interfaces (`spibus`, `mipidsi`, …) do **not** build on desktop MicroPython ports. `usdl2` is the desktop exception.
 
@@ -26,7 +26,7 @@ Root `micropython.mk` / `micropython.cmake` detect the active port, include `src
 
 ## Rules
 
-1. **`src/ports/common/`** — shared across MCU ports; uses `machine.*` APIs. Includes `i80bus/gpio_bitbang.c` for GPIO bit-bang backends.
+1. **`src/ports/common/`** — shared across MCU ports; uses `machine.*` APIs. Includes [`i80bus/gpio_bitbang.c`](../../src/ports/common/i80bus/gpio_bitbang.c) for GPIO bit-bang backends.
 2. **`src/ports/<port>/`** — SoC SDK code. One tree per MP port name.
 3. New portable interface → `src/ports/common/<name>/` + update `src/ports/common/micropython.mk`.
 4. New port-specific interface → source under `src/ports/<port>/` + update that port's `micropython.mk`.

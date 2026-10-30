@@ -9,7 +9,7 @@ backend map, firmware integration boundary, and lifecycle rules.
 
 MicroPython board configs in `pydevices` that raise `NotImplementedError` on import need firmware built with the matching displayif module. Native C modules register directly — **no Python re-export layer** in this repo.
 
-**CircuitPython** already has MCU display interfaces (`dotclockframebuffer`, `mipidsi`, `picodvi`, …) — use `pydevices/board_configs/cp/` with stock CP firmware for those. **Exception:** desktop `usdl2` (unix) builds into CircuitPython's unix port as a user C module, from this repo's `micropython.mk`.
+**CircuitPython** already has MCU display interfaces (`dotclockframebuffer`, `mipidsi`, `picodvi`, …) — use [`pydevices/board_configs/cp/`](https://github.com/PyDevices/pydevices/tree/main/board_configs/cp) with stock CP firmware for those. **Exception:** desktop `usdl2` (unix) builds into CircuitPython's unix port as a user C module, from this repo's [`micropython.mk`](micropython.mk).
 
 **Status:** Accelerated interfaces on esp32, mimxrt, samd, and rp2. See [docs/port-matrix.md](docs/port-matrix.md).
 

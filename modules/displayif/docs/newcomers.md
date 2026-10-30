@@ -47,15 +47,15 @@ commands and shows how to combine several CMake user modules.
 
 | Path | Purpose |
 |---|---|
-| `src/ports/common/` | Shared buses, helpers, RGB matrix code, and lifecycle support. |
+| [`src/ports/common/`](../src/ports/common) | Shared buses, helpers, RGB matrix code, and lifecycle support. |
 | `src/ports/<port>/` | SoC-specific backends for ESP32, RP2, SAMD, and MIMXRT; `stm32` builds the portable buses only. |
-| `src/ports/desktop/usdl2/` | SDL2 desktop backend for MicroPython unix and Windows. |
-| `src/include/displayif/` | Public native headers. |
-| `micropython.mk`, `micropython.cmake` | Make/CMake user-module entrypoints. |
-| `docs/port-matrix.md` | Module/port/board-config support matrix. |
-| `docs/idempotent-lifecycle.md` | Required init, deinit, and soft-reset contract. |
-| `docs/soft-reset-and-bring-up.md` | Evidence-based bring-up and debugging procedure. |
-| `tests/`, `tools/` | API checks and hardware/desktop smoke tools. |
+| [`src/ports/desktop/usdl2/`](../src/ports/desktop/usdl2) | SDL2 desktop backend for MicroPython unix and Windows. |
+| [`src/include/displayif/`](../src/include/displayif) | Public native headers. |
+| [`micropython.mk`](../micropython.mk), [`micropython.cmake`](../micropython.cmake) | Make/CMake user-module entrypoints. |
+| [`docs/port-matrix.md`](port-matrix.md) | Module/port/board-config support matrix. |
+| [`docs/idempotent-lifecycle.md`](idempotent-lifecycle.md) | Required init, deinit, and soft-reset contract. |
+| [`docs/soft-reset-and-bring-up.md`](soft-reset-and-bring-up.md) | Evidence-based bring-up and debugging procedure. |
+| [`tests/`](../tests), [`tools/`](../tools) | API checks and hardware/desktop smoke tools. |
 
 ## The important invariant
 

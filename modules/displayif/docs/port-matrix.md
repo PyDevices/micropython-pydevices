@@ -21,18 +21,18 @@ names (`mipidsi`, `i80bus`, `picodvi`, …).
 
 | Location | Native module | `displaydev` backend | Status |
 |----------|---------------|-------------------|--------|
-| `src/ports/common` | `spibus` / `i2cbus` | **BusDisplay** | shipped |
-| `src/ports/esp32` | `dotclockframebuffer` | **FBDisplay** | esp_lcd RGB scanout |
+| [`src/ports/common`](../src/ports/common) | `spibus` / `i2cbus` | **BusDisplay** | shipped |
+| [`src/ports/esp32`](../src/ports/esp32) | `dotclockframebuffer` | **FBDisplay** | esp_lcd RGB scanout |
 | `src/ports/esp32` | `i80bus` | bus driver | esp_lcd I80 (S3) |
 | `src/ports/esp32` | `qspibus` | bus driver | esp_lcd SPI quad_mode (S3) |
 | `src/ports/esp32` | `mipidsi` | **FBDisplay** | ESP32-P4 MIPI DSI |
 | `src/ports/esp32` / `mimxrt` / `samd` / `rp2` | `rgbmatrix` | **FBDisplay** | Protomatter backends |
-| `src/ports/rp2` | `i80bus` | bus driver | PIO+DMA |
+| [`src/ports/rp2`](../src/ports/rp2) | `i80bus` | bus driver | PIO+DMA |
 | `src/ports/rp2` | `picodvi` | **FBDisplay** | RP2040 PIO / RP2350 HSTX |
-| `src/ports/mimxrt` | `dotclockframebuffer` | **FBDisplay** | eLCDIF on MIMXRT1062 |
+| [`src/ports/mimxrt`](../src/ports/mimxrt) | `dotclockframebuffer` | **FBDisplay** | eLCDIF on MIMXRT1062 |
 | `src/ports/mimxrt` | `mipidsi` | **FBDisplay** | MIPI DSI on MIMXRT1176 |
 | `src/ports/mimxrt` | `i80bus` | bus driver | FlexIO MCULCD 8080 on MIMXRT1062 |
-| `src/ports/samd` | `i80bus` | bus driver | GPIO bit-bang (SAMD51) via `common/i80bus` |
+| [`src/ports/samd`](../src/ports/samd) | `i80bus` | bus driver | GPIO bit-bang (SAMD51) via `common/i80bus` |
 | `src/ports/samd` | stubs | `dotclockframebuffer`, `mipidsi` | import ok; ctor raises |
 
 All parallel dot-clock RGB panels use **`dotclockframebuffer.DotClockFramebuffer`** + **`FBDisplay`**.
@@ -100,7 +100,7 @@ alongside CircuitPython `FourWire` pin names (`command`, `chip_select`, `reset`)
 
 `picodvi.Framebuffer` is **implemented** for both chips: **RP2040** uses the vendored
 [PicoDVI libdvi](https://github.com/Wren6991/PicoDVI) (BSD-3-Clause; PIO TMDS serialiser, core1
-scanline callback), **RP2350** uses the HSTX hardware serialiser (`picodvi_rp2350.c`). Exposes
+scanline callback), **RP2350** uses the HSTX hardware serialiser ([`picodvi_rp2350.c`](../src/ports/rp2/picodvi_rp2350.c)). Exposes
 buffer protocol + `refresh()` for **FBDisplay**.
 
 `i80bus` uses a **PIO state machine** (8 consecutive data pins, WR on side-set) with **DMA** for
@@ -129,7 +129,7 @@ or override with `picotool_DIR` / `PICOTOOL_FETCH_FROM_GIT_PATH`.
 ### samd
 
 `i80bus` (**SAMD51**, GPIO bit-bang): uses PORT `OUTSET`/`OUTCLR` register writes via the shared
-`src/ports/common/i80bus/gpio_bitbang.c` backend (same algorithm as pydevices's viper `I80Bus`).
+[`src/ports/common/i80bus/gpio_bitbang.c`](../src/ports/common/i80bus/gpio_bitbang.c) backend (same algorithm as pydevices's viper `I80Bus`).
 Supports 8 data pins via `data0` (eight consecutive) or `data_pins` (sequential or LUT layout).
 No dedicated 8080 peripheral — throughput is lower than esp32-S3, rp2 PIO, or mimxrt FlexIO.
 `frequency` is accepted for CP signature parity but unused (timing is not cycle-counted yet);
@@ -137,7 +137,7 @@ esp32/rp2/mimxrt wire `frequency` into the host. `read` is likewise accepted but
 (write-only path) — same as esp32/rp2. SAMD21 builds keep the import-only stub.
 
 `rgbmatrix` (SAMD51) uses the **Protomatter** backend (TC3 overflow ISR + PORT OUTSET/OUTCLR);
-`samd_irq_hook.c` patches the TC3 vector before scanout starts.
+[`samd_irq_hook.c`](../src/ports/samd/samd_irq_hook.c) patches the TC3 vector before scanout starts.
 
 **Build** (make port, `USER_C_MODULES` = workspace parent):
 
@@ -166,7 +166,7 @@ These configs import displayif modules when firmware is built with the matching 
 | `fbdisplay/t-rgb_480` | `dotclockframebuffer` |
 | parallel RGB `fbdisplay/*` (MP) | `dotclockframebuffer` |
 
-CP siblings live under `board_configs/cp/fbdisplay/` and use CircuitPython native modules — not displayif.
+CP siblings live under [`board_configs/cp/fbdisplay/`](https://github.com/PyDevices/pydevices/tree/main/board_configs/cp/fbdisplay) and use CircuitPython native modules — not displayif.
 
 ---
 
