@@ -32,6 +32,10 @@ _SPEED_MIN = 20
 _SPEED_MAX = 500
 _PITCH_MIN = 0.5
 _PITCH_MAX = 2.0
+# Pico's own level clips: at its default of 100, about 0.3 to 1 % of the samples in a
+# sentence hit full scale. At 60 none did in our test sentences (peaks 75 to 93 % of full
+# scale), so every text is rendered at 60 and `volume` scales from there.
+_ENGINE_VOLUME = 60
 # Mixer buffer in bytes. Same value and reasoning as adafruit_moonshine_klatt: the mixer fills
 # halves of it from a background callback, so a stall longer than one half skips. Pass a
 # MixerVoice from your own Mixer for a larger buffer if other code stalls the loop.
@@ -393,7 +397,10 @@ class TTS:
         speed = min(max(self._rate * 100 // _NATURAL_WPM, _SPEED_MIN), _SPEED_MAX)
         pitch = int(self._pitch * 100)
         text = self._queue.pop(0)
-        self._engine.start(f'<speed level="{speed}"><pitch level="{pitch}">{text}</pitch></speed>')
+        self._engine.start(
+            f'<volume level="{_ENGINE_VOLUME}"><speed level="{speed}"><pitch level="{pitch}">'
+            f"{text}</pitch></speed></volume>"
+        )
         self._text_active = True
         self._piece_start = True
 

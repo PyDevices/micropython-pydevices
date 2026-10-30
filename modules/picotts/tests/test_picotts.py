@@ -3,7 +3,7 @@
 Run with the unix MicroPython built with --modules picotts, and the folder
 holding en_US_ta.bin and en_US_lh0_sg.bin:
 
-    builds/unix/standard/micropython -X heapsize=8M \\
+    builds/unix/standard/micropython -X heapsize=12M \\
         modules/picotts/tests/test_picotts.py <voice folder> [out.wav]
 
 With out.wav it also writes the first sentence as a 16 kHz mono WAV.
@@ -96,9 +96,22 @@ print("rendered %.2f s of speech in %d ms, peak %d" % (seconds, ms, peak(pcm)))
 assert 2.0 < seconds < 6.0, seconds
 assert peak(pcm) > 3000
 
-# The same text renders the same samples, and the piece size doesn't matter.
-assert render(engine, TEXT, piece=1000) == pcm
-assert render(engine, TEXT, piece=7) == pcm
+# The TTS class renders at an engine volume that doesn't clip.
+engine.start(('<volume level="%d">%s</volume>' % (picotts._ENGINE_VOLUME, TEXT)).encode() + b"\0")
+quiet = bytearray()
+buf = _picotts.samples(160)
+while engine.speaking:
+    quiet += bytes(buf)[: 2 * engine.render(buf)]
+assert 3000 < peak(quiet) < 32700, peak(quiet)
+
+# A fresh engine renders the same samples whatever the piece size. (One engine
+# rendering the same text twice differs: Pico's noise for unvoiced sounds
+# carries on from where the last text left it.)
+for piece in (1000, 7):
+    other = _picotts.Engine(ta, sg, bytearray(1100000))
+    assert render(other, TEXT, piece=piece) == pcm, piece
+    other.deinit()
+    other = None
 
 # stop() drops the rest of a text.
 engine.start(TEXT.encode() + b"\0")

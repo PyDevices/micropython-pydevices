@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include "py/obj.h"
+#include "py/objarray.h"
 #include "py/runtime.h"
 
 #include "picoapi.h"
@@ -101,7 +102,7 @@ static mp_obj_t picotts_samples(mp_obj_t n_in) {
         mp_raise_ValueError(MP_ERROR_TEXT("n must be > 0"));
     }
     int16_t *items = m_new0(int16_t, n);
-    return mp_obj_new_memoryview('h', n, items);
+    return mp_obj_new_memoryview('h' | MP_OBJ_ARRAY_TYPECODE_FLAG_RW, n, items);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(picotts_samples_obj, picotts_samples);
 
