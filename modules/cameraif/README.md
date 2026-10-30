@@ -478,6 +478,7 @@ ISP's tuning. Those names keep working as they did.
 | [`camera_espcamera.py`](examples/camera_espcamera.py) | espcamera's API: `take()`, `reconfigure()`, `vflip` and `hmirror`, a JPEG |
 | [`camera_snapshot.py`](examples/camera_snapshot.py) | A still to the filesystem as hardware-encoded JPEG |
 | [`camera_mjpeg.py`](examples/camera_mjpeg.py) | An MJPEG server any browser can open |
+| [`camera_send_simpletest.py`](examples/camera_send_simpletest.py) | A JPEG on request to another board's screen or a computer, over TCP |
 | [`camera_still.py`](examples/camera_still.py) | Live view, BOOT button takes the picture. The one that feels like a camera |
 | [`camera_controls.py`](examples/camera_controls.py) | Discovering what a sensor supports, then sweeping it on screen |
 | [`camera_frame.py`](examples/camera_frame.py) | Zero-copy `frame()` loop with `stats()` |
@@ -522,6 +523,31 @@ Everything except the panel refresh runs at the rate the sensor delivers, and
 genuinely costs less than the 28 ms between frames. Two changes got it there, a
 DMA scaler and a 97 ms wait that should not have existed:
 [how it got there](docs/performance.md).
+
+## Sending pictures over the network
+
+`camera_send_simpletest.py` sends one JPEG each time the viewer asks for one,
+so every picture costs a round trip on the network as well as its bytes. On a
+Waveshare ESP32-P4 WIFI6 DEV-KIT with an OV5647, sending 27 KB pictures at
+quality 60 to CPython on a PC, 20 pictures a run:
+
+| Link | per picture, median | slowest |
+|---|---|---|
+| Ethernet (100 Mbit, straight to the PC) | 62 ms, 55 of them waiting for the camera's next frame | 66 to 103 ms |
+| Wi-Fi at -59 to -66 dBm, power saving off | 110 to 210 ms | 0.3 to 2.4 s |
+| Wi-Fi at the same spot, power saving on (the default) | 300 to 690 ms | 0.7 to 7.9 s |
+| Wi-Fi, power saving on, the receiver's window cut to 5,760 bytes | 920 ms | 4.8 s |
+
+The time goes to the radio link, not to the code. `TCP_NODELAY` on the sender,
+or the length and the JPEG in one write, made no difference on either link.
+Power saving is the part you control: with it on, the P4's Wi-Fi sleeps between
+the access point's beacons and each request waits for one, so the example turns
+it off. A small receive window (the last row stands in for another
+microcontroller as the viewer) means more round trips per picture, each of
+them as slow. If pictures still crawl, move the board nearer the access point
+or use Ethernet.
+`camera_mjpeg.py` doesn't wait for requests, which is why it streams at 7 to
+15 fps over the same Wi-Fi.
 
 ## Known hardware defect
 
