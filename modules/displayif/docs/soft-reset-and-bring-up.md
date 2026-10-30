@@ -58,7 +58,7 @@ On MicroPython MCU ports the soft-reset exit path is typically:
 
 | Mechanism | When | What |
 |-----------|------|------|
-| `--wrap=gc_sweep_all` (`src/ports/common/soft_reset.c`) | **Before** heap wipe | `displayif_port_pre_gc_sweep()`, optional weak and initialization-guarded `lv_deinit()`, then `displayif_soft_reset_all()` |
+| `--wrap=gc_sweep_all` ([`src/ports/common/soft_reset.c`](../src/ports/common/soft_reset.c)) | **Before** heap wipe | `displayif_port_pre_gc_sweep()`, optional weak and initialization-guarded `lv_deinit()`, then `displayif_soft_reset_all()` |
 | `--wrap=mp_deinit` (same file) | After sweep | Idempotent second `displayif_soft_reset_all()` |
 | `displayif_register_soft_reset(fn)` | At first ctor | Per-interface host teardown (mipidsi, displayif/DotClock, i80bus, picodvi, rgbmatrix, …) |
 | `displayif_port_pre_gc_sweep()` | Strong symbol on esp32 | Stop `machine.Timer` / clear handlers (weak empty default elsewhere) |
@@ -174,7 +174,7 @@ approach. Do not stack silent fallbacks.
 Reference board: Adafruit Qualia S3 + TL040HDS20 (720×720). Same native module
 serves Waveshare 4.3″/7″ ST7262 and LILYGO T-RGB (see matrix above).
 CP sibling: `fbdisplay/cp_qualia_tl040hds20`. Native:
-`src/ports/esp32/mod_dotclockframebuffer.c`.
+[`src/ports/esp32/mod_dotclockframebuffer.c`](../src/ports/esp32/mod_dotclockframebuffer.c).
 
 ### Scanout model (MP LVGL vs CircuitPython)
 

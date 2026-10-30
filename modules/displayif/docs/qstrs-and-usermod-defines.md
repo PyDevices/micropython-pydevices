@@ -57,13 +57,13 @@ A guarded name is only safe if something else collects it:
    is why the checker has a `CORE_POOL` list, empty today. Add to that list only with the reason written down; the pool is
    MicroPython's, and it changes between versions.
 2. **The same file references it unguarded elsewhere.**
-   `src/ports/common/spi/mod_spibus.c` guards `sck`/`mosi`/`miso` behind
+   [`src/ports/common/spi/mod_spibus.c`](../src/ports/common/spi/mod_spibus.c) guards `sck`/`mosi`/`miso` behind
    `ESP_PLATFORM` at line 95 and passes them unguarded at 154 and 210, so the
    pass collects them from there.
 
 Same **file**, not same repo — that distinction is the whole check. Every name
-in `src/ports/samd/mod_i80bus.c` is also referenced by the esp32 backend and by
-`src/ports/common/notimpl/mod_i80bus.c`, and neither of those is compiled into a
+in [`src/ports/samd/mod_i80bus.c`](../src/ports/samd/mod_i80bus.c) is also referenced by the esp32 backend and by
+[`src/ports/common/notimpl/mod_i80bus.c`](../src/ports/common/notimpl/mod_i80bus.c), and neither of those is compiled into a
 SAMD51 build. A repo-wide "is it referenced anywhere?" test passes the bug
 this page is about.
 
