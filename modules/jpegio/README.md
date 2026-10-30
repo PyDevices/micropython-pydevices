@@ -256,7 +256,7 @@ to byte-swap for `RGB565_SWAPPED`); see above. And errors are typed
 - [`third_party/jpegenc/`](third_party/jpegenc/) — the software encoder, generated from stb_image_write by
   [`tools/make_jpegenc.py`](tools/make_jpegenc.py) (rerun it to take a newer stb).
 - [`jpegio_hw.c`](src/jpegio_hw.c), [`jpegio_hw.h`](src/jpegio_hw.h) — the ESP32-P4's JPEG engine
-  (`esp_driver_jpeg`), compiled in when `micropython.cmake` sees an esp32p4
+  (`esp_driver_jpeg`), compiled in when [`micropython.cmake`](micropython.cmake) sees an esp32p4
   target; two stubs everywhere else.
 - [`third_party/tjpgd/`](third_party/tjpgd/) — vendored TJpgDec: `tjpgd.c`, `tjpgd.h`, `tjpgdcnf.h`. The
   firmware's only TJpgDec, always compiled.
@@ -275,7 +275,7 @@ self-detects).** LVGL's own TJPGD is off by config on MicroPython
 the vendored copy and LVGL has no JPEG decoder of its own; this module
 supplies one. When LVGL is in the same build (`USER_C_MODULES`
 names omnipython-lvgl's `ports/micropython`, which a [`build_mp.py`](../../build_mp.py) build with both modules does), both glue files
-compile `lvgl_decoder.c` with `-DJPEGIO_LVGL_DECODER=1`; its `lvgl/lvgl.h`
+compile [`lvgl_decoder.c`](src/lvgl_decoder.c) with `-DJPEGIO_LVGL_DECODER=1`; its `lvgl/lvgl.h`
 resolves through the repository root that port puts on the include
 path. `JPEGIO_LVGL=0` / `1` (make) or `-DJPEGIO_LVGL=OFF` / `ON` (CMake)
 forces the decision. Without LVGL nothing links against LVGL
@@ -288,7 +288,7 @@ are unconditional* below.
 The decoder is ChaN's TJpgDec and the software encoder is the JPEG writer
 from Sean Barrett's stb_image_write. Both are under
 [`third_party/`](third_party/), each with its license and an `ORIGIN.txt`
-that names the upstream commit and every change made. `jpegio.c` is a port
+that names the upstream commit and every change made. [`jpegio.c`](src/jpegio.c) is a port
 of CircuitPython's jpegio by Jeff Epler for Adafruit Industries (MIT).
 [`NOTICE`](NOTICE) lists them all.
 

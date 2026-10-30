@@ -1,6 +1,6 @@
 # usbhost API Sketch — v0
 
-**Status:** Gate 1 deliverable for review, kept as history. The API that shipped is `usb.core` and the class packages in [`packages/`](../packages); this sketch's `usbhost.*` surface was retired.
+**Status:** Gate 1 deliverable for review, kept as history. The API that shipped is `usb.core` and the class packages in [pydevices](https://github.com/PyDevices/pydevices); this sketch's `usbhost.*` surface was retired.
 
 The sketch is written against all backends at once — the ESP native module, the desktop backends, and the hypothetical RP2350 TinyUSB backend of the vision's Appendix A — because the surface must not leak any one stack's assumptions. CircuitPython's `usb_host`/`usb_hid`/`usb_midi` family was studied for shape; names differ where PyDevices conventions differ.
 

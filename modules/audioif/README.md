@@ -389,7 +389,7 @@ Without this repository the firmware still builds and still plays: the engine's
 hooks default to one thread and no hardware, `audiopump.driver()` says
 `'none'`, and `audiodev` falls back to `machine.I2S` and says so once.
 
-**`micropython.cmake` defines `AUDIOIF_DRIVER_ESP32` itself**, and that is not
+**[`micropython.cmake`](micropython.cmake) defines `AUDIOIF_DRIVER_ESP32` itself**, and that is not
 belt-and-braces. The IDF does not hand `ESP_PLATFORM` to a user C module, and
 the POSIX branch of this file compiles *and links* on esp32 because the IDF's
 newlib has `pthread.h` — so keying off the wrong macro gets you an unpinned
@@ -408,7 +408,7 @@ Leave that last one out and you get a pump that free-runs and drops blocks
 when the output ring fills instead of waiting for room; it is the one missing
 hook Python can see, as `audiopump.backpressure()` returning False.
 
-The page for it is the engine's own `docs/pump-ports.md`: what each hook must
+The page for it is the engine's own [`docs/how-it-works/pump-ports.md`](https://github.com/PyDevices/audiodsp/blob/main/docs/how-it-works/pump-ports.md): what each hook must
 guarantee, how the weak-symbol binding works and the static-archive trap it
 dodges, and the portability gate that keeps platform includes out of the
 engine. The one rule to carry away before reading it is the binding rule:

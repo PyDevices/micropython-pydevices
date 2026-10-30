@@ -22,9 +22,9 @@ anything. Host mode is proven at full speed on the ESP32-S3, and at high
 speed on the ESP32-P4 with a webcam on a port that supplies 5 V; behind a hub
 the P4 reaches full-speed devices when you start the host with
 `full_speed=True` (see [below](#keyboards-and-midi-controllers-behind-a-hub-on-the-esp32-p4)). MSC now mounts as a filesystem, read-write
-(`examples/usb_drive_mount.py` lists a hosted stick; `usb_drive_log.py`
+([`examples/usb_drive_mount.py`](../examples/usb_drive_mount.py) lists a hosted stick; [`usb_drive_log.py`](../examples/usb_drive_log.py)
 appends sensor lines to one and reads them back after a remount;
-`usb_drive_read.py` reads a file end to end and checks its SHA-256), with
+[`usb_drive_read.py`](../examples/usb_drive_read.py) reads a file end to end and checks its SHA-256), with
 Bulk-Only Reset Recovery and REQUEST SENSE behind it, both exercised by
 a deliberate device-side failure rather than assumed; HID delivers raw reports rather than decoded
 events; and `host_stop()` on a device that was genuinely held open is now
@@ -49,7 +49,7 @@ A soft reset (Ctrl-D) stops what the program left running, as MicroPython's
 own `machine` peripherals do: the host and any stream open on it. The next program finds the host
 stopped and its devices attach again. `host_stop()` with a microphone or
 speaker stream still open no longer wedges the host.
-`tests/hardware/soft_reset_check.py` checks all of it on a board.
+[`tests/hardware/soft_reset_check.py`](../tests/hardware/soft_reset_check.py) checks all of it on a board.
 `host_start()`'s class filter **is** now honoured -- verified both
 in the intersection arithmetic and against a live device (excluded from a
 class tuple, it is invisible to `host_devices()`; included, it attaches).

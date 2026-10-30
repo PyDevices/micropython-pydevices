@@ -22,16 +22,16 @@ pairing is the same scripts on two boards, not a special `pair_*` file.
 Roles follow the hardware each board has, not their size. The P4 is the
 device in these pairings. It can host too, but only on a port that supplies
 5 V, such as the ESP32-P4-WIFI6-DEV-KIT's direct Type-A socket, where
-`uvc_display.py` streams a webcam. The Touch-LCD-4B's USB-C port only takes
+[`uvc_display.py`](uvc_display.py) streams a webcam. The Touch-LCD-4B's USB-C port only takes
 power in, so it can't host without 5 V from outside.
 
 | Device board | Script | Host board | Script | What is lent |
 |---|---|---|---|---|
-| **P4** | `usb_soundcard.py` | **S3** | `usb_speaker.py` | Sound output -- the headline offload |
-| **P4** | `usb_webcam.py` | **S3** | `uvc_display.py` | Camera → panel |
-| **P4** | `sd_drive.py` | **S3** | `usb_drive_mount.py`, `usb_drive_read.py` | Shared storage |
-| **P4** / **S3** | `midi_harmonizer.py` | **S3** | `midi_host.py` | MIDI effect / instrument |
-| **S3** | `hid_keyboard.py` | **S3** | `hid_host.py` | Control surface (needs two S3s, or S3-device + PC) |
+| **P4** | [`usb_soundcard.py`](usb_soundcard.py) | **S3** | [`usb_speaker.py`](usb_speaker.py) | Sound output -- the headline offload |
+| **P4** | [`usb_webcam.py`](usb_webcam.py) | **S3** | [`uvc_display.py`](uvc_display.py) | Camera → panel |
+| **P4** | [`sd_drive.py`](sd_drive.py) | **S3** | [`usb_drive_mount.py`](usb_drive_mount.py), [`usb_drive_read.py`](usb_drive_read.py) | Shared storage |
+| **P4** / **S3** | [`midi_harmonizer.py`](midi_harmonizer.py) | **S3** | [`midi_host.py`](midi_host.py) | MIDI effect / instrument |
+| **S3** | [`hid_keyboard.py`](hid_keyboard.py) | **S3** | [`hid_host.py`](hid_host.py) | Control surface (needs two S3s, or S3-device + PC) |
 
 A PC can replace either end. That is the point of standard classes.
 
@@ -56,8 +56,8 @@ wedged board.
 
 | Hole | Issue | Consequence for examples |
 |---|---|---|
-| Device UAC is speaker-only (no mic endpoint) | [Planned](../../pydevices/ROADMAP.md) | `usb_mic.py` hosts a commercial mic; no device-side capture script |
-| P4 behind a hub: ESP-IDF's host has no transaction translator, so a full-speed device is refused at high speed | [#120](https://github.com/PyDevices/micropython-pydevices/issues/120) | A keyboard or MIDI controller behind a hub needs `usb.core.start(full_speed=True)` (`FULL_SPEED = True` in `hid_host.py`, `midi_host.py` and `host_enum.py`); plugged straight into the port it needs nothing. At full speed the whole port is full speed, so a webcam on the same hub drops to full-speed bandwidth and the two cannot be mixed. On the DEV-KIT the speed can't change between starts: its hub can't be power-cycled, so a restart at the other speed can leave it dead until the board loses power, and `usb.core.start()` refuses it ([#121](https://github.com/PyDevices/micropython-pydevices/issues/121), [host.md](../docs/host.md#pick-the-speed-once-per-power-up-on-the-wifi6-dev-kit)) |
+| Device UAC is speaker-only (no mic endpoint) | [Planned](https://github.com/PyDevices/pydevices/blob/main/ROADMAP.md) | [`usb_mic.py`](usb_mic.py) hosts a commercial mic; no device-side capture script |
+| P4 behind a hub: ESP-IDF's host has no transaction translator, so a full-speed device is refused at high speed | [#120](https://github.com/PyDevices/micropython-pydevices/issues/120) | A keyboard or MIDI controller behind a hub needs `usb.core.start(full_speed=True)` (`FULL_SPEED = True` in [`hid_host.py`](hid_host.py), [`midi_host.py`](midi_host.py) and [`host_enum.py`](host_enum.py)); plugged straight into the port it needs nothing. At full speed the whole port is full speed, so a webcam on the same hub drops to full-speed bandwidth and the two cannot be mixed. On the DEV-KIT the speed can't change between starts: its hub can't be power-cycled, so a restart at the other speed can leave it dead until the board loses power, and `usb.core.start()` refuses it ([#121](https://github.com/PyDevices/micropython-pydevices/issues/121), [host.md](../docs/host.md#pick-the-speed-once-per-power-up-on-the-wifi6-dev-kit)) |
 | Host FIFO split is per session | [Planned](../ROADMAP.md) | `usb.core.start(classes=...)` decides it: `uvc` leans IN (600 B), `uac` without `uvc` gives periodic OUT 200 B and IN 528 B on an S3, four times that on a P4 (800 B and 2136 B); a camera and a 2.0 speaker cannot share one `start()` |
 
 ## Conventions
