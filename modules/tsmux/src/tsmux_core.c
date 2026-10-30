@@ -107,6 +107,7 @@ void tsmux_init(tsmux_t *m, int lpcm, tsmux_out_fn *out, void *ctx) {
     m->out = out;
     m->ctx = ctx;
     m->lpcm = lpcm;
+    m->pcr_lead = TSMUX_PCR_LEAD;
     // PES header (stream 0xE0, unbounded, PTS only) + access-unit delimiter
     static const uint8_t H[20] = {0, 0, 1, 0xe0, 0, 0, 0x80, 0x80, 5, 0, 0, 0, 0, 0, 0, 0, 0, 1, 9, 0xf0};
     memcpy(m->pes_head, H, 20);
@@ -151,7 +152,7 @@ void tsmux_video(tsmux_t *m, const uint8_t *au, uint32_t au_len, uint32_t pts, i
     uint32_t hlen = 20;
     uint32_t total = hlen + au_len;
     uint32_t pos = 0;
-    uint32_t pcr = pts - TSMUX_PCR_LEAD;
+    uint32_t pcr = pts - m->pcr_lead;
     int first = 1;
     while (pos < total) {
         uint32_t room = 184;
@@ -271,6 +272,10 @@ void tsmux_lpcm(tsmux_t *m, const uint8_t *pcm, uint32_t len, uint32_t pts) {
         m->out(m->ctx, pkt);
         first = 0;
     }
+}
+
+void tsmux_set_pcr_lead(tsmux_t *m, uint32_t lead) {
+    m->pcr_lead = lead;
 }
 
 void tsmux_pcr(tsmux_t *m, uint32_t pcr) {

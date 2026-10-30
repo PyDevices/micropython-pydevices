@@ -17,7 +17,7 @@
 #define TSMUX_PID_PMT 0x1000
 #define TSMUX_PID_VIDEO 0x100
 #define TSMUX_PID_AUDIO 0x101
-#define TSMUX_PCR_LEAD 36000        // the PCR runs 400 ms (90 kHz) ahead of the PTS
+#define TSMUX_PCR_LEAD 36000        // default: the PCR runs 400 ms (90 kHz) behind the PTS
 
 // Receives each 188-byte TS packet, in order.
 typedef void tsmux_out_fn(void *ctx, const uint8_t *pkt);
@@ -26,6 +26,7 @@ typedef struct tsmux {
     tsmux_out_fn *out;
     void *ctx;
     int lpcm;                       // the PMT lists an LPCM track
+    uint32_t pcr_lead;              // PTS - PCR, 90 kHz (TSMUX_PCR_LEAD unless set)
     uint8_t cc_pat, cc_pmt, cc_video, cc_audio;
     uint8_t pat[188];
     uint8_t pmt[188];
@@ -49,13 +50,17 @@ void tsmux_reset(tsmux_t *m);
 void tsmux_tables(tsmux_t *m);
 
 // One H.264 access unit (Annex B) at pts (90 kHz), with an access-unit
-// delimiter in front and the PCR (pts - TSMUX_PCR_LEAD) in its first packet;
+// delimiter in front and the PCR (pts - the PCR lead) in its first packet;
 // key marks a random access point.
 void tsmux_video(tsmux_t *m, const uint8_t *au, uint32_t len, uint32_t pts, int key);
 
 // One block of 48 kHz stereo s16 PCM, native little-endian (sent big-endian,
 // as LPCM is), at pts. len is a multiple of 4.
 void tsmux_lpcm(tsmux_t *m, const uint8_t *pcm, uint32_t len, uint32_t pts);
+
+// How far the PCR runs behind each video PTS, in 90 kHz ticks: how long the
+// sink may hold a frame before it is due. TSMUX_PCR_LEAD by default.
+void tsmux_set_pcr_lead(tsmux_t *m, uint32_t lead);
 
 // A PCR alone on the video PID, for a tick with no frame: the sink's clock
 // keeps running while the picture is still.

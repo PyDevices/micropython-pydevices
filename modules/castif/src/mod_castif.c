@@ -36,7 +36,7 @@ static void *castif_spiram(size_t n) {
     return heap_caps_aligned_calloc(16, 1, n, MALLOC_CAP_SPIRAM);
 }
 
-#define PCR_LEAD  36000           // 400 ms in 90 kHz ticks
+#define PCR_LEAD  36000           // the default PTS - PCR: 400 ms in 90 kHz ticks (set_pcr_lead)
 #define A_BLOCK   1920            // one 10 ms LPCM block: 480 frames * 4 bytes (48 kHz stereo s16)
 #define A_BLOCKS  64              // ring depth: 640 ms of audio
 #define TAP_CHUNK 4096            // bytes read from the pump's tap per call (85 ms of 24 kHz mono)
@@ -67,6 +67,7 @@ typedef struct _castif_obj_t {
     uint16_t seq;
     uint32_t ssrc;
     uint32_t ts90;
+    uint32_t pcr_lead;            // PTS - PCR, 90 kHz: how long the sink may hold a frame
     uint8_t rtp_buf[12 + 7 * 188];
     int rtp_n;
     // task + control
@@ -378,7 +379,7 @@ static void cast_task(void *arg) {
             }
         }
         int64_t m0 = now;
-        c->ts90 = pts - PCR_LEAD;
+        c->ts90 = pts - c->pcr_lead;
         if (!skip) {
             const uint8_t *au;
             uint32_t au_len;
@@ -401,7 +402,7 @@ static void cast_task(void *arg) {
             }
         }
         if (c->audio_on) {
-            if (skip) tsmux_pcr(c->mux, pts - PCR_LEAD);
+            if (skip) tsmux_pcr(c->mux, pts - c->pcr_lead);
             pace_audio(c, esp_timer_get_time());
             // the producer has stopped: the track is more than 200 ms behind the picture
             if (c->apts && (int32_t)(pts - c->apts) > 18000) c->audio_underruns++;
@@ -453,6 +454,7 @@ static mp_obj_t castif_make_new(const mp_obj_type_t *type, size_t n_args, size_t
     self->new_bitrate = -1;
     self->max_skip_us = 500000;   // static UIs: >=2 fps floor; set_skip(0) turns it off
     self->frame_us = 1000000 / args[ARG_fps].u_int;
+    self->pcr_lead = PCR_LEAD;
     if (tsmux_new == NULL) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("castif: needs the tsmux module in this firmware"));
     }
@@ -515,6 +517,7 @@ static mp_obj_t castif_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
     self->dst.sin_addr.s_addr = inet_addr(ip);
     self->rtp_n = 0;
     tsmux_reset(self->mux);
+    if (tsmux_set_pcr_lead) tsmux_set_pcr_lead(self->mux, self->pcr_lead);
     self->frames = self->packets = self->sent = self->stalls = self->idr_reqs = 0;
     self->running = true;
     self->want_idr = true;   // start with a keyframe
@@ -647,6 +650,18 @@ static mp_obj_t castif_set_skip(mp_obj_t self_in, mp_obj_t ms) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(castif_set_skip_obj, castif_set_skip);
 
+// How far the stream's clock (PCR) runs behind each frame's presentation
+// time, in ms: the most the sink may buffer. Takes effect at the next start().
+static mp_obj_t castif_set_pcr_lead(mp_obj_t self_in, mp_obj_t ms) {
+    castif_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    int v = mp_obj_get_int(ms);
+    if (v < 0 || v > 2000) mp_raise_ValueError(MP_ERROR_TEXT("pcr lead 0..2000 ms"));
+    if (self->task) mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("set it before start()"));
+    self->pcr_lead = (uint32_t)v * 90;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(castif_set_pcr_lead_obj, castif_set_pcr_lead);
+
 static mp_obj_t castif_set_fps(mp_obj_t self_in, mp_obj_t fps) {
     castif_obj_t *self = MP_OBJ_TO_PTR(self_in);
     int f = mp_obj_get_int(fps);
@@ -688,6 +703,7 @@ static mp_obj_t castif_stats(mp_obj_t self_in) {
     PUT(MP_QSTR_length, self->last_len);
     PUT(MP_QSTR_frame_type, self->last_type);
     PUT(MP_QSTR_running, self->running);
+    PUT(MP_QSTR_pcr_lead_ms, self->pcr_lead / 90);
     #undef PUT
     return d;
 }
@@ -712,6 +728,7 @@ static const mp_rom_map_elem_t castif_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_bitrate), MP_ROM_PTR(&castif_set_bitrate_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_fps), MP_ROM_PTR(&castif_set_fps_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_skip), MP_ROM_PTR(&castif_set_skip_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_pcr_lead), MP_ROM_PTR(&castif_set_pcr_lead_obj) },
     { MP_ROM_QSTR(MP_QSTR_mark_dirty), MP_ROM_PTR(&castif_mark_dirty_obj) },
     { MP_ROM_QSTR(MP_QSTR_feed_audio), MP_ROM_PTR(&castif_feed_audio_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_sync), MP_ROM_PTR(&castif_set_sync_obj) },

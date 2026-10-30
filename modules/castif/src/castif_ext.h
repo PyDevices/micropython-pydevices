@@ -35,5 +35,6 @@ extern void tsmux_tables(tsmux_t *m) __attribute__((weak));
 extern void tsmux_video(tsmux_t *m, const uint8_t *au, uint32_t len, uint32_t pts, int key) __attribute__((weak));
 extern void tsmux_lpcm(tsmux_t *m, const uint8_t *pcm, uint32_t len, uint32_t pts) __attribute__((weak));
 extern void tsmux_pcr(tsmux_t *m, uint32_t pcr) __attribute__((weak));
+extern void tsmux_set_pcr_lead(tsmux_t *m, uint32_t lead) __attribute__((weak));
 
 #endif
