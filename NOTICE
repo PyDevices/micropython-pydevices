@@ -6,6 +6,7 @@ Modules that vendor code keep it under their own third_party/ folder and
 list it in a NOTICE of their own:
 
   modules/jpegio/NOTICE   TJpgDec (ChaN) and stb_image_write's JPEG writer
+  modules/picotts/NOTICE  the SVOX Pico text-to-speech engine (Apache-2.0)
 
 The tflite and vision modules compile code fetched at build time from
 esp-vision, at the commit pinned in modules/.esp-vision/ESP_VISION.lock.

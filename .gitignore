@@ -23,6 +23,7 @@
 !/modules/jpegio/
 !/modules/mdns/
 !/modules/pngio/
+!/modules/picotts/
 !/modules/tflite/
 !/modules/vision/
 !/modules/.esp-vision/

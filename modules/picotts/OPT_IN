@@ -1,0 +1,3 @@
+Opt-in: name picotts to build it; --modules all leaves it out.
+It adds the SVOX Pico engine to the image, and it only runs on a board with
+PSRAM (about 2.5 MB for the engine and its voice).

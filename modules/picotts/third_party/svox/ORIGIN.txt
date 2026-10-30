@@ -1,0 +1,27 @@
+SVOX Pico text-to-speech engine, Copyright (C) 2008-2009 SVOX AG.
+Apache License 2.0 (LICENSE here; NOTICE is the engine's own notice).
+
+Upstream: the Android Open Source Project's external/svox, pico/lib.
+Taken from: Adafruit_CircuitPython_PicoTTS's src/svox/
+  https://github.com/adafruit/Adafruit_CircuitPython_PicoTTS
+  commit 3496a5d81d3984bacf4876c51653493f5afab867, identical.
+That copy came from the ESP-IDF component esp32_picotts
+  https://github.com/lllucius/esp32_picotts
+  commit 072b3d00f2a5a032bd7f8a517168eb28c41b9b51 (components/picotts/lib)
+
+Files: every .c and .h of pico/lib.
+
+Changes, none of them made here:
+
+1. esp32_picotts added pico_loadMemoryResource() and pico_defineVoice() to
+   picoapi.c and picoapi.h, which load a voice from memory instead of a file,
+   and ESP-IDF partition and file loaders beside them.
+2. Adafruit added a file-less platform, PICO_CIRCUITPY, in picopltf.h, with
+   stub file functions in picopal.c; put the ESP-IDF loaders in picoapi.c and
+   picoapi.h behind PICO_PLATFORM == PICO_ESP; made IMPLEMENT_TIMER's test
+   tolerate an undefined macro in picopal.c; and turned a debug-only static
+   counter in picosig.c into a local.
+
+picotts builds with PICO_PLATFORM=PICO_CIRCUITPY on every port: the voice is
+read into memory by the Python side and handed to the engine, so nothing in
+the engine opens a file.

@@ -15,6 +15,7 @@ tracked here or linked from a sibling checkout or cloned at the commit in
 | [`h264enc`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/h264enc) | RGB565 frames to H.264 on the ESP32-P4's hardware encoder. |
 | [`jpegio`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/jpegio) | JPEG decode and encode, with CircuitPython's `jpegio` API. |
 | [`mdns`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/mdns) | Find and advertise services on the local network, with CircuitPython's `mdns` API (esp32, rp2, unix, windows). |
+| [`picotts`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/picotts) | Text to speech on the SVOX Pico engine, with the API of Adafruit's `adafruit_picotts`. Opt-in, and it needs PSRAM. |
 | [`pngio`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/pngio) | PNG encode and decode, RGB565 in and out. |
 | [`ppa`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/ppa) | Scale, rotate, convert and fill pixel buffers, on the ESP32-P4's Pixel Processing Accelerator or in portable C elsewhere. |
 | [`tsmux`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/tsmux) | MPEG-TS and HLS segments from H.264. |
@@ -30,7 +31,7 @@ tracked here or linked from a sibling checkout or cloned at the commit in
 | `tflite`, `vision` | [esp-vision's modules](../guides/use-esp-vision-modules.md), opt-in: `all` leaves them out. |
 
 [`modules/all`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/all) is not a module but the rule behind `all`: every module beside it
-except those with an `OPT_IN` file.
+except those with an `OPT_IN` file: `picotts`, `tflite` and `vision`.
 
 ## Which modules build on CircuitPython
 
@@ -56,6 +57,7 @@ it is. "Unix" is CircuitPython's unix port, built and imported in
 | ulab | CircuitPython's own | CircuitPython's own | |
 | castif | no: it is the ESP32-P4's | ESP32-P4, with no network | Talks to lwIP directly, the lwIP under CircuitPython's own `socketpool`. CircuitPython's P4 port has no network until it drives the boards' ESP32-C6, so castif is built without one and `start()` says so. Name tsmux, h264enc and ppa with it. |
 | h264enc | no: it is the ESP32-P4's encoder | ESP32-P4 | Espressif's `esp_h264`, which CircuitPython's port, built with the component manager off, can't fetch itself, is pinned in `deps.lock` and fetched by `build_mp.py`. Name ppa with it. |
+| picotts | no | no, on purpose | CircuitPython has Adafruit's `adafruit_picotts`, the same engine and API as a native `.mpy`. |
 | tflite, vision | no | no, on purpose | esp-vision's modules, for MicroPython only. |
 | lvgl-micropython | no | no | CircuitPython's binding is `lvgl-circuitpython`, passed by path. |
 | micropython-lib | no | no | MicroPython's own upstream packages. |
