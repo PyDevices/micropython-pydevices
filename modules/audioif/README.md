@@ -299,12 +299,44 @@ and its stats say why.
 moved, short reads (the microphone) or writes that found the speaker's queue
 empty, discontinuities Windows reported, frames dropped to hold `keep_ms`,
 waits that timed out, the device buffer in frames, the frames waiting (the
-microphone) or queued (the speaker), and the HRESULT of a failed open.
+microphone) or queued (the speaker), the HRESULT of a failed open, and the
+Windows engine's period and reported stream latency for the device, in
+frames (0 until it opens). Add the held frames and the two periods and you
+have what the path costs before Windows' own engine and the converters.
 `sink_stats()` is `None` when the sink is not a speaker.
 
-The microphone and the speaker are two clocks unless they are one device.
-Nothing resamples between them yet, so over a long run on two devices the
-speaker's queue slowly grows or empties.
+### A microphone and a speaker on two clocks
+
+The microphone and the speaker are two clocks unless they are one device. A
+pump paced by both drops or starves a block each time they slip. Give the
+`Input` an `audiopump.Ring` and play an `audiopump.DriftResampler` instead:
+
+```python
+ring = audiopump.Ring(sample_rate=48000, channel_count=2, frames=128,
+                      capacity=64)
+mic = _audioif.Input(sample_rate=48000, channel_count=2, frames=128,
+                     device=mic_id, ring=ring)
+drift = audiopump.DriftResampler(ring, target=1024)
+fx = audioeffects.create("Overdrive", drift, 48000)
+```
+
+With `ring=` the `Input` reads the microphone on a thread of its own, at the
+microphone's pace, and writes every block into the Ring; the pump plays the
+resampler, paced by the speaker alone. Don't play the `Input` itself (it is
+silence in this mode). In `stats()` the short-reads field then counts the
+frames the Ring had no room for. `deinit()` stops the thread; deinit the
+`Input` before its Ring.
+
+Windows hands over 10 ms packets on both sides, so the Ring's fill swings by
+about 20 ms between the resampler's looks. A target of 1024 frames at 48 kHz
+held with no underrun on the bench, where 768 ran dry every second or two.
+
+`_audioif.same_clock(speaker=None, mic=None)` says which case you have: True
+when both endpoints belong to one physical device. Everything built into the
+computer shares one container whether or not it shares a clock, so two
+built-in endpoints count as two clocks. `_audioif.endpoint(device=None,
+capture=False)` returns an endpoint's ID (the default one's when `device` is
+None), its name and its container ID.
 
 ## Building it into a firmware
 

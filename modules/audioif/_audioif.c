@@ -100,6 +100,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <process.h>
+#include <stdlib.h>
 #include <fcntl.h>
 #include <io.h>
 #include <sys/stat.h>
@@ -2408,6 +2409,25 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(audiopump_rt_probe_obj, 1,
 // `keep_ms` holds the backlog: anything beyond one block plus that much is
 // dropped, oldest first, so a pump that fell behind once does not carry the
 // delay for the rest of the stream. 0 keeps everything.
+//
+// When the speaker is another device, it runs on another clock, and a pump
+// paced by both drops or starves a block every time they slip. Then give the
+// Input an `audiopump.Ring`:
+//
+//     ring = audiopump.Ring(sample_rate=48000, channel_count=2, frames=128,
+//                           capacity=16)
+//     mic = _audioif.Input(sample_rate=48000, channel_count=2, frames=128,
+//                          device=..., ring=ring)
+//     drift = audiopump.DriftResampler(ring, target=768)
+//
+// The Input then reads the microphone on a thread of its own, at the
+// microphone's pace, and writes every block into the Ring. The pump plays the
+// DriftResampler, paced by the speaker alone, and the Input is not played at
+// all (played anyway, it is silence). deinit() stops the thread.
+
+#if __has_include("audiopump/audiopump_ring.h")
+#include "audiopump/audiopump_ring.h"
+#endif
 
 typedef struct {
     audiosample_base_t base;
@@ -2417,7 +2437,48 @@ typedef struct {
     uint32_t timeout_ms;
     audioif_wasapi_t *dev;      // C heap: the pump thread uses it
     uint64_t short_reads;
+    // Ring mode: the reader thread and where it writes.
+    mp_obj_t ring;              // kept here so the GC keeps it
+    void *ring_ctx;
+    uint8_t *feed;              // C heap: the reader thread's block
+    HANDLE thread;
+    volatile LONG running;
+    volatile uint64_t fed;      // frames the thread read from the device
+    volatile uint64_t lost;     // frames the Ring had no room for
 } audioif_win_input_obj_t;
+
+#ifdef AUDIOPUMP_RING_HAS_SINK_WRITE
+// The reader: microphone to Ring, at the microphone's pace. Nothing here
+// touches the MicroPython runtime. The device opens on the first read, on
+// this thread, which keeps COM until it exits.
+static unsigned __stdcall audioif_win_input_reader(void *arg) {
+    audioif_win_input_obj_t *self = arg;
+    const uint32_t fb = self->base.channel_count * 2;
+    while (InterlockedCompareExchange(&self->running, 1, 1)) {
+        const uint32_t got = audioif_wasapi_read(self->dev, self->feed,
+            self->len, 50);
+        if (got == 0) {
+            continue;
+        }
+        const uint32_t took = audiopump_ring_sink_write(self->ring_ctx,
+            self->feed, got);
+        self->fed += got / fb;
+        if (took < got) {
+            self->lost += (got - took) / fb;
+        }
+    }
+    return 0;
+}
+#endif
+
+static void audioif_win_input_stop_reader(audioif_win_input_obj_t *self) {
+    if (self->thread != NULL) {
+        InterlockedExchange(&self->running, 0);
+        WaitForSingleObject(self->thread, INFINITE);
+        CloseHandle(self->thread);
+        self->thread = NULL;
+    }
+}
 
 extern const mp_obj_type_t audioif_win_input_type;
 
@@ -2435,7 +2496,9 @@ static audioio_get_buffer_result_t audioif_win_input_get_buffer(
     (void)channel;
     uint8_t *dst = self->buf[self->which];
     self->which ^= 1;
-    const uint32_t got = self->dev == NULL ? 0
+    // In ring mode the reader thread owns the device: a second reader here
+    // would split the stream between them.
+    const uint32_t got = self->dev == NULL || self->ring != MP_OBJ_NULL ? 0
         : audioif_wasapi_read(self->dev, dst, self->len, self->timeout_ms);
     if (got < self->len) {
         // Silence rather than stale audio: a short read is a starve.
@@ -2450,7 +2513,7 @@ static audioio_get_buffer_result_t audioif_win_input_get_buffer(
 static mp_obj_t audioif_win_input_make_new(const mp_obj_type_t *type,
     size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
     enum { ARG_rate, ARG_channels, ARG_frames, ARG_timeout_ms, ARG_device,
-           ARG_buffer_ms, ARG_keep_ms };
+           ARG_buffer_ms, ARG_keep_ms, ARG_ring };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_sample_rate,  MP_ARG_INT | MP_ARG_KW_ONLY, { .u_int = 48000 } },
         { MP_QSTR_channel_count, MP_ARG_INT | MP_ARG_KW_ONLY, { .u_int = 2 } },
@@ -2459,6 +2522,7 @@ static mp_obj_t audioif_win_input_make_new(const mp_obj_type_t *type,
         { MP_QSTR_device,       MP_ARG_OBJ | MP_ARG_KW_ONLY, { .u_rom_obj = MP_ROM_NONE } },
         { MP_QSTR_buffer_ms,    MP_ARG_INT | MP_ARG_KW_ONLY, { .u_int = 100 } },
         { MP_QSTR_keep_ms,      MP_ARG_INT | MP_ARG_KW_ONLY, { .u_int = 10 } },
+        { MP_QSTR_ring,         MP_ARG_OBJ | MP_ARG_KW_ONLY, { .u_rom_obj = MP_ROM_NONE } },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed),
@@ -2487,6 +2551,21 @@ static mp_obj_t audioif_win_input_make_new(const mp_obj_type_t *type,
         }
         memcpy(cfg.device, id, n);
     }
+    mp_obj_t ring = args[ARG_ring].u_obj;
+    if (ring != mp_const_none) {
+        #ifdef AUDIOPUMP_RING_HAS_SINK_WRITE
+        if (!mp_obj_is_type(ring, &audiopump_ring_type)) {
+            mp_raise_TypeError(MP_ERROR_TEXT("ring must be an audiopump.Ring"));
+        }
+        audiosample_base_t *rb = MP_OBJ_TO_PTR(ring);
+        if (rb->sample_rate != (uint32_t)rate || rb->channel_count != channels
+            || rb->bits_per_sample != 16) {
+            mp_raise_ValueError(MP_ERROR_TEXT("the Ring's rate and channels must match the Input's, 16-bit"));
+        }
+        #else
+        mp_raise_ValueError(MP_ERROR_TEXT("this build has no audiopump.Ring"));
+        #endif
+    }
     // The ID is checked here, on the interpreter, so that a wrong one is an
     // OSError now rather than silence on the pump later.
     int32_t hr = 0;
@@ -2502,10 +2581,36 @@ static mp_obj_t audioif_win_input_make_new(const mp_obj_type_t *type,
     self->which = 0;
     self->timeout_ms = (uint32_t)args[ARG_timeout_ms].u_int;
     self->short_reads = 0;
+    self->ring = MP_OBJ_NULL;
+    self->ring_ctx = NULL;
+    self->feed = NULL;
+    self->thread = NULL;
+    self->running = 0;
+    self->fed = 0;
+    self->lost = 0;
     self->dev = audioif_wasapi_new(&cfg);
     if (self->dev == NULL) {
         mp_raise_msg(&mp_type_MemoryError, NULL);
     }
+    #ifdef AUDIOPUMP_RING_HAS_SINK_WRITE
+    if (ring != mp_const_none) {
+        self->feed = malloc(self->len);
+        if (self->feed == NULL) {
+            mp_raise_msg(&mp_type_MemoryError, NULL);
+        }
+        self->ring = ring;
+        self->ring_ctx = MP_OBJ_TO_PTR(ring);
+        self->running = 1;
+        self->thread = (HANDLE)_beginthreadex(NULL, 0,
+            audioif_win_input_reader, self, 0, NULL);
+        if (self->thread == NULL) {
+            self->running = 0;
+            mp_raise_OSError(MP_EAGAIN);
+        }
+        // The reader is on the audio's schedule, not the interpreter's.
+        SetThreadPriority(self->thread, THREAD_PRIORITY_TIME_CRITICAL);
+    }
+    #endif
 
     self->base.sample_rate = (uint32_t)rate;
     self->base.max_buffer_length = self->len;
@@ -2520,15 +2625,19 @@ static mp_obj_t audioif_win_input_make_new(const mp_obj_type_t *type,
 // the pump keeps whatever it plays alive, so a finaliser never races it.
 static mp_obj_t audioif_win_input_deinit(mp_obj_t self_in) {
     audioif_win_input_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    audioif_win_input_stop_reader(self);
     audioif_wasapi_free(self->dev);
     self->dev = NULL;
+    free(self->feed);
+    self->feed = NULL;
+    self->ring = MP_OBJ_NULL;
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(audioif_win_input_deinit_obj,
     audioif_win_input_deinit);
 
 static mp_obj_t audioif_wasapi_stats_tuple(const audioif_wasapi_stats_t *st) {
-    mp_obj_t items[8] = {
+    mp_obj_t items[10] = {
         mp_obj_new_int_from_ull(st->frames),
         mp_obj_new_int_from_ull(st->starved),
         mp_obj_new_int_from_ull(st->glitches),
@@ -2537,17 +2646,22 @@ static mp_obj_t audioif_wasapi_stats_tuple(const audioif_wasapi_stats_t *st) {
         mp_obj_new_int_from_uint(st->buffer_frames),
         mp_obj_new_int_from_uint(st->queued_frames),
         mp_obj_new_int(st->error),
+        mp_obj_new_int_from_uint(st->period_frames),
+        mp_obj_new_int_from_uint(st->latency_frames),
     };
-    return mp_obj_new_tuple(8, items);
+    return mp_obj_new_tuple(10, items);
 }
 
 // (frames, short reads, glitches, dropped, timeouts, buffer frames, frames
-// waiting, error). `error` is the HRESULT of a failed open, else 0.
+// waiting, error, period frames, stream latency frames). `error` is the
+// HRESULT of a failed open, else 0; the period and the latency are what the
+// Windows engine reported for this device, 0 until it opens. In ring mode
+// `short reads` counts the frames the Ring had no room for instead.
 static mp_obj_t audioif_win_input_stats(mp_obj_t self_in) {
     audioif_win_input_obj_t *self = MP_OBJ_TO_PTR(self_in);
     audioif_wasapi_stats_t st;
     audioif_wasapi_stats(self->dev, &st);
-    st.starved = self->short_reads;
+    st.starved = self->ring != MP_OBJ_NULL ? self->lost : self->short_reads;
     return audioif_wasapi_stats_tuple(&st);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(audioif_win_input_stats_obj,
@@ -2590,6 +2704,74 @@ static mp_obj_t audioif_sink_stats(void) {
     return audioif_wasapi_stats_tuple(&st);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(audioif_sink_stats_obj, audioif_sink_stats);
+
+// endpoint(device=None, capture=False) -> (id, name, container)
+//
+// What a WASAPI endpoint is: its ID (the default one's, when `device` is
+// None), its friendly name, and the ID of the physical device it is part of.
+// A speaker and a microphone in the same container are one device on one
+// clock, except the container everything built into the computer shares,
+// which says nothing about clocks: `same_clock()` makes that call.
+static mp_obj_t audioif_endpoint(size_t n_args, const mp_obj_t *pos,
+    mp_map_t *kw) {
+    enum { ARG_device, ARG_capture };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_device,  MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+        { MP_QSTR_capture, MP_ARG_BOOL, { .u_bool = false } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args, pos, kw, MP_ARRAY_SIZE(allowed), allowed, args);
+    const char *dev = "";
+    if (args[ARG_device].u_obj != mp_const_none) {
+        dev = mp_obj_str_get_str(args[ARG_device].u_obj);
+    }
+    char id[128], name[128], container[48];
+    int32_t hr = 0;
+    if (!audioif_wasapi_describe(dev, args[ARG_capture].u_bool, id, sizeof(id),
+        name, sizeof(name), container, sizeof(container), &hr)) {
+        mp_raise_OSError(MP_ENODEV);
+    }
+    mp_obj_t items[3] = {
+        mp_obj_new_str_from_cstr(id),
+        mp_obj_new_str_from_cstr(name),
+        mp_obj_new_str_from_cstr(container),
+    };
+    return mp_obj_new_tuple(3, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(audioif_endpoint_obj, 0, audioif_endpoint);
+
+// same_clock(speaker=None, mic=None) -> bool
+//
+// Whether a speaker and a microphone run on one clock: True when both are
+// endpoints of the same physical device. Built-in endpoints share a
+// container whatever their hardware, so two of them count as two clocks; a
+// pump between two clocks wants an audiopump.DriftResampler.
+static mp_obj_t audioif_same_clock(size_t n_args, const mp_obj_t *pos,
+    mp_map_t *kw) {
+    enum { ARG_out, ARG_in };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_speaker, MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+        { MP_QSTR_mic, MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args, pos, kw, MP_ARRAY_SIZE(allowed), allowed, args);
+    char id[128], name[128], c_out[48], c_in[48];
+    int32_t hr = 0;
+    const char *o = args[ARG_out].u_obj == mp_const_none ? ""
+        : mp_obj_str_get_str(args[ARG_out].u_obj);
+    const char *i = args[ARG_in].u_obj == mp_const_none ? ""
+        : mp_obj_str_get_str(args[ARG_in].u_obj);
+    if (!audioif_wasapi_describe(o, false, id, sizeof(id), name, sizeof(name),
+        c_out, sizeof(c_out), &hr)
+        || !audioif_wasapi_describe(i, true, id, sizeof(id), name, sizeof(name),
+            c_in, sizeof(c_in), &hr)) {
+        mp_raise_OSError(MP_ENODEV);
+    }
+    const bool same = c_out[0] && strcmp(c_out, c_in) == 0
+        && !audioif_wasapi_container_is_host(c_out);
+    return mp_obj_new_bool(same);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(audioif_same_clock_obj, 0, audioif_same_clock);
 #endif
 
 // --- the module -----------------------------------------------------------
@@ -2738,6 +2920,8 @@ static const mp_rom_map_elem_t audioif_driver_globals_table[] = {
     #if AUDIOIF_DRV_WIN
     { MP_ROM_QSTR(MP_QSTR_Input), MP_ROM_PTR(&audioif_win_input_type) },
     { MP_ROM_QSTR(MP_QSTR_sink_stats), MP_ROM_PTR(&audioif_sink_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_endpoint), MP_ROM_PTR(&audioif_endpoint_obj) },
+    { MP_ROM_QSTR(MP_QSTR_same_clock), MP_ROM_PTR(&audioif_same_clock_obj) },
     #endif
 };
 static MP_DEFINE_CONST_DICT(audioif_driver_globals,

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A microphone and a speaker on two clocks.** `_audioif.Input(...,
+  ring=ring)` on Windows reads the microphone on its own thread into an
+  `audiopump.Ring`, so an `audiopump.DriftResampler` can play it at the
+  speaker's pace without a dropped or starved block when the two devices
+  drift apart. `_audioif.same_clock()` says whether a speaker and a
+  microphone are one device, and `_audioif.endpoint()` names an endpoint and
+  its physical device. `Input.stats()` and `sink_stats()` add the Windows
+  engine's period and stream latency for the device.
 - **Windows plays and records live audio on the pump's thread.** A sink path
   starting with `wasapi` is a WASAPI speaker instead of a file
   (`audiobusio.I2SOut(..., sink="wasapi")`, or `wasapi:RATE:CHANNELS@ID` for
