@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 00:00:00 -0500
+Subject: [PATCH] webrepl: free the session slot when the client is gone.
+
+accept_conn() takes the one session slot with os.dupterm() and the slot
+frees only when a read on the socket returns EOF or an error. When a
+client's close is lost (a lossy link, a client that dies mid-login), the
+board keeps the dead session for many minutes and rejects every login.
+
+This turns on TCP keepalive on the accepted socket (20 s idle, a probe
+every 5 s, dropped after 3 unanswered, so a vanished client frees the
+slot after about 35 s), and gives the HTTP handshake 10 s. The keepalive
+needs the socket options a firmware adds; on a firmware without them the
+session behaves as before.
+
+---
+diff --git a/micropython/net/webrepl/webrepl.py b/micropython/net/webrepl/webrepl.py
+index 00da815..0b8e175 100644
+--- a/micropython/net/webrepl/webrepl.py
++++ b/micropython/net/webrepl/webrepl.py
+@@ -17,6 +17,25 @@ DEBUG = 0
+ _DEFAULT_STATIC_HOST = const("https://micropython.org/webrepl/")
+ static_host = _DEFAULT_STATIC_HOST
+ 
++# A WebREPL client that vanishes without closing (a dropped link, a powered-off
++# phone) never sends the FIN that frees the one session slot. Probe an idle
++# session so the stack gives up on it: idle seconds, then a probe every
++# interval seconds, dropped after count unanswered probes. A client that
++# connects but never finishes the handshake is dropped after handshake seconds.
++KEEPALIVE_IDLE = const(20)
++KEEPALIVE_INTERVAL = const(5)
++KEEPALIVE_COUNT = const(3)
++HANDSHAKE_TIMEOUT = const(10)
++
++
++def _keepalive(cl):
++    if not hasattr(socket, "TCP_KEEPCNT"):
++        return  # firmware without the socket options
++    cl.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
++    cl.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, KEEPALIVE_IDLE)
++    cl.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, KEEPALIVE_INTERVAL)
++    cl.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, KEEPALIVE_COUNT)
++
+ 
+ def server_handshake(cl):
+     req = cl.makefile("rwb", 0)
+@@ -113,7 +132,13 @@ def accept_conn(listen_sock):
+     global client_s
+     cl, remote_addr = listen_sock.accept()
+ 
+-    if not server_handshake(cl):
++    cl.settimeout(HANDSHAKE_TIMEOUT)
++    try:
++        ok = server_handshake(cl)
++    except OSError:
++        cl.close()
++        return False
++    if not ok:
+         send_html(cl)
+         return False
+ 
+@@ -125,6 +150,7 @@ def accept_conn(listen_sock):
+         return False
+     print("\nWebREPL connection from:", remote_addr)
+     client_s = cl
++    _keepalive(cl)
+ 
+     ws = websocket.websocket(cl, True)
+     ws = _webrepl._webrepl(ws)
