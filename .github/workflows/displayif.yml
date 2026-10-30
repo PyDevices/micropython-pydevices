@@ -6,6 +6,9 @@ on:
     branches: [main]
     paths:
       - 'modules/displayif/**'
+      - '!modules/displayif/*.md'
+      - '!modules/displayif/docs/**'
+      - '!modules/displayif/examples/**'
       - 'build_mp.py'
       - 'modules.lock'
       - 'patches/**'
@@ -13,11 +16,23 @@ on:
   pull_request:
     paths:
       - 'modules/displayif/**'
+      - '!modules/displayif/*.md'
+      - '!modules/displayif/docs/**'
+      - '!modules/displayif/examples/**'
       - 'build_mp.py'
       - 'modules.lock'
       - 'patches/**'
       - '.github/workflows/displayif.yml'
+  # Everything, weekly: the path filters skip what a change can't reach.
+  schedule:
+    - cron: '25 6 * * 1'
   workflow_dispatch:
+
+# A new push to a pull request cancels the run it supersedes. A push to main is
+# never cancelled: each one keeps its own record.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
