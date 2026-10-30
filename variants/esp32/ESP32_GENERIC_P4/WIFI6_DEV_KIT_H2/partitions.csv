@@ -1,0 +1,9 @@
+# Name, Type, SubType, Offset, Size, Flags
+# Waveshare ESP32-P4-WIFI6-DEV-KIT, 16 MB flash: upstream's partitions-4MiBplus.csv
+# with 'factory' grown to 6 MB. The app with every module is about 4.8 MB, and
+# opt-in modules such as picotts (about 0.2 MB) or vision push it past the slot
+# upstream's table gives it. The filesystem isn't listed: it is the rest of
+# the flash after the last partition, so it starts at 0x610000 and keeps about 9.9 MB.
+nvs,      data, nvs,     0x9000,  0x6000,
+phy_init, data, phy,     0xf000,  0x1000,
+factory,  app,  factory, 0x10000, 0x600000,

@@ -38,8 +38,9 @@ picotts, speech on the board:
 - **Speech that starts sooner.** `say()` renders a whole sentence before it
   plays, which on an ESP32-S3 is 1 to 4 s of silence first. The engine runs at
   twice real time there, so a short lead would do once its longest step fits.
-- **picotts on the ESP32-P4 boards.** It is built and run on an ESP32-S3
-  only so far.
+- **picotts on more ESP32-P4 boards.** It speaks on the ESP32-S3 T-Embed and
+  the P4 WIFI6 DEV-KIT (whose app slot is now 6 MB so it fits); the P4 panels
+  aren't built or run yet.
 
 Every module, the same kit:
 
