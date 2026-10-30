@@ -6,6 +6,9 @@
 # runs that file and the manifest tool includes a file only once, so it
 # applies the same rule itself: a module's manifest.py if it has one, else
 # its C half (ulab keeps its glue in code/).
+#
+# LVGL is not in modules/: it is omnipython-lvgl's ports/micropython, which
+# build_mp.py names in $PYDEVICES_LVGL, and "all" takes it from there.
 import os
 
 _root = os.path.dirname(os.getcwd())  # include() runs a manifest from its own directory
@@ -31,3 +34,7 @@ for _name in sorted(os.listdir(_root)):
                 _name, _dir
             )
         )
+
+_lvgl = os.environ.get("PYDEVICES_LVGL")
+if _lvgl:
+    include(_lvgl)

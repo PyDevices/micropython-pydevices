@@ -25,7 +25,7 @@ scr.clean()
 scr.set_style_bg_color(lv.color_black(), 0)
 img = lv.image(scr)
 try:
-    import fs_driver  # frozen in by lvgl-micropython's manifest: LVGL reads files through it
+    import fs_driver  # frozen in by omnipython-lvgl's manifest: LVGL reads files through it
 
     fs_driver.register("S")
     img.set_src("S:" + PATH)

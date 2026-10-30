@@ -127,10 +127,9 @@ class Record(unittest.TestCase):
             self.assertNotEqual(build_mp.record([repo])["mod"]["changes"], first["changes"])
 
 
-class LvglBindings(unittest.TestCase):
-    """lvgl-bindings comes from modules.lock and lands in the build record."""
-
-    def git_repo(self, path, name="f.py"):
+class GitRepo:
+    @staticmethod
+    def git_repo(path, name="f.py"):
         path.mkdir(parents=True)
 
         def git(*args):
@@ -142,31 +141,97 @@ class LvglBindings(unittest.TestCase):
         git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "one")
         return path
 
-    def test_not_fetched_without_lvgl_micropython(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            self.assertIsNone(build_mp.lvgl_bindings(None, [Path(tmp) / "ulab"]))
 
-    def test_record_names_the_bindings(self):
+class Lvgl(unittest.TestCase):
+    """omnipython-lvgl comes from modules.lock: --modules names it lvgl, a build
+    takes the port for its interpreter, and the record names the repository."""
+
+    def checkout(self, tmp):
+        root = GitRepo.git_repo(Path(tmp) / "omnipython-lvgl", "lv_conf.h")
+        for port in ("micropython", "circuitpython"):
+            (root / "ports" / port).mkdir(parents=True)
+            (root / "ports" / port / "micropython.mk").write_text("")
+        return root
+
+    def modules_dir(self, tmp, *names):
+        modules = Path(tmp) / "modules"
+        for n in names:
+            (modules / n).mkdir(parents=True)
+        saved = build_mp.MODULES_DIR
+        build_mp.MODULES_DIR = modules
+        self.addCleanup(setattr, build_mp, "MODULES_DIR", saved)
+        return modules
+
+    def test_lvgl_is_the_port_for_the_interpreter(self):
         with tempfile.TemporaryDirectory() as tmp:
-            mod = self.git_repo(Path(tmp) / "mod")
-            bindings = self.git_repo(Path(tmp) / ".lvgl-bindings", "lv_conf.h")
-            rows = build_mp.record([mod], bindings)
-            self.assertEqual(sorted(rows), ["lvgl-bindings", "mod"])
-            self.assertEqual(len(rows["lvgl-bindings"]["commit"]), 40)
-            self.assertFalse(rows["lvgl-bindings"]["dirty"])
-            (bindings / "lv_conf.h").write_text("x = 2\n")
-            self.assertTrue(build_mp.record([mod], bindings)["lvgl-bindings"]["dirty"])
+            root = self.checkout(tmp)
+            self.modules_dir(tmp, "jpegio")
+            for interp in ("micropython", "circuitpython"):
+                spec, dirs, _ = build_mp.resolve_modules("jpegio,lvgl", None, interp, lambda: root)
+                port = (root / "ports" / interp).resolve()
+                self.assertEqual(dirs[1], port)
+                self.assertEqual(spec, f"jpegio,{port}")
+                self.assertEqual(build_mp.lvgl_in(dirs), root.resolve())
+
+    def test_a_path_to_the_checkout_is_the_port_too(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.checkout(tmp)
+            self.modules_dir(tmp)
+            _, dirs, _ = build_mp.resolve_modules(str(root), None, "circuitpython")
+            self.assertEqual(dirs, [(root / "ports" / "circuitpython").resolve()])
+            with self.assertRaises(SystemExit) as cm:
+                build_mp.resolve_modules(str(root / "ports" / "micropython"), None, "circuitpython")
+            self.assertIn("another interpreter", str(cm.exception))
+
+    def test_all_takes_lvgl_and_fetches_nothing_otherwise(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.checkout(tmp)
+            self.modules_dir(tmp, "all", "a")
+            asked = []
+
+            def lvgl():
+                asked.append(1)
+                return root
+
+            build_mp.resolve_modules("a", None, "micropython", lvgl)
+            self.assertEqual(asked, [])
+            _, dirs, _ = build_mp.resolve_modules("all", None, "micropython", lvgl)
+            self.assertIn((root / "ports" / "micropython").resolve(), dirs)
+
+    def test_the_old_names_are_refused_naming_lvgl(self):
+        for old in ("lvgl-micropython", "lvgl-circuitpython", "lvgl-bindings"):
+            with self.subTest(old), self.assertRaises(SystemExit) as cm:
+                build_mp.resolve_modules(f"jpegio,{old}")
+            self.assertIn("--modules ...,lvgl", str(cm.exception))
+
+    @unittest.skipIf(os.name == "nt", "the CircuitPython build is Linux or WSL")
+    def test_a_circuitpython_build_refuses_an_old_name_before_fetching_anything(self):
+        args = type("A", (), {"flash": False, "modules": "jpegio,/some/where/lvgl-circuitpython"})()
+        with self.assertRaises(SystemExit) as cm:
+            build_mp.build_circuitpython(args, [], None)
+        self.assertIn("lvgl", str(cm.exception))
+
+    def test_record_names_the_repository(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.checkout(tmp)
+            mod = GitRepo.git_repo(Path(tmp) / "mod")
+            rows = build_mp.record([mod, root / "ports" / "micropython"])
+            self.assertEqual(sorted(rows), ["mod", "omnipython-lvgl"])
+            self.assertEqual(len(rows["omnipython-lvgl"]["commit"]), 40)
+            self.assertFalse(rows["omnipython-lvgl"]["dirty"])
+            (root / "lv_conf.h").write_text("x = 2\n")
+            self.assertTrue(build_mp.record([root / "ports" / "micropython"])["omnipython-lvgl"]["dirty"])
 
     def test_a_short_commit_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             (repo / "modules").mkdir()
-            (repo / "modules.lock").write_text("lvgl-bindings https://example.invalid/lvgl-bindings.git 7740c2f\n")
+            (repo / "modules.lock").write_text("omnipython-lvgl https://example.invalid/omnipython-lvgl.git 84d1de3\n")
             saved = build_mp.REPO, build_mp.MODULES_DIR
             build_mp.REPO, build_mp.MODULES_DIR = repo, repo / "modules"
             try:
                 with self.assertRaises(SystemExit) as cm:
-                    build_mp.lvgl_bindings(None, [repo / "modules" / "lvgl-micropython"])
+                    build_mp.lvgl_checkout(None)
             finally:
                 build_mp.REPO, build_mp.MODULES_DIR = saved
             self.assertIn("full 40-character commit", str(cm.exception))
@@ -274,30 +339,10 @@ class LibraryPackages(unittest.TestCase):
 
     def test_the_build_record_names_the_library_commit(self):
         with tempfile.TemporaryDirectory() as tmp:
-            lib = LvglBindings.git_repo(None, Path(tmp) / "lib", "libbuild.py")
-            rows = build_mp.record([], None, lib)
+            lib = GitRepo.git_repo(Path(tmp) / "lib", "libbuild.py")
+            rows = build_mp.record([], lib)
             self.assertEqual(list(rows), ["omnipython-lib"])
             self.assertEqual(len(rows["omnipython-lib"]["commit"]), 40)
-
-
-class RefuseLvglMicropython(unittest.TestCase):
-    """CircuitPython's LVGL binding is lvgl-circuitpython, not lvgl-micropython."""
-
-    def test_lvgl_micropython_is_refused_naming_lvgl_circuitpython(self):
-        with self.assertRaises(SystemExit) as cm:
-            build_mp.refuse_lvgl_micropython(["jpegio", "lvgl-micropython"])
-        self.assertIn("lvgl-circuitpython", str(cm.exception))
-        self.assertIn("--modules", str(cm.exception))
-
-    def test_the_circuitpython_binding_and_other_modules_pass(self):
-        build_mp.refuse_lvgl_micropython(["jpegio", "lvgl-circuitpython", ""])
-
-    @unittest.skipIf(os.name == "nt", "the CircuitPython build is Linux or WSL")
-    def test_a_circuitpython_build_refuses_before_fetching_anything(self):
-        args = type("A", (), {"flash": False, "modules": "jpegio,/some/where/lvgl-micropython"})()
-        with self.assertRaises(SystemExit) as cm:
-            build_mp.build_circuitpython(args, [], None)
-        self.assertIn("lvgl-circuitpython", str(cm.exception))
 
 
 class MicropythonVersion(unittest.TestCase):
@@ -678,15 +723,16 @@ class Coredump(unittest.TestCase):
 
     def test_tables_are_the_same_with_or_without_the_flag_and_only_the_s3_has_the_slot(self):
         # build_mp.py picks one table whatever the flag says; a standard S3 image
-        # and a troubleshooting one share it, so the filesystem doesn't move. The
-        # P4 has no table of ours, so --coredump refuses there.
+        # and a troubleshooting one share it, so the filesystem doesn't move. A
+        # P4 table, where there is one, has no coredump slot, so --coredump
+        # refuses there.
         for c in self.cells:
             table = build_mp.esp32_table(c["chip"], c["board"], c["variant"])
             with self.subTest(c["id"]):
                 if c["chip"] == "esp32s3":
                     self.assertTrue(build_mp.has_coredump_partition(table))
                 else:
-                    self.assertIsNone(table)
+                    self.assertFalse(table and build_mp.has_coredump_partition(table))
 
     def test_a_table_without_the_partition_is_seen(self):
         with tempfile.TemporaryDirectory() as tmp:

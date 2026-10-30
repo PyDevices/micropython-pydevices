@@ -80,19 +80,17 @@ class Table(unittest.TestCase):
 
     def test_build_command(self):
         c = rf.cell("mp-s3-lcd7")
-        args = rf.build_args(c, None)
+        args = rf.build_args(c)
         self.assertIn("--flash", args)
         self.assertEqual(args[args.index("--variant") + 1], "LCD_7")
         self.assertEqual(args[args.index("--modules") + 1], "all")
 
-    def test_circuitpython_needs_the_lvgl_checkout(self):
+    def test_circuitpython_names_lvgl_like_micropython(self):
         c = rf.cell("cp-s3-lcd7")
-        with self.assertRaises(rf.Failed):
-            rf.build_args(c, None)
-        args = rf.build_args(c, "/tmp/ws")
+        args = rf.build_args(c)
         self.assertIn("--interpreter", args)
         self.assertNotIn("--flash", args)
-        self.assertTrue(args[args.index("--modules") + 1].endswith("/tmp/ws/lvgl-circuitpython"))
+        self.assertEqual(args[args.index("--modules") + 1].split(",")[-1], "lvgl")
 
 
 class Assemble(unittest.TestCase):
@@ -104,7 +102,7 @@ class Assemble(unittest.TestCase):
         fake_set(self.indir)
 
     def run_assemble(self, **kw):
-        return rf.assemble(self.indir, self.out, kw.pop("pico2", False), kw.pop("tag", ""), "https://run", "b" * 40, **kw)
+        return rf.assemble(self.indir, self.out, kw.pop("pico2", False), kw.pop("tag", ""), "https://run", **kw)
 
     def fails_with(self, text):
         with self.assertRaises(rf.Failed) as cm:
@@ -126,7 +124,7 @@ class Assemble(unittest.TestCase):
         self.assertEqual(doc["pins"]["UPSTREAM"], (rf.REPO / "UPSTREAM").read_text().strip())
         self.assertIn("esp-idf", doc["pins"]["deps.lock"])
         self.assertIn("omnipython-lib", doc["pins"]["modules.lock"])
-        self.assertEqual(doc["pins"]["lvgl-circuitpython"], "b" * 40)
+        self.assertIn("omnipython-lvgl", doc["pins"]["modules.lock"])
         s3 = next(b for b in doc["builds"] if b["id"] == "mp-s3-lcd7")
         self.assertEqual(s3["flash_offset"], "0x0")
         self.assertEqual(s3["app_offset"], "0x10000")
@@ -337,7 +335,7 @@ class DraftRelease(unittest.TestCase):
         indir = self.root / "in"
         indir.mkdir()
         fake_set(indir)
-        self.doc = rf.assemble(indir, self.root / "out", False, "staged-20261020", "https://run", "b" * 40)
+        self.doc = rf.assemble(indir, self.root / "out", False, "staged-20261020", "https://run")
 
     def test_a_preview_set_takes_only_a_staged_tag(self):
         rf.check_draft_tag(self.doc)

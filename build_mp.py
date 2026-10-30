@@ -225,21 +225,23 @@ def micropython_version(mp, upstream):
     return tag, git_out(mp, "rev-parse", "--short=10", upstream)
 
 
-# lvgl-bindings is pinned in modules.lock beside the modules, but it is not a
-# module: it is the generated binding and LVGL that lvgl-micropython compiles.
-# It lands in modules/.lvgl-bindings (the dot keeps it out of "all" and of the
-# module list) and reaches lvgl-micropython as BINDINGS_DIR, so that module's
-# own pin and fetch never come into a build made here.
-LVGL_BINDINGS = "lvgl-bindings"
-LVGL_MODULE = "lvgl-micropython"
-# lvgl-circuitpython is pinned in modules.lock too, but only the CircuitPython
-# release lane reads that row: it clones the commit and gives it to --modules by path.
-LVGL_CIRCUITPYTHON = "lvgl-circuitpython"
+# omnipython-lvgl is pinned in modules.lock beside the modules, but it is not
+# one module directory: it is LVGL, its generated bindings and one port per
+# interpreter (ports/micropython, ports/circuitpython), which read generated/,
+# lv_conf.h and lvgl/ from the repository's root. The checkout lands in
+# modules/.omnipython-lvgl (the dot keeps it out of the module list): in the
+# workspace a link to the sibling checkout, which wins like every other module,
+# anywhere else a sparse fetch at the pinned commit. --modules names it `lvgl`,
+# and "all" takes it too; a build gets the port for its interpreter.
+LVGL_REPO = "omnipython-lvgl"
+LVGL_MODULE = "lvgl"
+# The names it went by before the four LVGL repositories became one.
+LVGL_OLD_NAMES = ("lvgl-micropython", "lvgl-circuitpython", "lvgl-bindings")
 
 
 def ensure_modules(ws):
     for name, url, commit in read_lock("modules.lock"):
-        if name in (LVGL_BINDINGS, LIBRARY, LVGL_CIRCUITPYTHON):
+        if name in (LVGL_REPO, LIBRARY):
             continue
         dest = MODULES_DIR / name
         if dest.exists() or dest.is_symlink():
@@ -250,40 +252,60 @@ def ensure_modules(ws):
             clone_at(url, commit, dest)
 
 
-def lvgl_bindings(ws, module_dirs):
-    """The lvgl-bindings a build with lvgl-micropython compiles, or None
-    when the build has no lvgl-micropython.
+def refuse_old_lvgl_names(names):
+    """lvgl-micropython, lvgl-circuitpython and lvgl-bindings are one repository
+    now, omnipython-lvgl, named `lvgl` here whatever the interpreter."""
+    old = [n for n in names if n in LVGL_OLD_NAMES]
+    if old:
+        die(f"{', '.join(old)}: LVGL is one module now, {LVGL_MODULE} (the {LVGL_REPO} repository), "
+            f"for MicroPython and CircuitPython alike: --modules ...,{LVGL_MODULE}")
 
-    In a workspace, modules/.lvgl-bindings links to the sibling checkout and
-    builds it as it is, like every other module. Anywhere else, it is fetched
-    at its modules.lock commit: lvgl-bindings' generated/ and lv_conf.h, and
-    LVGL's src/ at the commit lvgl-bindings records. Shallow, sparse and
-    blobless, so it downloads tens of MB rather than LVGL's whole history."""
-    if not any(module_name(d) == LVGL_MODULE for d in module_dirs):
-        return None
+
+def lvgl_root_of(d):
+    """The omnipython-lvgl checkout `d` is, or is a port directory of, else None."""
+    real = Path(d).resolve()
+    if (real / "lv_conf.h").is_file() and (real / "ports" / "micropython").is_dir():
+        return real
+    root = real.parent.parent
+    if real.parent.name == "ports" and (root / "lv_conf.h").is_file():
+        return root
+    return None
+
+
+def lvgl_port(root, interpreter):
+    return (Path(root) / "ports" / interpreter).resolve()
+
+
+def lvgl_checkout(ws):
+    """modules/.omnipython-lvgl: LVGL, its bindings and its ports, at their
+    modules.lock commit (or the workspace's own checkout).
+
+    Fetched shallow, sparse and blobless: the ports, generated/, python/ and
+    the root's files (lv_conf.h), and LVGL's src/ at the commit the repository
+    records, so it downloads tens of MB rather than LVGL's whole history."""
     rows = {row[0]: row[1:] for row in read_lock("modules.lock")}
-    if LVGL_BINDINGS not in rows:
-        die(f"modules.lock has no {LVGL_BINDINGS} row, which {LVGL_MODULE} needs")
-    url, commit = rows[LVGL_BINDINGS]
-    dest = MODULES_DIR / f".{LVGL_BINDINGS}"
+    if LVGL_REPO not in rows:
+        die(f"modules.lock has no {LVGL_REPO} row, which {LVGL_MODULE} comes from")
+    url, commit = rows[LVGL_REPO]
+    dest = MODULES_DIR / f".{LVGL_REPO}"
     if dest.is_symlink():
         if (dest / "lv_conf.h").is_file():
-            return dest
+            return dest.resolve()
         dest.unlink()
     elif dest.is_dir():
         if git_out(dest, "rev-parse", "HEAD") == commit and (dest / "lvgl" / "lvgl.h").is_file():
-            return dest
+            return dest.resolve()
         say(f"{dest} is not at modules.lock's {commit[:12]}; fetching it again")
         shutil.rmtree(dest)
-    sibling = ws / LVGL_BINDINGS if ws else None
+    sibling = ws / LVGL_REPO if ws else None
     if sibling and (sibling / "lv_conf.h").is_file():
         if not (sibling / "lvgl" / "lvgl.h").is_file():
             die(f"{sibling} has no LVGL: git -C {sibling} submodule update --init --depth 1 lvgl")
         link(dest, sibling)
-        return dest
+        return dest.resolve()
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
-        die(f"modules.lock pins {LVGL_BINDINGS} at {commit!r}: it takes a full 40-character commit")
-    say(f"fetching {url} at {commit[:12]} into {dest} (generated/, lv_conf.h and LVGL's src/)")
+        die(f"modules.lock pins {LVGL_REPO} at {commit!r}: it takes a full 40-character commit")
+    say(f"fetching {url} at {commit[:12]} into {dest} (the ports, generated/, lv_conf.h and LVGL's src/)")
     part = dest.with_name(dest.name + ".partial")
     shutil.rmtree(part, ignore_errors=True)
 
@@ -297,18 +319,18 @@ def lvgl_bindings(ws, module_dirs):
             if r.returncode:
                 shutil.rmtree(part, ignore_errors=True)
                 die(f"could not fetch {origin} at {sha} (git {cmd[0]}: {r.stderr.strip() or r.returncode});"
-                    f" is modules.lock's {LVGL_BINDINGS} commit on GitHub?")
+                    f" is modules.lock's {LVGL_REPO} commit on GitHub?")
 
-    sparse(part, url, commit, ["generated", "lvgl"])
+    sparse(part, url, commit, ["generated", "lvgl", "ports", "python"])
     lvgl_sha = git_out(part, "ls-tree", "HEAD", "lvgl").split()[2:3]
     lvgl_url = git_out(part, "config", "-f", ".gitmodules", "submodule.lvgl.url")
     if not lvgl_sha or not lvgl_url:
         shutil.rmtree(part, ignore_errors=True)
-        die(f"{LVGL_BINDINGS} {commit[:12]} records no lvgl submodule")
+        die(f"{LVGL_REPO} {commit[:12]} records no lvgl submodule")
     shutil.rmtree(part / "lvgl")
     sparse(part / "lvgl", lvgl_url, lvgl_sha[0], ["src"])
     part.rename(dest)
-    return dest
+    return dest.resolve()
 
 
 # omnipython-lib is the repository of our Python-only packages: pydevices,
@@ -567,13 +589,27 @@ def module_choices():
     return sorted(p.name for p in MODULES_DIR.iterdir() if p.is_dir() and not p.name.startswith("."))
 
 
-def resolve_modules(spec, library=None):
+def resolve_modules(spec, library=None, interpreter="micropython", lvgl=None):
     """The comma list as modules/manifest.py will read it (paths made
     absolute), the module directories it amounts to ("all" expanded), which
     the esp32 conventions and the build record need, and the library packages
     it names. A name that is no module of ours but a package of the library is
-    required from it; `library` is the Library to ask, built only then."""
+    required from it; `library` is the Library to ask, built only then.
+
+    `lvgl`, and "all", take omnipython-lvgl's port for `interpreter`, as does a
+    path to an omnipython-lvgl checkout; `lvgl` is called for the checkout
+    only then, so a build without LVGL fetches none. Without `lvgl`, "all"
+    leaves LVGL out and the name `lvgl` is refused."""
     names, dirs, packages = [], [], []
+    refuse_old_lvgl_names([Path(s.strip()).name for s in spec.split(",")])
+
+    def lvgl_dir(root=None):
+        if root is None:
+            if lvgl is None:
+                die(f"{LVGL_MODULE}: no {LVGL_REPO} checkout to build it from")
+            root = lvgl()
+        return lvgl_port(root, interpreter)
+
     for item in (s.strip() for s in spec.split(",")):
         if not item:
             continue
@@ -581,12 +617,25 @@ def resolve_modules(spec, library=None):
             path = Path(item).expanduser().resolve()
             if not path.is_dir():
                 die(f"module path does not exist: {item}")
+            root = lvgl_root_of(path)
+            if root and path != lvgl_dir(root):
+                if path != root:
+                    die(f"{item} is {LVGL_REPO}'s port for another interpreter; this build takes "
+                        f"{lvgl_dir(root)} (or name it {LVGL_MODULE})")
+                path = lvgl_dir(root)
             names.append(str(path))
             dirs.append(path)
         elif item == "all":
             names.append("all")
             # modules/all/manifest.py's rule: every module but the opt-in ones.
             dirs += [MODULES_DIR / n for n in module_choices() if n != "all" and not (MODULES_DIR / n / "OPT_IN").is_file()]
+            # and LVGL, which modules/all/manifest.py finds through $PYDEVICES_LVGL.
+            if lvgl is not None:
+                dirs.append(lvgl_dir())
+        elif item == LVGL_MODULE and not (MODULES_DIR / item).is_dir():
+            path = lvgl_dir()
+            names.append(str(path))
+            dirs.append(path)
         elif (MODULES_DIR / item).is_dir():
             names.append(item)
             dirs.append(MODULES_DIR / item)
@@ -594,8 +643,8 @@ def resolve_modules(spec, library=None):
             names.append(item)
             packages.append(item)
         else:
-            have = module_choices() + (sorted(library.names()) if library else [])
-            die(f"no module '{item}' in {MODULES_DIR} (have: {', '.join(have)})")
+            have = module_choices() + [LVGL_MODULE] + (sorted(library.names()) if library else [])
+            die(f"no module '{item}' in {MODULES_DIR} (have: {', '.join(sorted(have))})")
     unique = []
     for d in dirs:
         if d.resolve() not in [u.resolve() for u in unique]:
@@ -603,14 +652,17 @@ def resolve_modules(spec, library=None):
     return ",".join(names), unique, sorted(set(packages))
 
 
-def record(dirs, bindings=None, library=None):
-    """A row per module, one for the lvgl-bindings lvgl-micropython compiles
-    when the build has it, and one for the omnipython-lib the build's library
-    packages came from: which commit went in, and whether it had uncommitted
-    changes."""
+def lvgl_in(module_dirs):
+    """The omnipython-lvgl checkout a build compiles, or None when it has no LVGL."""
+    return next((r for r in (lvgl_root_of(d) for d in module_dirs) if r), None)
+
+
+def record(dirs, library=None):
+    """A row per module (omnipython-lvgl's under its repository's name) and one
+    for the omnipython-lib the build's library packages came from: which commit
+    went in, and whether it had uncommitted changes."""
     rows = {}
-    named = ([(module_name(d), d) for d in dirs] + ([(LVGL_BINDINGS, bindings)] if bindings else [])
-             + ([(LIBRARY, library)] if library else []))
+    named = [(module_name(d), d) for d in dirs] + ([(LIBRARY, library)] if library else [])
     for name, d in named:
         real = d.resolve()
         rev = git_out(real, "describe", "--always", "--dirty", "--abbrev=12") or "(not a git checkout)"
@@ -674,7 +726,7 @@ def foreign_sources(build, roots):
     names the source first), so it catches the next way it goes wrong too.
 
     `roots` are the build's module directories (and anything else the build
-    is meant to compile from, such as lvgl-bindings): a source counts as its
+    is meant to compile from, such as omnipython-lvgl's root): a source counts as its
     module's when the directory it was found under is inside one of them.
     CMake ports name sources by absolute path and write no .P files."""
     roots = [Path(os.path.realpath(r)) for r in roots]
@@ -1115,6 +1167,8 @@ def module_name(d):
     real = d.resolve()
     if d.parent == MODULES_DIR:
         return d.name
+    if lvgl_root_of(real):
+        return LVGL_REPO
     top = git_out(real, "rev-parse", "--show-toplevel")
     common = git_out(real, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if top and Path(top).resolve() == real and Path(common).name == ".git":
@@ -1196,7 +1250,7 @@ def cp_frozen_manifest(cp, port, board, variant, module_dirs, library_packages, 
     """The FROZEN_MANIFEST of a CircuitPython build that freezes our Python, or
     None when it freezes none: the port's own base (the unix coverage variant's
     manifest), the board's FROZEN_MPY_DIRS content, the Python of the modules
-    named (palettes, pdwidgets, lvgl-circuitpython's fs_driver, ...), and the
+    named (palettes, pdwidgets, omnipython-lvgl's fs_driver, ...), and the
     library packages named. Returns (manifest path, make arguments)."""
     manifests = [d for d in module_dirs if cp_frozen_manifest_dir(d)]
     if not manifests and not library_packages:
@@ -1265,20 +1319,6 @@ def cp_user_c_modules(module_dirs, link_dir):
         (link_dir / name).symlink_to(found, target_is_directory=True)
         dirs.append(link_dir / name)
     return dirs
-
-
-def refuse_lvgl_micropython(names):
-    """lvgl-micropython is MicroPython's LVGL binding. CircuitPython compiles
-    with -Wshadow -Werror, which its generated binding trips over, so a build
-    that reached that error would only say 'shadows a global declaration'.
-    CircuitPython's binding is lvgl-circuitpython, given to --modules by path."""
-    if LVGL_MODULE in names:
-        die(
-            f"{LVGL_MODULE} is MicroPython's LVGL binding and does not build on CircuitPython "
-            "(its generated code stops on -Werror=shadow). For --interpreter circuitpython use "
-            "lvgl-circuitpython, passed by path: --modules /path/to/lvgl-circuitpython "
-            "(see its docs/build-and-flash.md)"
-        )
 
 
 def cp_espressif_env(port_dir, board):
@@ -1401,8 +1441,8 @@ def build_circuitpython(args, make_extra, ws):
         die("--interpreter circuitpython builds from Linux or WSL")
     if args.flash:
         die("--flash is for MicroPython's esp32 port")
-    # Before anything is fetched: a plain name or a path ending in the name.
-    refuse_lvgl_micropython([Path(i.strip()).name for i in (args.modules or "").split(",")])
+    # Before anything is fetched.
+    refuse_old_lvgl_names([Path(i.strip()).name for i in (args.modules or "").split(",")])
     ensure_modules(ws)
     cp = ensure_circuitpython()
     lock = lock_beside(cp)  # noqa: F841 -- held until exit
@@ -1435,8 +1475,7 @@ def build_circuitpython(args, make_extra, ws):
         say("Modules: " + ", ".join(module_choices()))
         spec = input('Which (comma list; full paths for others; empty for none)? ').strip()
     library = Library(ws)
-    spec, module_dirs, library_packages = resolve_modules(spec, library)
-    refuse_lvgl_micropython([module_name(d) for d in module_dirs])
+    spec, module_dirs, library_packages = resolve_modules(spec, library, "circuitpython", lambda: lvgl_checkout(ws))
     if library_packages or any(LIBRARY in (d.resolve() / "manifest.py").read_text()
                                for d in module_dirs if cp_frozen_manifest_dir(d)):
         library.build()
@@ -1457,8 +1496,7 @@ def build_circuitpython(args, make_extra, ws):
             "modules": spec, "module_set": module_set, "make_args": make_extra}
     if components:
         want["esp_idf_components"] = [f"{n} {dep_version(n, d)}" for n, d in zip(components, component_dirs)]
-    bindings = lvgl_bindings(ws, module_dirs)
-    revisions = record(module_dirs, bindings, library.source)
+    revisions = record(module_dirs, library.source)
     rec_path = build_dir_for(build, want, args.clean, revisions)
     user_c = cp_user_c_modules(module_dirs, build / "usermods")
     frozen, frozen_args = (None, []) if any(a.startswith("FROZEN_MANIFEST=") for a in make_extra) else \
@@ -1466,9 +1504,7 @@ def build_circuitpython(args, make_extra, ws):
 
     env = {k: v for k, v in os.environ.items()
            if k not in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "VARIANT_DIR", "PYTHONPATH",
-                        "BINDINGS_DIR")}
-    if bindings:
-        env["BINDINGS_DIR"] = str(bindings.resolve())
+                        "BINDINGS_DIR", "PYDEVICES_LVGL")}
     if library.tree:
         env["PYDEVICES_LIBRARY"] = library.tree.as_posix()
     env["PYDEVICES_INTERPRETER"] = "circuitpython"
@@ -1656,7 +1692,8 @@ def main():
         say("Modules: " + ", ".join(module_choices()))
         spec = input('Which (comma list; full paths for others; "all"; empty for none)? ').strip()
     library = Library(ws)
-    spec, module_dirs, library_packages = resolve_modules(spec, library)
+    spec, module_dirs, library_packages = resolve_modules(spec, library, "micropython", lambda: lvgl_checkout(ws))
+    lvgl_root = lvgl_in(module_dirs)
     if library_packages or uses_library(module_dirs, frozen_manifest(port, board, variant)):
         library.build()
 
@@ -1674,13 +1711,12 @@ def main():
             "module_set": module_set}
     # Each module's commit too: a module that moved keeps its name, and make
     # would reuse frozen content and qstr headers from before it moved.
-    bindings = lvgl_bindings(ws, module_dirs)
-    revisions = record(module_dirs, bindings, library.source)
+    revisions = record(module_dirs, library.source)
     build_dir_for(build, want, args.clean, revisions)
 
     env = dict(os.environ)
     for leak in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "BOARD_DIR", "VARIANT_DIR",
-                 "BINDINGS_DIR"):
+                 "BINDINGS_DIR", "PYDEVICES_LVGL"):
         env.pop(leak, None)
     env["PYDEVICES_MODULES"] = spec
     # The frozen pydevices leaves its host-only files off a board's image.
@@ -1690,8 +1726,9 @@ def main():
         env["MICROPY_GIT_TAG"], env["MICROPY_GIT_HASH"] = version
     if library.tree:
         env["PYDEVICES_LIBRARY"] = library.tree.as_posix()
-    if bindings:
-        env["BINDINGS_DIR"] = bindings.resolve().as_posix()
+    if lvgl_root:
+        # modules/all/manifest.py takes LVGL's port from here.
+        env["PYDEVICES_LVGL"] = lvgl_port(lvgl_root, "micropython").as_posix()
     if os.name == "nt":
         # Upstream's tools open sources without encoding=; Windows' default is cp1252.
         env.setdefault("PYTHONUTF8", "1")
@@ -1748,7 +1785,7 @@ def main():
     # those, and this build compiles them again from their modules.
     # The variant tree is ours too: a variant's manifest adds its own C module
     # (webassembly's wasmbridge) from beside the variant.
-    roots = module_dirs + ([bindings] if bindings else []) + [VARIANTS_DIR / port]
+    roots = module_dirs + ([lvgl_root] if lvgl_root else []) + [VARIANTS_DIR / port]
     for dep, src in foreign_sources(build, roots):
         say(f"compiling {dep.relative_to(build).with_suffix('.o').as_posix()} again: it was compiled from {src}")
         dep.with_suffix(".o").unlink(missing_ok=True)

@@ -29,7 +29,7 @@ FLASH_SIZE_SDKCONFIG = boards/$(BOARD)/sdkconfig-flash.defaults
 CIRCUITPY_STORAGE_EXTEND = 0
 CIRCUITPY_DUALBANK = 0
 
-# LVGL links its own AnimatedGIF decoder (lvgl-circuitpython's micropython.mk).
+# LVGL links its own AnimatedGIF decoder (omnipython-lvgl's ports/circuitpython/micropython.mk).
 CIRCUITPY_GIFIO = 0
 
 # Specialized board.
