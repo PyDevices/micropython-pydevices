@@ -32,7 +32,7 @@ sentences and prints how long each took.
   ./build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --modules all,picotts
   ```
 
-  It adds about 160 KB of engine code to the image. MicroPython only: on
+  It adds about 170 KB of engine code to the image. MicroPython only: on
   CircuitPython, use Adafruit's library, which is the same engine as a
   native `.mpy`.
 - **The voice files in `/lib/picotts/`.** Two files, `en_US_ta.bin`
