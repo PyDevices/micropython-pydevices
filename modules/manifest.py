@@ -25,6 +25,11 @@ import os
 
 options.defaults(base=True, modules=None)
 
+# lib-overrides/ holds the few micropython-lib packages we freeze our own copy
+# of (mip, for a connection kept open per host). Searched ahead of
+# micropython-lib, so the port's require() of one of them gets ours.
+add_library("pydevices-overrides", "../lib-overrides", prepend=True)
+
 if options.base:
     # Board ports (esp32, rp2) carry a port-wide boards/manifest.py; variant
     # ports (unix, windows, webassembly) have no boards/ at all, so that
