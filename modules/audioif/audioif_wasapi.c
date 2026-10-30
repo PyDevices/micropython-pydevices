@@ -30,6 +30,7 @@
 #include <audioclient.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "audioif_wasapi.h"
 
@@ -56,14 +57,27 @@ static const GUID audioif_iid_capture = {
     0xC8ADBD64, 0xE71E, 0x48A0,
     { 0xA4, 0xDE, 0x18, 0x5C, 0x39, 0x5C, 0xD3, 0x17 } };
 
+// PKEY_Device_FriendlyName and PKEY_Device_ContainerId, spelled out so the
+// build needs neither functiondiscoverykeys_devpkey.h nor a link to uuid.
+static const PROPERTYKEY audioif_pkey_name = {
+    { 0xA45C254E, 0xDF1C, 0x4EFD,
+      { 0x80, 0x20, 0x67, 0xD1, 0x46, 0xA8, 0x50, 0xE0 } }, 14 };
+static const PROPERTYKEY audioif_pkey_container = {
+    { 0x8C7ED206, 0x3F8A, 0x4827,
+      { 0xB3, 0xAB, 0xAE, 0x9E, 0x1F, 0xAE, 0xFC, 0x6C } }, 2 };
+
 typedef HRESULT (WINAPI *audioif_co_init_t)(LPVOID, DWORD);
 typedef HRESULT (WINAPI *audioif_co_create_t)(REFCLSID, LPUNKNOWN, DWORD,
     REFIID, LPVOID *);
 typedef void (WINAPI *audioif_co_uninit_t)(void);
+typedef void (WINAPI *audioif_co_free_t)(LPVOID);
+typedef HRESULT (WINAPI *audioif_pv_clear_t)(PROPVARIANT *);
 
 static audioif_co_init_t audioif_co_init;
 static audioif_co_create_t audioif_co_create;
 static audioif_co_uninit_t audioif_co_uninit;
+static audioif_co_free_t audioif_co_free;
+static audioif_pv_clear_t audioif_pv_clear;
 
 static bool audioif_ole_load(void) {
     if (audioif_co_create != NULL) {
@@ -79,8 +93,13 @@ static bool audioif_ole_load(void) {
         "CoUninitialize");
     audioif_co_create = (audioif_co_create_t)(void *)GetProcAddress(ole,
         "CoCreateInstance");
+    audioif_co_free = (audioif_co_free_t)(void *)GetProcAddress(ole,
+        "CoTaskMemFree");
+    audioif_pv_clear = (audioif_pv_clear_t)(void *)GetProcAddress(ole,
+        "PropVariantClear");
     return audioif_co_init != NULL && audioif_co_uninit != NULL
-           && audioif_co_create != NULL;
+           && audioif_co_create != NULL && audioif_co_free != NULL
+           && audioif_pv_clear != NULL;
 }
 
 struct audioif_wasapi {
@@ -147,6 +166,86 @@ bool audioif_wasapi_probe(const char *device, bool capture, int32_t *hr_out) {
     IMMDevice *dev = NULL;
     hr = audioif_device(device, capture, &dev);
     if (dev != NULL) {
+        IMMDevice_Release(dev);
+    }
+    if (mine) {
+        audioif_co_uninit();
+    }
+    *hr_out = (int32_t)hr;
+    return SUCCEEDED(hr);
+}
+
+static void audioif_utf8(const WCHAR *src, char *dst, size_t len) {
+    if (len == 0) {
+        return;
+    }
+    dst[0] = 0;
+    if (src != NULL
+        && WideCharToMultiByte(CP_UTF8, 0, src, -1, dst, (int)len, NULL, NULL) == 0) {
+        dst[0] = 0;
+    }
+    dst[len - 1] = 0;
+}
+
+bool audioif_wasapi_container_is_host(const char *container) {
+    // {00000000-0000-0000-FFFF-FFFFFFFFFFFF}, in whatever case it came.
+    static const char host[] = "{00000000-0000-0000-ffff-ffffffffffff}";
+    for (size_t i = 0; i < sizeof(host) - 1; i++) {
+        char ch = container[i];
+        if (ch >= 'A' && ch <= 'Z') {
+            ch = (char)(ch - 'A' + 'a');
+        }
+        if (ch != host[i]) {
+            return false;
+        }
+    }
+    return container[sizeof(host) - 1] == 0;
+}
+
+bool audioif_wasapi_describe(const char *device, bool capture, char *id,
+    size_t id_len, char *name, size_t name_len, char *container,
+    size_t container_len, int32_t *hr_out) {
+    id[0] = name[0] = container[0] = 0;
+    HRESULT hr;
+    const bool mine = audioif_com_up(&hr);
+    if (FAILED(hr)) {
+        *hr_out = (int32_t)hr;
+        return false;
+    }
+    IMMDevice *dev = NULL;
+    hr = audioif_device(device, capture, &dev);
+    if (SUCCEEDED(hr)) {
+        LPWSTR wid = NULL;
+        if (SUCCEEDED(IMMDevice_GetId(dev, &wid))) {
+            audioif_utf8(wid, id, id_len);
+            audioif_co_free(wid);
+        }
+        IPropertyStore *props = NULL;
+        if (SUCCEEDED(IMMDevice_OpenPropertyStore(dev, STGM_READ, &props))) {
+            PROPVARIANT v;
+            PropVariantInit(&v);
+            if (SUCCEEDED(IPropertyStore_GetValue(props, &audioif_pkey_name, &v))
+                && v.vt == VT_LPWSTR) {
+                audioif_utf8(v.pwszVal, name, name_len);
+            }
+            audioif_pv_clear(&v);
+            PropVariantInit(&v);
+            if (SUCCEEDED(IPropertyStore_GetValue(props,
+                &audioif_pkey_container, &v)) && v.vt == VT_CLSID
+                && v.puuid != NULL) {
+                WCHAR text[40];
+                const GUID *g = v.puuid;
+                _snwprintf(text, 40,
+                    L"{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+                    (unsigned long)g->Data1, g->Data2, g->Data3,
+                    g->Data4[0], g->Data4[1], g->Data4[2], g->Data4[3],
+                    g->Data4[4], g->Data4[5], g->Data4[6], g->Data4[7]);
+                text[39] = 0;
+                audioif_utf8(text, container, container_len);
+            }
+            audioif_pv_clear(&v);
+            IPropertyStore_Release(props);
+        }
         IMMDevice_Release(dev);
     }
     if (mine) {
@@ -245,6 +344,16 @@ static bool audioif_wasapi_open(audioif_wasapi_t *w) {
     }
     if (SUCCEEDED(hr)) {
         w->stats.buffer_frames = frames;
+        // What the engine adds on its own side, for anyone adding up the
+        // latency: its default period and the stream latency it reports.
+        // Neither is fatal to have missed.
+        REFERENCE_TIME period = 0, latency = 0;
+        if (SUCCEEDED(IAudioClient_GetDevicePeriod(w->client, &period, NULL))) {
+            w->stats.period_frames = (uint32_t)(period * w->cfg.rate / 10000000);
+        }
+        if (SUCCEEDED(IAudioClient_GetStreamLatency(w->client, &latency))) {
+            w->stats.latency_frames = (uint32_t)(latency * w->cfg.rate / 10000000);
+        }
         if (w->cfg.capture) {
             hr = IAudioClient_GetService(w->client, &audioif_iid_capture,
                 (void **)&w->capture);

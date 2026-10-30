@@ -13,6 +13,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 typedef struct audioif_wasapi audioif_wasapi_t;
 
@@ -35,6 +36,8 @@ typedef struct {
     uint32_t buffer_frames; // what Windows granted
     uint32_t queued_frames; // speaker: queued at the last write; mic: waiting
     int32_t error;          // the HRESULT of a failed open, else 0
+    uint32_t period_frames; // the engine's default period for this device
+    uint32_t latency_frames; // the stream latency Windows reports
 } audioif_wasapi_stats_t;
 
 // Allocates the state only. The device opens on the first read or write, on
@@ -48,6 +51,21 @@ void audioif_wasapi_free(audioif_wasapi_t *w);
 // calling thread and leaves nothing open; a bad ID fails here, on the
 // interpreter, rather than as silence on the pump.
 bool audioif_wasapi_probe(const char *device, bool capture, int32_t *hr);
+
+// The endpoint `device` names (or the default one for the direction): its
+// ID, its friendly name and the ID of the physical device it belongs to (its
+// container), each as UTF-8, NUL-terminated and cut to fit. Two endpoints in
+// one container are one device on one clock, except the container every
+// built-in endpoint shares (audioif_wasapi_container_is_host). Runs on the
+// calling thread and leaves nothing open.
+bool audioif_wasapi_describe(const char *device, bool capture, char *id,
+    size_t id_len, char *name, size_t name_len, char *container,
+    size_t container_len, int32_t *hr);
+
+// True for the container Windows gives everything built into the computer:
+// a laptop's speakers and its microphone array share it whether or not they
+// share a clock.
+bool audioif_wasapi_container_is_host(const char *container);
 
 // Speaker: queue `length` bytes, waiting up to `timeout_ms` for room. Returns
 // the bytes queued.
