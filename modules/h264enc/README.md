@@ -76,7 +76,7 @@ decode it: every frame, at 30 dB or better against the source (33.3 dB
 measured), and a frame-late comparison that must fail.
 
 Without a board, [`tests/encode_h264_ffmpeg.py`](tests/encode_h264_ffmpeg.py) has ffmpeg's x264 encode the
-same frames at the same settings, for `check_h264_ffmpeg.py` to score.
+same frames at the same settings, for [`check_h264_ffmpeg.py`](tests/check_h264_ffmpeg.py) to score.
 [`h264enc.yml`](../../.github/workflows/h264enc.yml) runs both on every change, and builds a P4 firmware
 with h264enc to check it compiles and links.
 

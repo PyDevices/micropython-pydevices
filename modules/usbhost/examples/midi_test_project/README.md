@@ -74,7 +74,7 @@ today's enumeration. If playback doesn't seem to reach the board:
 
 ## Regenerating it
 
-`build_canon.py` (plain Python, no dependencies) generated
+[`build_canon.py`](build_canon.py) (plain Python, no dependencies) generated
 `USBHOST_MIDI_Test.RPP` and is included here for provenance and so a
 different tempo, device index, or musical shape doesn't require
 hand-editing MIDI event bytes:
@@ -93,7 +93,7 @@ sign anything broke).
 
 ## The other direction: counting what the board sends
 
-`midi_in_count.py` is the PC half of a board-to-PC MIDI check, for Windows,
+[`midi_in_count.py`](midi_in_count.py) is the PC half of a board-to-PC MIDI check, for Windows,
 with nothing to install: it drives `winmm` through `ctypes`, lists the MIDI
 inputs, opens the one whose name contains its first argument (a usbhost board
 appears as "Espressif Device"), listens for the given seconds and prints how

@@ -37,12 +37,12 @@ The portable engine belongs in [audiodsp](https://github.com/PyDevices/audiodsp)
 
 | Path | Purpose |
 |---|---|
-| `_audioif.c` | Platform driver hooks and native lower-level API. |
-| `audiobusio.c` | CircuitPython-compatible `I2SOut` implementation. |
-| `audiopump_i2s.h` | I2S driver interface shared by native pieces. |
-| `micropython.mk`, `micropython.cmake` | Make/CMake user-module integration. |
-| `manifest.py` | Native module declaration for combined manifests. |
-| `tests/` | Desktop probes (`run_probes.sh`) plus S3 drift and stall witnesses. |
+| [`_audioif.c`](../_audioif.c) | Platform driver hooks and native lower-level API. |
+| [`audiobusio.c`](../audiobusio.c) | CircuitPython-compatible `I2SOut` implementation. |
+| [`audiopump_i2s.h`](../audiopump_i2s.h) | I2S driver interface shared by native pieces. |
+| [`micropython.mk`](../micropython.mk), [`micropython.cmake`](../micropython.cmake) | Make/CMake user-module integration. |
+| [`manifest.py`](../manifest.py) | Native module declaration for combined manifests. |
+| [`tests/`](../tests) | Desktop probes ([`run_probes.sh`](../tests/run_probes.sh)) plus S3 drift and stall witnesses. |
 
 ## Building and target boundaries
 
@@ -54,7 +54,7 @@ ESP32 has the production I2S driver and can expose microphone capture through `_
 
 ## Contributor boundary
 
-This code is timing- and lifecycle-sensitive. A driver hook table belongs in the same C file as module registration so static linking cannot silently select audiodsp's weak default hooks. Read [the pump-port guide](https://github.com/PyDevices/audiodsp/blob/main/docs/pump-ports.md) before adding a platform.
+This code is timing- and lifecycle-sensitive. A driver hook table belongs in the same C file as module registration so static linking cannot silently select audiodsp's weak default hooks. Read [the pump-port guide](https://github.com/PyDevices/audiodsp/blob/main/docs/how-it-works/pump-ports.md) before adding a platform.
 
 Start with an existing desktop probe or a narrowly scoped diagnostics change. Hardware work needs real target validation; a successful compile alone does not prove a bound driver, DMA progress, or safe soft reset.
 

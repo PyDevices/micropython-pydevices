@@ -48,9 +48,9 @@ return `None` or zero when no frame arrives by the timeout.
 
 ## Firmware integration
 
-`apply_patches.sh` adds the sensor-driver component and required ESP32
+[`apply_patches.sh`](../apply_patches.sh) adds the sensor-driver component and required ESP32
 sdkconfig change to a MicroPython checkout. Build with this repository's
-`micropython.cmake` as `USER_C_MODULES`, then enable the desired sensor driver
+[`micropython.cmake`](../micropython.cmake) as `USER_C_MODULES`, then enable the desired sensor driver
 in the board sdkconfig. For OV5647, both `CONFIG_CAMERA_OV5647=y` and its
 `AUTO_DETECT_MIPI_INTERFACE_SENSOR` setting are required; the latter registers
 the probe that discovers the sensor.
@@ -62,12 +62,12 @@ build, and sdkconfig commands.
 
 | Path | Purpose |
 |---|---|
-| `src/mod_cameraif.c` | Native Camera implementation and capture ownership. |
-| `patches/` | MicroPython ESP32 sensor-component and sdkconfig patches. |
-| `apply_patches.sh` | Apply, inspect, or revert repository-owned patches. |
-| `examples/` | Still, preview, formats, controls, JPEG, transform, and diagnostics. |
-| `docs/performance.md` | Measured capture, scaling, and JPEG behavior. |
-| `manifest.py`, `micropython.cmake` | Firmware user-module entrypoints. |
+| [`src/mod_cameraif.c`](../src/mod_cameraif.c) | Native Camera implementation and capture ownership. |
+| [`patches/`](../patches) | MicroPython ESP32 sensor-component and sdkconfig patches. |
+| [`apply_patches.sh`](../apply_patches.sh) | Apply, inspect, or revert repository-owned patches. |
+| [`examples/`](../examples) | Still, preview, formats, controls, JPEG, transform, and diagnostics. |
+| [`docs/performance.md`](performance.md) | Measured capture, scaling, and JPEG behavior. |
+| [`manifest.py`](../manifest.py), [`micropython.cmake`](../micropython.cmake) | Firmware user-module entrypoints. |
 
 ## Controls and diagnostics
 

@@ -488,9 +488,9 @@ ISP's tuning. Those names keep working as they did.
 
 The examples take the camera from `board_config`, so they run unchanged on
 any board whose config provides one. On a board without one, construct a
-`Camera` directly with your own pins -- see `camera_formats.py`.
+`Camera` directly with your own pins -- see [`camera_formats.py`](examples/camera_formats.py).
 
-`camera_still.py` is the one that uses `appdev` as the scheduler, which is
+[`camera_still.py`](examples/camera_still.py) is the one that uses `appdev` as the scheduler, which is
 the house idiom for an application with input; the rest are plain scripts
 because they have nothing to schedule.
 
@@ -526,7 +526,7 @@ DMA scaler and a 97 ms wait that should not have existed:
 
 ## Sending pictures over the network
 
-`camera_send_simpletest.py` sends one JPEG each time the viewer asks for one,
+[`camera_send_simpletest.py`](examples/camera_send_simpletest.py) sends one JPEG each time the viewer asks for one,
 so every picture costs a round trip on the network as well as its bytes. On a
 Waveshare ESP32-P4 WIFI6 DEV-KIT with an OV5647, sending 27 KB pictures at
 quality 60 to CPython on a PC, 20 pictures a run:
@@ -570,7 +570,7 @@ times as long with power saving off and about ten times as long with it on.
 Turn Bluetooth off on the viewer (`bluetooth.BLE().active(False)`) if nothing
 needs it.
 
-`camera_mjpeg.py` doesn't wait for requests, which is why it streams at 7 to
+[`camera_mjpeg.py`](examples/camera_mjpeg.py) doesn't wait for requests, which is why it streams at 7 to
 15 fps over the same Wi-Fi.
 
 ## Known hardware defect

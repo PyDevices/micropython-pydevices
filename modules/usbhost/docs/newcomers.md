@@ -38,12 +38,12 @@ The class packages (`usb-core`, `usb-host-*`, `usb-device-*`, `usb-hid`) are in 
 
 | Path | Purpose |
 |---|---|
-| `src/mod_usbhost.c` | The C module: the host session, its transfers and streams. |
+| [`src/mod_usbhost.c`](../src/mod_usbhost.c) | The C module: the host session, its transfers and streams. |
 | `src/usbhost_host*.c` | The host core, the generic transfers under `usb.core`, the isochronous streams under the audio and video packages, and the tethering adapter. |
-| `src/shared/` | The event ring, the PCM sink's gate, and the host streams' pacing, framing and queue sizing. |
-| `examples/` | Device and host examples. |
-| `tools/` | The device proof matrix and the stream and host checks. |
-| `tests/` | Native ring, stream and sink tests, and the examples' tests. |
+| [`src/shared/`](../src/shared) | The event ring, the PCM sink's gate, and the host streams' pacing, framing and queue sizing. |
+| [`examples/`](../examples) | Device and host examples. |
+| [`tools/`](../tools) | The device proof matrix and the stream and host checks. |
+| [`tests/`](../tests) | Native ring, stream and sink tests, and the examples' tests. |
 
 ## Safe first contributions
 
