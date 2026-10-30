@@ -1,0 +1,20 @@
+picotts
+Copyright (c) 2026 PyDevices, MIT License (see the repository's LICENSE).
+
+This module includes code from other projects.
+
+third_party/svox/
+  The SVOX Pico text-to-speech engine, Copyright (C) 2008-2009 SVOX AG.
+  Apache License 2.0: third_party/svox/LICENSE, with the engine's own notice
+  in third_party/svox/NOTICE. ORIGIN.txt names the upstream commits and every
+  change made to the files.
+
+src/modpicotts.c and py/picotts.py
+  Ports of Adafruit_CircuitPython_PicoTTS's src/picotts_native.c and
+  adafruit_picotts/__init__.py, Copyright (c) 2026 Mikey Sklar and Adafruit
+  Industries, MIT License. The upstream copyright lines are kept in each
+  file's header, and the changes are listed in picotts.py's docstring.
+
+The en-US voice files (voices/en-US.json installs them) are SVOX AG's,
+Apache License 2.0. They are not stored in this repository; they are
+downloaded from Adafruit_CircuitPython_PicoTTS at the commit above.

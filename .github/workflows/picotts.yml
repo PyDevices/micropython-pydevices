@@ -1,0 +1,104 @@
+# picotts from a bare clone: the unix port renders speech with the real voice
+# files, and an ESP32-S3 firmware compiles it under the esp32 port's
+# -Werror=all, which the unix build doesn't use.
+name: picotts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/picotts/**'
+      - 'build_mp.py'
+      - 'modules.lock'
+      - '.github/workflows/picotts.yml'
+  pull_request:
+    paths:
+      - 'modules/picotts/**'
+      - 'build_mp.py'
+      - 'modules.lock'
+      - '.github/workflows/picotts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the unix port's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev pkg-config
+
+      - name: Build the unix port with picotts
+        run: python3 build_mp.py --port unix --modules picotts
+
+      - name: Fetch the voice files named in voices/en-US.json
+        run: |
+          mkdir -p "$RUNNER_TEMP/voice"
+          python3 - "$RUNNER_TEMP/voice" <<'PY'
+          import json, sys, urllib.request
+          for dest, url in json.load(open("modules/picotts/voices/en-US.json"))["urls"]:
+              urllib.request.urlretrieve(url, sys.argv[1] + "/" + dest.split("/")[-1])
+          PY
+          ls -l "$RUNNER_TEMP/voice"
+
+      - name: The engine speaks, and the API around it
+        run: ./builds/unix/standard/micropython -X heapsize=12M modules/picotts/tests/test_picotts.py "$RUNNER_TEMP/voice"
+
+  esp32s3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CCACHE_DIR: /home/runner/.cache/ccache
+      CCACHE_MAXSIZE: 400M
+      CCACHE_COMPILERCHECK: content
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CMAKE_ASM_COMPILER_LAUNCHER: ccache
+      IDF_CCACHE_ENABLE: '1'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Packages the build needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache gettext cmake ninja-build pkg-config libffi-dev
+
+      - name: The runner's Python, which the cached venvs are tied to
+        id: py
+        run: echo "version=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" >> "$GITHUB_OUTPUT"
+
+      # release-firmware.yml's cache, the same paths and key so it's shared.
+      - name: Cache ESP-IDF
+        uses: actions/cache@v6
+        with:
+          path: |
+            deps/esp-idf
+            deps/circuitpython
+            deps/circuitpython-venv
+            ~/.espressif
+          key: deps-idf-py${{ steps.py.outputs.version }}-${{ hashFiles('deps.lock', 'patches/circuitpython/**') }}
+
+      - name: Cache compiler output
+        uses: actions/cache@v6
+        with:
+          path: /home/runner/.cache/ccache
+          key: ccache-picotts-s3-${{ hashFiles('UPSTREAM', 'modules.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-picotts-s3-${{ hashFiles('UPSTREAM', 'modules.lock') }}-
+            ccache-picotts-s3-
+
+      - name: Build an ESP32-S3 firmware with picotts
+        run: python3 build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --modules picotts
+
+      - name: picotts is linked in
+        run: |
+          map=builds/esp32/ESP32_GENERIC_S3/SPIRAM_OCT/micropython.map
+          grep -q 'pico_initialize' "$map"
+          grep -q 'picotts_user_cmodule' "$map"

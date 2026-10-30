@@ -1,0 +1,7 @@
+{
+  "urls": [
+    ["picotts/en_US_ta.bin", "https://raw.githubusercontent.com/adafruit/Adafruit_CircuitPython_PicoTTS/3496a5d81d3984bacf4876c51653493f5afab867/adafruit_picotts/en_US_ta.bin"],
+    ["picotts/en_US_lh0_sg.bin", "https://raw.githubusercontent.com/adafruit/Adafruit_CircuitPython_PicoTTS/3496a5d81d3984bacf4876c51653493f5afab867/adafruit_picotts/en_US_lh0_sg.bin"]
+  ],
+  "version": "1.0.0"
+}
