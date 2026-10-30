@@ -210,7 +210,7 @@ where making the caller size 1.28 MB first is a poor introduction.
 
 Scale the frame into a rectangle of a destination picture, using the P4's
 Pixel Processing Accelerator through
-[ppa](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/ppa),
+[ppa](../ppa),
 so the firmware needs ppa too (`--modules cameraif,ppa`, or `all`). No pixel
 passes through the CPU: the PPA reads the camera buffer and writes the
 destination by DMA.
@@ -245,7 +245,7 @@ one the PPA makes and the scale runs in software.
 **`capture_jpeg(quality=80, timeout=1000)` → `bytes` | `None`**
 
 JPEG, encoded by the P4's hardware encoder through
-[jpegio](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/jpegio),
+[jpegio](../jpegio),
 so the firmware needs jpegio too (`--modules cameraif,jpegio`, or `all`);
 without it this raises `OSError` and says so. The sensor's RGB565 goes to the
 encoder untouched, so there is no software colour conversion in the path at
@@ -432,9 +432,9 @@ own frame with no copy at all. None of it costs frames: on the OV5647 at
 800x800, `take()` keeps the sensor's 35.7 fps natively, scaled to `QVGA`,
 `HVGA`, `VGA` and `SVGA`, in `GRAYSCALE` at `QQVGA`, and as a JPEG natively
 and at `SVGA`. `GRAYSCALE` and any `FrameSize` need
-[ppa](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/ppa)
+[ppa](../ppa)
 in the firmware, and `JPEG` needs
-[jpegio](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/jpegio).
+[jpegio](../jpegio).
 
 **The controls are properties**, with espcamera's names, mapped onto the
 `esp_cam_sensor` parameters that `controls()` reports:

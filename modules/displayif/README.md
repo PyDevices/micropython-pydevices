@@ -147,7 +147,7 @@ Then run the lifecycle API test under the same interpreter:
 for the identified upstream revision and license text.
 
 The JPEG decoder, `jpegio`, moved to micropython-pydevices'
-[modules/jpegio](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/jpegio) on 2026-10-06, with its vendored TJpgDec and its notice.
+[modules/jpegio](../jpegio) on 2026-10-06, with its vendored TJpgDec and its notice.
 
 ## Related
 
