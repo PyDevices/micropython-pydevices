@@ -19,10 +19,14 @@ connected to Wi-Fi. Start the viewer first.
 Run it:
     mpremote run camera_send_simpletest.py
 
+Each picture waits for a request, so it pays a full round trip on the
+network. How long that takes on Wi-Fi and on Ethernet is in the cameraif
+README, under "Sending pictures over the network".
+
 Tested on: Waveshare ESP32-P4 boards with an OV5647 or IMX219 camera on
 MicroPython 1.30 preview, sending to an ESP32-S3 board running
-jpegio_viewer_simpletest.py. Over Wi-Fi between those two, a picture can
-take ten seconds or more to arrive.
+jpegio_viewer_simpletest.py, and to CPython 3.14 on Windows over Wi-Fi
+and over Ethernet.
 """
 
 import socket
@@ -30,6 +34,7 @@ import struct
 import time
 
 import board_config
+import network
 
 # Change these to match your setup.
 VIEWER_HOST = "192.168.1.159"
@@ -41,6 +46,13 @@ PICTURES = 10
 camera = board_config.camera
 width, height = camera.size()[:2]
 print("Camera %s, %dx%d" % (camera.sensor()[0], width, height))
+
+# Keep the Wi-Fi radio awake. With power saving on, it dozes between the
+# access point's beacons, and each request waits for the next one: that
+# about doubles the time a picture takes over Wi-Fi.
+wlan = network.WLAN(network.STA_IF)
+if wlan.active():
+    wlan.config(pm=wlan.PM_NONE)
 
 # Connect to the viewer.
 viewer = socket.socket()
