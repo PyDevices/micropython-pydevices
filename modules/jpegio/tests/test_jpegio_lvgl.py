@@ -1,4 +1,4 @@
-"""jpegio -- its LVGL image decoder, on unix MicroPython built beside lvgl-micropython.
+"""jpegio -- its LVGL image decoder, on unix MicroPython built beside lvgl (omnipython-lvgl).
 
 The LVGL half of the Phase 2 gate in the org's docs/jpegio-vision.md, checked
 mechanically:
@@ -39,11 +39,11 @@ mechanically:
      -> one refresh -> gc.collect() dies with SIGBUS in MicroPython's
      gc_sweep_run_finalisers -> mp_load_method_maybe (a finaliser-flagged GC
      block whose type pointer is garbage) with no jpegio involved at all:
-     reproduced with a label on a build without displayif (lvgl-micropython
+     reproduced with a label on a build without displayif (omnipython-lvgl
      glue, not this decoder).
 
 Skips (exit 0, prints SKIP) when `import lvgl` fails: the interpreter was
-built without the lvgl-micropython usermod, and this module's LVGL-less
+built without the lvgl usermod, and this module's LVGL-less
 CI job runs this file too.  Before skipping it asserts the other
 half of the contract, the one that only a decoder-less build can check:
 jpegio.register_lvgl_decoder() and jpegio.lvgl_decoders() are module
@@ -57,7 +57,7 @@ import sys
 try:
     import lvgl as lv
 except ImportError:
-    # No lvgl-micropython in this build, so lvgl_decoder.c was not compiled --
+    # No lvgl in this build, so lvgl_decoder.c was not compiled --
     # but the two module attributes are unconditional (jpegio.c keeps them out
     # of the #if, so the CMake ports' QSTR pass sees their names and the API
     # never silently disappears).  This is the only build that can check it.
@@ -73,7 +73,7 @@ except ImportError:
     assert jpegio.lvgl_decoders() == (), jpegio.lvgl_decoders()
     print("no LVGL decoder compiled in: lvgl_decoders() == ()")
 
-    print("SKIP: no `lvgl` module in this interpreter (build with the lvgl-micropython usermod)")
+    print("SKIP: no `lvgl` module in this interpreter (build with the lvgl usermod)")
     sys.exit(0)
 
 import binascii
@@ -189,7 +189,7 @@ class Frame:
         disp.flush_ready()
 
 def setup_display(frame):
-    """320x240 RGB565 display like lvgl-bindings/tools/test_lvgl_smoke.py's _setup_display."""
+    """320x240 RGB565 display like omnipython-lvgl/tools/test_lvgl_smoke.py's _setup_display."""
     disp = lv.display_create(W, H)
     disp.set_color_format(lv.COLOR_FORMAT.RGB565)
     buf = lv.draw_buf_create(W, H, lv.COLOR_FORMAT.RGB565, 0)
@@ -351,7 +351,7 @@ def main():
     assert sha256_hex(frame.buf) == bg, "half a scan drew something: %s" % sha256_hex(frame.buf)
     print("half a scan (%d of %d bytes): info OK, open refused, nothing drawn, refr_now survived" % (len(half), len(rst)))
 
-    # 5. a file source through fs_driver.py (frozen in by lvgl-micropython's manifest)
+    # 5. a file source through fs_driver.py (frozen in by omnipython-lvgl's manifest)
     print("== 5. file source")
     try:
         import fs_driver

@@ -86,7 +86,7 @@ unix, `include("$(PORT_DIR)/boards/manifest.py")` on esp32) or you lose
 ```bash
 make BOARD=ESP32_GENERIC_S3 USER_C_MODULES=/abs/path/to/displayif
 make BOARD=ESP32_GENERIC_S3 \
-  USER_C_MODULES="/abs/path/to/displayif;/abs/path/to/lvgl-micropython"
+  USER_C_MODULES="/abs/path/to/displayif;/abs/path/to/omnipython-lvgl/ports/micropython"
 ```
 
 On Make ports (unix, windows, mimxrt, samd) point it at the directory that

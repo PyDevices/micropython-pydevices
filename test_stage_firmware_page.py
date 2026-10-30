@@ -27,7 +27,7 @@ class Stage(unittest.TestCase):
         indir.mkdir()
         fake_set(indir)
         self.fw = self.root / "fw"
-        self.doc = rf.assemble(indir, self.fw, False, "staged-20261020", "https://run", "b" * 40)
+        self.doc = rf.assemble(indir, self.fw, False, "staged-20261020", "https://run")
         self.page = self.root / "page"
 
     def test_files_manifests_and_firmware_json_land(self):

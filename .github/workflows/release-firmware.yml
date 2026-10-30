@@ -36,8 +36,8 @@ on:
         description: Build the Raspberry Pi Pico 2 and the Pimoroni Pico Plus 2 W too (off until a board is on the bench)
         default: false
         type: boolean
-      lvgl-circuitpython-ref:
-        description: lvgl-circuitpython branch, tag or commit for the CircuitPython builds (left empty, it takes the commit modules.lock pins)
+      omnipython-lvgl-ref:
+        description: omnipython-lvgl branch, tag or full 40-character commit for every LVGL build (left empty, it takes the commit modules.lock pins)
         default: ''
         type: string
   schedule:
@@ -46,6 +46,7 @@ on:
     paths:
       - '.github/workflows/release-firmware.yml'
       - 'scripts/release_firmware.py'
+      - 'scripts/pin_lvgl_ref.sh'
       - 'scripts/stage_firmware_page.py'
       - 'test_release_firmware.py'
       - 'test_stage_firmware_page.py'
@@ -101,18 +102,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: lvgl-circuitpython, which the CircuitPython builds compile in
-        if: matrix.interpreter == 'circuitpython'
+      - name: omnipython-lvgl at the ref asked for, in modules.lock
+        if: inputs.omnipython-lvgl-ref != ''
         env:
-          LVGL_CP_REF: ${{ inputs.lvgl-circuitpython-ref }}
-        run: |
-          # empty input: the commit modules.lock pins
-          LVGL_CP_REF="${LVGL_CP_REF:-$(awk '$1=="lvgl-circuitpython"{print $3}' "$GITHUB_WORKSPACE/modules.lock")}"
-          mkdir -p "$RUNNER_TEMP/ws" && cd "$RUNNER_TEMP/ws"
-          git clone --quiet --depth 1 --branch "$LVGL_CP_REF" https://github.com/PyDevices/lvgl-circuitpython.git \
-            || { git clone --quiet https://github.com/PyDevices/lvgl-circuitpython.git \
-                 && git -C lvgl-circuitpython checkout --quiet "$LVGL_CP_REF"; }
-          git -C lvgl-circuitpython rev-parse HEAD | tee "$RUNNER_TEMP/lvgl-circuitpython.commit"
+          REF: ${{ inputs.omnipython-lvgl-ref }}
+        run: scripts/pin_lvgl_ref.sh "$REF"
 
       - name: Packages the builds need
         run: |
@@ -162,9 +156,7 @@ jobs:
       - name: Build ${{ matrix.id }}
         run: |
           start=$(date +%s)
-          ws=()
-          [[ "${{ matrix.interpreter }}" == circuitpython ]] && ws=(--ws "$RUNNER_TEMP/ws")
-          python3 scripts/release_firmware.py build "${{ matrix.id }}" out "${ws[@]}"
+          python3 scripts/release_firmware.py build "${{ matrix.id }}" out
           {
             echo "### ${{ matrix.id }}"
             echo "- toolchain cache: ${{ steps.deps.outputs.cache-hit == 'true' && 'hit' || (matrix.deps == 'none' && 'none needed' || 'miss') }}"
@@ -197,17 +189,12 @@ jobs:
           merge-multiple: true
           path: in
 
-      - name: lvgl-circuitpython's commit
-        id: lvgl
+      # The same pin the builds took, so firmware.json's modules.lock says it.
+      - name: omnipython-lvgl at the ref asked for, in modules.lock
+        if: inputs.omnipython-lvgl-ref != ''
         env:
-          LVGL_CP_REF: ${{ inputs.lvgl-circuitpython-ref }}
-        run: |
-          # empty input: the commit modules.lock pins
-          LVGL_CP_REF="${LVGL_CP_REF:-$(awk '$1=="lvgl-circuitpython"{print $3}' "$GITHUB_WORKSPACE/modules.lock")}"
-          git clone --quiet --depth 1 --branch "$LVGL_CP_REF" https://github.com/PyDevices/lvgl-circuitpython.git lvgl-cp \
-            || { git clone --quiet https://github.com/PyDevices/lvgl-circuitpython.git lvgl-cp \
-                 && git -C lvgl-cp checkout --quiet "$LVGL_CP_REF"; }
-          echo "commit=$(git -C lvgl-cp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          REF: ${{ inputs.omnipython-lvgl-ref }}
+        run: scripts/pin_lvgl_ref.sh "$REF"
 
       - name: Check the files and write firmware.json
         env:
@@ -216,8 +203,7 @@ jobs:
         run: |
           python3 scripts/release_firmware.py assemble in firmware $PICO2 \
             --tag "$TAG" \
-            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --lvgl-circuitpython-commit "${{ steps.lvgl.outputs.commit }}"
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           ls -l firmware
           cat firmware/firmware.json
 

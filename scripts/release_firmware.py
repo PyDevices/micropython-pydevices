@@ -8,14 +8,13 @@ on Linux or WSL.
         Print the build matrix as JSON for the workflow: one row per cell.
         The Pico 2's and the Pico Plus 2 W's rows are left out unless --pico2 is given.
 
-    release_firmware.py build <cell> <out-dir> [--ws DIR]
+    release_firmware.py build <cell> <out-dir>
         Build one cell with build_mp.py and put its files, a sha256 of each and
-        a cell.json in <out-dir>/<cell>/. --ws is a directory holding a
-        checkout of lvgl-circuitpython, which the CircuitPython cells compile
-        in.
+        a cell.json in <out-dir>/<cell>/. LVGL (omnipython-lvgl) comes in at
+        the commit modules.lock pins, for MicroPython and CircuitPython alike.
 
     release_firmware.py assemble <in-dir> <out-dir> [--pico2] [--tag TAG]
-                                 [--run-url URL] [--lvgl-circuitpython-commit SHA]
+                                 [--run-url URL]
         Check every cell in <in-dir> (one directory per cell, as `build`
         wrote them), name the files for the set and write firmware.json
         beside them in <out-dir>. Exits 1 if any check fails. It never
@@ -75,23 +74,23 @@ CELLS = [
          chip="esp32s3", offset=0, kind="esp32", deps="idf"),
     dict(id="cp-p4-devkit", label="ESP32-P4-WIFI6-DEV-KIT", interpreter="circuitpython", port="espressif",
          board="waveshare_esp32p4_wifi6_dev_kit", variant=None, flash="16MB",
-         modules="audiodsp,pygraphics,pngio,tsmux,ppa,jpegio,cameraif,castif,h264enc,usbhost,pydevices,pdwidgets,palettes,@lvgl-circuitpython",
+         modules="audiodsp,pygraphics,pngio,tsmux,ppa,jpegio,cameraif,castif,h264enc,usbhost,pydevices,pdwidgets,palettes,lvgl",
          chip="esp32p4", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-s3-lcd7", label="ESP32-S3-Touch-LCD-7", interpreter="circuitpython", port="espressif",
          board="waveshare_esp32s3_touch_lcd_7", variant=None, flash="8MB",
-         modules="audiodsp,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,@lvgl-circuitpython",
+         modules="audiodsp,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl",
          chip="esp32s3", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-s3-lcd43", label="ESP32-S3-Touch-LCD-4.3", interpreter="circuitpython", port="espressif",
          board="waveshare_esp32s3_touch_lcd_43", variant=None, flash="8MB",
-         modules="audiodsp,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,@lvgl-circuitpython",
+         modules="audiodsp,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl",
          chip="esp32s3", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-twatch", label="LilyGO T-Watch S3", interpreter="circuitpython", port="espressif",
          board="lilygo_twatch_s3_single_app", variant=None, flash="16MB",
-         modules="audiodsp,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,@lvgl-circuitpython",
+         modules="audiodsp,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl",
          chip="esp32s3", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-feather-rp2040", label="Adafruit Feather RP2040 + display wing", interpreter="circuitpython",
          port="raspberrypi", board="feather_rp2040_lvgl", variant=None, flash="8MB",
-         modules="pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,@lvgl-circuitpython", chip="rp2040", offset=None, kind="rp2", deps="none"),
+         modules="pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl", chip="rp2040", offset=None, kind="rp2", deps="none"),
     # Off by default until a board is on the bench to run it on.
     dict(id="mp-pico2", label="Raspberry Pi Pico 2", interpreter="micropython", port="rp2",
          board="RPI_PICO2", variant=None, flash="4MB", modules="all",
@@ -201,7 +200,7 @@ def build_dir(c):
     return REPO / "builds" / c["port"] / c["board"] / (c["variant"] or "default")
 
 
-def build_args(c, ws):
+def build_args(c):
     args = [sys.executable, str(REPO / "build_mp.py"), "--port", c["port"], "--board", c["board"]]
     if c["interpreter"] == "circuitpython":
         args[2:2] = ["--interpreter", "circuitpython"]
@@ -209,24 +208,17 @@ def build_args(c, ws):
         args += ["--variant", c["variant"]]
     if c["interpreter"] == "micropython" and c["port"] == "esp32":
         args += ["--flash", c["flash"]]
-    mods = []
-    for m in c["modules"].split(","):
-        if m.startswith("@"):
-            if not ws:
-                raise Failed(f"{c['id']} compiles in {m[1:]}: give --ws a directory holding it")
-            m = str(Path(ws, m[1:]).resolve())
-        mods.append(m)
-    args += ["--modules", ",".join(mods)]
+    args += ["--modules", c["modules"]]
     return args
 
 
-def build(cell_id, out, ws):
+def build(cell_id, out):
     c = cell(cell_id)
     out = Path(out) / c["id"]
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    args = build_args(c, ws)
+    args = build_args(c)
     print("+", " ".join(args), flush=True)
     start = time.time()
     rc = subprocess.run(args, cwd=REPO).returncode
@@ -384,7 +376,7 @@ def preview_reasons(upstream_describe, cp_version, deps):
     return reasons
 
 
-def assemble(indir, out, pico2, tag, run_url, lvgl_cp_commit, now=None):
+def assemble(indir, out, pico2, tag, run_url, now=None):
     indir, out = Path(indir), Path(out)
     now = now or datetime.datetime.now(datetime.timezone.utc)
     date = now.strftime("%Y%m%d")
@@ -447,8 +439,6 @@ def assemble(indir, out, pico2, tag, run_url, lvgl_cp_commit, now=None):
     pins = {"UPSTREAM": (REPO / "UPSTREAM").read_text().strip(),
             "deps.lock": deps,
             "modules.lock": {r[0]: r[2] for r in read_lock("modules.lock")}}
-    if lvgl_cp_commit:
-        pins["lvgl-circuitpython"] = lvgl_cp_commit
     reasons = preview_reasons(mp_version, cp_version, deps)
     doc = {"schema": 1, "tag": tag, "built": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
            "run": run_url, "micropython": mp_version, "circuitpython": cp_version,
@@ -536,14 +526,12 @@ def main(argv=None):
     b = sub.add_parser("build")
     b.add_argument("cell")
     b.add_argument("out")
-    b.add_argument("--ws")
     a = sub.add_parser("assemble")
     a.add_argument("indir")
     a.add_argument("out")
     a.add_argument("--pico2", action="store_true")
     a.add_argument("--tag", default="")
     a.add_argument("--run-url", default="")
-    a.add_argument("--lvgl-circuitpython-commit", default="")
     n = sub.add_parser("notes")
     n.add_argument("firmware_json")
     n.add_argument("--out")
@@ -565,9 +553,9 @@ def main(argv=None):
             else:
                 print(text)
         elif args.cmd == "build":
-            build(args.cell, args.out, args.ws)
+            build(args.cell, args.out)
         elif args.cmd == "assemble":
-            doc = assemble(args.indir, args.out, args.pico2, args.tag, args.run_url, args.lvgl_circuitpython_commit)
+            doc = assemble(args.indir, args.out, args.pico2, args.tag, args.run_url)
             text = summary(doc)
             print(text)
             if os.environ.get("GITHUB_STEP_SUMMARY"):

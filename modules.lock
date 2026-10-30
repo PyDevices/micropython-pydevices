@@ -13,18 +13,14 @@
 # from other repositories (audiocomponents' two) are pinned by tag in its
 # lib-lock.json, not here.
 #
-# lvgl-bindings is not a module but the source lvgl-micropython compiles: a
-# build that has lvgl-micropython fetches it at this commit into
-# modules/.lvgl-bindings (a sibling checkout is linked there instead) and
-# hands it to lvgl-micropython, whose own LVGL_BINDINGS_COMMIT then goes unused.
-#
-# lvgl-circuitpython is not a module build_mp.py clones either: the CircuitPython
-# cells of release-firmware.yml check it out at this commit and pass it to
-# --modules by path. Move the commit here to move the CircuitPython builds.
+# omnipython-lvgl is not a module directory either: it is LVGL, its generated
+# bindings and a port per interpreter. --modules names it lvgl ("all" takes it
+# too), and a build fetches it at this commit into modules/.omnipython-lvgl (a
+# sibling checkout is linked there instead) and compiles the port for its
+# interpreter. Move the commit here to move every LVGL build, MicroPython's and
+# CircuitPython's.
 audiodsp          https://github.com/PyDevices/audiodsp.git           f763ec30d008a668fe8cbadf132c56f2fc099749
-lvgl-bindings     https://github.com/PyDevices/lvgl-bindings.git      22f8383eedc785a6c87c57c7ed46c95c454cebe3
-lvgl-micropython  https://github.com/PyDevices/lvgl-micropython.git   48937fcd87e574488178997e2bafe73d9bf02240
+omnipython-lvgl   https://github.com/PyDevices/omnipython-lvgl.git    84d1de375b014c7d49b4ccbd3be551813091f9ef
 pygraphics        https://github.com/PyDevices/pygraphics.git         1c193cfef534a3bdb85d4b112a66e0d4e76692ca
 ulab              https://github.com/v923z/micropython-ulab.git       1d3ddd8f5228e2c7335dac71f4846e6abb0ec9f9
 omnipython-lib   https://github.com/PyDevices/pydevices.git          80a1fcbcf9ed970746ae9c178cadf1ab92d5d75b
-lvgl-circuitpython  https://github.com/PyDevices/lvgl-circuitpython.git  5478910d2505de02a72bf30384c33ca6cecc9825

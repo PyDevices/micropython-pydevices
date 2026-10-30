@@ -16,7 +16,7 @@ media modules roadmap's Phase 1), so a firmware that wants JPEG now names
 directory's [`micropython.mk`](micropython.mk) / [`micropython.cmake`](micropython.cmake). Output is native-order RGB565, block by block, straight
 from TJpgDec — no full-frame buffer inside the module.
 
-Beside the `lvgl-micropython` usermod it is also LVGL's JPEG decoder: the
+Beside the `lvgl` usermod it is also LVGL's JPEG decoder: the
 same TJpgDec, registered through LVGL's public `lv_image_decoder_create`
 API, so `lv.image` shows JPEGs (webcam MJPEG frames included) with one
 decoder in the firmware — see [LVGL image decoder](#lvgl-image-decoder).
@@ -261,7 +261,7 @@ to byte-swap for `RGB565_SWAPPED`); see above. And errors are typed
 - [`third_party/tjpgd/`](third_party/tjpgd/) — vendored TJpgDec: `tjpgd.c`, `tjpgd.h`, `tjpgdcnf.h`. The
   firmware's only TJpgDec, always compiled.
 - [`lvgl_decoder.c`](src/lvgl_decoder.c) / [`lvgl_decoder.h`](src/lvgl_decoder.h) — the LVGL image decoder on that
-  TJpgDec; compiled only beside `lvgl-micropython` (below).
+  TJpgDec; compiled only beside `lvgl` (below).
 - [`micropython.mk`](micropython.mk) / [`micropython.cmake`](micropython.cmake) — the module's glue ([`manifest.py`](manifest.py)
   names it with `c_module`).
 
@@ -271,14 +271,14 @@ refuses to build with any other `JD_FORMAT`.
 
 **With LVGL (jpegio
 self-detects).** LVGL's own TJPGD is off by config on MicroPython
-(`LV_USE_TJPGD 0` in lvgl-bindings' `lv_conf.h`), so nothing clashes with
+(`LV_USE_TJPGD 0` in omnipython-lvgl's `lv_conf.h`), so nothing clashes with
 the vendored copy and LVGL has no JPEG decoder of its own; this module
-supplies one. When lvgl-micropython is in the same build (`USER_C_MODULES`
-names it, which a [`build_mp.py`](../../build_mp.py) build with both modules does), both glue files
+supplies one. When LVGL is in the same build (`USER_C_MODULES`
+names omnipython-lvgl's `ports/micropython`, which a [`build_mp.py`](../../build_mp.py) build with both modules does), both glue files
 compile `lvgl_decoder.c` with `-DJPEGIO_LVGL_DECODER=1`; its `lvgl/lvgl.h`
-resolves through the bindings directory lvgl-micropython puts on the include
+resolves through the repository root that port puts on the include
 path. `JPEGIO_LVGL=0` / `1` (make) or `-DJPEGIO_LVGL=OFF` / `ON` (CMake)
-forces the decision. Without lvgl-micropython nothing links against LVGL
+forces the decision. Without LVGL nothing links against LVGL
 (this module's CI builds it both ways), but the module still exports
 `register_lvgl_decoder()` and `lvgl_decoders()`; see *Why these two names
 are unconditional* below.
@@ -295,7 +295,7 @@ of CircuitPython's jpegio by Jeff Epler for Adafruit Industries (MIT).
 ## LVGL image decoder
 
 The decoder itself ([`lvgl_decoder.c`](src/lvgl_decoder.c)) is compiled only beside
-`lvgl-micropython` (see Build); the two Python names below exist on every
+`lvgl` (see Build); the two Python names below exist on every
 build. It is an ordinary LVGL image decoder named `"jpegio"`
 (`lv_image_decoder_t.name`), created with `lv_image_decoder_create`, so
 `lv.image(...).set_src(...)` and every other LVGL image path decode
@@ -331,8 +331,8 @@ a second decoder:
   came before `lv.init()`, and after every `lv.deinit()` / `lv.init()` cycle
   (LVGL clears its decoder list on deinit). On a build with no decoder in it
   the call always raises `RuntimeError`, and the message names both the cause
-  and the way out: *no lvgl-micropython sibling at build time (rebuild with
-  `JPEGIO_LVGL=1` to force it)*.
+  and the way out: *lvgl was not in the build (name both modules, or rebuild
+  with `JPEGIO_LVGL=1`)*.
 
 `jpegio.lvgl_decoders() -> tuple` lists LVGL's registered image decoders by
 name in the order LVGL consults them — `("jpegio", "LODEPNG", "BIN")` once
@@ -370,7 +370,7 @@ brings the break straight back. Do not re-conditionalise either function.
 
 **Sources.** A variable source (`lv.image_dsc_t`) whose `data` starts with
 the SOI marker `FF D8`, or a file (through a registered `lv.fs_drv_t`, e.g.
-lvgl-bindings' `fs_driver.py`) whose first two bytes are `FF D8` — the
+omnipython-lvgl's `fs_driver.py`) whose first two bytes are `FF D8` — the
 extension is not consulted. Nothing more is sniffed: LVGL's own `is_jpg()`
 wants a 10-byte JFIF signature and so rejects every UVC MJPEG frame; here
 `jd_prepare` judges, for both source kinds, in the decoder's *info* step.
@@ -389,7 +389,7 @@ blends RGB565 into an RGB565 display by row copy, its fast path.
 **Memory.** The decoder decodes the whole image in its *open* step into a
 draw buffer of `w * h * 2` bytes (from LVGL's image-cache allocator, i.e.
 the MicroPython heap), which LVGL frees at *close* — every refresh, unless
-LVGL's image cache is on (`LV_CACHE_DEF_SIZE`, 0 in lvgl-bindings). That is
+LVGL's image cache is on (`LV_CACHE_DEF_SIZE`, 0 in omnipython-lvgl). That is
 what LVGL's own full-decode decoders (`lv_lodepng.c`) do. It is not the
 block-wise, no-frame-buffer path `JpegDecoder.decode(callable)` offers:
 LVGL's `lv_tjpgd.c` decodes MCU by MCU only through exports it added to its

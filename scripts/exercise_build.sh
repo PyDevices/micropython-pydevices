@@ -225,7 +225,7 @@ print('RUN', sys.implementation._machine, np.sum(np.array([1, 2, 3])), board_con
         elif [ $m_t = pico ]; then
             build pico --port rp2 --board RPI_PICO --modules displayif,jpegio,pygraphics,palettes,pdwidgets
         else
-            build pico2 --port rp2 --board RPI_PICO2 --modules displayif,jpegio,lvgl-micropython
+            build pico2 --port rp2 --board RPI_PICO2 --modules displayif,jpegio,lvgl
         fi
     done
 

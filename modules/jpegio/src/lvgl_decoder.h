@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // jpegio's LVGL image decoder (lvgl_decoder.c). Compiled only when the
-// lvgl-micropython sibling usermod is on the same build (JPEGIO_LVGL_DECODER).
+// omnipython-lvgl usermod (lvgl) is on the same build (JPEGIO_LVGL_DECODER).
 #ifndef JPEGIO_LVGL_DECODER_H
 #define JPEGIO_LVGL_DECODER_H
 

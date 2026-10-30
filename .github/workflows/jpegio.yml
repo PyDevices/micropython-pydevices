@@ -1,6 +1,6 @@
 # jpegio from a bare clone, the way a user builds it: build_mp.py fetches
 # MicroPython and the pinned modules itself. Its golden corpus without LVGL,
-# then beside lvgl-micropython as LVGL's JPEG decoder. (These checks moved
+# then beside LVGL (omnipython-lvgl) as its JPEG decoder. (These checks moved
 # here with jpegio from displayif's clean-build workflow, 2026-10-06.)
 name: jpegio
 
@@ -72,11 +72,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libffi-dev pkg-config
 
-      - name: Build the unix port with jpegio and lvgl-micropython
-        run: python3 build_mp.py --port unix --modules jpegio,lvgl-micropython
+      - name: Build the unix port with jpegio and lvgl
+        run: python3 build_mp.py --port unix --modules jpegio,lvgl
 
       - name: One TJpgDec in the firmware, and it is jpegio's
-        # LVGL's own tjpgd.o compiles empty (LV_USE_TJPGD 0 in lvgl-bindings),
+        # LVGL's own tjpgd.o compiles empty (LV_USE_TJPGD 0 in omnipython-lvgl),
         # so exactly one object defines jd_prepare, and jpegio's two objects
         # call into it.
         working-directory: builds/unix/standard

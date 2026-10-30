@@ -11,9 +11,9 @@ fix is a good first contribution.
 |---|---|
 | `build_mp.py` | The build command. |
 | `UPSTREAM` | The MicroPython commit the patches apply to. |
-| `modules.lock`, `deps.lock` | What gets fetched when it's missing, lvgl-bindings included. |
+| `modules.lock`, `deps.lock` | What gets fetched when it's missing, omnipython-lvgl included. |
 | `modules/` | The module manifest, `all/`, `tflite/` and `vision/` (esp-vision's), the modules linked or cloned, and the C modules that live only here: `audioif`, `cameraif`, `castif`, `displayif`, `h264enc`, `jpegio`, `mdns`, `pngio`, `ppa`, `tsmux`, `usbhost`. Each has its own README and tests. |
-| `modules/.lvgl-bindings` | The lvgl-bindings lvgl-micropython compiles: the sibling checkout, linked, or `modules.lock`'s commit, fetched. |
+| `modules/.omnipython-lvgl` | LVGL, its bindings and its ports, which `--modules lvgl` compiles: the sibling checkout, linked, or `modules.lock`'s commit, fetched. |
 | `patches/` | The patch series and `apply_patches.py`. |
 | `variants/`, `boards/` | Our variants and CircuitPython boards. |
 | `scripts/` | `exercise_build.sh`, `release_firmware.py`, `stage_firmware_page.py`, `serve_workbench.sh`, `freeze_list.py`, `update_provenance.py`. |

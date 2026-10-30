@@ -25,8 +25,8 @@
 #error "jpegio needs TJpgDec built with JD_FORMAT 1 (RGB565) -- see tjpgd/tjpgdcnf.h"
 #endif
 
-// Defined by micropython.mk / micropython.cmake only when the lvgl-micropython
-// sibling usermod is in the same build: jpegio then also registers an LVGL
+// Defined by micropython.mk / micropython.cmake only when the omnipython-lvgl
+// usermod (lvgl) is in the same build: jpegio then also registers an LVGL
 // image decoder on its TJpgDec (lvgl_decoder.c).
 #ifndef JPEGIO_LVGL_DECODER
 #define JPEGIO_LVGL_DECODER 0
@@ -546,7 +546,7 @@ static mp_obj_t jpegio_register_lvgl_decoder(void) {
     }
     return mp_const_true;
     #else
-    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("jpegio was built without its LVGL decoder: lvgl-micropython was not in the build (name both modules, or rebuild with JPEGIO_LVGL=1)"));
+    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("jpegio was built without its LVGL decoder: lvgl was not in the build (name both modules, or rebuild with JPEGIO_LVGL=1)"));
     #endif
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(jpegio_register_lvgl_decoder_obj, jpegio_register_lvgl_decoder);

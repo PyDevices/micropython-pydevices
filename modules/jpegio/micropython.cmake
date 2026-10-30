@@ -28,19 +28,24 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32p4")
     target_link_libraries(usermod_jpegio INTERFACE idf::esp_driver_jpeg)
 endif()
 
-# The LVGL image decoder (lvgl_decoder.c) is built only when lvgl-micropython is
-# in this build, decided from USER_C_MODULES the way micropython.mk decides it:
-# what is on disk beside this module says nothing about what this build
-# selected, and jpegio has to build without LVGL. Override with -DJPEGIO_LVGL=ON/OFF.
-# The decoder includes "lvgl/lvgl.h" and "lvgl/src/...", which resolve through
-# the bindings directory lvgl-micropython itself puts on the include path, so
-# nothing here needs to know where the bindings are.
+# The LVGL image decoder (lvgl_decoder.c) is built only when LVGL is in this
+# build: when USER_C_MODULES names omnipython-lvgl's ports/micropython (its
+# repository root, two levels up, holds the generated binding), decided the
+# way micropython.mk decides it: what is on disk beside this module says
+# nothing about what this build selected, and jpegio has to build without
+# LVGL. Override with -DJPEGIO_LVGL=ON/OFF. The decoder includes "lvgl/lvgl.h"
+# and "lvgl/src/...", which resolve through the root that port itself puts on
+# the include path, so nothing here needs to know where the checkout is.
 if(NOT DEFINED JPEGIO_LVGL)
-    if("${USER_C_MODULES}" MATCHES "lvgl-micropython")
-        set(JPEGIO_LVGL ON)
-    else()
-        set(JPEGIO_LVGL OFF)
-    endif()
+    set(JPEGIO_LVGL OFF)
+    foreach(_jpegio_mod ${USER_C_MODULES})
+        if(NOT IS_DIRECTORY "${_jpegio_mod}")
+            get_filename_component(_jpegio_mod "${_jpegio_mod}" DIRECTORY)
+        endif()
+        if(EXISTS "${_jpegio_mod}/../../generated/lvgl_micropython.c")
+            set(JPEGIO_LVGL ON)
+        endif()
+    endforeach()
 endif()
 
 if(JPEGIO_LVGL)
