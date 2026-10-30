@@ -30,7 +30,7 @@ installed at all, use [a codespace](../guides/build-in-a-codespace.md).
 
 ## Install what each port needs
 
-[`build_mp.py`](../../build_mp.py) fetches the big pieces itself: MicroPython, the modules, ESP-IDF,
+[`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py) fetches the big pieces itself: MicroPython, the modules, ESP-IDF,
 emsdk, the pico-sdk and picotool, and SDL2 for MinGW. What it can't fetch are
 your distribution's packages. On Debian or Ubuntu (WSL included):
 

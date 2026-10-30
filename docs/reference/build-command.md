@@ -9,7 +9,7 @@
 
 Leave out `--port` and it asks for port, board and variant. On a port that has
 boards, leave out `--board` and it asks for that. `--variant` is always
-optional. Leave out `--modules` and it lists [`modules/`](../../modules) and asks.
+optional. Leave out `--modules` and it lists [`modules/`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules) and asks.
 
 ## Options
 
@@ -18,7 +18,7 @@ optional. Leave out `--modules` and it lists [`modules/`](../../modules) and ask
 | `--interpreter` | `micropython` (the default) or `circuitpython`: CircuitPython-compatible firmware from CircuitPython's own ports and boards. |
 | `--port` | The port: `unix`, `windows`, `webassembly`, `esp32`, `rp2`. With `--interpreter circuitpython`, CircuitPython's own: `espressif`, `raspberrypi`, `unix` and the rest. |
 | `--board` | The board, by upstream's directory name. |
-| `--variant` | A variant of the board or port: upstream's, or one of ours in [`variants/`](../../variants). |
+| `--variant` | A variant of the board or port: upstream's, or one of ours in [`variants/`](https://github.com/PyDevices/micropython-pydevices/tree/main/variants). |
 | `--modules` | A comma list of short names, full paths, or `all`. See [Modules](modules.md). |
 | `--flash` | esp32 flash size, such as `16MB`. |
 | `--no-autosize` | esp32 and rp2: refuse instead of growing the firmware's share of flash. |
@@ -33,8 +33,8 @@ CircuitPython build they are part of the build record.
 | Variable | Default | Meaning |
 |---|---|---|
 | `OUT_DIR` | `builds/` | Where builds go. |
-| `VARIANTS_DIR` | [`variants/`](../../variants) | Where our variants are found. |
-| `MODULES_DIR` | [`modules/`](../../modules) | Where modules are found. |
+| `VARIANTS_DIR` | [`variants/`](https://github.com/PyDevices/micropython-pydevices/tree/main/variants) | Where our variants are found. |
+| `MODULES_DIR` | [`modules/`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules) | Where modules are found. |
 | `JOBS` | every core | The parallelism handed to make. |
 | `MSYS2_ROOT` | `C:\msys64` | On Windows, the MSYS2 whose make and MinGW gcc build the windows port. |
 | `IDF_TOOLS_PATH` | `~/.espressif` | Where an esp32 build installs ESP-IDF's toolchains. |
