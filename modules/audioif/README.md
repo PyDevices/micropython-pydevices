@@ -231,7 +231,7 @@ it and it has not been done.
 |---|---|---|---|---|---|
 | **ESP32 family** | a FreeRTOS task pinned to the core the interpreter is not on, optionally with its stack in PSRAM | `xSemaphoreCreateRecursiveMutex`, which is priority-inheriting | `esp_timer_get_time` | the I2S channel, written from the pull loop | `Input`, single-port or two-port |
 | **unix** | `pthread` | recursive `pthread_mutex` | `clock_gettime` | a file the loop `write(2)`s each block to | — |
-| **Windows** | `_beginthreadex` | `CRITICAL_SECTION` | `QueryPerformanceCounter` | a file descriptor | — |
+| **Windows** | `_beginthreadex` | `CRITICAL_SECTION` | `QueryPerformanceCounter` | a file descriptor, or a WASAPI speaker written from the pull loop | `Input`, a WASAPI microphone read on the pump's thread |
 | **WebAssembly** | none — **and none is needed** | — | — | — | — |
 
 WebAssembly is not a gap. That build has no threads (no `-pthread`, no
@@ -242,11 +242,69 @@ same compiles-links-silently-wrong trap in a new place. So this file compiles
 to nothing there, no driver binds, the engine's default hooks take over, and
 `audiopump.driver()` says `'none'`, which is exactly true.
 
-Two more things the desktop ports are honest about. There is no audio device
-on either: the sink is a file, and what plays it is `audiodev`'s own
-transport. And Windows has no `_thread` module at all, so the pump being a
+Two more things the desktop ports are honest about. On unix there is no audio
+device: the sink is a file, and what plays it is `audiodev`'s own transport.
+On Windows the sink can be a speaker instead (below). And Windows has no `_thread` module at all, so the pump being a
 native C thread there is not an optimisation — it is the only way a second
 thread exists in that interpreter.
+
+## Live audio on Windows
+
+On Windows the pump can play to a speaker and read a microphone itself, with
+no Python between them, so a live input through an effect to the output runs
+entirely on the pump's thread:
+
+```python
+import _audioif, audiobusio, audioeffects
+
+mic = _audioif.Input(sample_rate=48000, channel_count=2, frames=128)
+fx = audioeffects.create("Overdrive", mic, 48000)
+out = audiobusio.I2SOut(0, 1, 2, sample_rate=48000, sink="wasapi")
+out.play(fx.output)
+```
+
+Both use WASAPI in shared mode. Windows converts to and from the device's own
+format, so the stream is signed 16-bit at whatever rate you ask for.
+
+The sink is chosen by its path. A path starting with `wasapi` names a speaker
+rather than a file:
+
+    wasapi[:RATE[:CHANNELS[:PRIME_MS[:BUFFER_MS]]]][@ENDPOINT_ID]
+
+`audiobusio.I2SOut` fills in its own rate, so `"wasapi"` alone is the default
+speaker at the output's rate. `PRIME_MS` (10 by default) is silence queued
+before the first block, the cushion against the first periods. `BUFFER_MS` (20)
+is the device buffer asked for, and it is the most a pump that is not paced by
+a microphone can queue ahead. `ENDPOINT_ID` picks a device that is not the
+default, by the ID Windows' `IMMDevice::GetId` returns, such as
+`{0.0.0.00000000}.{786d5d70-...}`. The same path works as
+`audiopump.spawn(..., sink=...)`; pass `pace=False` there, because the speaker
+is the clock.
+
+`Input` takes three keywords on Windows besides the shared ones: `device=` is
+a capture endpoint ID, `buffer_ms=` (100) is the capture buffer, and
+`keep_ms=` (10) holds the backlog. A read waits until a block has arrived,
+which paces a graph that starts at the microphone. When the backlog grows
+past one block plus `keep_ms`, the oldest audio is dropped, so a pump that
+fell behind once does not carry the delay for the rest of the stream; 0 keeps
+everything. `deinit()` lets the device go.
+
+Both devices open on the pump's thread, on its first block, because COM
+objects belong to the thread that made them. Only the endpoint ID is checked
+when you create them, so a wrong one is an `OSError` at once rather than
+silence later. A device that fails to open afterwards plays or reads silence,
+and its stats say why.
+
+`Input.stats()` and `_audioif.sink_stats()` return the same tuple: frames
+moved, short reads (the microphone) or writes that found the speaker's queue
+empty, discontinuities Windows reported, frames dropped to hold `keep_ms`,
+waits that timed out, the device buffer in frames, the frames waiting (the
+microphone) or queued (the speaker), and the HRESULT of a failed open.
+`sink_stats()` is `None` when the sink is not a speaker.
+
+The microphone and the speaker are two clocks unless they are one device.
+Nothing resamples between them yet, so over a long run on two devices the
+speaker's queue slowly grows or empties.
 
 ## Building it into a firmware
 

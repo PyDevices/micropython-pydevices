@@ -82,6 +82,11 @@ uint32_t audiopump_i2s_live_rate(void);
 // desktop port, which is how audiobusio decides what it is.
 bool audiopump_i2s_have(void);
 
+// A desktop sink path, before the pump opens it: `rate` is the stream's, for a
+// path that leaves it out, and true means the sink is a clock (a Windows
+// speaker, "wasapi..."), so the pump must not also pace off the wall clock.
+bool audiopump_sink_prepare(const char *path, uint32_t rate);
+
 // True while a channel is open.
 bool audiopump_i2s_is_open(void);
 

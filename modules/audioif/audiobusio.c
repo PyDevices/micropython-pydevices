@@ -598,16 +598,28 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(audiobusio_i2sout_exit_obj, 4, 4,
 
 // --- play -----------------------------------------------------------------
 
+// The wall clock paces a desktop pump writing to a file or to nothing. A
+// Windows speaker ("wasapi...") is a clock of its own, like the DMA on a
+// board, and its writes wait for room; pacing twice would leave the two
+// clocks drifting apart under the pump.
+static bool audiobusio_pace(audiobusio_i2sout_obj_t *self, bool board) {
+    if (board) {
+        return false;
+    }
+    return !audiopump_sink_prepare(self->sink, self->rate);
+}
+
 static void audiobusio_start_direct(audiobusio_i2sout_obj_t *self,
     mp_obj_t sample, bool loop) {
     const bool board = audiopump_i2s_have();
     mp_obj_t sink = board ? mp_const_true
         : (self->sink != NULL ? self->sink_obj : mp_const_none);
-    // On a desktop the sink is not a clock, so the pump is paced off the wall
-    // clock instead; on a board the DMA is the pace and pacing twice would
-    // be a stall. `core = -1` lets the driver pin the task itself.
+    // A file sink is not a clock, so the pump is paced off the wall clock
+    // instead; on a board the DMA is the pace, on Windows a "wasapi" speaker
+    // is, and pacing twice would be a stall (audiobusio_pace above).
+    // `core = -1` lets the driver pin the task itself.
     (void)audiopump_c_spawn(sample, self->status, UINT64_MAX, sink, loop,
-        !board, -1, 200, NULL);
+        audiobusio_pace(self, board), -1, 200, NULL);
 }
 
 // The converted path: the same spawn, plus a scratch the pump converts each
@@ -644,7 +656,7 @@ static void audiobusio_start_converted(audiobusio_i2sout_obj_t *self,
     mp_obj_t sink = board ? mp_const_true
         : (self->sink != NULL ? self->sink_obj : mp_const_none);
     (void)audiopump_c_spawn(sample, self->status, UINT64_MAX, sink, loop,
-        !board, -1, 200, &cfg);
+        audiobusio_pace(self, board), -1, 200, &cfg);
 }
 
 static void audiobusio_start_fed(audiobusio_i2sout_obj_t *self,

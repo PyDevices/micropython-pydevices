@@ -25,6 +25,7 @@ CFLAGS_USERMOD += -I$(AUDIODSP_DIR)/src
 SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/_audioif.c
 SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audiobusio.c
 SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audioi2sin.c
+SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audioif_wasapi.c
 
 # --- which audioif this firmware was built from ----------------------
 # Computed at build time from this repo's own git, never stored; "unknown" when
