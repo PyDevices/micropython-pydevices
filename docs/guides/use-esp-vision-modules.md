@@ -1,13 +1,18 @@
 # Use esp-vision's modules
 
 Two modules come from [espressif/esp-vision](https://github.com/espressif/esp-vision)
-(Apache-2.0; its imlib is OpenMV's, MIT), compiled from esp-vision's own files
-without changes. Both are ESP32-P4 and ESP32-S3 only, both need ulab, and both
-are opt-in: `--modules all` leaves them out, so name them:
+(Apache-2.0; its imlib is OpenMV's, MIT), compiled from esp-vision's own
+files. Both are ESP32-P4 and ESP32-S3 only, both need ulab, and both are
+opt-in: `--modules all` leaves them out, so name them:
 
 ```bash
 ./build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB --modules ulab,tflite,vision
 ```
+
+On a P4 before chip revision 3, build the `PRE_REV3_C6_WIFI` variant instead.
+`h264` works there too, but that chip's encoder reads only YUV420, so each
+frame is converted in software first: 30 frames at 320x240 took 635 ms to
+encode on a revision 1.3 chip, against 263 ms on a revision 3 one.
 
 - **`tflite`**: TensorFlow Lite Micro inference (`tflite.Model`), the API
   OpenMV's `ml` module uses.
