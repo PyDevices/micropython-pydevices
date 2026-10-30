@@ -7,7 +7,7 @@ cache sizes and tick.
 
 ## An esp32 board
 
-On esp32, `build_mp.py` appends our ESP-IDF settings after the board's, so ours
+On esp32, [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py) appends our ESP-IDF settings after the board's, so ours
 win. They come from files it finds by name, each used only if it exists, in
 this order:
 

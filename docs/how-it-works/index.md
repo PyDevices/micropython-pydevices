@@ -39,7 +39,7 @@ is the user's side of this.
 - Upstream is **pinned**. Moving `UPSTREAM` re-validates every patch.
 - Patches are justified in their headers. Never hand-edit a patched tree: change
   the patch and prepare again.
-- `build_mp.py` names no version and no setting. Pins move in the lock files,
+- [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py) names no version and no setting. Pins move in the lock files,
   and esp32 settings live in sdkconfig fragments it finds by convention.
 - Publishing binaries is a separate decision from this source repository.
 

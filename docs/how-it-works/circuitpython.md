@@ -29,7 +29,7 @@ What differs is one function, and these are its parts.
   Python requirements in `deps/circuitpython-venv`.
 - **Our patches and boards go on first.** `patches/circuitpython/*.patch` are
   applied to `deps/circuitpython` and each `boards/circuitpython/<port>/<board>`
-  is linked into the port's `boards/`, once each; the build record lists the
+  is linked into the port's [`boards/`](https://github.com/PyDevices/micropython-pydevices/tree/main/boards), once each; the build record lists the
   patches. [The boards table](../reference/boards.md#circuitpython-boards) lists
   the boards.
 - **A module can ask espressif for ESP-IDF components.** CircuitPython's

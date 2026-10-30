@@ -26,7 +26,7 @@ python build_mp.py --port windows --variant pydevices --modules all
 .\builds\windows\pydevices\micropython.exe
 ```
 
-That's all you type. `build_mp.py` finds MSYS2 in `C:\msys64` (set
+That's all you type. [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py) finds MSYS2 in `C:\msys64` (set
 `MSYS2_ROOT` if it's elsewhere), puts its tools first on the build's `PATH`,
 and uses its `bash`. Left to `PATH`, `bash` from PowerShell is WSL's, which
 would run the build inside Linux. Without MSYS2 it stops and prints the install

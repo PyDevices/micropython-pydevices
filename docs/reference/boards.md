@@ -23,7 +23,7 @@ For a board that isn't listed, see [Build for a board](../guides/build-for-a-boa
 
 ## Variants
 
-Our variants, in `variants/`.
+Our variants, in [`variants/`](https://github.com/PyDevices/micropython-pydevices/tree/main/variants).
 
 | Port | Variant | What it is |
 |---|---|---|
