@@ -63,10 +63,18 @@ def sink(n):
 
 
 def size(path):
+    """How many bytes the sink has written so far, while it is still writing.
+
+    Not `os.stat`: on Windows that reads the size from the directory entry,
+    which stays at 0 until the writer closes the file, so every leg that
+    looks while the bus plays would read nothing. Seeking to the end of the
+    file through a handle of our own gives the real size on every platform.
+    """
     if FAULT == "deaf":
         return 0
     try:
-        return os.stat(path)[6]
+        with open(path, "rb") as f:
+            return f.seek(0, 2)
     except OSError:
         return 0
 
