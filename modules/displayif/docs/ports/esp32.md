@@ -48,7 +48,8 @@ Behavioral contract (proven on Qualia S3 + TL040HDS20):
 | Topic | Behavior |
 |-------|----------|
 | Scanout | Continuous DMA (`refresh_on_demand=0`); panel-owned FB |
-| `refresh()` | Cache writeback only (`esp_cache_msync`) |
+| `refresh()` | Double-buffered: promote the back buffer, wait for the scanout to take it (up to a frame), then paint the other buffer. Single buffer: cache writeback only |
+| `present()` / `wait()` | `refresh()` in two halves: `present()` promotes and returns at once, `wait()` returns once the scanout has the new buffer. A GUI that renders straight into `framebuffers()` (LVGL DIRECT) calls `wait()` before it paints again, and gets the frame period back instead of blocking in every present. `blit`, `fill_rect`, `framebuffers` and `refresh` finish a pending flip themselves |
 | Large panels | Bounce buffers `bounce_rows * h_res` px each (`bounce_rows=`, 4..20, default 20; stepped down if internal DMA RAM will not hold two) + dirty-row msync |
 | Buffer protocol | typecode `'B'` (MP has no `memoryview.cast`) |
 | Fast paths | Native `blit` / `fill_rect` (expose via custom `attr`) |
