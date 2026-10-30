@@ -14,7 +14,7 @@ The leading dot keeps it out of `--modules` and `all`, because esp-vision's own
 [`modules/tflite`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/tflite) and [`modules/vision`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/vision) are our glue around esp-vision's files:
 the ESP-IDF components esp-vision uses, at its versions; the include paths and
 definitions MicroPython's QSTR scan needs (it sees only a module's own paths,
-never a linked component's); and three pieces of our own.
+never a linked component's); and four pieces of our own.
 
 - **imlib compiles inside the module**, not as an ESP-IDF component. As a
   component it would wait for MicroPython's generated headers while being one of
@@ -32,6 +32,11 @@ never a linked component's); and three pieces of our own.
   those models use is in esp-vision's list already.
 - **`src/vision_preview_none.c`** stands in for esp-vision's preview, which
   streams frames to its IDE over its own USB multiplexer.
+- **`src/vision_h264.c`** is `h264`'s encoder, in place of esp-vision's
+  `platform/h264.c`. It is that file with one addition: the encoder in a P4
+  before revision 3 reads only packed YUV420 and refuses RGB565, so firmware
+  built for those chips converts each frame in software first. Revision 3 and
+  later take the image's RGB565 as esp-vision does.
 
 Two build details follow from esp-vision's code. The prebuilt RTSP library calls
 `ESP_ERROR_CHECK`'s handler, which nothing else references with MicroPython's

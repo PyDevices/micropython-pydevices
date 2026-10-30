@@ -54,7 +54,9 @@ if(ESP_PLATFORM AND (IDF_TARGET STREQUAL "esp32p4" OR IDF_TARGET STREQUAL "esp32
     set(_libs idf::esp_driver_jpeg idf::espressif__esp_new_jpeg)
     if(IDF_TARGET STREQUAL "esp32p4")
         idf_component_get_property(_h264 espressif__esp_h264 COMPONENT_DIR)
-        list(APPEND _src ${EV}/platform/h264.c ${EV}/modules/py_h264.c)
+        # Our encoder file, not esp-vision's platform/h264.c: it also feeds a
+        # pre-revision-3 P4, which takes only YUV420 (src/vision_h264.c).
+        list(APPEND _src ${CMAKE_CURRENT_LIST_DIR}/src/vision_h264.c ${EV}/modules/py_h264.c)
         list(APPEND _inc ${_h264}/interface/include ${_h264}/sw/include ${_h264}/port/include ${_h264}/hw/include)
         list(APPEND _libs idf::espressif__esp_h264)
     endif()
