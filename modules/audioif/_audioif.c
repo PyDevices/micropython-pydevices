@@ -103,6 +103,7 @@
 #include <fcntl.h>
 #include <io.h>
 #include <sys/stat.h>
+#include "audioif_wasapi.h"
 #define AUDIOIF_DRV_ESP (0)
 #define AUDIOIF_DRV_WIN (1)
 #define AUDIOIF_DRV_POSIX (0)
@@ -1249,8 +1250,74 @@ static uint64_t audiopump_sink_rx_bytes(void) {
 // against a good one. It is the one difference between the two opens.
 static int audiopump_sink_fd = -1;
 
+#if AUDIOIF_DRV_WIN
+// On Windows the sink can also be a speaker. A path that starts with "wasapi"
+// names one instead of a file:
+//
+//     wasapi[:RATE[:CHANNELS[:PRIME_MS[:BUFFER_MS]]]][@ENDPOINT_ID]
+//
+// RATE and CHANNELS are the pump's stream, signed 16-bit; PRIME_MS is the
+// silence queued ahead of the first block; BUFFER_MS is the device buffer
+// asked for. Without an ID it is the default speaker. An endpoint ID has no
+// ':' or '@' in it, so the two separators cannot be confused with it.
+//
+// The device itself opens on the pump's first write, on the pump's thread
+// (audioif_wasapi.c says why); only the ID is checked here, so a wrong one is
+// an OSError at spawn rather than silence afterwards.
+static audioif_wasapi_t *audiopump_sink_wasapi;
+static uint32_t audiopump_sink_wasapi_rate = 48000;
+
+static bool audiopump_sink_is_wasapi(const char *path) {
+    return strncmp(path, "wasapi", 6) == 0
+           && (path[6] == 0 || path[6] == ':' || path[6] == '@');
+}
+
+static bool audiopump_wasapi_parse(const char *path,
+    audioif_wasapi_cfg_t *cfg) {
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->rate = audiopump_sink_wasapi_rate;
+    cfg->channels = 2;
+    cfg->prime_ms = 10;
+    cfg->buffer_ms = 20;
+    const char *p = path + 6;
+    uint32_t *fields[4] = { &cfg->rate, &cfg->channels, &cfg->prime_ms,
+                            &cfg->buffer_ms };
+    for (int i = 0; i < 4 && *p == ':'; i++) {
+        p++;
+        if (*p >= '0' && *p <= '9') {
+            uint32_t v = 0;
+            while (*p >= '0' && *p <= '9') {
+                v = v * 10 + (uint32_t)(*p++ - '0');
+            }
+            *fields[i] = v;
+        }
+    }
+    if (*p == '@') {
+        p++;
+        if (strlen(p) >= sizeof(cfg->device)) {
+            return false;
+        }
+        strcpy(cfg->device, p);
+    } else if (*p != 0) {
+        return false;
+    }
+    return cfg->rate >= 8000 && cfg->rate <= 384000
+           && (cfg->channels == 1 || cfg->channels == 2);
+}
+#endif
+
 static bool audiopump_sink_open(const char *path) {
     #if AUDIOIF_DRV_WIN
+    if (audiopump_sink_is_wasapi(path)) {
+        audioif_wasapi_cfg_t cfg;
+        int32_t hr = 0;
+        if (!audiopump_wasapi_parse(path, &cfg)
+            || !audioif_wasapi_probe(cfg.device, false, &hr)) {
+            return false;
+        }
+        audiopump_sink_wasapi = audioif_wasapi_new(&cfg);
+        return audiopump_sink_wasapi != NULL;
+    }
     audiopump_sink_fd = _open(path, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY,
         _S_IREAD | _S_IWRITE);
     #else
@@ -1260,6 +1327,12 @@ static bool audiopump_sink_open(const char *path) {
 }
 
 static void audiopump_sink_close(void) {
+    #if AUDIOIF_DRV_WIN
+    if (audiopump_sink_wasapi != NULL) {
+        audioif_wasapi_free(audiopump_sink_wasapi);
+        audiopump_sink_wasapi = NULL;
+    }
+    #endif
     if (audiopump_sink_fd >= 0) {
         #if AUDIOIF_DRV_WIN
         _close(audiopump_sink_fd);
@@ -1271,11 +1344,22 @@ static void audiopump_sink_close(void) {
 }
 
 static bool audiopump_sink_ready(void) {
+    #if AUDIOIF_DRV_WIN
+    if (audiopump_sink_wasapi != NULL) {
+        return true;
+    }
+    #endif
     return audiopump_sink_fd >= 0;
 }
 
 static uint32_t audiopump_sink_write(const uint8_t *buffer, uint32_t length,
     uint32_t timeout_ms, bool *timed_out) {
+    #if AUDIOIF_DRV_WIN
+    if (audiopump_sink_wasapi != NULL) {
+        return audioif_wasapi_write(audiopump_sink_wasapi, buffer, length,
+            timeout_ms, timed_out);
+    }
+    #endif
     (void)timeout_ms;
     *timed_out = false;
     if (audiopump_sink_fd < 0) {
@@ -2308,6 +2392,206 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(audiopump_rt_probe_obj, 1,
     audiopump_rt_probe);
 #endif
 
+#if AUDIOIF_DRV_WIN
+// --- _audioif.Input on Windows: a WASAPI microphone, as an audiosample -----
+//
+//     mic = _audioif.Input(sample_rate=48000, channel_count=2, frames=128,
+//                          device="{0.0.1.00000000}.{...}")
+//     audiopump.spawn(audioeffects.create("Galactic", mic, 48000), ...,
+//                     sink="wasapi:48000:2@{0.0.0.00000000}.{...}")
+//
+// The same type the ESP32 build has, reading Windows' capture instead of an
+// I2S channel. get_buffer blocks until a block has arrived, which is the
+// pacing, and it runs on the pump thread: the device opens there, on the
+// first read, and nothing in get_buffer touches the MicroPython runtime.
+//
+// `keep_ms` holds the backlog: anything beyond one block plus that much is
+// dropped, oldest first, so a pump that fell behind once does not carry the
+// delay for the rest of the stream. 0 keeps everything.
+
+typedef struct {
+    audiosample_base_t base;
+    uint8_t *buf[2];            // ping-pong, so a node may hold the last block
+    uint32_t len;               // bytes per block
+    uint8_t which;
+    uint32_t timeout_ms;
+    audioif_wasapi_t *dev;      // C heap: the pump thread uses it
+    uint64_t short_reads;
+} audioif_win_input_obj_t;
+
+extern const mp_obj_type_t audioif_win_input_type;
+
+static void audioif_win_input_reset_buffer(audioif_win_input_obj_t *self,
+    bool single_channel_output, uint8_t channel) {
+    (void)single_channel_output;
+    (void)channel;
+    self->which = 0;
+}
+
+static audioio_get_buffer_result_t audioif_win_input_get_buffer(
+    audioif_win_input_obj_t *self, bool single_channel_output, uint8_t channel,
+    uint8_t **buffer, uint32_t *buffer_length) {
+    (void)single_channel_output;
+    (void)channel;
+    uint8_t *dst = self->buf[self->which];
+    self->which ^= 1;
+    const uint32_t got = self->dev == NULL ? 0
+        : audioif_wasapi_read(self->dev, dst, self->len, self->timeout_ms);
+    if (got < self->len) {
+        // Silence rather than stale audio: a short read is a starve.
+        memset(dst + got, 0, self->len - got);
+        self->short_reads++;
+    }
+    *buffer = dst;
+    *buffer_length = self->len;
+    return GET_BUFFER_MORE_DATA;
+}
+
+static mp_obj_t audioif_win_input_make_new(const mp_obj_type_t *type,
+    size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
+    enum { ARG_rate, ARG_channels, ARG_frames, ARG_timeout_ms, ARG_device,
+           ARG_buffer_ms, ARG_keep_ms };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_sample_rate,  MP_ARG_INT | MP_ARG_KW_ONLY, { .u_int = 48000 } },
+        { MP_QSTR_channel_count, MP_ARG_INT | MP_ARG_KW_ONLY, { .u_int = 2 } },
+        { MP_QSTR_frames,       MP_ARG_INT | MP_ARG_KW_ONLY, { .u_int = 256 } },
+        { MP_QSTR_timeout_ms,   MP_ARG_INT | MP_ARG_KW_ONLY, { .u_int = 500 } },
+        { MP_QSTR_device,       MP_ARG_OBJ | MP_ARG_KW_ONLY, { .u_rom_obj = MP_ROM_NONE } },
+        { MP_QSTR_buffer_ms,    MP_ARG_INT | MP_ARG_KW_ONLY, { .u_int = 100 } },
+        { MP_QSTR_keep_ms,      MP_ARG_INT | MP_ARG_KW_ONLY, { .u_int = 10 } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed),
+        allowed, args);
+
+    const uint32_t channels = (uint32_t)args[ARG_channels].u_int;
+    const uint32_t frames = (uint32_t)args[ARG_frames].u_int;
+    const mp_int_t rate = args[ARG_rate].u_int;
+    if (channels < 1 || channels > 2 || frames < 16 || rate < 8000
+        || rate > 384000 || args[ARG_buffer_ms].u_int < 1
+        || args[ARG_keep_ms].u_int < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("bad sample_rate, channel_count or frames"));
+    }
+    audioif_wasapi_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.capture = true;
+    cfg.rate = (uint32_t)rate;
+    cfg.channels = channels;
+    cfg.buffer_ms = (uint32_t)args[ARG_buffer_ms].u_int;
+    cfg.keep_ms = (uint32_t)args[ARG_keep_ms].u_int;
+    if (args[ARG_device].u_obj != mp_const_none) {
+        size_t n;
+        const char *id = mp_obj_str_get_data(args[ARG_device].u_obj, &n);
+        if (n >= sizeof(cfg.device)) {
+            mp_raise_ValueError(MP_ERROR_TEXT("device ID too long"));
+        }
+        memcpy(cfg.device, id, n);
+    }
+    // The ID is checked here, on the interpreter, so that a wrong one is an
+    // OSError now rather than silence on the pump later.
+    int32_t hr = 0;
+    if (!audioif_wasapi_probe(cfg.device, true, &hr)) {
+        mp_raise_OSError(MP_ENODEV);
+    }
+
+    audioif_win_input_obj_t *self = mp_obj_malloc_with_finaliser(
+        audioif_win_input_obj_t, (const mp_obj_type_t *)&audioif_win_input_type);
+    self->len = frames * channels * 2;
+    self->buf[0] = m_new0(uint8_t, self->len);
+    self->buf[1] = m_new0(uint8_t, self->len);
+    self->which = 0;
+    self->timeout_ms = (uint32_t)args[ARG_timeout_ms].u_int;
+    self->short_reads = 0;
+    self->dev = audioif_wasapi_new(&cfg);
+    if (self->dev == NULL) {
+        mp_raise_msg(&mp_type_MemoryError, NULL);
+    }
+
+    self->base.sample_rate = (uint32_t)rate;
+    self->base.max_buffer_length = self->len;
+    self->base.bits_per_sample = 16;
+    self->base.channel_count = (uint8_t)channels;
+    self->base.samples_signed = true;
+    self->base.single_buffer = false;
+    return MP_OBJ_FROM_PTR(self);
+}
+
+// Stop capturing and let the device go. Only while no pump is pulling this:
+// the pump keeps whatever it plays alive, so a finaliser never races it.
+static mp_obj_t audioif_win_input_deinit(mp_obj_t self_in) {
+    audioif_win_input_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    audioif_wasapi_free(self->dev);
+    self->dev = NULL;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(audioif_win_input_deinit_obj,
+    audioif_win_input_deinit);
+
+static mp_obj_t audioif_wasapi_stats_tuple(const audioif_wasapi_stats_t *st) {
+    mp_obj_t items[8] = {
+        mp_obj_new_int_from_ull(st->frames),
+        mp_obj_new_int_from_ull(st->starved),
+        mp_obj_new_int_from_ull(st->glitches),
+        mp_obj_new_int_from_ull(st->dropped),
+        mp_obj_new_int_from_ull(st->timeouts),
+        mp_obj_new_int_from_uint(st->buffer_frames),
+        mp_obj_new_int_from_uint(st->queued_frames),
+        mp_obj_new_int(st->error),
+    };
+    return mp_obj_new_tuple(8, items);
+}
+
+// (frames, short reads, glitches, dropped, timeouts, buffer frames, frames
+// waiting, error). `error` is the HRESULT of a failed open, else 0.
+static mp_obj_t audioif_win_input_stats(mp_obj_t self_in) {
+    audioif_win_input_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    audioif_wasapi_stats_t st;
+    audioif_wasapi_stats(self->dev, &st);
+    st.starved = self->short_reads;
+    return audioif_wasapi_stats_tuple(&st);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(audioif_win_input_stats_obj,
+    audioif_win_input_stats);
+
+static const mp_rom_map_elem_t audioif_win_input_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&audioif_win_input_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&audioif_win_input_deinit_obj) },
+    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&audioif_win_input_deinit_obj) },
+    AUDIOSAMPLE_FIELDS,
+};
+static MP_DEFINE_CONST_DICT(audioif_win_input_locals,
+    audioif_win_input_locals_table);
+
+static const audiosample_p_t audioif_win_input_proto = {
+    MP_PROTO_IMPLEMENT(MP_QSTR_protocol_audiosample)
+    .reset_buffer = (audiosample_reset_buffer_fun)audioif_win_input_reset_buffer,
+    .get_buffer = (audiosample_get_buffer_fun)audioif_win_input_get_buffer,
+};
+
+MP_DEFINE_CONST_OBJ_TYPE(
+    audioif_win_input_type,
+    MP_QSTR_Input,
+    MP_TYPE_FLAG_HAS_SPECIAL_ACCESSORS,
+    make_new, audioif_win_input_make_new,
+    attr, cp_compat_attr,
+    locals_dict, &audioif_win_input_locals,
+    protocol, &audioif_win_input_proto
+    );
+
+// The speaker's side of the same numbers, while a "wasapi" sink is open:
+// (frames, starved writes, 0, 0, timeouts, buffer frames, frames queued at
+// the last write, error). None when the sink is not a speaker.
+static mp_obj_t audioif_sink_stats(void) {
+    if (audiopump_sink_wasapi == NULL) {
+        return mp_const_none;
+    }
+    audioif_wasapi_stats_t st;
+    audioif_wasapi_stats(audiopump_sink_wasapi, &st);
+    return audioif_wasapi_stats_tuple(&st);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(audioif_sink_stats_obj, audioif_sink_stats);
+#endif
+
 // --- the module -----------------------------------------------------------
 
 static mp_obj_t audiopump_driver_name(void) {
@@ -2451,6 +2735,10 @@ static const mp_rom_map_elem_t audioif_driver_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_lock_probe),
       MP_ROM_PTR(&audiopump_lock_probe_obj) },
     #endif
+    #if AUDIOIF_DRV_WIN
+    { MP_ROM_QSTR(MP_QSTR_Input), MP_ROM_PTR(&audioif_win_input_type) },
+    { MP_ROM_QSTR(MP_QSTR_sink_stats), MP_ROM_PTR(&audioif_sink_stats_obj) },
+    #endif
 };
 static MP_DEFINE_CONST_DICT(audioif_driver_globals,
     audioif_driver_globals_table);
@@ -2462,6 +2750,22 @@ const mp_obj_module_t _audioif_module = {
 MP_REGISTER_MODULE(MP_QSTR__audioif, _audioif_module);
 
 #endif  // !AUDIOIF_DRV_NONE
+
+// What audiobusio asks before it spawns: the rate its stream runs at, which a
+// "wasapi" path may leave out, and whether this sink is a clock. A speaker is,
+// and a pump writing to one must not be paced off the wall clock as well.
+bool audiopump_sink_prepare(const char *path, uint32_t rate) {
+    #if AUDIOIF_DRV_WIN
+    if (path != NULL && audiopump_sink_is_wasapi(path)) {
+        audiopump_sink_wasapi_rate = rate;
+        return true;
+    }
+    #else
+    (void)path;
+    (void)rate;
+    #endif
+    return false;
+}
 
 // The four the CircuitPython-shaped binding in audiobusio.c needs. On a
 // build with no I2S they still exist and answer honestly, so that file needs

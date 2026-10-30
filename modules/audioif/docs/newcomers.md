@@ -48,9 +48,9 @@ The portable engine belongs in [audiodsp](https://github.com/PyDevices/audiodsp)
 
 Clone `audioif` beside `audiodsp`. Both must be included as user modules; each build file finds audiodsp headers through a sibling path by default. `micropython-pydevices` supplies ready-made audio manifests and board variants, while the root README gives upstream build commands.
 
-ESP32 has the production I2S driver and can expose microphone capture through `_audioif.Input`. Unix and Windows use native threads with a file sink for deterministic testing. WebAssembly deliberately binds no driver because it has neither threads nor a hardware sink.
+ESP32 has the production I2S driver and can expose microphone capture through `_audioif.Input`. Unix and Windows use native threads with a file sink for deterministic testing; Windows can also play to a WASAPI speaker and read a WASAPI microphone through `_audioif.Input`, both on the pump thread (README, "Live audio on Windows"). WebAssembly deliberately binds no driver because it has neither threads nor a hardware sink.
 
-`I2SOut` accepts PyDevices-specific `port=`, `sample_rate=`, and `main_clock_fs=` options for board wiring. Its desktop-only `sink=` option is for testing. Do not use `retarget()` to change sample rate or signed-16 format: the running DMA and pump buffers are sized for the original stream.
+`I2SOut` accepts PyDevices-specific `port=`, `sample_rate=`, and `main_clock_fs=` options for board wiring. Its desktop-only `sink=` option writes to a file for testing, or on Windows names a speaker with `sink="wasapi..."`. Do not use `retarget()` to change sample rate or signed-16 format: the running DMA and pump buffers are sized for the original stream.
 
 ## Contributor boundary
 

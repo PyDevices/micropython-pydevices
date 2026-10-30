@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Windows plays and records live audio on the pump's thread.** A sink path
+  starting with `wasapi` is a WASAPI speaker instead of a file
+  (`audiobusio.I2SOut(..., sink="wasapi")`, or `wasapi:RATE:CHANNELS@ID` for
+  another device), and `_audioif.Input` reads a WASAPI microphone, with
+  `device=`, `buffer_ms=` and `keep_ms=` keywords. A live input through an
+  effect to the output then runs with no Python in the path: on a USB
+  interface looped back on itself, a click goes round in about 100 ms, where
+  the same loop fed from Python took about 180 ms. `_audioif.sink_stats()`
+  reports the speaker's side. An `I2SOut` writing to a speaker is not paced
+  off the wall clock, because the speaker is the clock.
 - **`audioi2sin.I2SIn` records from an I2S microphone.** CircuitPython's own
   class: `I2SIn(bit_clock, word_select, data, ...)` and `record(buffer,
   count)`, with its keywords, typecode rules and bit-depth conversions, so
