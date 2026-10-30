@@ -546,6 +546,30 @@ it off. A small receive window (the last row stands in for another
 microcontroller as the viewer) means more round trips per picture, each of
 them as slow. If pictures still crawl, move the board nearer the access point
 or use Ethernet.
+
+With another board as the viewer, the same DEV-KIT (at -61 to -65 dBm) sent to
+a LilyGO T-Embed (ESP32-S3) running `jpegio_viewer_simpletest.py` at -83 to
+-85 dBm, two runs of 20 pictures for each setting. The times are from the
+viewer's request to the last byte of the JPEG. Decoding at an eighth of the
+size and showing the picture took another 86 ms on the S3.
+
+| Sender's power saving | Viewer's power saving | Bluetooth on the viewer | per picture, median | slowest |
+|---|---|---|---|---|
+| off | off | off | 108 to 152 ms | 1.3 to 1.5 s |
+| off | on (the default) | off | 107 to 165 ms | 0.3 s |
+| on (the default) | off | off | 327 to 365 ms | 0.7 to 1.5 s |
+| on | on | off | 201 to 326 ms | 1.6 to 2.6 s |
+| off | off | on | 502 to 536 ms | 2.6 to 3.5 s |
+| on | on | on | 2.9 s | 7.4 s |
+
+The sender's power saving matters and the viewer's barely does, so the example
+turns it off on the sender only. Bluetooth matters most: the S3 shares one
+radio between Bluetooth and Wi-Fi, and with Bluetooth active on the viewer
+(here a Bluetooth REPL waiting for a connection) each picture took about four
+times as long with power saving off and about ten times as long with it on.
+Turn Bluetooth off on the viewer (`bluetooth.BLE().active(False)`) if nothing
+needs it.
+
 `camera_mjpeg.py` doesn't wait for requests, which is why it streams at 7 to
 15 fps over the same Wi-Fi.
 
