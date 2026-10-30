@@ -1,7 +1,7 @@
 # lib-overrides
 
 Packages from micropython-lib that these firmware builds freeze their own copy
-of. `modules/manifest.py` registers this folder ahead of micropython-lib, so a
+of. [`modules/manifest.py`](../modules/manifest.py) registers this folder ahead of micropython-lib, so a
 port's `require("mip")` (bundle-networking on ESP32, `mip-cmdline` on unix)
 gets the copy here and upstream's is left out. `mpremote mip` is unaffected,
 since it runs on the host.
@@ -20,6 +20,6 @@ The change is the block between `PyDevices patch begins` and `ends` in
 `mip/__init__.py`, the two `requests.get` calls swapped for `_get`, and a
 `_drop()` at the end of `install`. Anything that isn't `https://` with a
 Content-Length (a redirect to http, chunked bodies, a port in the URL) falls
-back to `requests.get`. `test_lib_overrides.py` checks that removing those
+back to `requests.get`. [`test_lib_overrides.py`](../test_lib_overrides.py) checks that removing those
 pieces gives upstream's file back, so to move to a newer upstream, copy its
 `mip/__init__.py` in and re-apply the pieces.

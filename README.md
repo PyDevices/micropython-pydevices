@@ -46,6 +46,6 @@ For a board, name its port, board and variant, and the modules you want:
     --flash 16MB --modules displayif,pygraphics
 ```
 
-[Docs](https://github.com/PyDevices/micropython-pydevices/blob/main/docs/index.md) · [Examples](https://pydevices.github.io/gallery/gallery/) · [Roadmap](ROADMAP.md)
+[Docs](docs/index.md) · [Examples](https://pydevices.github.io/gallery/gallery/) · [Roadmap](ROADMAP.md)
 
 Made by [PyDevices](https://pydevices.com).

@@ -34,5 +34,5 @@ For a `.uf2`, mpftp copies it to the board's drive instead.
 
 ## After flashing
 
-pydevices' [Bringing up a board](https://github.com/PyDevices/pydevices/blob/main/docs/board-bringup.md)
+pydevices' [Bringing up a board](https://github.com/PyDevices/pydevices/blob/main/docs/guides/bring-up-a-board.md)
 takes a flashed board to one drawing on its own panel.

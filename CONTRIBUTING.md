@@ -9,18 +9,18 @@ fix is a good first contribution.
 
 | Path | What's there |
 |---|---|
-| `build_mp.py` | The build command. |
+| [`build_mp.py`](build_mp.py) | The build command. |
 | `UPSTREAM` | The MicroPython commit the patches apply to. |
 | `modules.lock`, `deps.lock` | What gets fetched when it's missing, omnipython-lvgl included. |
-| `modules/` | The module manifest, `all/`, `tflite/` and `vision/` (esp-vision's), the modules linked or cloned, and the C modules that live only here: `audioif`, `cameraif`, `castif`, `displayif`, `h264enc`, `jpegio`, `mdns`, `pngio`, `ppa`, `tsmux`, `usbhost`. Each has its own README and tests. |
+| [`modules/`](modules) | The module manifest, `all/`, `tflite/` and `vision/` (esp-vision's), the modules linked or cloned, and the C modules that live only here: `audioif`, `cameraif`, `castif`, `displayif`, `h264enc`, `jpegio`, `mdns`, `pngio`, `ppa`, `tsmux`, `usbhost`. Each has its own README and tests. |
 | `modules/.omnipython-lvgl` | LVGL, its bindings and its ports, which `--modules lvgl` compiles: the sibling checkout, linked, or `modules.lock`'s commit, fetched. |
-| `patches/` | The patch series and `apply_patches.py`. |
-| `variants/`, `boards/` | Our variants and CircuitPython boards. |
-| `scripts/` | `exercise_build.sh`, `release_firmware.py`, `stage_firmware_page.py`, `serve_workbench.sh`, `freeze_list.py`, `update_provenance.py`. |
-| `.devcontainer/` | One dev container per port. |
-| `docs/` | The documentation site. |
+| [`patches/`](patches) | The patch series and `apply_patches.py`. |
+| [`variants/`](variants), [`boards/`](boards) | Our variants and CircuitPython boards. |
+| [`scripts/`](scripts) | `exercise_build.sh`, `release_firmware.py`, `stage_firmware_page.py`, `serve_workbench.sh`, `freeze_list.py`, `update_provenance.py`. |
+| [`.devcontainer/`](.devcontainer) | One dev container per port. |
+| [`docs/`](docs) | The documentation site. |
 
-The reference pages in [the docs](https://github.com/PyDevices/micropython-pydevices/blob/main/docs/index.md)
+The reference pages in [the docs](docs/index.md)
 describe what each of these does.
 
 ## Rules
@@ -43,7 +43,7 @@ python3 -m unittest test_provenance -v
 python3 -m unittest test_release_firmware test_stage_firmware_page -v
 ```
 
-Each module has its own workflow under `.github/workflows/`, named for it.
+Each module has its own workflow under [`.github/workflows/`](.github/workflows), named for it.
 
 ## Change a patch
 

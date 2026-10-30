@@ -2,7 +2,7 @@
 
 micropython-pydevices builds firmware: MicroPython-compatible and
 CircuitPython-compatible interpreters with the PyDevices C modules compiled in,
-for boards, desktops and the browser. One command, `build_mp.py`, does it.
+for boards, desktops and the browser. One command, [`build_mp.py`](../build_mp.py), does it.
 
 ## Get started
 

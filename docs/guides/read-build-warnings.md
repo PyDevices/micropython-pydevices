@@ -18,7 +18,7 @@ comes out as text and a log shows the colour codes raw. Nothing is broken.
   and still maps the old names.
 - `Component lockfile contents have changed`, a CMake warning that asks you to
   mention it in any issue. The build uses its own TinyUSB and a newer ESP-IDF
-  than upstream's lockfile records; `build_mp.py` puts the lockfile back
+  than upstream's lockfile records; [`build_mp.py`](../../build_mp.py) puts the lockfile back
   afterwards.
 - cmake's `Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed` and `Could NOT find
   Threads`.

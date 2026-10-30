@@ -7,7 +7,7 @@ cache sizes and tick.
 
 ## An esp32 board
 
-On esp32, `build_mp.py` appends our ESP-IDF settings after the board's, so ours
+On esp32, [`build_mp.py`](../../build_mp.py) appends our ESP-IDF settings after the board's, so ours
 win. They come from files it finds by name, each used only if it exists, in
 this order:
 
@@ -37,7 +37,7 @@ It may also hold:
   full-speed PHYs, so the USB device comes out on the kit's USB-C marked "USB".
 
 The partition table is found the same way, the most specific `partitions.csv`
-winning ([`variants/esp32/partitions.esp32s3.csv`](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/esp32/partitions.esp32s3.csv)
+winning ([`variants/esp32/partitions.esp32s3.csv`](../../variants/esp32/partitions.esp32s3.csv)
 adds a coredump partition on the S3, which a standard build leaves unused).
 Without one, the board's own is used. Either way, autosize grows the app
 partition when the image doesn't fit.
