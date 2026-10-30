@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 00:00:00 -0500
+Subject: [PATCH] esp32/modsocket: setsockopt SO_KEEPALIVE and the TCP keepalive timers.
+
+socket.setsockopt() on the esp32 port took SO_REUSEADDR, SO_BROADCAST,
+SO_BINDTODEVICE and TCP_NODELAY, and printed "option not implemented"
+for anything else. A server that wants to notice a client that vanished
+without closing (a dropped link, a powered-off phone) had no way to ask
+lwIP to probe the connection, which ESP-IDF builds with
+LWIP_TCP_KEEPALIVE.
+
+This accepts SO_KEEPALIVE at SOL_SOCKET and TCP_KEEPIDLE, TCP_KEEPINTVL
+and TCP_KEEPCNT at IPPROTO_TCP, and exports the four names from the
+socket module. The timers are matched on the level as well as the
+number, because TCP_KEEPINTVL has the number of SO_REUSEADDR.
+
+Based-on: micropython b70ae1aca (v1.30.0-preview)
+---
+diff --git a/ports/esp32/modsocket.c b/ports/esp32/modsocket.c
+index f5fd96422..8bd04461f 100644
+--- a/ports/esp32/modsocket.c
++++ b/ports/esp32/modsocket.c
+@@ -492,10 +492,21 @@ static mp_obj_t socket_setsockopt(size_t n_args, const mp_obj_t *args) {
+ 
+     int opt = mp_obj_get_int(args[2]);
+ 
++    // The keepalive timers share option numbers with SOL_SOCKET options
++    // (TCP_KEEPINTVL is SO_REUSEADDR), so they are told apart by level.
++    if (mp_obj_get_int(args[1]) == IPPROTO_TCP && (opt == TCP_KEEPIDLE || opt == TCP_KEEPINTVL || opt == TCP_KEEPCNT)) {
++        int val = mp_obj_get_int(args[3]);
++        if (lwip_setsockopt(self->fd, IPPROTO_TCP, opt, &val, sizeof(int)) != 0) {
++            mp_raise_OSError(errno);
++        }
++        return mp_const_none;
++    }
++
+     switch (opt) {
+         // level: SOL_SOCKET
+         case SO_REUSEADDR:
+-        case SO_BROADCAST: {
++        case SO_BROADCAST:
++        case SO_KEEPALIVE: {
+             int val = mp_obj_get_int(args[3]);
+             int ret = lwip_setsockopt(self->fd, SOL_SOCKET, opt, &val, sizeof(int));
+             if (ret != 0) {
+@@ -1015,7 +1026,11 @@ static const mp_rom_map_elem_t mp_module_socket_globals_table[] = {
+     { MP_ROM_QSTR(MP_QSTR_SO_BROADCAST), MP_ROM_INT(SO_BROADCAST) },
+     { MP_ROM_QSTR(MP_QSTR_SO_BINDTODEVICE), MP_ROM_INT(SO_BINDTODEVICE) },
+     { MP_ROM_QSTR(MP_QSTR_IP_ADD_MEMBERSHIP), MP_ROM_INT(IP_ADD_MEMBERSHIP) },
++    { MP_ROM_QSTR(MP_QSTR_SO_KEEPALIVE), MP_ROM_INT(SO_KEEPALIVE) },
+     { MP_ROM_QSTR(MP_QSTR_TCP_NODELAY), MP_ROM_INT(TCP_NODELAY) },
++    { MP_ROM_QSTR(MP_QSTR_TCP_KEEPIDLE), MP_ROM_INT(TCP_KEEPIDLE) },
++    { MP_ROM_QSTR(MP_QSTR_TCP_KEEPINTVL), MP_ROM_INT(TCP_KEEPINTVL) },
++    { MP_ROM_QSTR(MP_QSTR_TCP_KEEPCNT), MP_ROM_INT(TCP_KEEPCNT) },
+     { MP_ROM_QSTR(MP_QSTR_MSG_PEEK), MP_ROM_INT(MSG_PEEK) },
+     { MP_ROM_QSTR(MP_QSTR_MSG_DONTWAIT), MP_ROM_INT(MSG_DONTWAIT) },
+ };
