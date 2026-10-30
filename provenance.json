@@ -130,6 +130,9 @@
   },
   "0044-micropython-esp32-inisetup-new-filesystem-over-stale-flash.patch": {
    "sha256": "217ddd09c806be0d78bb22bbdda5692985b2ad7f325029f2dc7f6cbd7a9fb41a"
+  },
+  "0045-micropython-esp32-modsocket-so-keepalive-and-tcp-keepalive-timers.patch": {
+   "sha256": "f3806160db7a41639d8460ec2df8e580dba8c2cf3f6cf2c93c846e791dbf893e"
   }
  },
  "tinyusb_patches": {
