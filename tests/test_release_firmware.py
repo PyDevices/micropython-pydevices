@@ -1,7 +1,7 @@
 """Tests for scripts/release_firmware.py: the cell table and the checks
 `assemble` makes on what the builds hand over. Nothing is built.
 
-    python3 -m unittest test_release_firmware -v
+    PYTHONPATH=tests python3 -m unittest test_release_firmware -v
 
 Each check is shown to fail by planting its fault in a set that passes.
 """
@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import release_firmware as rf
 
 COMMIT = "a" * 40

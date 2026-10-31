@@ -20,6 +20,6 @@ The change is the block between `PyDevices patch begins` and `ends` in
 `mip/__init__.py`, the two `requests.get` calls swapped for `_get`, and a
 `_drop()` at the end of `install`. Anything that isn't `https://` with a
 Content-Length (a redirect to http, chunked bodies, a port in the URL) falls
-back to `requests.get`. [`test_lib_overrides.py`](../test_lib_overrides.py) checks that removing those
+back to `requests.get`. [`test_lib_overrides.py`](../tests/test_lib_overrides.py) checks that removing those
 pieces gives upstream's file back, so to move to a newer upstream, copy its
 `mip/__init__.py` in and re-apply the pieces.
