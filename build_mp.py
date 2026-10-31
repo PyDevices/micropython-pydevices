@@ -345,7 +345,7 @@ def lvgl_checkout(ws):
 # "all"): in the workspace a link to the sibling checkout, which wins like
 # every other module, anywhere else a clone at the pinned commit. The tree is
 # assembled into deps/omnipython-lib on every build that needs it; the outside
-# packages the library pins by tag (pygraphics, audiocomponents' two) are
+# packages the library pins by tag (pygraphics, audioinstruments, audioeffects) are
 # cloned once into deps/omnipython-lib-sources. In the workspace those come
 # from the sibling checkouts instead, the way every module does, so a
 # workspace build freezes the code beside it rather than the pinned tag.

@@ -18,12 +18,12 @@ A name is one of three things:
   [Use esp-vision's modules](use-esp-vision-modules.md).
 
 A module never brings another, and nothing checks dependencies. If you name
-`audiocomponents`, `tflite` or `vision`, name `ulab` too, or use `all`.
+`audioinstruments`, `audioeffects`, `tflite` or `vision`, name `ulab` too, or use `all`.
 
 ## Python packages from omnipython-lib
 
 Our Python-only packages come from omnipython-lib: `pydevices`, `palettes`,
-`pdwidgets` and `audiocomponents` are modules whose manifest requires them from
+`pdwidgets`, `audioinstruments` and `audioeffects` are modules whose manifest requires them from
 it. Any other package of it, such as `appkit` or a board config, can be named
 too.
 
