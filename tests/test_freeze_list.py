@@ -1,7 +1,7 @@
 """Unit tests for scripts/freeze_list.py's comparison and, with a prepared
 MicroPython checkout, its reading of a manifest.
 
-    python3 -m unittest test_freeze_list -v
+    PYTHONPATH=tests python3 -m unittest test_freeze_list -v
 """
 
 import contextlib
@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parent.parent
 _spec = importlib.util.spec_from_file_location("freeze_list", HERE / "scripts" / "freeze_list.py")
 freeze_list = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(freeze_list)

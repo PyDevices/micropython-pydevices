@@ -1,7 +1,7 @@
 """Tests for scripts/update_provenance.py, and the check that the committed
 provenance.json is current.
 
-    python3 -m unittest test_provenance -v
+    PYTHONPATH=tests python3 -m unittest test_provenance -v
 """
 import contextlib
 import io
@@ -12,10 +12,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import update_provenance as up
 
-REPO = Path(__file__).resolve().parent
+REPO = Path(__file__).resolve().parent.parent
 
 
 class Committed(unittest.TestCase):

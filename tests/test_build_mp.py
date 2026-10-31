@@ -1,6 +1,6 @@
 """Unit tests for build_mp.py's decisions that need no build.
 
-    python3 -m unittest test_build_mp -v
+    PYTHONPATH=tests python3 -m unittest test_build_mp -v
 """
 
 import contextlib
@@ -13,10 +13,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import build_mp
-
-sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
-import release_firmware as rf
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "scripts"))
+import build_mp  # noqa: E402
+import release_firmware as rf  # noqa: E402
 
 A = "a" * 40
 B = "b" * 40

@@ -16,7 +16,8 @@ fix is a good first contribution.
 | `modules/.omnipython-lvgl` | LVGL, its bindings and its ports, which `--modules lvgl` compiles: the sibling checkout, linked, or `modules.lock`'s commit, fetched. |
 | [`patches/`](patches) | The patch series and `apply_patches.py`. |
 | [`variants/`](variants), [`boards/`](boards) | Our variants and CircuitPython boards. |
-| [`scripts/`](scripts) | `exercise_build.sh`, `release_firmware.py`, `stage_firmware_page.py`, `serve_workbench.sh`, `freeze_list.py`, `update_provenance.py`. |
+| [`scripts/`](scripts) | `exercise_build.sh`, `release_firmware.py`, `stage_firmware_page.py`, `serve_workbench.sh`, `freeze_list.py`, `update_provenance.py`, `ci_scope.py`. |
+| [`tests/`](tests) | The unit tests for `build_mp.py`, the scripts, the provenance record and `lib-overrides`. |
 | [`.devcontainer/`](.devcontainer) | One dev container per port. |
 | [`docs/`](docs) | The documentation site. |
 
@@ -38,9 +39,10 @@ describe what each of these does.
 directory has to be wiped. They need no toolchain:
 
 ```bash
-python3 -m unittest test_build_mp test_freeze_list -v
-python3 -m unittest test_provenance -v
-python3 -m unittest test_release_firmware test_stage_firmware_page -v
+PYTHONPATH=tests python3 -m unittest test_build_mp test_freeze_list -v
+PYTHONPATH=tests python3 -m unittest test_provenance -v
+PYTHONPATH=tests python3 -m unittest test_release_firmware test_stage_firmware_page test_ci_scope -v
+PYTHONPATH=tests python3 -m unittest test_lib_overrides -v
 ```
 
 Each module has its own workflow under [`.github/workflows/`](.github/workflows), named for it.

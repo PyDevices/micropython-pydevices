@@ -3,7 +3,7 @@ import pathlib
 import re
 import unittest
 
-HERE = pathlib.Path(__file__).parent
+HERE = pathlib.Path(__file__).resolve().parent.parent
 OURS = HERE / "lib-overrides/mip/mip/__init__.py"
 _REL = pathlib.Path("micropython/lib/micropython-lib/micropython/mip/mip/__init__.py")
 UPSTREAM = next((d / _REL for d in HERE.resolve().parents if (d / _REL).exists()), HERE / "missing")
