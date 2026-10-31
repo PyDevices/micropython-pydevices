@@ -26,6 +26,15 @@ ours to port.
 
 More models for tflite:
 
+- **Small int8 models on the ESP32-P4 and S3.** The microWakeWord wake words,
+  micro_speech, person_detection, MobileNet-v2 int8 and yamnet-cry-distill fit
+  both chips' resolver and memory. Each has run on a P4 board; the S3 is
+  judged from the ops, not yet run.
+- **Bigger detectors on the P4 only.** yolo26n at 640 runs there but needs a
+  6 MB arena and 33 s a frame, and is AGPL-3.0, so it stays a proof, not an example.
+- **Next to try.** efficientdet-lite0, silero-vad, MoveNet and the MLPerf Tiny
+  models. fp16 and fp32 models (YuNet, yolox-nano) need an int8 conversion first;
+  GELU and StableHLO models (OCR, NER) don't run in tflite.
 - **YAMNet's full 521-class int8 model in tflite.** The published
   yamnet-mel-int8-tflm conversion scores every class near 0.5 for any input;
   a fresh int8 conversion of Google's YAMNet would run in the same resolver.
