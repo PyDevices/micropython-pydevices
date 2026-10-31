@@ -49,9 +49,9 @@ on:
       - 'scripts/pin_lvgl_ref.sh'
       - 'scripts/stage_firmware_page.py'
       - 'scripts/ci_scope.py'
-      - 'test_release_firmware.py'
-      - 'test_stage_firmware_page.py'
-      - 'test_ci_scope.py'
+      - 'tests/test_release_firmware.py'
+      - 'tests/test_stage_firmware_page.py'
+      - 'tests/test_ci_scope.py'
 
 permissions:
   contents: read
@@ -86,7 +86,7 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: python3 scripts/ci_scope.py firmware --event "$EVENT" --base "$BASE"
       - name: The checks themselves pass
-        run: python3 -m unittest test_release_firmware test_stage_firmware_page test_ci_scope -v
+        run: PYTHONPATH=tests python3 -m unittest test_release_firmware test_stage_firmware_page test_ci_scope -v
       - name: Which cells this run builds
         id: matrix
         env:

@@ -8,30 +8,30 @@ on:
     branches: [main]
     paths:
       - 'build_mp.py'
-      - 'test_build_mp.py'
-      - 'test_freeze_list.py'
+      - 'tests/test_build_mp.py'
+      - 'tests/test_freeze_list.py'
       - 'scripts/freeze_list.py'
       - 'modules/library.py'
       - 'modules.lock'
       - 'UPSTREAM'
       - 'patches/micropython/**'
       - 'patches/tinyusb/**'
-      - 'test_provenance.py'
+      - 'tests/test_provenance.py'
       - 'scripts/update_provenance.py'
       - 'provenance.json'
       - '.github/workflows/build-mp.yml'
   pull_request:
     paths:
       - 'build_mp.py'
-      - 'test_build_mp.py'
-      - 'test_freeze_list.py'
+      - 'tests/test_build_mp.py'
+      - 'tests/test_freeze_list.py'
       - 'scripts/freeze_list.py'
       - 'modules/library.py'
       - 'modules.lock'
       - 'UPSTREAM'
       - 'patches/micropython/**'
       - 'patches/tinyusb/**'
-      - 'test_provenance.py'
+      - 'tests/test_provenance.py'
       - 'scripts/update_provenance.py'
       - 'provenance.json'
       - '.github/workflows/build-mp.yml'
@@ -47,9 +47,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Unit tests
-        run: python3 -m unittest test_build_mp test_freeze_list -v
+        run: PYTHONPATH=tests python3 -m unittest test_build_mp test_freeze_list -v
       - name: provenance.json is current
-        run: python3 -m unittest test_provenance -v
+        run: PYTHONPATH=tests python3 -m unittest test_provenance -v
 
   vpath:
     # make must find each user C module's sources in its own directory, not in
@@ -75,4 +75,4 @@ jobs:
       - name: Each module's sources come from its own directory
         env:
           PYDEVICES_REQUIRE_MICROPYTHON: '1'
-        run: python3 -m unittest test_build_mp.VpathSearchesEachModuleFirst -v
+        run: PYTHONPATH=tests python3 -m unittest test_build_mp.VpathSearchesEachModuleFirst -v

@@ -5,7 +5,7 @@ import sys
 import unittest
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE / "scripts"))
 import ci_scope  # noqa: E402
 
@@ -36,7 +36,7 @@ class CircuitPythonJobs(unittest.TestCase):
         self.assertEqual(self.reach("modules/pngio/README.md", "modules/mdns/examples/a.py",
                                     "modules/displayif/docs/x.md", "patches/micropython/0001-x.patch",
                                     "patches/tinyusb/0001-x.patch", "UPSTREAM", "variants/LCD_7/x.cmake",
-                                    "docs/a.md", "test_release_firmware.py"), set())
+                                    "docs/a.md", "tests/test_release_firmware.py"), set())
 
     def test_usbhost_tests_do_not_build_the_p4_image(self):
         self.assertEqual(self.reach("modules/usbhost/tests/test_a.py"), {"unix_modules"})
@@ -63,8 +63,8 @@ class FirmwareCells(unittest.TestCase):
         self.assertTrue(rest)
 
     def test_the_stager_and_the_tests_build_nothing(self):
-        self.assertEqual(self.scope(["scripts/stage_firmware_page.py", "test_stage_firmware_page.py",
-                                     "test_release_firmware.py"]), (False, False, []))
+        self.assertEqual(self.scope(["scripts/stage_firmware_page.py", "tests/test_stage_firmware_page.py",
+                                     "tests/test_release_firmware.py"]), (False, False, []))
 
     def test_the_workflow_builds_the_whole_set(self):
         self.assertEqual(self.scope([ci_scope.FIRMWARE_WORKFLOW]), (True, True, []))

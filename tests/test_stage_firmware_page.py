@@ -1,6 +1,6 @@
 """Tests for scripts/stage_firmware_page.py.
 
-    python3 -m unittest test_stage_firmware_page -v
+    PYTHONPATH=tests python3 -m unittest test_stage_firmware_page -v
 """
 import json
 import shutil
@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import release_firmware as rf
 import stage_firmware_page as sp

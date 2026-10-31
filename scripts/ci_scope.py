@@ -47,7 +47,7 @@ INERT = (
     "**.md", "docs/**", "NOTICE", "LICENSE", "lib-overrides/**", "boards/**", "variants/**",
     "provenance.json", "scripts/stage_firmware_page.py", "scripts/pin_lvgl_ref.sh",
     "scripts/update_provenance.py", "scripts/freeze_list.py", "scripts/serve_workbench.sh",
-    "scripts/exercise_build.sh", "test_*.py", ".gitignore", ".github/dependabot.yml",
+    "scripts/exercise_build.sh", "tests/**", ".gitignore", ".github/dependabot.yml",
 )
 
 # What the three CircuitPython jobs can read. They build CircuitPython, so
