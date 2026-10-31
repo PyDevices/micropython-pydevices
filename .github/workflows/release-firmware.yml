@@ -49,6 +49,8 @@ on:
       - 'scripts/pin_lvgl_ref.sh'
       - 'scripts/stage_firmware_page.py'
       - 'scripts/ci_scope.py'
+      - 'modules.lock'
+      - 'deps.lock'
       - 'test_release_firmware.py'
       - 'test_stage_firmware_page.py'
       - 'test_ci_scope.py'

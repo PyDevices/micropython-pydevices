@@ -89,6 +89,8 @@ def cp_reach(path):
 
 FIRMWARE = "scripts/release_firmware.py"
 FIRMWARE_WORKFLOW = ".github/workflows/release-firmware.yml"
+# The pins every build fetches: a change to one can break any board.
+FIRMWARE_PINS = ("modules.lock", "deps.lock")
 
 
 def cells_of(source):
@@ -110,9 +112,10 @@ def firmware_scope(files, show_base, show_head):
 
     The workflow, or anything in release_firmware.py besides CELLS, builds the
     whole set. A change to CELLS builds the cells whose row changed, and the
-    whole set when a cell is added or removed. Everything else the workflow
-    watches is read by the unit tests its gate job runs and by no build."""
-    if FIRMWARE_WORKFLOW in files:
+    whole set when a cell is added or removed. A pin in modules.lock or
+    deps.lock builds the whole set too. Everything else the workflow watches is
+    read by the unit tests its gate job runs and by no build."""
+    if FIRMWARE_WORKFLOW in files or any(p in files for p in FIRMWARE_PINS):
         return True, True, []
     if FIRMWARE not in files:
         return False, False, []
