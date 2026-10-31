@@ -11,8 +11,9 @@ to [issues](https://github.com/PyDevices/micropython-pydevices/issues).
 
 ## Capture
 
-- `audioi2sin.I2SIn` as an audiosample, so `I2SOut.play(mic)` and a mixer can
-  take a live microphone the way CircuitPython 11's can.
+- `I2SOut.play(mic)`: let `audioi2sin.I2SIn` be an audiosample too, so a live
+  microphone plays through `I2SOut` and a mixer the way it does on
+  CircuitPython 11. `I2SIn` already records with `record()`.
 - `audiobusio.PDMIn` for PDM microphones, on the I2S peripheral's PDM mode.
 - A one-channel read from a multi-mic codec returns the average of the
   enabled mics, with a way to ask for a single mic; boards state which mics
