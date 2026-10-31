@@ -23,4 +23,4 @@ audiodsp          https://github.com/PyDevices/audiodsp.git           733b44b63f
 omnipython-lvgl   https://github.com/PyDevices/omnipython-lvgl.git    e6f88b7737e3c5252e92a6e717142875127816ca
 pygraphics        https://github.com/PyDevices/pygraphics.git         ecc4eb2348b3289f4383d51c6f401e922621e724
 ulab              https://github.com/v923z/micropython-ulab.git       1d3ddd8f5228e2c7335dac71f4846e6abb0ec9f9
-omnipython-lib   https://github.com/PyDevices/pydevices.git          e2ab248006980930ce75be621a92c68724b7a263
+omnipython-lib   https://github.com/PyDevices/pydevices.git          89465318281799aeffd5bc3ee40e95a5c1ca8acc

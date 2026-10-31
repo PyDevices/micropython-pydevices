@@ -9,6 +9,8 @@
 !/modules/pydevices/
 !/modules/palettes/
 !/modules/pdwidgets/
+!/modules/audioinstruments/
+!/modules/audioeffects/
 !/modules/audiocomponents/
 !/modules/micropython-lib/
 !/modules/all/
