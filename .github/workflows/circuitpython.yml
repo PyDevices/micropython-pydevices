@@ -15,6 +15,10 @@ on:
       - 'modules.lock'
       - 'patches/circuitpython/**'
       - 'modules/**'
+      - '!modules/*/*.md'
+      - '!modules/*/docs/**'
+      - '!modules/*/examples/**'
+      - 'scripts/ci_scope.py'
       - '.github/workflows/circuitpython.yml'
   pull_request:
     paths:
@@ -23,14 +27,48 @@ on:
       - 'modules.lock'
       - 'patches/circuitpython/**'
       - 'modules/**'
+      - '!modules/*/*.md'
+      - '!modules/*/docs/**'
+      - '!modules/*/examples/**'
+      - 'scripts/ci_scope.py'
       - '.github/workflows/circuitpython.yml'
+  # Everything, weekly: the scope skips what a change can't reach.
+  schedule:
+    - cron: '58 6 * * 1'
   workflow_dispatch:
+
+# A new push to a pull request cancels the run it supersedes. A push to main is
+# never cancelled: each one keeps its own record.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
+  # What this change can reach (scripts/ci_scope.py): a pull request against its
+  # base, a push to main from the commit it moved from. A manual or weekly run,
+  # or a base git can't find, runs every job.
+  scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      unix: ${{ steps.scope.outputs.unix }}
+      unix_modules: ${{ steps.scope.outputs.unix_modules }}
+      usbhost: ${{ steps.scope.outputs.usbhost }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Scope
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 scripts/ci_scope.py circuitpython --event "$EVENT" --base "$BASE"
+
   unix:
+    needs: scope
+    if: needs.scope.outputs.unix == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -92,6 +130,8 @@ jobs:
           timeout 60 ./builds/circuitpython/unix/coverage/micropython empty_source.py
 
   unix-modules:
+    needs: scope
+    if: needs.scope.outputs.unix_modules == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -215,6 +255,8 @@ jobs:
   # unix port builds usbhost to nothing, and a change to the shared engine
   # sources (modules/usbhost/src) can break it with every other check green.
   esp32p4-usbhost:
+    needs: scope
+    if: needs.scope.outputs.usbhost == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:

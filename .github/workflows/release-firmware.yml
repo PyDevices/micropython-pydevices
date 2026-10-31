@@ -48,8 +48,10 @@ on:
       - 'scripts/release_firmware.py'
       - 'scripts/pin_lvgl_ref.sh'
       - 'scripts/stage_firmware_page.py'
+      - 'scripts/ci_scope.py'
       - 'test_release_firmware.py'
       - 'test_stage_firmware_page.py'
+      - 'test_ci_scope.py'
 
 permissions:
   contents: read
@@ -69,20 +71,34 @@ jobs:
     timeout-minutes: 10
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      build: ${{ steps.scope.outputs.build }}
+      full: ${{ steps.scope.outputs.full }}
     steps:
+      # A pull request builds what its change can reach (scripts/ci_scope.py):
+      # nothing for the stager or the tests, the cells whose row in CELLS changed,
+      # the whole set for anything else in release_firmware.py or this workflow.
+      # A manual or weekly run, or a base git can't find, builds the whole set.
       - uses: actions/checkout@v7
+      - name: Scope
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/ci_scope.py firmware --event "$EVENT" --base "$BASE"
       - name: The checks themselves pass
-        run: python3 -m unittest test_release_firmware test_stage_firmware_page -v
+        run: python3 -m unittest test_release_firmware test_stage_firmware_page test_ci_scope -v
       - name: Which cells this run builds
         id: matrix
         env:
           PICO2: ${{ inputs.pico2 && '--pico2' || '' }}
+          ONLY: ${{ steps.scope.outputs.only }}
         run: |
-          echo "matrix=$(python3 scripts/release_firmware.py matrix $PICO2)" | tee -a "$GITHUB_OUTPUT"
+          echo "matrix=$(python3 scripts/release_firmware.py matrix $PICO2 ${ONLY:+--only "$ONLY"})" | tee -a "$GITHUB_OUTPUT"
 
   build:
     name: build ${{ matrix.id }}
     needs: gate
+    if: needs.gate.outputs.build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
@@ -176,6 +192,9 @@ jobs:
 
   assemble:
     needs: [gate, build]
+    # The whole set or nothing: a pull request that built a few cells has no
+    # set to check.
+    if: needs.gate.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Read-only on purpose: nothing here attaches to a release.

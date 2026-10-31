@@ -152,8 +152,12 @@ def read_lock(name):
 
 # ---- matrix ----------------------------------------------------------------
 
-def matrix(pico2):
-    rows = [{k: c[k] for k in ("id", "label", "kind", "deps", "interpreter")} for c in wanted(pico2)]
+def matrix(pico2, only=()):
+    """The cells to build: all the wanted ones, or just the ids in `only`."""
+    for cell_id in only:
+        cell(cell_id)
+    rows = [{k: c[k] for k in ("id", "label", "kind", "deps", "interpreter")}
+            for c in wanted(pico2) if not only or c["id"] in only]
     return {"include": rows}
 
 
@@ -523,6 +527,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     m = sub.add_parser("matrix")
     m.add_argument("--pico2", action="store_true")
+    m.add_argument("--only", default="", help="comma list of cell ids to build instead of the whole set")
     b = sub.add_parser("build")
     b.add_argument("cell")
     b.add_argument("out")
@@ -539,7 +544,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     try:
         if args.cmd == "matrix":
-            print(json.dumps(matrix(args.pico2), separators=(",", ":")))
+            print(json.dumps(matrix(args.pico2, [i for i in args.only.split(",") if i]), separators=(",", ":")))
         elif args.cmd == "cells":
             for c in CELLS:
                 print(f"{c['id']:20} {c['interpreter']:14} {c['board']} {c['variant'] or ''}"

@@ -7,14 +7,27 @@ on:
     branches: [main]
     paths:
       - 'modules/pngio/**'
+      - '!modules/pngio/*.md'
+      - '!modules/pngio/examples/**'
       - 'build_mp.py'
       - '.github/workflows/pngio.yml'
   pull_request:
     paths:
       - 'modules/pngio/**'
+      - '!modules/pngio/*.md'
+      - '!modules/pngio/examples/**'
       - 'build_mp.py'
       - '.github/workflows/pngio.yml'
+  # Everything, weekly: the path filters skip what a change can't reach.
+  schedule:
+    - cron: '50 6 * * 1'
   workflow_dispatch:
+
+# A new push to a pull request cancels the run it supersedes. A push to main is
+# never cancelled: each one keeps its own record.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

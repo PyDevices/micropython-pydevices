@@ -8,16 +8,29 @@ on:
     branches: [main]
     paths:
       - 'modules/picotts/**'
+      - '!modules/picotts/*.md'
+      - '!modules/picotts/examples/**'
       - 'build_mp.py'
       - 'modules.lock'
       - '.github/workflows/picotts.yml'
   pull_request:
     paths:
       - 'modules/picotts/**'
+      - '!modules/picotts/*.md'
+      - '!modules/picotts/examples/**'
       - 'build_mp.py'
       - 'modules.lock'
       - '.github/workflows/picotts.yml'
+  # Everything, weekly: the path filters skip what a change can't reach.
+  schedule:
+    - cron: '45 6 * * 1'
   workflow_dispatch:
+
+# A new push to a pull request cancels the run it supersedes. A push to main is
+# never cancelled: each one keeps its own record.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
