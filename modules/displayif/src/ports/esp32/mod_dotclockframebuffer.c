@@ -108,6 +108,12 @@ typedef struct _dotclockframebuffer_obj_t {
     // the buffers itself (LVGL DIRECT) never touches it and keeps its own sync.
     bool dirty;
     int dirty_x0, dirty_y0, dirty_x1, dirty_y1;  // half-open
+    // present() promoted fbs[presented] and returned without waiting for the
+    // scanout to adopt it: wait() (or the next call that touches the buffers)
+    // finishes the flip once the frame counter moves past present_frames.
+    bool present_pending;
+    uint8_t presented;
+    uint32_t present_frames;
 #endif
 } dotclockframebuffer_obj_t;
 
@@ -602,6 +608,9 @@ static mp_obj_t dotclockframebuffer_make(const mp_obj_type_t *type, size_t n_arg
     self->draw_index = 0;
     self->num_fbs = 0;
     self->dirty = false;
+    self->present_pending = false;
+    self->presented = 0;
+    self->present_frames = 0;
 #endif
     self->data_pin_count = 0;
 
@@ -623,39 +632,37 @@ static mp_obj_t dotclockframebuffer_make(const mp_obj_type_t *type, size_t n_arg
     return MP_OBJ_FROM_PTR(self);
 }
 
-static mp_obj_t dotclockframebuffer_refresh(mp_obj_t self_in) {
-    dotclockframebuffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
+static void dotclockframebuffer_check_live(dotclockframebuffer_obj_t *self) {
     if (self->deinited || self->buf == NULL) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("RGB framebuffer is deinited"));
     }
+}
+
 #if defined(ESP_PLATFORM) && SOC_LCD_RGB_SUPPORTED
-    if (!self->panel_ready || self->panel == NULL || self->num_fbs < 2) {
-        // Single-FB / stub: cache writeback only (no tear-free swap).
-        dotclockframebuffer_msync_rows(self, 0, self->height);
-        return mp_const_none;
+// Finish a flip that present() started: wait until bounce has wrapped onto
+// the promoted buffer, then switch the paint target to the other one. If
+// the scanout does not wrap in time the flip is dropped and painting stays
+// on the same buffer; the next present retries it.
+static void dotclockframebuffer_finish_present(dotclockframebuffer_obj_t *self) {
+    if (!self->present_pending) {
+        return;
     }
-
-    // Promote the back buffer. IDF draw_bitmap with a panel-FB pointer only
-    // updates cur_fb_index; bounce adopts it on the next frame wrap.
-    uint8_t presented = self->draw_index;
-    uint32_t start_frames = s_dcfb_frame_count;
-    dotclockframebuffer_raise_esp_err(
-        esp_lcd_panel_draw_bitmap(self->panel, 0, 0, self->width, self->height, self->fbs[presented]));
-
     // Wait until bounce wraps onto the new front so the old front is idle.
     int64_t deadline = esp_timer_get_time() + DCFB_PRESENT_TIMEOUT_US;
-    while (s_dcfb_frame_count == start_frames) {
+    while (s_dcfb_frame_count == self->present_frames) {
         if (esp_timer_get_time() >= deadline) {
-            // Keep painting the same back buffer; next show() retries present.
-            return mp_const_none;
+            self->present_pending = false;
+            return;
         }
         vTaskDelay(1);
     }
+    self->present_pending = false;
 
     // Advance the paint target. Do not memcpy the full FB — that costs
     // ~100ms+ on 800x480 PSRAM and is redundant when a dual-buffer GUI
     // (e.g. LVGL DIRECT) already syncs dirty regions across both panel FBs.
     // What fill_rect()/blit() painted is copied below instead.
+    uint8_t presented = self->presented;
     uint8_t next = (uint8_t)(1 - presented);
     self->draw_index = next;
     self->buf = self->fbs[next];
@@ -671,12 +678,83 @@ static mp_obj_t dotclockframebuffer_refresh(mp_obj_t self_in) {
         dotclockframebuffer_msync_rows(self, self->dirty_y0, self->dirty_y1 - self->dirty_y0);
         self->dirty = false;
     }
-    return mp_const_none;
+}
+#endif
+
+// Promote the back buffer without waiting for the scanout to take it.
+// Returns false (and promotes nothing) when there is no double-buffered
+// panel: the caller then has nothing to wait for.
+static bool dotclockframebuffer_start_present(dotclockframebuffer_obj_t *self) {
+#if defined(ESP_PLATFORM) && SOC_LCD_RGB_SUPPORTED
+    if (!self->panel_ready || self->panel == NULL || self->num_fbs < 2) {
+        // Single-FB / stub: cache writeback only (no tear-free swap).
+        dotclockframebuffer_msync_rows(self, 0, self->height);
+        return false;
+    }
+    // A flip still pending from the last present() must finish first: until
+    // it does, the paint target is the buffer on screen.
+    dotclockframebuffer_finish_present(self);
+    uint8_t presented = self->draw_index;
+    // Promote the back buffer. IDF draw_bitmap with a panel-FB pointer only
+    // updates cur_fb_index; bounce adopts it on the next frame wrap. The
+    // frame count is read after the promote, so a wrap that lands between
+    // the two can only make the wait one frame longer, never let it end
+    // before the scanout has the new buffer.
+    dotclockframebuffer_raise_esp_err(
+        esp_lcd_panel_draw_bitmap(self->panel, 0, 0, self->width, self->height, self->fbs[presented]));
+    self->presented = presented;
+    self->present_frames = s_dcfb_frame_count;
+    self->present_pending = true;
+    return true;
 #else
+    (void)self;
     mp_raise_msg(&mp_type_NotImplementedError, MP_ERROR_TEXT("ESP-IDF dotclock scanout not supported on this target"));
 #endif
 }
+
+// Calls that touch the paint target finish a pending flip first, so they
+// never paint the buffer on screen.
+static void dotclockframebuffer_settle(dotclockframebuffer_obj_t *self) {
+#if defined(ESP_PLATFORM) && SOC_LCD_RGB_SUPPORTED
+    dotclockframebuffer_finish_present(self);
+#else
+    (void)self;
+#endif
+}
+
+static mp_obj_t dotclockframebuffer_refresh(mp_obj_t self_in) {
+    dotclockframebuffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    dotclockframebuffer_check_live(self);
+    if (dotclockframebuffer_start_present(self)) {
+        dotclockframebuffer_settle(self);
+    }
+    return mp_const_none;
+}
 static MP_DEFINE_CONST_FUN_OBJ_1(dotclockframebuffer_refresh_obj, dotclockframebuffer_refresh);
+
+/* present() — promote the back buffer and return without waiting for the
+ * scanout to take it. Until wait() returns, the buffer just presented is the
+ * one LVGL-style direct painters must not touch; blit(), fill_rect(),
+ * framebuffers() and refresh() wait for the flip themselves. */
+static mp_obj_t dotclockframebuffer_present(mp_obj_t self_in) {
+    dotclockframebuffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    dotclockframebuffer_check_live(self);
+    dotclockframebuffer_start_present(self);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(dotclockframebuffer_present_obj, dotclockframebuffer_present);
+
+/* wait() — finish the flip present() started: return once the scanout shows
+ * the presented buffer and painting has moved to the other one. Returns at
+ * once when nothing is pending. */
+static mp_obj_t dotclockframebuffer_wait(mp_obj_t self_in) {
+    dotclockframebuffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    dotclockframebuffer_check_live(self);
+    dotclockframebuffer_settle(self);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(dotclockframebuffer_wait_obj, dotclockframebuffer_wait);
+
 
 /* blit(buf, x, y, w, h) — C memcpy into the scanout FB.
  * MicroPython has no memoryview.cast; FBDisplay's uint16 per-pixel path is
@@ -700,6 +778,7 @@ static mp_obj_t dotclockframebuffer_blit(size_t n_args, const mp_obj_t *args) {
     if (srcinfo.len < row_bytes * (size_t)h) {
         mp_raise_ValueError(MP_ERROR_TEXT("blit buffer too small"));
     }
+    dotclockframebuffer_settle(self);
     const uint8_t *src = srcinfo.buf;
     uint8_t *dst = self->buf + (size_t)y * self->row_stride + (size_t)x * sizeof(uint16_t);
     for (int row = 0; row < h; row++) {
@@ -730,6 +809,7 @@ static mp_obj_t dotclockframebuffer_fill_rect(size_t n_args, const mp_obj_t *arg
     if (!displayif_fb_rect_ok(x, y, w, h, self->width, self->height)) {
         mp_raise_ValueError(MP_ERROR_TEXT("fill_rect out of range"));
     }
+    dotclockframebuffer_settle(self);
     displayif_fb_fill_rect16(self->buf, self->row_stride, x, y, w, h, color);
 #if defined(ESP_PLATFORM) && SOC_LCD_RGB_SUPPORTED
     dotclockframebuffer_msync_rows(self, y, h);
@@ -770,6 +850,7 @@ static mp_obj_t dotclockframebuffer_framebuffers(mp_obj_t self_in) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("RGB framebuffer is deinited"));
     }
 #if defined(ESP_PLATFORM) && SOC_LCD_RGB_SUPPORTED
+    dotclockframebuffer_finish_present(self);
     if (self->num_fbs >= 2 && self->fbs[0] != NULL && self->fbs[1] != NULL) {
         // Paint order, not index order: the buffer refresh() presents next
         // comes first. A double-buffered GUI (LVGL DIRECT) paints its first
@@ -820,6 +901,12 @@ static void dotclockframebuffer_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest
         } else if (attr == MP_QSTR_refresh) {
             dest[0] = MP_OBJ_FROM_PTR(&dotclockframebuffer_refresh_obj);
             dest[1] = self_in;
+        } else if (attr == MP_QSTR_present) {
+            dest[0] = MP_OBJ_FROM_PTR(&dotclockframebuffer_present_obj);
+            dest[1] = self_in;
+        } else if (attr == MP_QSTR_wait) {
+            dest[0] = MP_OBJ_FROM_PTR(&dotclockframebuffer_wait_obj);
+            dest[1] = self_in;
         } else if (attr == MP_QSTR_blit) {
             dest[0] = MP_OBJ_FROM_PTR(&dotclockframebuffer_blit_obj);
             dest[1] = self_in;
@@ -838,6 +925,8 @@ static void dotclockframebuffer_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest
 
 static const mp_rom_map_elem_t dotclockframebuffer_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_refresh), MP_ROM_PTR(&dotclockframebuffer_refresh_obj) },
+    { MP_ROM_QSTR(MP_QSTR_present), MP_ROM_PTR(&dotclockframebuffer_present_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wait), MP_ROM_PTR(&dotclockframebuffer_wait_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit), MP_ROM_PTR(&dotclockframebuffer_blit_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill_rect), MP_ROM_PTR(&dotclockframebuffer_fill_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_framebuffers), MP_ROM_PTR(&dotclockframebuffer_framebuffers_obj) },
