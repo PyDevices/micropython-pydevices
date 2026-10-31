@@ -19,7 +19,7 @@
 # sibling checkout is linked there instead) and compiles the port for its
 # interpreter. Move the commit here to move every LVGL build, MicroPython's and
 # CircuitPython's.
-audiodsp          https://github.com/PyDevices/audiodsp.git           64aeccce466c8ee77e846d67dd933939b48e7b4a
+audiodsp          https://github.com/PyDevices/audiodsp.git           4873df7a7449b38e39c3575ee3ae75d4fdd92805
 omnipython-lvgl   https://github.com/PyDevices/omnipython-lvgl.git    e6f88b7737e3c5252e92a6e717142875127816ca
 pygraphics        https://github.com/PyDevices/pygraphics.git         ecc4eb2348b3289f4383d51c6f401e922621e724
 ulab              https://github.com/v923z/micropython-ulab.git       1d3ddd8f5228e2c7335dac71f4846e6abb0ec9f9
