@@ -69,6 +69,10 @@ class FirmwareCells(unittest.TestCase):
     def test_the_workflow_builds_the_whole_set(self):
         self.assertEqual(self.scope([ci_scope.FIRMWARE_WORKFLOW]), (True, True, []))
 
+    def test_a_pin_builds_the_whole_set(self):
+        self.assertEqual(self.scope(["modules.lock"]), (True, True, []))
+        self.assertEqual(self.scope(["deps.lock"]), (True, True, []))
+
     def test_one_cells_row_builds_that_cell(self):
         head = with_cell(SOURCE, "mp-s3-lcd43", 'flash="8MB"', 'flash="16MB"')
         self.assertEqual(self.scope([ci_scope.FIRMWARE], head), (True, False, ["mp-s3-lcd43"]))
