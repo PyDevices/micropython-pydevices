@@ -15,4 +15,4 @@
 | [`patches/apply_patches.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/patches/apply_patches.py) | Applies the MicroPython series, plus each module's own MicroPython patches, once, as one local commit. `--check` tests a change without applying it. |
 | [`variants/`](boards.md#variants) | Our variants and the esp32 settings. |
 | [`boards/circuitpython/`](boards.md#circuitpython-boards) | Boards CircuitPython has no definition for. |
-| [`scripts/`](https://github.com/PyDevices/micropython-pydevices/tree/main/scripts) | `exercise_build.sh`, `release_firmware.py`, `stage_firmware_page.py`, `serve_workbench.sh`, `freeze_list.py`, `update_provenance.py`. [Contributing](https://github.com/PyDevices/micropython-pydevices/blob/main/CONTRIBUTING.md) says what each is for. |
+| [`scripts/`](https://github.com/PyDevices/micropython-pydevices/tree/main/scripts) | `exercise_build.sh`, `release_firmware.py`, `stage_firmware_page.py`, `serve_workbench.sh`, `freeze_list.py`, `update_provenance.py`, `ci_scope.py`, `wasm_provenance.py`. [Contributing](https://github.com/PyDevices/micropython-pydevices/blob/main/CONTRIBUTING.md) says what each is for. |
