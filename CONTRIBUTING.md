@@ -16,7 +16,7 @@ fix is a good first contribution.
 | `modules/.omnipython-lvgl` | LVGL, its bindings and its ports, which `--modules lvgl` compiles: the sibling checkout, linked, or `modules.lock`'s commit, fetched. |
 | [`patches/`](patches) | The patch series and `apply_patches.py`. |
 | [`variants/`](variants), [`boards/`](boards) | Our variants and CircuitPython boards. |
-| [`scripts/`](scripts) | `exercise_build.sh`, `release_firmware.py`, `stage_firmware_page.py`, `serve_workbench.sh`, `freeze_list.py`, `update_provenance.py`, `ci_scope.py`. |
+| [`scripts/`](scripts) | `exercise_build.sh`, `release_firmware.py`, `stage_firmware_page.py`, `serve_workbench.sh`, `freeze_list.py`, `update_provenance.py`, `ci_scope.py`, `wasm_provenance.py`. |
 | [`tests/`](tests) | The unit tests for `build_mp.py`, the scripts, the provenance record and `lib-overrides`. |
 | [`.devcontainer/`](.devcontainer) | One dev container per port. |
 | [`docs/`](docs) | The documentation site. |
@@ -67,6 +67,19 @@ their folders:
 ```bash
 scripts/exercise_build.sh --report builds/rp2/RPI_PICO2/default ...
 ```
+
+## The website's WebAssembly runtime
+
+PyDevices.github.io and workbench serve the webassembly port's `pydevices`
+variant, built with every module. When a push to main changes what goes into it
+(`modules.lock`, `deps.lock`, the patch series, `modules/`, the webassembly
+variant), the **WebAssembly runtime** workflow
+([`wasm-runtime.yml`](.github/workflows/wasm-runtime.yml)) rebuilds it from the
+pins, checks it starts under node and imports what it freezes, stamps
+`micropython.wasm.provenance` with
+[`scripts/wasm_provenance.py`](scripts/wasm_provenance.py), and opens a pull
+request on each site. A newer one closes the older. Run it by hand from
+Actions > WebAssembly runtime > Run workflow.
 
 ## Firmware sets
 

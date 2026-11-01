@@ -1,0 +1,159 @@
+# The website (PyDevices.github.io) and workbench serve a WebAssembly build of
+# this repository: the webassembly port, pydevices variant, every module. Its
+# sources move here, in modules.lock, the patch series and the module
+# manifests, and nothing on either site notices. So when main changes what
+# goes into that build, this rebuilds it from the pins, checks it starts and
+# imports what it freezes, and opens a pull request on each site with the new
+# runtime and its provenance. Those pull requests are reviewed and merged like
+# any other: nothing here publishes.
+#
+# On a pull request that changes this workflow or its script, only the build
+# and the checks run.
+name: WebAssembly runtime
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules.lock'
+      - 'deps.lock'
+      - 'UPSTREAM'
+      - 'build_mp.py'
+      - 'modules/**'
+      - 'lib-overrides/**'
+      - 'patches/micropython/**'
+      - 'variants/webassembly/**'
+      - 'variants/desktop-board.py'
+      - 'scripts/wasm_provenance.py'
+      - '.github/workflows/wasm-runtime.yml'
+  pull_request:
+    paths:
+      - 'scripts/wasm_provenance.py'
+      - '.github/workflows/wasm-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wasm-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+
+      # The same container a codespace builds this port in: install.sh's
+      # packages on a clean Ubuntu, and build_mp.py fetches the rest at its pins.
+      - name: Build the webassembly port in its dev container
+        uses: devcontainers/ci@v0.3
+        with:
+          configFile: .devcontainer/webassembly/devcontainer.json
+          push: never
+          runCmd: |
+            set -e
+            ./build_mp.py --port webassembly --variant pydevices --modules all
+
+      - name: It starts and imports what it freezes
+        run: |
+          b=builds/webassembly/pydevices
+          cat > /tmp/check.py <<'EOF'
+          import sys
+          print(sys.implementation)
+          for name in ("displaydev", "lvgl", "appkit", "controlpanel", "sayso",
+                       "audioinstruments", "audioeffects", "pdwidgets", "palettes", "ulab"):
+              __import__(name)
+              print("imports", name)
+          EOF
+          node $b/micropython.mjs /tmp/check.py
+
+      - name: Stamp its provenance
+        run: |
+          python3 scripts/wasm_provenance.py builds/webassembly/pydevices \
+            --built-by "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wasm-runtime
+          path: |
+            builds/webassembly/pydevices/micropython.mjs
+            builds/webassembly/pydevices/micropython.wasm
+            builds/webassembly/pydevices/micropython.wasm.provenance
+          if-no-files-found: error
+
+  propose:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: PyDevices.github.io
+            dir: vendor/micropython
+          - repo: workbench
+            dir: assets/pydevices
+    env:
+      HAS_APP: ${{ secrets.PYDEVICES_APP_ID != '' }}
+    steps:
+      - name: The app's secrets are here
+        if: env.HAS_APP != 'true'
+        run: |
+          echo "::error::PYDEVICES_APP_ID and PYDEVICES_APP_PRIVATE_KEY are not set on this repository, so no pull request can be opened on ${{ matrix.repo }}. The runtime is in this run's wasm-runtime artifact."
+          exit 1
+
+      - name: Token for ${{ matrix.repo }}
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.PYDEVICES_APP_ID }}
+          private-key: ${{ secrets.PYDEVICES_APP_PRIVATE_KEY }}
+          owner: PyDevices
+          repositories: ${{ matrix.repo }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: wasm-runtime
+          path: runtime
+
+      - name: Open a pull request with the new runtime
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: PyDevices/${{ matrix.repo }}
+          DIR: ${{ matrix.dir }}
+          SOURCE_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          short=${SOURCE_SHA:0:7}
+          branch="wasm-runtime/$short"
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" site
+          cd site
+          cp ../runtime/micropython.mjs ../runtime/micropython.wasm ../runtime/micropython.wasm.provenance "$DIR/"
+          # The provenance always changes (it carries the time); the runtime
+          # may not.
+          if git diff --quiet -- "$DIR/micropython.mjs" "$DIR/micropython.wasm"; then
+            echo "${REPO} already serves this runtime."
+            exit 0
+          fi
+          git config user.name "pydevices-release-automation[bot]"
+          git config user.email "pydevices-release-automation[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add "$DIR/micropython.mjs" "$DIR/micropython.wasm" "$DIR/micropython.wasm.provenance"
+          git commit -q -m "WebAssembly runtime: rebuild at micropython-pydevices ${short}"
+          git push -q --force origin "$branch"
+          body="The WebAssembly runtime rebuilt from [micropython-pydevices@${short}](https://github.com/PyDevices/micropython-pydevices/commit/${SOURCE_SHA}): the webassembly port, pydevices variant, every module, at that commit's pins. It starts under node and imports what it freezes ([build](${RUN_URL})). \`${DIR}/micropython.wasm.provenance\` lists every source's commit.
+
+          Open a page with a live demo on the preview before merging."
+          # One open runtime pull request at a time: this one replaces any older.
+          for old in $(gh pr list --repo "$REPO" --state open --json number,headRefName \
+                         --jq ".[] | select(.headRefName | startswith(\"wasm-runtime/\")) | select(.headRefName != \"$branch\") | .number"); do
+            gh pr close "$old" --repo "$REPO" --delete-branch --comment "Replaced by the runtime rebuilt at micropython-pydevices ${short}."
+          done
+          if [ -z "$(gh pr list --repo "$REPO" --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            gh pr create --repo "$REPO" --head "$branch" --title "WebAssembly runtime: rebuild at micropython-pydevices ${short}" --body "$body"
+          fi
