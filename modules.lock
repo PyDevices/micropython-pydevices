@@ -5,7 +5,7 @@
 # serves a fetch by commit only for the whole 40 characters.
 #
 # omnipython-lib is not a module either: it is the repository of our Python-only
-# packages (pydevices, palettes, pdwidgets, appkit, audioinstruments,
+# packages (pydevices, palettes, pdwidgets, audioinstruments,
 # audioeffects, board configs and drivers). A build asks its
 # tools/libbuild.py for the library tree and require()s packages from it; the
 # modules/ entries of those names are manifests that do exactly that. It is

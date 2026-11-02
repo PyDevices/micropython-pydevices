@@ -23,7 +23,7 @@ A module never brings another, and nothing checks dependencies. If you name
 ## Python packages from omnipython-lib
 
 Our Python-only packages come from omnipython-lib: `pydevices`, `palettes`,
-`pdwidgets`, `appkit`, `sayso`, `audioinstruments` and
+`pdwidgets`, `sayso`, `audioinstruments` and
 `audioeffects` are modules whose manifest requires them from it. `sayso`, the
 Spotify controller, freezes only into desktop and web builds. Any other package
 of it, such as a board config, can be named too.
