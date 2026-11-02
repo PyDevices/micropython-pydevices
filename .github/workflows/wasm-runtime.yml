@@ -63,7 +63,7 @@ jobs:
           cat > /tmp/check.py <<'EOF'
           import sys
           print(sys.implementation)
-          for name in ("displaydev", "lvgl", "appkit", "controlpanel", "sayso",
+          for name in ("displaydev", "lvgl", "appkit", "sayso",
                        "audioinstruments", "audioeffects", "pdwidgets", "palettes", "ulab"):
               __import__(name)
               print("imports", name)

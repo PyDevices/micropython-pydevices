@@ -1,2 +1,0 @@
-Opt-in: name synthstation to build it; --modules all leaves it out.
-It's an app rather than a library: install it with mip on the board that runs it, or freeze it into a build made for that board.

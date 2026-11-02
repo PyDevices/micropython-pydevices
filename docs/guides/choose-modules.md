@@ -13,9 +13,8 @@ A name is one of three things:
 - **A path**, to a module of your own: a directory with a `manifest.py`, or a
   C module with its `micropython.mk` or `micropython.cmake`.
 - **`all`**: every module except the opt-in ones. `picotts`, `tflite` and
-  `vision` are opt-in, and so is `synthstation` (each has an `OPT_IN` file
-  saying why), so name them to get them: `--modules all,picotts` or
-  `--modules all,synthstation`, and for tflite and vision
+  `vision` are opt-in (each has an `OPT_IN` file saying why), so name them to get them:
+  `--modules all,picotts`, and for tflite and vision
   [Use esp-vision's modules](use-esp-vision-modules.md).
 
 A module never brings another, and nothing checks dependencies. If you name
@@ -24,10 +23,9 @@ A module never brings another, and nothing checks dependencies. If you name
 ## Python packages from omnipython-lib
 
 Our Python-only packages come from omnipython-lib: `pydevices`, `palettes`,
-`pdwidgets`, `appkit`, `controlpanel`, `synthstation`, `sayso`, `audioinstruments` and
+`pdwidgets`, `appkit`, `sayso`, `audioinstruments` and
 `audioeffects` are modules whose manifest requires them from it. `sayso`, the
-Spotify controller, freezes only into desktop and web builds, and
-`synthstation`, an app, only when you name it: `all` leaves it out. Any other package
+Spotify controller, freezes only into desktop and web builds. Any other package
 of it, such as a board config, can be named too.
 
 ## The desktop board config
