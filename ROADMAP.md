@@ -8,6 +8,16 @@ or missing for you, open an
   codespace or anywhere else, goes onto your board from the browser with the
   firmware page's "Install from a file", as the released images do.
 
+More ways to watch a board:
+
+- **An RTSP server built from source.** Point VLC, a monitoring app or a recorder
+  at an ESP32-P4 and watch its camera in H.264, as you would a network camera,
+  without the prebuilt library the `rtsp` module uses today.
+- **A live camera through Miracast.** Send the CSI camera's picture to a TV or
+  Windows Wireless Display with `castif.Cast`.
+- **Sound in `castif.Hls`.** Boards serve HLS with no sound today, because its
+  players expect AAC and a board has no AAC encoder.
+
 More modules in CircuitPython-compatible builds
 ([what builds today](docs/reference/modules.md#which-modules-build-on-circuitpython)):
 
