@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Pillow fidelity reference for the jpegio corpus -> frames/reference.json.
 
 Run:  python3 modules/jpegio/tests/reference.py        (needs Pillow; 12.3 used)

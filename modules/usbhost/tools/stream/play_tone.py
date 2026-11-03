@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Play a tone into a named output device (Windows Python, sounddevice).
 
     python play_tone.py NAME SECONDS [HZ] [LEVEL] [--beeps]

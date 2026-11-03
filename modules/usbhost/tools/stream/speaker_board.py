@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # Board half of the sound-card stream check: bring up usb-device-audio's
 # speaker beside the console, then drain its ring for a while and report what
 # arrived. Driven over a held REPL (tools/stream/speaker_check.py).

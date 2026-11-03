@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """jpegio.JpegEncoder (and the P4's hardware decode) -- the media Phase 2 gate.
 
 Thresholds were fixed before the first run, on the corpus's real camera frame

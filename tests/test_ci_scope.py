@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """scripts/ci_scope.py: which jobs of the firmware workflows a change can reach."""
 
 import re

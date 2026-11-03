@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # Board half of the webcam stream check: bring up usb-device-video's camera
 # beside the console and keep its ring fed with colour bars (YUY2), so a
 # computer that opens the camera sees eight vertical bars.

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # Freeze manifest for this repo. Nothing Python to freeze here; the line below
 # names the C module so a build that includes this manifest compiles it
 # (MicroPython 1.29 c_module()).

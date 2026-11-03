@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """ffprobe decodes what test_castif_hls served: each kept segment alone and
 the playlist, and /stats parses as JSON. A planted fault (a segment cut in
 half) must fail.

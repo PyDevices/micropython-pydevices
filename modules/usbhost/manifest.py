@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # MicroPython manifest for usbhost.
 #
 # usbhost's native half, the `_usbhost` module built from ``src/``: the USB host

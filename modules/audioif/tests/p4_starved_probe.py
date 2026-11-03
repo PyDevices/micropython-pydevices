@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """`I2SOut.starved()` on a board: 0 while nothing starves, and it moves when
 the pump really falls behind.
 

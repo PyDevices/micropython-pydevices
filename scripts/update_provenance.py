@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Keep provenance.json in step with the tree.
 
 provenance.json records the MicroPython pin and the SHA-256 of every patch in

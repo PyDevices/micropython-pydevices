@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # Every module beside this one, except those that say they are opt-in: a
 # module with an OPT_IN file (its text says why) is built only when named.
 # Otherwise all means all, and a module leaves "all" only by leaving modules/.

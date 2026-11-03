@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Smoke test for picodvi import and Framebuffer (rp2 PIO / HSTX).
 
 Uses the smallest supported mode (320x240 @ 4bpp on RP2040). Full DVI output

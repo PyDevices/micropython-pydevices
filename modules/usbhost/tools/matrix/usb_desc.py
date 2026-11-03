@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """What Windows was told: a USB device's speed and its endpoints, from the hub.
 
     python usb_desc.py VID [SERIAL]       e.g.  python usb_desc.py 303A E8F60AE0F070

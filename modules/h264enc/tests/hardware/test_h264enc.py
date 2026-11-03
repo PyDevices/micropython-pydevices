@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """h264enc on the ESP32-P4 -- the media Phase 3 encode gate, board half.
 
 Encodes N frames from h264_frames.py (no camera, no cast) at 720x720, 30 fps,

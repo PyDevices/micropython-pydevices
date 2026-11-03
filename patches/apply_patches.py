@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Prepare a MicroPython checkout for our builds.
 
 The checkout is moved to the tag in UPSTREAM, then gets every patch in

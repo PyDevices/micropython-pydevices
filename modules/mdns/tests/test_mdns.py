@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # mdns on a desktop MicroPython (unix or windows): the API, its errors, and a
 # service this process advertises, found by this process.
 #

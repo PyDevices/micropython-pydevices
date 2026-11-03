@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # The PyDevices desktop build: the port's own content and the modules you
 # named (modules/manifest.py), plus the universal desktop board config,
 # frozen. A board_config.py beside your script still wins: the script's

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Is there a tone at `hz` in this recording? Asked through `audiometer`.
 
     from tone_check import tone_check

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Say what a change can reach in the workflows that build firmware.
 
 A pull request is diffed against its base; a push to main from the commit main

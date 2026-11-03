@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """ffmpeg decodes what test_tsmux.py muxed: the stream, each segment alone,
 and the playlist. A planted fault (the stream with every sync byte zeroed)
 must fail.

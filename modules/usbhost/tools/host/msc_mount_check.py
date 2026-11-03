@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # Mount the flash drive on the host port through usb.host.msc, list it, then
 # write a small file, read it back, and remove it.
 import os

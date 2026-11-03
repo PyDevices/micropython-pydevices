@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Count raw mouse and keyboard reports from one USB device on Windows.
 
     python rawinput_count.py VID_303A SECONDS

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """The firmware set: which boards, how each is built, and the checks on the result.
 
 .github/workflows/release-firmware.yml calls this; every step also runs by hand

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """jpegwalk -- a tiny JPEG marker walker.
 
 Plain Python with no third-party imports, written so it also runs under

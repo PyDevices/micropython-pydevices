@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """List what a manifest freezes, by name and hash, and compare two lists.
 
     scripts/freeze_list.py list --port-dir micropython/ports/unix \\

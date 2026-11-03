@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """The driver's file sink hands over exactly what the engine pulled.
 
     <interpreter> tests/sink_probe.py [scratch-dir] [--fault WHICH]

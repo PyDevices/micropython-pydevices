@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # vision: esp-vision's OpenMV-style image stack, compiled as it is
 # (modules/.esp-vision). C only; ESP32-P4 and ESP32-S3. image (with image.ImageIO),
 # espdl, and on the P4 h264 and rtsp; not sensor or display (see

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Unit tests for build_mp.py's decisions that need no build.
 
     PYTHONPATH=tests python3 -m unittest test_build_mp -v

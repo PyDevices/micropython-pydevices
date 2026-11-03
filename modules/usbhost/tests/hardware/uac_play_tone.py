@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Sound card stream check, host half (usbif#37). Run with Windows Python.
 
 Plays a 440 Hz sine to "Speakers (Espressif Device)" through WASAPI, then

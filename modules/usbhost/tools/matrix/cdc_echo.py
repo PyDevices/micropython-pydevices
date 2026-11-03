@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Echo a pattern through a board's extra USB serial port (Windows Python).
 
     python cdc_echo.py SERIAL [BYTES]

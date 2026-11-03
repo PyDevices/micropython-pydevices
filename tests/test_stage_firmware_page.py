@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Tests for scripts/stage_firmware_page.py.
 
     PYTHONPATH=tests python3 -m unittest test_stage_firmware_page -v

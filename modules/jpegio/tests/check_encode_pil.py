@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Pillow, a decoder that is not ours, must read back what we encoded.
 
 Every JPEG test_jpegio_encode.py wrote must open in Pillow at its size and

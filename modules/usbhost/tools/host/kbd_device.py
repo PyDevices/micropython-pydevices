@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # The DEV-KIT as a USB keyboard on its device port (usb_hid on
 # machine.USBDevice, typed with adafruit_hid), for a host board to read.
 import time

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # The test's source frames, computed the same way on a board (MicroPython)
 # and on the PC (CPython, check_h264_ffmpeg.py): a fixed RGB565 gradient with
 # a 96x96 box crossing it, 8 px a frame, in native byte order.

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Structural checks of a USB configuration descriptor, as a host receives it.
 
     python3 desc_check.py HEX SPEED IN_MAX         # HEX: the configuration bytes

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """mdns against another implementation: python-zeroconf, in another process.
 
     python3 check_mdns_zeroconf.py ./builds/unix/standard/micropython

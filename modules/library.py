@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # Registers omnipython-lib, our library of Python-only packages, so a manifest
 # can require("pydevices", library="omnipython-lib"). build_mp.py assembles the
 # library tree (tools/libbuild.py build --tree-only in the pinned repository)

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Every espcamera control name on a real camera, checked against its driver.
 
 Reads each of espcamera's control names, and for the ones the sensor offers,

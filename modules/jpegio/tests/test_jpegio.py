@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """jpegio -- unix MicroPython tests against the corpus and the Pillow reference.
 
 The Phase 1 gate of the org's docs/jpegio-vision.md, checked mechanically:

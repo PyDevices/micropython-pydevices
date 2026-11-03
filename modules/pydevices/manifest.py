@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # PyDevices' own Python, from omnipython-lib: what lib/ holds, which is
 # `pydevices` and `bledev` as the library splits them, plus the host-only
 # parts of audiodev, bledev, displaydev and multimer that mip ships in

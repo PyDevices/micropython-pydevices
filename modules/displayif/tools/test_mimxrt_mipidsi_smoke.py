@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Smoke test for mipidsi import (MIMXRT1176 with MIPI DSI only).
 
 Full panel bring-up requires MIMXRT1170-EVK + Waveshare 5\" DSI on J84.

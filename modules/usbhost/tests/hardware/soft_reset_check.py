@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Soft reset check: usbhost shuts its hardware down on a soft reset.
 
 Run on the PC, with CPython and ``mpftp`` on the PATH (or named by ``MPFTP``),

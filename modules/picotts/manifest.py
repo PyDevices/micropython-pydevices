@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # picotts: text to speech on the SVOX Pico engine, the API of Adafruit's
 # adafruit_picotts. The engine is C (_picotts); the TTS class is frozen Python.
 # Needs PSRAM on a microcontroller: about 2.5 MB for the engine and voice.

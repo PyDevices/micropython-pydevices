@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # MicroPython manifest for cameraif: deliberately empty.
 #
 # cameraif is a native module with no Python half. Its whole surface is the

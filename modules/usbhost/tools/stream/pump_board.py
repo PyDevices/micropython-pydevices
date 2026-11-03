@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # Board half of the sound card through audiodsp's pump: usb-device-audio's
 # speaker writes into an audiopump.Ring from the USB interrupt
 # (Ring.from_usb), and audiodsp's pump plays that ring on the board's I2S

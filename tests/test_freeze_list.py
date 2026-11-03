@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Unit tests for scripts/freeze_list.py's comparison and, with a prepared
 MicroPython checkout, its reading of a manifest.
 

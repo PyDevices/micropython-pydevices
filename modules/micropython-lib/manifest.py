@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # The packages from micropython-lib that PyDevices' APIs lean on, frozen in so
 # an OmniPython firmware never asks anyone to mip.install them first (on stock
 # MicroPython you install them from micropython-lib's index, then ours):
