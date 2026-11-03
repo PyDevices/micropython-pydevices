@@ -16,7 +16,7 @@ encode on a revision 1.3 chip, against 263 ms on a revision 3 one.
 
 - **`tflite`**: TensorFlow Lite Micro inference (`tflite.Model`), the API
   OpenMV's `ml` module uses.
-- **`vision`**: the OpenMV-style `image` API (`image`, `imageio`), ESP-DL
+- **`vision`**: the OpenMV-style `image` API (`image`, with `image.ImageIO`), ESP-DL
   inference (`espdl`), and on the P4 the hardware H.264 encoder (`h264`) and an
   RTSP server (`rtsp`).
 
