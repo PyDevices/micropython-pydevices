@@ -20,7 +20,7 @@ inside a branch taken when one of those macros is set.
 
 A name is not reported when it *also* appears unguarded **in the same file** --
 the QSTR pass collects it from there and the guarded reference rides along -- or
-when it is in :data:`CORE_POOL` below.
+when it is in `CORE_POOL` below.
 
 Same file, not same repo, and the difference is the whole check. Every name in
 ``src/ports/samd/mod_i80bus.c`` is also referenced by the esp32 backend and by

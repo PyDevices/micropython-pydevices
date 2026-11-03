@@ -156,10 +156,11 @@ class _Engine:
 class TTS:
     """Speak text through an audio output.
 
-    :param audio: An audio output object with ``play()``, ``stop()`` and ``playing``, such as
-        `audiobusio.I2SOut`, `audioio.AudioOut` or `audiopwmio.PWMAudioOut`. The library
-        creates its own `audiomixer.Mixer` on it. Or an `audiomixer.MixerVoice` from the
-        caller's mixer, whose sample rate must match `sample_rate`.
+    Args:
+        audio: An audio output object with ``play()``, ``stop()`` and ``playing``, such as
+            `audiobusio.I2SOut`, `audioio.AudioOut` or `audiopwmio.PWMAudioOut`. The library
+            creates its own `audiomixer.Mixer` on it. Or an `audiomixer.MixerVoice` from the
+            caller's mixer, whose sample rate must match `sample_rate`.
     """
 
     def __init__(self, audio, *, voice_dir=None) -> None:
@@ -273,10 +274,11 @@ class TTS:
     def say(self, text: str, *, wait: bool = True, interrupt: bool = False) -> None:
         """Speak ``text``. If speech is already playing, ``text`` is queued after it.
 
-        :param str text: The text to speak.
-        :param bool wait: If True, return when all queued speech ends. If False, return
-            right away; call `update` in the main loop to keep speech going.
-        :param bool interrupt: If True, stop current speech and clear the queue first.
+        Args:
+            text (str): The text to speak.
+            wait (bool): If True, return when all queued speech ends. If False, return
+                right away; call `update` in the main loop to keep speech going.
+            interrupt (bool): If True, stop current speech and clear the queue first.
         """
         if interrupt:
             self.stop()
