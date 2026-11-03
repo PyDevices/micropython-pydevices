@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """The CircuitPython `audiobusio` docstring example, run unmodified.
 
 This is the program in CircuitPython 10.3.0's own

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 import sys
 S = sys.argv[1]
 src = open(S + "/stb_image_write.h").read()

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # On a board with a display, LVGL and jpegio: draw a corpus JPEG with
 # lv.image and compare what lands in the panel's framebuffer, pixel for pixel,
 # with jpegio decoding the same file into a buffer. The framebuffer is what

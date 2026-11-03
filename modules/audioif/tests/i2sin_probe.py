@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """`audioi2sin.I2SIn` against what CircuitPython documents it to do.
 
 Every leg is a behaviour taken off CircuitPython's

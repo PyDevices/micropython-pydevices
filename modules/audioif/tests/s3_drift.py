@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """audioif#5: do the T-Embed's two I2S ports drift, over an hour?
 
 Forty seconds said no -- `rx - tx` stayed at 0 bytes at a 4 x 128 ring. Two

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # usb.host.video on usb.core: open the hosted camera, stream, decode a frame.
 import time
 

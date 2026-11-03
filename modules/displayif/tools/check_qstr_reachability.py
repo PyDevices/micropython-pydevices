@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Refuse an MP_QSTR_ name that only exists when a usermod's INTERFACE define is set.
 
 The rule this enforces, and why, is docs/qstrs-and-usermod-defines.md. In one

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """The device-class proof matrix: every combination enumerates on Windows and
 moves data. Runs in WSL; drives the board over WebREPL with ``mpftp hold``.
 

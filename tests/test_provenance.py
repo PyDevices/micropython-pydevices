@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Tests for scripts/update_provenance.py, and the check that the committed
 provenance.json is current.
 

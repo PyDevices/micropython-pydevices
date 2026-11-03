@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Smoke test for dotclockframebuffer.DotClockFramebuffer (mimxrt eLCDIF).
 
 Small 4x4 buffer on MIMXRT1062 (Teensy 4.x / MIMXRT1060-EVK). Full RK043 panel

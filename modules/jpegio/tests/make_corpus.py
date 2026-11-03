@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Build the jpegio test corpus in frames/ and write frames/README.md.
 
 Run:  python3 modules/jpegio/tests/make_corpus.py        (needs Pillow; 12.3 used)

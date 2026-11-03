@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """jpegio -- its LVGL image decoder, on unix MicroPython built beside lvgl (omnipython-lvgl).
 
 The LVGL half of the Phase 2 gate in the org's docs/jpegio-vision.md, checked

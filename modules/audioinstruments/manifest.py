@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # audioinstruments, from omnipython-lib: the rack and its instruments, which
 # the library builds from the PyDevices/audioinstruments repository at the tag
 # its lib-lock.json pins. They import ulab and audiodsp, so name those too (or

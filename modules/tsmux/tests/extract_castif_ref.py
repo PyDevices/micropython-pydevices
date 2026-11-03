@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Regenerate castif_ref.inc: castif's muxer functions, verbatim from git.
 
     python extract_castif_ref.py [COMMIT]     (default ccccb28, the last castif

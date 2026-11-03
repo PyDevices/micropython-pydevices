@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """`audiobusio.I2SOut` against what CircuitPython documents it to do.
 
 Everything here is a CircuitPython behaviour taken off

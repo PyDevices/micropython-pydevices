@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Smoke test for dotclockframebuffer.DotClockFramebuffer import and buffer protocol (esp32)."""
 
 import sys

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # tflite: TensorFlow Lite Micro inference, esp-vision's module compiled as it
 # is (modules/.esp-vision). C only; ESP32-P4 and ESP32-S3.
 #

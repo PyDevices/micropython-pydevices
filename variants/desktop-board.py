@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # The desktop and browser images' board config, frozen, from omnipython-lib:
 # board_config and board_peripherals from its `desktop` package, and the
 # desktop-only helpers pydevices-desktop carries (the pure-Python SDL2 and

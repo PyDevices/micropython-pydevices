@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # usb.host.audio on usb.core: play a tone into the hosted speaker.
 import math
 import time

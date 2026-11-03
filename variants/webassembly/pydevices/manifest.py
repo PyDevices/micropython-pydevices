@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # The direct browser runtime. This variant brings its own port content rather
 # than modules/manifest.py's:
 # its Fetch-backed requests module must be frozen before anything resolves

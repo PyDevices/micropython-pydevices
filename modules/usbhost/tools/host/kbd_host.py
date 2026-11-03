@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # Read a hosted keyboard's key events through usb.host.hid for a while.
 import time
 

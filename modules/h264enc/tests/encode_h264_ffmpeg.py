@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """The board half's stand-in on a PC: ffmpeg's x264 encodes h264_frames.py's
 frames with the settings hardware/test_h264enc.py gives h264enc (720x720,
 30 fps, 3 Mbit/s, a keyframe every 30), so CI can run check_h264_ffmpeg.py

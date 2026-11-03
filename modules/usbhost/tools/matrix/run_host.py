@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """The proof matrix's host leg: a board's native port as USB host, checked
 against what's plugged into it. Runs in WSL; drives the host board (and a
 peer board, if one is given) over ``mpftp hold``. One command, one verdict:

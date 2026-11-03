@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Smoke test for native spibus (displayif src/ports/common/spi)."""
 
 import sys

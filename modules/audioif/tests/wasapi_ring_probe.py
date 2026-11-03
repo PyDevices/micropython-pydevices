@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """A WASAPI microphone feeding an audiopump.Ring on its own thread holds pace.
 
     micropython.exe tests/wasapi_ring_probe.py [secs=30] [in=ID] [out=ID]

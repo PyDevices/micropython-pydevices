@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # The board half of the device-class proof matrix (tools/matrix/run_matrix.py).
 #
 # setup(names) brings up any combination of "cdc" (an extra serial port),

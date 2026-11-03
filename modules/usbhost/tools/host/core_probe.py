@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # Board half of the usb.core check: list what's plugged into the host port,
 # then talk to a flash drive with nothing but usb.core's bulk transfers
 # (SCSI INQUIRY and READ CAPACITY over Bulk-Only Transport), and to a MIDI

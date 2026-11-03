@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Write micropython.wasm.provenance for a webassembly build.
 
 The website and workbench keep this file beside the runtime they serve, so a

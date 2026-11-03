@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # The S3 hosts a UVC camera through usb.host.video, streams for a while,
 # and saves the last whole frame to /frame.bin.
 import time

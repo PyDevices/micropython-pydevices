@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # The manifest a build_mp.py build freezes: upstream's own content for the
 # port, then the modules you named. This is the user manifest MicroPython's
 # manifest reference describes -- the port's base, then your additions -- and

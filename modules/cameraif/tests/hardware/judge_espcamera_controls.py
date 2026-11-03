@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Judge espcamera_controls.py's output against the OV5647 driver's own source.
 
 The expectation comes from esp_cam_sensor's ov5647.c (which parameter ids its

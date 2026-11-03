@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """pngio against Pillow, on the PC, both ways.
 
     python check_pngio_pillow.py MICROPYTHON DIR

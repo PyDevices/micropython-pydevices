@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """UAC host ring check (usbif#36). Run on the HOST board.
 
 The host board plays to a hosted USB speaker (a P4 running

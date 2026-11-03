@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """ffmpeg on the PC decodes what test_h264enc.py encoded on the board.
 
 Thresholds fixed before the first run (2026-10-06): ffmpeg decodes exactly N

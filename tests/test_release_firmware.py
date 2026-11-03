@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Tests for scripts/release_firmware.py: the cell table and the checks
 `assemble` makes on what the builds hand over. Nothing is built.
 

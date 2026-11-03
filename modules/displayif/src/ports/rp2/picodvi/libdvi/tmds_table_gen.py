@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
 
 # The key fact is that, if x is even, and the encoder currently has a running
 # imbalance of 0, encoding x followed by x + 1 produces a symbol pair with a

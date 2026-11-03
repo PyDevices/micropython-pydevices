@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Verify displayif modules expose idempotent lifecycle methods on their types.
 
 This test runs without display hardware: it imports modules that exist on the

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """tsmux on unix MicroPython -- the media Phase 4 portable half.
 
 Muxes canned_160x96.h264 (90 frames, a keyframe every 30, from ffmpeg) into

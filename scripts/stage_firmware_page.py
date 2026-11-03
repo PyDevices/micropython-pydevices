@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Lay a firmware set out for the download page.
 
     stage_firmware_page.py <firmware-dir> <page-dir> [--interpreters FILE |

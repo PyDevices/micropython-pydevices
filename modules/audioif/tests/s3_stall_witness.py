@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Does a flash erase stall the I2S DMA itself, or only the pump?
 
     mpftp put -d COM12 tests/s3_stall_witness.py /lib/s3_stall_witness.py

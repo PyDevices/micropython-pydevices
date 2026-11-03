@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """UAC host duplex check: play to a USB sound card and record from it at once.
 
 Run on a board that hosts a USB audio device whose output is looped back into

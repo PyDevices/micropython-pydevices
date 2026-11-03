@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # usb.host.cdc on usb.core: type a line into a hosted MicroPython board's REPL
 # over its USB serial port and read the answer back.
 import time

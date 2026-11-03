@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """pngio on MicroPython: round trips, sizes and times. Runs on unix and on boards.
 
     micropython test_pngio.py [--out DIR]

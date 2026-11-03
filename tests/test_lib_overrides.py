@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """lib-overrides/mip is micropython-lib's mip plus the marked patch, nothing else."""
 import pathlib
 import re

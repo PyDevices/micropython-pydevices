@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Grab a frame from a named webcam and check it shows the colour bars
 (Windows Python: ffmpeg's dshow, numpy, Pillow).
 

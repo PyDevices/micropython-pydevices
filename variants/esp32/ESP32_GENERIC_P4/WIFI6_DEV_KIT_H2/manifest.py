@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # The DEV-KIT's frozen content: the port's and the modules you named
 # (modules/manifest.py), plus the USB packages this board's apps import and
 # midiports, frozen so the board runs without a mip install. Only this variant

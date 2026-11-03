@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """picotts on the unix port: the engine renders speech, and the API around it.
 
 Run with the unix MicroPython built with --modules picotts, and the folder

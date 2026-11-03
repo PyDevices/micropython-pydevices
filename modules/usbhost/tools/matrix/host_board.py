@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 # The board half of the proof matrix's host leg (tools/matrix/run_host.py).
 #
 # Runs on the board whose native port is the USB host, with usbhost's check

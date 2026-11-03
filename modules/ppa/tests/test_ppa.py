@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """ppa -- the media Phase 5 gate. Thresholds fixed before the first run.
 
 On every port (the software path):

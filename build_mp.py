@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+
 """Build PyDevices MicroPython firmware with one command.
 
     ./build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI \\
