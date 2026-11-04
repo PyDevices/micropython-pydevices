@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Adafruit Industries
 # SPDX-FileCopyrightText: 2026 PyDevices
+#
 # SPDX-License-Identifier: MIT
 """Text to speech on the SVOX Pico engine by SVOX AG (Apache-2.0).
 
