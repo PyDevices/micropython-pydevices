@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
 # SPDX-License-Identifier: MIT
 """Smoke test for usdl2 (MicroPython unix/windows or CircuitPython unix)."""
 

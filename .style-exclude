@@ -1,0 +1,5 @@
+# Paths the style check skips: code that isn't ours, and generated files.
+# One glob per line.
+
+# MicroPython's own mip installer, kept as upstream wrote it.
+lib-overrides/mip/
