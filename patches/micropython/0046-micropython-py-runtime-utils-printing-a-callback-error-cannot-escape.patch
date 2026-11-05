@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 00:00:00 -0500
+Subject: [PATCH] py/runtime_utils: An error printing a callback's exception
+ must not escape.
+
+A scheduled callback that overflows the stack can stop every scheduled
+callback for the rest of the run. mp_call_function_1_protected() catches the
+overflow and prints it, but printing checks the stack as well: the check in
+mp_obj_print_helper() raises again, this time with no handler left in the
+protected call. The exception jumps out through mp_sched_run_pending(), past
+its mp_sched_unlock(), and lands in whatever Python frame was running.
+sched_state stays at MP_SCHED_LOCKED until the next soft reset, and the
+foreground gets a RuntimeError it did nothing to cause.
+
+Seen on RP2040, ESP32-S3, ESP32-P4 and the unix port by scheduling a no-op with
+the foreground within a few hundred bytes of the stack limit. The console shows
+"RuntimeError: " with no message, then no machine.Timer callback runs again
+and micropython.schedule() fills up and raises "schedule queue full".
+
+Catch whatever the print raises, so a protected call does what its name says,
+and say so on the console. The callback's error is still reported as far as
+there's stack to print it, and the foreground carries on.
+
+diff --git a/py/runtime_utils.c b/py/runtime_utils.c
+index 3b0ae279a..f6b55986b 100644
+--- a/py/runtime_utils.c
++++ b/py/runtime_utils.c
+@@ -27,6 +27,21 @@
+ 
+ #include "py/runtime.h"
+ 
++// Printing an exception can raise too: mp_obj_print_helper() checks the stack,
++// and after a stack overflow this runs about as deep as the overflow did.  An
++// exception that got out would skip what the caller does after a protected call,
++// such as the scheduler unlocking itself.
++static void print_exception_protected(mp_obj_t exc) {
++    nlr_buf_t nlr;
++    if (nlr_push(&nlr) == 0) {
++        mp_obj_print_exception(&mp_plat_print, exc);
++        nlr_pop();
++    } else {
++        // This can end a line the print started, so it reads either way.
++        mp_print_str(&mp_plat_print, "could not print exception\n");
++    }
++}
++
+ mp_obj_t mp_call_function_1_protected(mp_obj_t fun, mp_obj_t arg) {
+     nlr_buf_t nlr;
+     if (nlr_push(&nlr) == 0) {
+@@ -34,7 +49,7 @@ mp_obj_t mp_call_function_1_protected(mp_obj_t fun, mp_obj_t arg) {
+         nlr_pop();
+         return ret;
+     } else {
+-        mp_obj_print_exception(&mp_plat_print, MP_OBJ_FROM_PTR(nlr.ret_val));
++        print_exception_protected(MP_OBJ_FROM_PTR(nlr.ret_val));
+         return MP_OBJ_NULL;
+     }
+ }
+@@ -46,7 +61,7 @@ mp_obj_t mp_call_function_2_protected(mp_obj_t fun, mp_obj_t arg1, mp_obj_t arg2
+         nlr_pop();
+         return ret;
+     } else {
+-        mp_obj_print_exception(&mp_plat_print, MP_OBJ_FROM_PTR(nlr.ret_val));
++        print_exception_protected(MP_OBJ_FROM_PTR(nlr.ret_val));
+         return MP_OBJ_NULL;
+     }
+ }
+-- 
+2.43.0
