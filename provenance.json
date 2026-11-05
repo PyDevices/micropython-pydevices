@@ -133,6 +133,9 @@
   },
   "0045-micropython-esp32-modsocket-so-keepalive-and-tcp-keepalive-timers.patch": {
    "sha256": "f3806160db7a41639d8460ec2df8e580dba8c2cf3f6cf2c93c846e791dbf893e"
+  },
+  "0046-micropython-py-runtime-utils-printing-a-callback-error-cannot-escape.patch": {
+   "sha256": "ec62b25178128b02fc464b550183983c183e725ee7b2da3f1b4005a166c0bde9"
   }
  },
  "tinyusb_patches": {
