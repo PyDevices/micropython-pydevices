@@ -136,6 +136,9 @@
   },
   "0046-micropython-py-runtime-utils-printing-a-callback-error-cannot-escape.patch": {
    "sha256": "ec62b25178128b02fc464b550183983c183e725ee7b2da3f1b4005a166c0bde9"
+  },
+  "0047-micropython-py-scheduler-no-wait-with-a-callback-ready.patch": {
+   "sha256": "b01cd7d260563082e788e0e160e51e3179f127a86fa323755732cfd5a45cffc8"
   }
  },
  "tinyusb_patches": {
