@@ -21,6 +21,8 @@
 #include "esp_err.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_io_i80.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #define DC_CMD 0
 #define DC_DATA 1
@@ -43,6 +45,21 @@ typedef struct {
 } i80bus_host_t;
 
 static i80bus_host_t s_host;
+
+// esp_lcd queues a color transfer and returns before the DMA has read the
+// buffer. The caller owns that buffer and reuses it at once (LVGL's draw
+// buffers, displaydev's fill strip, the window parameters), and transfers
+// queued behind each other were lost on the panel. send() waits for each
+// transfer to finish, signalled from the done interrupt.
+static SemaphoreHandle_t s_color_done;
+
+static bool i80bus_color_done_isr(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx) {
+    (void)io;
+    (void)edata;
+    BaseType_t woken = pdFALSE;
+    xSemaphoreGiveFromISR((SemaphoreHandle_t)user_ctx, &woken);
+    return woken == pdTRUE;
+}
 static bool s_soft_reset_registered;
 
 static const mp_obj_type_t i80bus_type;
@@ -189,10 +206,20 @@ static mp_obj_t i80bus_make(const mp_obj_type_t *type, size_t n_args, size_t n_k
 
     i80bus_raise_esp_err(esp_lcd_new_i80_bus(&bus_config, &self->bus));
 
+    if (s_color_done == NULL) {
+        s_color_done = xSemaphoreCreateBinary();
+        if (s_color_done == NULL) {
+            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("i80bus: no memory for its semaphore"));
+        }
+    }
+    xSemaphoreTake(s_color_done, 0); // drop a give left by an earlier bus
+
     esp_lcd_panel_io_i80_config_t io_config = {
         .cs_gpio_num = self->has_cs ? cs_pin : -1,
         .pclk_hz = vals[ARG_frequency].u_int,
         .trans_queue_depth = 10,
+        .on_color_trans_done = i80bus_color_done_isr,
+        .user_ctx = s_color_done,
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
         .dc_levels = {
@@ -228,6 +255,10 @@ static mp_obj_t i80bus_send(size_t n_args, const mp_obj_t *args) {
         mp_get_buffer_raise(data, &bufinfo, MP_BUFFER_READ);
         if (bufinfo.len > 0) {
             i80bus_raise_esp_err(esp_lcd_panel_io_tx_color(self->io, -1, bufinfo.buf, bufinfo.len));
+            // The longest transfer, 64 KB at 1 MHz on 8 lines, takes about 66 ms.
+            if (xSemaphoreTake(s_color_done, pdMS_TO_TICKS(1000)) != pdTRUE) {
+                mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("i80bus: a transfer didn't finish"));
+            }
         }
     }
 
