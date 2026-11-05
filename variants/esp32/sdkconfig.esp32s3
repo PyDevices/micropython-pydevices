@@ -9,6 +9,9 @@
 # come from, and on the T-Embed spremote ran it down to 49 KB free with a
 # largest block of 23 KB, unable to start its audio thread. The IDF choice
 # symbol is loaded after the defaults, so this line wins over the port's.
+# On an S3 with no PSRAM every one of those allocations fails, and Wi-Fi can't
+# finish a WPA2 handshake (status 202): our S3 builds need PSRAM. An S3 without
+# it is rare enough that it takes upstream's firmware, not a fallback here.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
 # No core dump to flash in a standard build; ./build_mp.py --coredump makes a
