@@ -19,6 +19,11 @@ top. Add `--modules` to any of these:
 | Raspberry Pi Pico 2 (RP2350) | `--port rp2 --board RPI_PICO2` |
 | Pimoroni Pico Plus 2 W (16 MB flash, 8 MB PSRAM, 48 GPIOs) | `--port rp2 --board RPI_PICO2_W --variant PIMORONI_PICO_PLUS2_W` |
 
+Our ESP32-S3 builds need an S3 with PSRAM: they keep the TLS library in PSRAM,
+and on an S3 without it, Wi-Fi can't join a WPA2 network. Most S3 boards have
+PSRAM. For one that doesn't, such as Adafruit's QT Py ESP32-S3 with 8 MB flash
+and no PSRAM, use upstream's `ESP32_GENERIC_S3` firmware.
+
 For a board that isn't listed, see [Build for a board](../guides/build-for-a-board.md#a-board-that-isnt-in-the-table).
 
 ## Variants
