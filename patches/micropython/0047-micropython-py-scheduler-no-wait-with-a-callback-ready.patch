@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 00:00:00 -0500
+Subject: [PATCH] py/scheduler: Don't start a wait with a callback ready to run.
+
+mp_event_wait_indefinite() and mp_event_wait_ms() handle pending events and
+then wait, whatever the handling left behind. mp_handle_pending() runs at most
+one Python callback, so a second one can stay queued with sched_state at
+MP_SCHED_PENDING while the CPU sits in WFE. On rp2 that WFE returns only at the
+next interrupt. mp_event_wait_ms() hides this for a short timeout, because
+best_effort_wfe_or_timeout() adds an alarm, and so an event, when no alarm is
+due sooner. It doesn't for a long timeout or at the friendly REPL.
+
+On an RP2040 running an LVGL test app with three timers (10, 33 and 10 ms),
+over 10 s, service timer callbacks:
+
+    time.sleep_ms(500) in a loop:  747 before, 757 after
+    time.sleep_ms(2000) in a loop: 359 before, 757 after
+    time.sleep_ms(10000):           78 before, 754 after
+    at the friendly REPL:          131 before, 728 after
+
+Skip the wait while a callback this thread could run is ready. Ports still on
+MICROPY_EVENT_POLL_HOOK, esp32 among them, don't reach this code.
+
+diff --git a/py/scheduler.c b/py/scheduler.c
+index 7849fcfe2..202359386 100644
+--- a/py/scheduler.c
++++ b/py/scheduler.c
+@@ -255,6 +255,23 @@ void mp_handle_pending(mp_handle_pending_behaviour_t behavior) {
+     #endif
+ }
+ 
++// Whether a wait should hold off, because the scheduler has a callback that this
++// thread could run now. mp_handle_pending() runs at most one Python callback at a
++// time, and the event that announced the next may have been used up already, so
++// nothing would wake the wait until some unrelated interrupt.
++static inline bool mp_event_callback_ready(void) {
++    #if MICROPY_ENABLE_SCHEDULER
++    #if MICROPY_PY_THREAD && !MICROPY_PY_THREAD_GIL
++    if (!mp_thread_is_main_thread()) {
++        return false;
++    }
++    #endif
++    return MP_STATE_VM(sched_state) == MP_SCHED_PENDING;
++    #else
++    return false;
++    #endif
++}
++
+ // Handles any pending MicroPython events without waiting for an interrupt or event.
+ void mp_event_handle_nowait(void) {
+     #if defined(MICROPY_EVENT_POLL_HOOK_FAST) && !MICROPY_PREVIEW_VERSION_2
+@@ -275,7 +292,9 @@ void mp_event_wait_indefinite(void) {
+     MICROPY_EVENT_POLL_HOOK
+     #else
+     mp_event_handle_nowait();
+-    MICROPY_INTERNAL_WFE(-1);
++    if (!mp_event_callback_ready()) {
++        MICROPY_INTERNAL_WFE(-1);
++    }
+     #endif
+ }
+ 
+@@ -287,6 +306,8 @@ void mp_event_wait_ms(mp_uint_t timeout_ms) {
+     MICROPY_EVENT_POLL_HOOK
+     #else
+     mp_event_handle_nowait();
+-    MICROPY_INTERNAL_WFE(timeout_ms);
++    if (!mp_event_callback_ready()) {
++        MICROPY_INTERNAL_WFE(timeout_ms);
++    }
+     #endif
+ }
+-- 
+2.43.0
