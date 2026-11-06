@@ -162,9 +162,9 @@ PLL3 R, runs at the pixel clock; deinit and soft reset put the divider back. Ini
 out as DCS writes over the DSI host's command interface. Panel power and backlight GPIO are
 owned by board_config, not `Display`. Other stm32 chips get the stub.
 
-The board needs the HAL's DSI and LTDC drivers: micropython-pydevices'
-`ARDUINO_GIGA` `DISPLAY_SHIELD` variant adds them, through its `stm32h7xx_hal_conf.h` and
-`HAL_SRC_C`. Example pydevices config: `fbdisplay/arduino-giga-display-shield`.
+The board needs the HAL's DSI and LTDC drivers: the `ARDUINO_GIGA` `DISPLAY_SHIELD` variant in
+the [boards table](../../../docs/reference/boards.md) adds them, through its
+`stm32h7xx_hal_conf.h` and `HAL_SRC_C`. Example pydevices config: `fbdisplay/arduino-giga-display-shield`.
 
 ---
 
