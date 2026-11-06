@@ -162,6 +162,13 @@ PLL3 R, runs at the pixel clock; deinit and soft reset put the divider back. Ini
 out as DCS writes over the DSI host's command interface. Panel power and backlight GPIO are
 owned by board_config, not `Display`. Other stm32 chips get the stub.
 
+The DSI host counts each line in lane byte clocks (the lane bit rate / 8, 62.5 MHz at
+500 Mbit/s), so pick horizontal timings whose total, at your pixel clock, is a whole number of
+them: the GIGA config's 864-pixel line at 40 MHz is exactly 1350. `mipidsi` never reads from
+the panel. If you add a DSI read, set the host's low-power receive and bus-turnaround timeouts
+(`TCCR`) first, and give every wait on `GPSR` a deadline: a read with neither can hang the chip
+until its reset button is pressed.
+
 The board needs the HAL's DSI and LTDC drivers: the `ARDUINO_GIGA` `DISPLAY_SHIELD` variant in
 the [boards table](../../../docs/reference/boards.md) adds them, through its
 `stm32h7xx_hal_conf.h` and `HAL_SRC_C`. Example pydevices config: `fbdisplay/arduino-giga-display-shield`.
