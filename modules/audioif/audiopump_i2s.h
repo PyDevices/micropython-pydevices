@@ -45,6 +45,9 @@ typedef struct {
     // wants. Only a receive-only channel can be opened left-justified; every
     // output is Philips.
     int msb;
+    // stm32 only: the right channel's DAC pin, as port * 16 + pin, or -1 for
+    // a mono output; `dout` is the left's. audioio.AudioOut fills both.
+    int dac_right;
 } audiopump_i2s_cfg_t;
 
 // Who is holding the open channel. The output (`audiobusio.I2SOut`, or

@@ -22,7 +22,7 @@ Ask a firmware whether this half is in it:
 ```python
 >>> import audiopump
 >>> audiopump.driver()
-'esp32'          # or 'pthread', 'win32', 'none'
+'esp32'          # or 'stm32', 'pthread', 'win32', 'none'
 ```
 
 `'none'` means no driver bound. That is a real answer — the engine's default
@@ -109,6 +109,33 @@ They compile and link for an ESP32-P4 and an ESP32-S3 — the driver's hook
 table wins in both link maps and the three entry points are in both images
 and not discarded — and the desktop probe covers all 39 legs. No image
 carrying them has been flashed.
+
+## `audioio.AudioOut` — the same output on a DAC
+
+On an STM32H7 board whose audio is a DAC rather than I2S, such as the Arduino
+GIGA R1's headphone jack, the output is CircuitPython's `audioio.AudioOut`, and
+`audiobusio.I2SOut` says to use it instead:
+
+```python
+import audiocore, audioio, pyb
+
+out = audioio.AudioOut(pyb.Pin("PA4"), right_channel=pyb.Pin("PA5"))
+out.play(sample, loop=True)
+```
+
+PA4 and PA5 are the GIGA's A12 and A13, its jack's left and right. The DAC
+plays 12 bits, so each 16-bit sample loses its low four. Everything after the
+constructor is `I2SOut`'s: `play`, `stop`, `pause`, `resume`, `retarget`,
+`playing`, `starved()` and `status`. `quiescent_value` takes only CircuitPython's
+default, 0x8000, which is where the DAC rests, and `sample_rate=` (ours) is the
+rate it opens at before the first `play()`.
+
+The port has no threads, so the pump runs in the engine's service mode, on the
+interpreter: a soft timer looks at the DMA every 4 ms and schedules the pump
+whenever a block's worth of the 2,048-frame ring has played. It runs between
+bytecodes and while the interpreter sleeps. A C call that holds the interpreter
+for longer than the ring (93 ms at 22.05 kHz) underruns, and the DAC plays
+silence until the pump catches up; `starved()` counts it.
 
 ## `audioi2sin.I2SIn` — recording from a microphone
 
@@ -232,6 +259,7 @@ it and it has not been done.
 | **ESP32 family** | a FreeRTOS task pinned to the core the interpreter is not on, optionally with its stack in PSRAM | `xSemaphoreCreateRecursiveMutex`, which is priority-inheriting | `esp_timer_get_time` | the I2S channel, written from the pull loop | `Input`, single-port or two-port |
 | **unix** | `pthread` | recursive `pthread_mutex` | `clock_gettime` | a file the loop `write(2)`s each block to | — |
 | **Windows** | `_beginthreadex` | `CRITICAL_SECTION` | `QueryPerformanceCounter` | a file descriptor, or a WASAPI speaker written from the pull loop | `Input`, a WASAPI microphone read on the pump's thread |
+| **STM32H7** (Arduino GIGA R1) | none: the engine's service mode, run by a soft timer that schedules the pump on the interpreter whenever the DAC has played a block | — | `mp_hal_ticks_us` | the DAC's two channels, through a circular DMA paced by TIM6 | — |
 | **WebAssembly** | none — **and none is needed** | — | — | — | — |
 
 WebAssembly is not a gap. That build has no threads (no `-pthread`, no
@@ -360,8 +388,8 @@ out anywhere; failing that it looks at `../audiodsp`. A build that names audioif
 but can't find audiodsp stops with an error saying so. Tested on the unix port against MicroPython v1.29.0, where
 `audiopump.driver()` answers `'pthread'`.
 
-The platform driver is unix, Windows and esp32. Any other CMake port (rp2, say)
-skips it by design.
+The platform driver is unix, Windows, esp32 and the STM32H7 (`audioio.AudioOut`
+on its DAC). Any other port (rp2, say) skips it by design.
 
 If you would rather not edit the MicroPython tree, write a manifest of your own
 and pass it as `FROZEN_MANIFEST=`. That replaces the port's default, so include

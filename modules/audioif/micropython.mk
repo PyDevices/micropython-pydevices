@@ -1,4 +1,4 @@
-# MicroPython Make glue for the audio pump's platform driver (unix, windows).
+# MicroPython Make glue for the audio pump's platform driver (unix, windows, stm32).
 #
 # The engine is not here any more: the pull loop, the ring, the events, the tap
 # and the lock all live in audiodsp and are built by audiodsp's own glue. This
@@ -26,6 +26,14 @@ SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/_audioif.c
 SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audiobusio.c
 SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audioi2sin.c
 SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audioif_wasapi.c
+
+# An STM32H7 plays through its DAC (audioio.AudioOut), with the pump in the
+# engine's service mode; audioif_stm32.c is that driver, and _audioif.c then
+# compiles to no driver of its own.
+ifeq ($(MCU_SERIES),h7)
+CFLAGS_USERMOD += -DAUDIOIF_DRIVER_STM32
+SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audioif_stm32.c
+endif
 
 # --- which audioif this firmware was built from ----------------------
 # Computed at build time from this repo's own git, never stored; "unknown" when

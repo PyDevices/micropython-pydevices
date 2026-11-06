@@ -68,6 +68,15 @@
 #define AUDIOIF_DRV_POSIX (0)
 #define AUDIOIF_DRV_NONE (0)
 #define AUDIOIF_DRV_NAME "esp32"
+#elif defined(AUDIOIF_DRIVER_STM32)
+// The STM32H7's driver is a file of its own, audioif_stm32.c: a DAC rather
+// than I2S, and no thread, so it shares almost nothing with the branches here.
+// This file compiles to no driver there, and that one answers what
+// audiobusio.c asks of an output.
+#define AUDIOIF_DRV_ESP (0)
+#define AUDIOIF_DRV_WIN (0)
+#define AUDIOIF_DRV_POSIX (0)
+#define AUDIOIF_DRV_NONE (1)
 #elif defined(__EMSCRIPTEN__)
 // Not a mistake and not a gap: the WebAssembly build has no threads (no
 // -pthread, no SharedArrayBuffer) and no hardware to drive. Emscripten still
@@ -2938,6 +2947,8 @@ MP_REGISTER_MODULE(MP_QSTR__audioif, _audioif_module);
 
 #endif  // !AUDIOIF_DRV_NONE
 
+#if !defined(AUDIOIF_DRIVER_STM32)
+
 // What audiobusio asks before it spawns: the rate its stream runs at, which a
 // "wasapi" path may leave out, and whether this sink is a clock. A speaker is,
 // and a pump writing to one must not be paced off the wall clock as well.
@@ -3107,3 +3118,5 @@ bool audiopump_i2s_rx_held(void) {
     return false;
 }
 #endif
+
+#endif  // !AUDIOIF_DRIVER_STM32
