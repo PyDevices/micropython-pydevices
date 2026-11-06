@@ -19,7 +19,7 @@ top. Add `--modules` to any of these:
 | Raspberry Pi Pico 2 (RP2350) | `--port rp2 --board RPI_PICO2` |
 | Pimoroni Pico Plus 2 W (16 MB flash, 8 MB PSRAM, 48 GPIOs) | `--port rp2 --board RPI_PICO2_W --variant PIMORONI_PICO_PLUS2_W` |
 | Arduino GIGA R1 WiFi | `--port stm32 --board ARDUINO_GIGA` (past 1,280 KB it [takes the M4 core's flash](../guides/fit-firmware-on-a-small-flash.md)) |
-| Arduino GIGA R1 WiFi, playing through its headphone jack ([`audioio.AudioOut`](../../modules/audioif/README.md#audioioaudioout--the-same-output-on-a-dac)) | `--port stm32 --board ARDUINO_GIGA --modules audiodsp,audioif` |
+| Arduino GIGA R1 WiFi, playing through its headphone jack ([`audioio.AudioOut`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/audioif/README.md#audioioaudioout--the-same-output-on-a-dac)) | `--port stm32 --board ARDUINO_GIGA --modules audiodsp,audioif` |
 | Arduino GIGA R1 WiFi with the GIGA Display Shield | `--port stm32 --board ARDUINO_GIGA --variant DISPLAY_SHIELD --modules displayif,lvgl` ([two images to flash](../guides/flash-a-board.md#stm32-arduino-giga-r1-wifi)) |
 
 Our ESP32-S3 builds need an S3 with PSRAM: they keep the TLS library in PSRAM,
