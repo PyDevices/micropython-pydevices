@@ -79,6 +79,12 @@ board, unchanged, and adds:
 the Wi-Fi chip's firmware into QSPI flash with a linker script fragment and
 turns on the HAL's DSI driver for displayif's `mipidsi`.
 
+On `ARDUINO_GIGA`, with a variant or without one, a firmware too big for its
+1,280 KB grows over the M4 core's flash instead of failing, and the build adds
+the settings for that to the variant file it generates. A variant doesn't need
+to make room itself; see
+[fit firmware on a small flash](fit-firmware-on-a-small-flash.md).
+
 ## Desktop variants
 
 The unix and windows ports take our `pydevices` and `vst3-engine` variants, and

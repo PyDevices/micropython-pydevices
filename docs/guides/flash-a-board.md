@@ -35,7 +35,9 @@ dfu-util -a 0 -d 2341:0366 -s 0x08040000:leave -D firmware0.bin
 ```
 
 `firmware1.bin` only changes when the Wi-Fi driver does, so after the first
-time you can write `firmware0.bin` alone.
+time you can write `firmware0.bin` alone. A build without the variant keeps the
+Wi-Fi firmware inside its one image, `firmware.bin`, which the second command
+writes in place of `firmware0.bin`.
 
 The OmniPython libraries don't fit in this firmware beside LVGL, so they go on
 the board after it, in its 4 MB ROMFS partition, where MicroPython runs them in
@@ -55,6 +57,37 @@ board compiles them as they're imported. A deploy replaces the whole partition,
 so the board's own drivers go in the same folder:
 [the GIGA Display Shield's board page](https://github.com/PyDevices/pydevices/blob/main/docs/boards/display-boards.md#arduino-giga-r1-wifi--giga-display-shield)
 has that recipe.
+
+The H747 has a second core, a Cortex-M4, and upstream's layout leaves it the
+last 512 KB of flash. A GIGA build that doesn't fit the 1,280 KB before that
+takes it too, and says `autosize:` as it does
+([fit firmware on a small flash](fit-firmware-on-a-small-flash.md)). You flash
+it the same way; `firmware0.bin` is just longer. It overwrites any M4 program
+on the board, and it has no `openamp` module, so it can't start one.
+
+### The M4 starts on its own
+
+When a GIGA's BCM4 option bit is set, as it was on the one these builds were
+tested on, its M4 starts at reset, before MicroPython runs, from 0x08100000,
+the default boot address. To read the bit at the REPL (1 means set; this only
+reads it):
+
+```python
+import machine
+print(machine.mem32[0x5200201C] >> 22 & 1)
+```
+
+Any GIGA firmware longer than 768 KB covers that address, upstream's included,
+so the M4 starts from whatever bytes of it are there. They are almost never a
+valid stack and reset address, so the M4 faults on its first instruction and
+stops. Every GIGA build checks the bytes it puts there and fails, saying so, if
+they look like a vector table the M4 could run; a module more or less moves
+them.
+
+To stop the M4 starting at all, clear BCM4: ST's
+[STM32CubeProgrammer](https://www.st.com/en/development-tools/stm32cubeprog.html)
+can change it in the option bytes. Changing option bytes is your call, since a
+wrong one can leave the board unable to boot until it is recovered over SWD.
 
 ## With mpftp
 
