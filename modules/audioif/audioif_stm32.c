@@ -51,7 +51,9 @@
 // DAC midscale, the silence of an unsigned 12-bit output, on both channels.
 #define AUDIOIF_SILENCE (0x08000800u)
 
-// In AXI SRAM, which DMA1 reads. The CPU writes it through the data cache,
+// In .bss, which the H7 boards' linker scripts put in AXI SRAM, where DMA1
+// can read it; DMA1 can't reach the DTCM, and audiopump_i2s_open() refuses a
+// board that puts .bss there. The CPU writes the ring through the data cache,
 // so every write is cleaned out to memory before the DMA can get to it.
 static uint32_t audioif_ring[AUDIOIF_RING_FRAMES] __attribute__((aligned(32)));
 
@@ -275,6 +277,10 @@ uint32_t audiopump_i2s_open(const audiopump_i2s_cfg_t *cfg) {
     int right = cfg->dac_right >= 0 ? audioif_dac_channel(cfg->dac_right) : 0;
     if (left == 0 || (cfg->dac_right >= 0 && right == 0) || left == right) {
         mp_raise_ValueError(MP_ERROR_TEXT("the DAC is on PA4 (A12) and PA5 (A13)"));
+    }
+    if ((uintptr_t)audioif_ring >= 0x20000000u && (uintptr_t)audioif_ring < 0x20020000u) {
+        mp_raise_msg(&mp_type_RuntimeError,
+            MP_ERROR_TEXT("this board's .bss is in DTCM, which the DAC's DMA can't read"));
     }
     if (cfg->bits != 16 || cfg->channels < 1 || cfg->channels > 2) {
         mp_raise_ValueError(MP_ERROR_TEXT("the DAC plays 16-bit mono or stereo"));

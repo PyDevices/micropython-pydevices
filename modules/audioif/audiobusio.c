@@ -446,6 +446,15 @@ static void audiobusio_halt(audiobusio_i2sout_obj_t *self) {
     }
     audiopump_c_unpark();
     audiopump_c_stop();
+    // With no thread (the stm32 port, WebAssembly) the loop only sees `stop`
+    // inside service(), and join() waits for it to have seen it. Without this
+    // the pump stays live, and the next play() raises that one is already
+    // spawned.
+    if (audiopump_c_service_mode()) {
+        for (int i = 0; i < 8 && !audiopump_c_join(0); i++) {
+            audiopump_c_service(1);
+        }
+    }
     (void)audiopump_c_join(5000);
     self->playing = false;
     self->paused = false;

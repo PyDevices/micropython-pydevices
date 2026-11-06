@@ -126,9 +126,10 @@ out.play(sample, loop=True)
 PA4 and PA5 are the GIGA's A12 and A13, its jack's left and right. The DAC
 plays 12 bits, so each 16-bit sample loses its low four. Everything after the
 constructor is `I2SOut`'s: `play`, `stop`, `pause`, `resume`, `retarget`,
-`playing`, `starved()` and `status`. `quiescent_value` takes only CircuitPython's
-default, 0x8000, which is where the DAC rests, and `sample_rate=` (ours) is the
-rate it opens at before the first `play()`.
+`playing`, `starved()` and `status`. A `WaveFile` doesn't play reliably through
+it yet: after some sequences of calls it plays silence. `quiescent_value` takes
+only CircuitPython's default, 0x8000, which is where the DAC rests, and
+`sample_rate=` (ours) is the rate it opens at before the first `play()`.
 
 The port has no threads, so the pump runs in the engine's service mode, on the
 interpreter: a soft timer looks at the DMA every 4 ms and schedules the pump
