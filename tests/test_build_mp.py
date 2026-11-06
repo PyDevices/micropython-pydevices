@@ -590,6 +590,11 @@ class ForeignSources(unittest.TestCase):
         found = build_mp.foreign_sources(self.build, [self.module, self.root / "audiodsp"])
         self.assertEqual(found, [(self.build / "displayif/src/a.P", str(stray))])
 
+    def test_a_source_the_build_generated_in_its_own_directory_passes(self):
+        # stm32's OpenAMP copies libmetal's sources into BUILD/openamp/metal/.
+        self.dep("openamp/metal/device.P", self.build / "openamp" / "metal" / "device.c")
+        self.assertEqual(build_mp.foreign_sources(self.build, [self.module]), [])
+
     def test_a_module_reached_through_a_link_is_its_own(self):
         link = self.root / "repo" / "modules" / "linked"
         link.symlink_to(self.module, target_is_directory=True)

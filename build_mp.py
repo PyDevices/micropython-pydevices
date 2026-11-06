@@ -731,9 +731,11 @@ def foreign_sources(build, roots):
 
     `roots` are the build's module directories (and anything else the build
     is meant to compile from, such as omnipython-lvgl's root): a source counts as its
-    module's when the directory it was found under is inside one of them.
+    module's when the directory it was found under is inside one of them. A
+    source inside the build directory was generated there and always counts.
     CMake ports name sources by absolute path and write no .P files."""
     roots = [Path(os.path.realpath(r)) for r in roots]
+    here = Path(os.path.realpath(build))
     found = []
     for dep in sorted(Path(build).rglob("*.P")):
         rel = dep.relative_to(build).with_suffix("").as_posix()
@@ -758,6 +760,10 @@ def foreign_sources(build, roots):
         # or absolute all the way (BUILD/home/...) was never searched for.
         absolute = src.startswith("/") or re.match(r"[A-Za-z]:/", src)
         if not absolute or not stem.endswith("/" + rel) or stem == "/" + rel:
+            continue
+        # A source the build generated in its own directory belongs to it:
+        # stm32's OpenAMP copies libmetal's sources into BUILD/openamp/.
+        if here in Path(os.path.realpath(src)).parents:
             continue
         module = rel.split("/", 1)[0]
         found_in = Path(os.path.realpath(stem[: -len(rel)] + module))
