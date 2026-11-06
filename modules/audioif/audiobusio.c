@@ -446,6 +446,15 @@ static void audiobusio_halt(audiobusio_i2sout_obj_t *self) {
     }
     audiopump_c_unpark();
     audiopump_c_stop();
+    // With no thread (the stm32 port, WebAssembly) the loop only sees `stop`
+    // inside service(), and join() waits for it to have seen it. Without this
+    // the pump stays live, and the next play() raises that one is already
+    // spawned.
+    if (audiopump_c_service_mode()) {
+        for (int i = 0; i < 8 && !audiopump_c_join(0); i++) {
+            audiopump_c_service(1);
+        }
+    }
     (void)audiopump_c_join(5000);
     self->playing = false;
     self->paused = false;
@@ -512,6 +521,10 @@ static mp_obj_t audiobusio_i2sout_make_new(const mp_obj_type_t *type,
     mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed),
         allowed, args);
 
+    #if defined(AUDIOIF_DRIVER_STM32)
+    mp_raise_NotImplementedError(MP_ERROR_TEXT(
+        "this board's audio output is its DAC: use audioio.AudioOut"));
+    #endif
     if (args[ARG_external_clock].u_bool) {
         mp_raise_NotImplementedError(MP_ERROR_TEXT("external_clock"));
     }
@@ -550,6 +563,7 @@ static mp_obj_t audiobusio_i2sout_make_new(const mp_obj_type_t *type,
     self->wire.in_bclk = -1;
     self->wire.in_ws = -1;
     self->wire.in_mclk = -1;
+    self->wire.dac_right = -1;
     self->rate = (uint32_t)self->wire.rate;
 
     if (args[ARG_sink].u_obj != mp_const_none) {
@@ -1071,3 +1085,98 @@ const mp_obj_module_t audiobusio_module = {
     .globals = (mp_obj_dict_t *)&audiobusio_globals,
 };
 MP_REGISTER_MODULE(MP_QSTR_audiobusio, audiobusio_module);
+
+#if defined(AUDIOIF_DRIVER_STM32)
+// --- audioio.AudioOut: the same output on a DAC ----------------------------
+//
+// CircuitPython's name for a DAC output, on a board whose audio is a DAC (the
+// Arduino GIGA R1's headphone jack). It is I2SOut's object with I2SOut's
+// methods; only the construction differs, and audioif_stm32.c is the driver
+// under it.
+
+#include "pin.h"
+
+static int audioio_dac_pin(mp_obj_t obj) {
+    const machine_pin_obj_t *pin = pin_find(obj);
+    return (int)(pin->port * 16 + pin->pin);
+}
+
+static mp_obj_t audioio_audioout_make_new(const mp_obj_type_t *type,
+    size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
+    enum { ARG_left_channel, ARG_right_channel, ARG_quiescent_value,
+           ARG_sample_rate };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_left_channel,    MP_ARG_OBJ | MP_ARG_REQUIRED,
+          { .u_obj = MP_OBJ_NULL } },
+        { MP_QSTR_right_channel,   MP_ARG_OBJ | MP_ARG_KW_ONLY,
+          { .u_obj = mp_const_none } },
+        // CircuitPython's: the level the output rests at. The DAC rests at
+        // midscale, which is what 0x8000 means, and only that is supported.
+        { MP_QSTR_quiescent_value, MP_ARG_INT | MP_ARG_KW_ONLY,
+          { .u_int = 0x8000 } },
+        // Ours: the rate the DAC is opened at until the first play() retunes it.
+        { MP_QSTR_sample_rate,     MP_ARG_INT | MP_ARG_KW_ONLY,
+          { .u_int = 22050 } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed),
+        allowed, args);
+    if (args[ARG_quiescent_value].u_int != 0x8000) {
+        mp_raise_NotImplementedError(MP_ERROR_TEXT("quiescent_value"));
+    }
+    if (audiobusio_owner() != NULL) {
+        mp_raise_msg(&mp_type_RuntimeError,
+            MP_ERROR_TEXT("Peripheral in use"));
+    }
+
+    audiobusio_i2sout_obj_t *self = mp_obj_malloc_with_finaliser(
+        audiobusio_i2sout_obj_t, type);
+    memset((char *)self + sizeof(mp_obj_base_t), 0,
+        sizeof(*self) - sizeof(mp_obj_base_t));
+    self->wire.port = -1;
+    self->wire.bclk = -1;
+    self->wire.ws = -1;
+    self->wire.mclk = -1;
+    self->wire.din = -1;
+    self->wire.in_port = -1;
+    self->wire.in_bclk = -1;
+    self->wire.in_ws = -1;
+    self->wire.in_mclk = -1;
+    self->wire.dout = audioio_dac_pin(args[ARG_left_channel].u_obj);
+    self->wire.dac_right = args[ARG_right_channel].u_obj == mp_const_none
+        ? -1 : audioio_dac_pin(args[ARG_right_channel].u_obj);
+    self->wire.rate = args[ARG_sample_rate].u_int;
+    self->wire.bits = 16;
+    self->wire.channels = 2;
+    self->wire.dma_frame = audiobusio_dma_frame(self->wire.rate);
+    self->rate = (uint32_t)self->wire.rate;
+
+    (void)audiopump_i2s_open(&self->wire);
+    self->opened = true;
+    self->status = mp_obj_new_bytearray_by_ref(AUDIOPUMP_STATUS_BYTES,
+        m_new0(uint8_t, AUDIOPUMP_STATUS_BYTES));
+    MP_STATE_VM(audiobusio_live) = MP_OBJ_FROM_PTR(self);
+    return MP_OBJ_FROM_PTR(self);
+}
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    audioio_audioout_type,
+    MP_QSTR_AudioOut,
+    MP_TYPE_FLAG_NONE,
+    make_new, audioio_audioout_make_new,
+    attr, cp_compat_attr,
+    locals_dict, &audiobusio_i2sout_locals
+    );
+
+static const mp_rom_map_elem_t audioio_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_audioio) },
+    { MP_ROM_QSTR(MP_QSTR_AudioOut), MP_ROM_PTR(&audioio_audioout_type) },
+};
+static MP_DEFINE_CONST_DICT(audioio_globals, audioio_globals_table);
+
+const mp_obj_module_t audioio_module = {
+    .base = { &mp_type_module },
+    .globals = (mp_obj_dict_t *)&audioio_globals,
+};
+MP_REGISTER_MODULE(MP_QSTR_audioio, audioio_module);
+#endif  // AUDIOIF_DRIVER_STM32
