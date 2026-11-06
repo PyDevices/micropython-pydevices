@@ -170,6 +170,12 @@ void audiopump_i2s_starved_hold(void);
 // The pause ends: count again from the pump's next write.
 void audiopump_i2s_starved_resume(void);
 
+#if defined(AUDIOIF_DRIVER_STM32)
+// The DAC driver's service(), for a port with no thread to give the pump:
+// run the pump while the DAC's ring has room for a block, and no further.
+void audiopump_i2s_service(void);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

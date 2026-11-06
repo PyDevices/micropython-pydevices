@@ -423,8 +423,18 @@ static void audiobusio_reap(audiobusio_i2sout_obj_t *self) {
     // bind -- advances the loop only when somebody calls service(). Without
     // this, `while i2s.playing: pass` is a hang rather than a wait: the pump
     // is live, has pulled nothing, and never will.
+    //
+    // On the DAC, service() runs as far as the ring has room. Sixteen blocks
+    // regardless meant sixteen sink writes, each waiting for the DMA, and
+    // each pull draining a file's feed ring that only this thread can refill:
+    // a `playing` read held the interpreter for 340 ms and left the DAC
+    // holding a ring of silence.
     if (self->playing && audiopump_c_service_mode()) {
+        #if defined(AUDIOIF_DRIVER_STM32)
+        audiopump_i2s_service();
+        #else
         audiopump_c_service(16);
+        #endif
     }
     if (!self->playing || audiopump_is_running()) {
         return;
