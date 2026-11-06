@@ -134,7 +134,7 @@ jobs:
 
       # CircuitPython refuses anything older than GCC 14, and Ubuntu's is 13.
       - name: Arm GNU toolchain 14.2
-        if: matrix.kind == 'rp2'
+        if: matrix.kind == 'rp2' || matrix.kind == 'stm32'
         run: |
           name=arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/arm.tar.xz" \

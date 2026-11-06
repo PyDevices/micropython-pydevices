@@ -12,6 +12,7 @@ Each check is shown to fail by planting its fault in a set that passes.
 import hashlib
 import json
 import shutil
+import struct
 import sys
 import tempfile
 import unittest
@@ -43,13 +44,20 @@ def fake_cell(root, c, version="v1.30.0-preview"):
         files["partitions"] = put(d, "partitions.bin", b"\xaaP" + b"\x00" * 100) if c["kind"] == "esp32" else None
         if files["partitions"] is None:
             del files["partitions"]
+    elif c["kind"] == "stm32":
+        # A vector table at the image's start: a stack in RAM, then a Thumb reset address inside it.
+        head = struct.pack("<II", 0x24080000, c["offset"] + 0x2001)
+        files["flash"] = put(d, "firmware0.bin", head + b"\x00" * (1536 * 1024))
+        files["wifi"] = put(d, "firmware1.bin", b"w" * 400000)
     else:
         block = b"UF2\n" + b"WQ]\x9e" + b"\x00" * 500 + b"\x30\x6f\xb1\x0a"
         files["uf2"] = put(d, "firmware.uf2", block * 2000)   # 1 MB
     files["elf"] = put(d, "firmware.elf", b"\x7fELF" + b"\x00" * 4096)
     files["map"] = put(d, "firmware.map", b"m" * 4096)
     meta = {k: c[k] for k in ("id", "label", "interpreter", "port", "board", "variant", "chip", "flash", "modules")}
-    meta.update(kind=c["kind"], flash_offset=None if c["offset"] is None else hex(c["offset"]),
+    if c["kind"] == "stm32":
+        meta["wifi_offset"] = rf.hex8(rf.WIFI_OFFSET)
+    meta.update(kind=c["kind"], flash_offset=None if c["offset"] is None else rf.hex8(c["offset"]) if c["kind"] == "stm32" else hex(c["offset"]),
                 flash_bytes=int(c["flash"][:-2]) * rf.MB, files=files, build_seconds=61,
                 interpreter_version=version if c["interpreter"] == "micropython" else "11.0.0-alpha.1-dirty",
                 module_revisions={"pydevices": {"commit": COMMIT, "dirty": False}})
@@ -63,19 +71,19 @@ def fake_set(root, pico2=False):
 
 
 class Table(unittest.TestCase):
-    def test_ten_cells_by_default_and_the_pico2_only_when_asked(self):
-        self.assertEqual(len(rf.matrix(False)["include"]), 10)
+    def test_eleven_cells_by_default_and_the_pico2_only_when_asked(self):
+        self.assertEqual(len(rf.matrix(False)["include"]), 11)
         ids = [c["id"] for c in rf.matrix(True)["include"]]
-        self.assertEqual(len(ids), 12)
+        self.assertEqual(len(ids), 13)
         self.assertIn("mp-pico2", ids)
         self.assertIn("mp-pico-plus2-w", ids)
         self.assertNotIn("mp-pico2", [c["id"] for c in rf.matrix(False)["include"]])
         self.assertNotIn("mp-pico-plus2-w", [c["id"] for c in rf.matrix(False)["include"]])
         self.assertEqual(len(set(ids)), len(ids))
 
-    def test_five_micropython_and_five_circuitpython(self):
+    def test_six_micropython_and_five_circuitpython(self):
         rows = rf.wanted(False)
-        self.assertEqual(sum(c["interpreter"] == "micropython" for c in rows), 5)
+        self.assertEqual(sum(c["interpreter"] == "micropython" for c in rows), 6)
         self.assertEqual(sum(c["interpreter"] == "circuitpython" for c in rows), 5)
 
     def test_every_cell_names_its_files(self):
@@ -115,7 +123,7 @@ class Assemble(unittest.TestCase):
 
     def test_a_good_set_assembles(self):
         doc = self.run_assemble()
-        self.assertEqual(len(doc["builds"]), 10)
+        self.assertEqual(len(doc["builds"]), 11)
         self.assertTrue((self.out / "firmware.json").is_file())
         names = {f["name"] for b in doc["builds"] for f in b["files"]}
         for name in names:
@@ -137,6 +145,17 @@ class Assemble(unittest.TestCase):
         cp4 = next(b for b in doc["builds"] if b["id"] == "cp-p4-devkit")
         self.assertEqual(cp4["flash_offset"], "0x0")
         self.assertEqual(cp4["app_offset"], "0x10000")
+
+    def test_the_giga_ships_two_images_named_for_where_they_go(self):
+        doc = self.run_assemble(tag="v1.30.0-20261106")
+        giga = next(b for b in doc["builds"] if b["id"] == "mp-giga-shield")
+        names = {f["role"]: f["name"] for f in giga["files"]}
+        stem = "omnipython-mp-arduino_giga-display_shield-v1.30.0-20261106"
+        self.assertEqual(names["flash"], stem + ".firmware0-at-0x08040000.bin")
+        self.assertEqual(names["wifi"], stem + ".firmware1-at-0x90F00000.bin")
+        self.assertEqual((giga["flash_offset"], giga["wifi_offset"]), ("0x08040000", "0x90F00000"))
+        for name in names.values():
+            self.assertTrue((self.out / name).is_file(), name)
 
     def test_a_tagged_release_is_not_a_preview(self):
         shutil.rmtree(self.indir)
@@ -213,6 +232,30 @@ class Assemble(unittest.TestCase):
         meta["flash_bytes"] = 1 * rf.MB
         (d / "cell.json").write_text(json.dumps(meta))
         self.fails_with("past the 16MB flash")
+
+    def rewrite_giga(self, role, fn):
+        d = self.indir / "mp-giga-shield"
+        meta = json.loads((d / "cell.json").read_text())
+        f = d / meta["files"][role]["file"]
+        f.write_bytes(fn(f.read_bytes()))
+        meta["files"][role].update(size=f.stat().st_size, sha256=rf.sha256(f))
+        (d / "cell.json").write_text(json.dumps(meta))
+
+    def test_a_giga_image_without_a_vector_table_is_caught(self):
+        self.rewrite_giga("flash", lambda b: b"\xff" * 8 + b[8:])
+        self.fails_with("does not start with a vector table")
+
+    def test_a_giga_image_that_expects_another_address_is_caught(self):
+        self.rewrite_giga("flash", lambda b: struct.pack("<II", 0x24080000, 0x08000001) + b[8:])
+        self.fails_with("does not start with a vector table")
+
+    def test_a_giga_image_past_the_flash_is_caught(self):
+        self.rewrite_giga("flash", lambda b: b + b"\x00" * (1 * rf.MB))
+        self.fails_with("past the 2MB flash")
+
+    def test_a_giga_wifi_image_past_the_qspi_flash_is_caught(self):
+        self.rewrite_giga("wifi", lambda b: b + b"w" * (1 * rf.MB))
+        self.fails_with("past the QSPI flash")
 
     def test_a_uf2_cut_off_mid_block_is_caught(self):
         d = self.indir / "cp-feather-rp2040"
@@ -368,6 +411,14 @@ class DraftRelease(unittest.TestCase):
         self.assertIn("esptool --chip esp32p4 write-flash 0x2000 omnipython-mp-esp32_generic_p4-wifi6_dev_kit_h2-staged-20261020.bin", text)
         self.assertIn("--chip esp32s3 write-flash 0x0 ", text)
         self.assertIn("BOOTSEL drive", text)
+
+    def test_the_notes_give_the_giga_both_dfu_commands_wifi_first(self):
+        text = rf.notes(self.doc)
+        stem = "omnipython-mp-arduino_giga-display_shield-staged-20261020"
+        wifi = f"dfu-util -a 1 -d 2341:0366 -s 0x90F00000 -D {stem}.firmware1-at-0x90F00000.bin"
+        main = f"dfu-util -a 0 -d 2341:0366 -s 0x08040000:leave -D {stem}.firmware0-at-0x08040000.bin"
+        self.assertIn(wifi + "`, then `" + main, text)
+        self.assertIn("flash-a-board.md#stm32-arduino-giga-r1-wifi", text)
 
     def test_a_final_set_has_no_staged_banner(self):
         self.doc.update(preview=False, preview_reasons=[], tag="v1.30.0-20261101")
