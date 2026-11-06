@@ -6,7 +6,7 @@
 // computer pairs with the board and plays; Python reads the decoded audio
 // into any PCM output, and reads the title, play state and volume, and
 // sends play, pause and skip. The work is the btaudio ESP-IDF component in
-// ../components/btaudio; this file only wraps it.
+// ../esp-idf/btaudio; this file only wraps it.
 
 #include <string.h>
 
@@ -38,12 +38,13 @@ static void btaudio_raise(esp_err_t err) {
     mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("btaudio: %s"), esp_err_to_name(err));
 }
 
-// Receiver(name=None, *, buffer_ms=500)
+// Receiver(name=None, *, buffer_ms=500, reconnect=True)
 static mp_obj_t btaudio_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
-    enum { ARG_name, ARG_buffer_ms };
+    enum { ARG_name, ARG_buffer_ms, ARG_reconnect };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_name, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
         { MP_QSTR_buffer_ms, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 500} },
+        { MP_QSTR_reconnect, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed), allowed, args);
@@ -70,7 +71,7 @@ static mp_obj_t btaudio_make_new(const mp_obj_type_t *type, size_t n_args, size_
         mp_raise_ValueError(MP_ERROR_TEXT("buffer_ms must be 50 to 5000"));
     }
     // Sized for 48 kHz, the fastest rate A2DP's SBC sends.
-    esp_err_t err = btaudio_start(name, (size_t)(48 * ms));
+    esp_err_t err = btaudio_start(name, (size_t)(48 * ms), args[ARG_reconnect].u_bool);
     if (err != ESP_OK) {
         btaudio_raise(err);
     }

@@ -68,9 +68,11 @@ typedef struct {
 
 // Start Bluetooth and become discoverable as `name`. `ring_frames` sizes
 // the buffer in stereo frames (0 picks about half a second at 44.1 kHz).
+// With `reconnect`, call back the last sender if it is still paired, as a
+// speaker does when it's switched on; the address is kept in NVS.
 // Releases the controller's BLE memory, so BLE can't start later in this
 // boot. ESP_ERR_INVALID_STATE if already started.
-esp_err_t btaudio_start(const char *name, size_t ring_frames);
+esp_err_t btaudio_start(const char *name, size_t ring_frames, bool reconnect);
 
 // Disconnect and shut Bluetooth down. btaudio_start() may run again.
 void btaudio_stop(void);

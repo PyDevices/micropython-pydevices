@@ -32,6 +32,8 @@ class Receiver:
             hostname, `network.hostname()`.
         buffer_ms: how much audio to hold, 50 to 5000. Playback starts once
             half of it has arrived, so this is also the delay to the speaker.
+        reconnect: call back the last sender, if it is still paired, as a
+            speaker does when it's switched on.
     """
 
     connected: bool
@@ -52,7 +54,7 @@ class Receiver:
     peer: str
     """The sender's Bluetooth address, or "" with none connected."""
 
-    def __init__(self, name: str | None = None, *, buffer_ms: int = 500) -> None: ...
+    def __init__(self, name: str | None = None, *, buffer_ms: int = 500, reconnect: bool = True) -> None: ...
     def readinto(self, buf: bytearray | memoryview) -> int:
         """Fill `buf` with 16-bit stereo frames at `sample_rate`, scaled by
         `volume`. Never waits: silence fills whatever the stream can't.

@@ -106,4 +106,5 @@ jobs:
         run: |
           . "$IDF_PATH/export.sh"
           cd modules/btaudio/tests/idf_app
-          idf.py -B "build-${{ matrix.target }}" set-target ${{ matrix.target }} build
+          # The S31 is a preview target in ESP-IDF 6.1, which idf.py makes you say.
+          idf.py --preview -B "build-${{ matrix.target }}" set-target ${{ matrix.target }} build

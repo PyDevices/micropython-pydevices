@@ -10,6 +10,7 @@
 // under s_lock.
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
@@ -24,6 +25,7 @@
 #include "esp_gap_bt_api.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "nvs.h"
 
 #include "btaudio.h"
 
@@ -66,6 +68,8 @@ typedef struct {
 
 static btaudio_state_t s;
 static bool s_started;
+static bool s_reconnect;
+
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 
 static void mark(uint32_t bits) {
@@ -213,10 +217,63 @@ static void avrc_tg_cb(esp_avrc_tg_cb_event_t event, esp_avrc_tg_cb_param_t *par
     }
 }
 
+// ---- the last sender, kept in NVS so a restart can call it back ----
+
+#define NVS_NAMESPACE "btaudio"
+#define NVS_KEY_LAST "last"
+
+static void save_last_sender(const uint8_t *bda) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_blob(h, NVS_KEY_LAST, bda, sizeof(esp_bd_addr_t));
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+// Call the last sender back, as a speaker does when it's switched on. Only a
+// sender we're still bonded with: one that unpaired would just refuse.
+static void reconnect_last_sender(void) {
+    esp_bd_addr_t last;
+    size_t len = sizeof(last);
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+    esp_err_t err = nvs_get_blob(h, NVS_KEY_LAST, last, &len);
+    nvs_close(h);
+    if (err != ESP_OK || len != sizeof(last)) {
+        return;
+    }
+    int n = esp_bt_gap_get_bond_device_num();
+    if (n <= 0) {
+        return;
+    }
+    esp_bd_addr_t *bonded = malloc(n * sizeof(esp_bd_addr_t));
+    if (bonded == NULL) {
+        return;
+    }
+    if (esp_bt_gap_get_bond_device_list(&n, bonded) == ESP_OK) {
+        for (int i = 0; i < n; i++) {
+            if (memcmp(bonded[i], last, sizeof(last)) == 0) {
+                ESP_LOGI(TAG, "calling back the last sender");
+                esp_a2d_sink_connect(last);
+                break;
+            }
+        }
+    }
+    free(bonded);
+}
+
 // ---- A2DP: the link, the stream's format, and the audio ----
 
 static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
     switch (event) {
+        case ESP_A2D_PROF_STATE_EVT:
+            if (param->a2d_prof_stat.init_state == ESP_A2D_INIT_SUCCESS && s_reconnect) {
+                reconnect_last_sender();
+            }
+            break;
         case ESP_A2D_CONNECTION_STATE_EVT: {
             esp_a2d_connection_state_t state = param->conn_stat.state;
             if (state == ESP_A2D_CONNECTION_STATE_CONNECTED) {
@@ -228,6 +285,7 @@ static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
                 memcpy(s.peer, a, sizeof(esp_bd_addr_t));
                 s.connected = true;
                 portEXIT_CRITICAL(&s_lock);
+                save_last_sender(a);
                 // One sender at a time: hide until it leaves.
                 esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
                 mark(BTAUDIO_CHANGED_CONNECTION);
@@ -349,7 +407,7 @@ static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
 
 // ---- start and stop ----
 
-esp_err_t btaudio_start(const char *name, size_t ring_frames) {
+esp_err_t btaudio_start(const char *name, size_t ring_frames, bool reconnect) {
     if (s_started) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -363,6 +421,7 @@ esp_err_t btaudio_start(const char *name, size_t ring_frames) {
     s.capacity = ring_frames;
     s.volume = DEFAULT_VOLUME;
     s.channels = 2;
+    s_reconnect = reconnect;
     size_t bytes = ring_frames * 2 * sizeof(int16_t);
     s.ring = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (s.ring == NULL) {

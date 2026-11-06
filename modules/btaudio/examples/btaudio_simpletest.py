@@ -15,7 +15,8 @@ Run it:
 
     mpftp run btaudio_simpletest.py
 
-Tested on: not yet run.
+Tested on: Adafruit QT Py ESP32 Pico with the Audio BFF, MicroPython
+1.30.0-preview with btaudio, playing from a Windows 11 PC.
 """
 
 import time
@@ -27,6 +28,10 @@ from audiodev import AudioFormat
 
 # Change these to match your setup.
 FRAMES = 512  # frames per write; 512 is about 12 ms at 44.1 kHz
+
+# Wi-Fi and Bluetooth share the ESP32's radio, and with Wi-Fi up the audio
+# arrives slower than it plays, in bursts. Turn Wi-Fi off while listening.
+network.WLAN(network.STA_IF).active(False)
 
 # Start Bluetooth. The board appears under its hostname.
 receiver = btaudio.Receiver()
@@ -44,12 +49,14 @@ while True:
             speaker.close()
         speaker = board_peripherals.pcm_out(AudioFormat(rate, 2, 16))
 
-    # Move one block from Bluetooth to the speaker. Silence until audio comes.
-    receiver.readinto(buf)
-    if speaker:
+    # Move one block from Bluetooth to the speaker whenever the speaker has
+    # room for it, so the speaker's clock sets the pace. Neither side waits:
+    # read faster than the speaker plays and its queue drops the rest.
+    if speaker and speaker.space() >= len(buf):
+        receiver.readinto(buf)
         speaker.write(buf)
     else:
-        time.sleep_ms(10)
+        time.sleep_ms(5)
 
     # Say what's playing when the track changes.
     if receiver.changes() & btaudio.TRACK and receiver.title:

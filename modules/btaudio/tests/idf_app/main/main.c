@@ -10,7 +10,7 @@
 
 void app_main(void) {
     nvs_flash_init();
-    btaudio_start("btaudio", 0);
+    btaudio_start("btaudio", 0, true);
     int16_t frames[256 * 2];
     btaudio_read(frames, 256);
     btaudio_status_t st;
