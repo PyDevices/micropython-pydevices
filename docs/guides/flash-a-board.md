@@ -84,13 +84,10 @@ stops. Every GIGA build checks the bytes it puts there and fails, saying so, if
 they look like a vector table the M4 could run; a module more or less moves
 them.
 
-To stop the M4 starting at all, clear BCM4 with
-[STM32CubeProgrammer](https://www.st.com/en/development-tools/stm32cubeprog.html):
-connect to the board in ST's own bootloader (hold BOOT0 while you press RESET)
-or over SWD, untick BCM4 under Option bytes, User Configuration, leave BCM7
-ticked, and apply. Option bytes are the chip's own settings, and changing them
-is your choice to make: a wrong one can leave the board unable to boot until it
-is recovered over SWD.
+To stop the M4 starting at all, clear BCM4: ST's
+[STM32CubeProgrammer](https://www.st.com/en/development-tools/stm32cubeprog.html)
+can change it in the option bytes. Changing option bytes is your call, since a
+wrong one can leave the board unable to boot until it is recovered over SWD.
 
 ## With mpftp
 

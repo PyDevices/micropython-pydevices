@@ -153,14 +153,15 @@ make USER_C_MODULES=../../.. BOARD=ADAFRUIT_FEATHER_M4_EXPRESS
 `mipidsi` (**STM32H747/H757**): drives the chip's DSI host in video burst mode, fed by the
 **LTDC**, which scans an RGB565 framebuffer allocated from the MicroPython heap (SDRAM on the
 Arduino GIGA R1). The LTDC reads that memory continuously, so `refresh()` only writes the CPU's
-dirty data-cache lines back to it; `blit` and `fill_rect` do the same after drawing. `Bus` takes
-`frequency` (the lane bit rate, default 500 MHz) and `num_lanes` (1 or 2). `Display` takes the
-same keyword arguments as on esp32, with `virtual_channel=0` and `color_depth=16`; its
-`pixel_clock_frequency` is met by changing only PLL3's R divider, the LTDC's clock, and leaving
-PLL3's other outputs (SPI1/2/3) alone. While a display is up, the ADC's kernel clock, also
-PLL3 R, runs at the pixel clock; deinit and soft reset put the divider back. Init commands go
-out as DCS writes over the DSI host's command interface. Panel power and backlight GPIO are
-owned by board_config, not `Display`. Other stm32 chips, and an H747 board that leaves the HAL's DSI driver off, get the stub.
+dirty data-cache lines back to it; `blit` and `fill_rect` do the same after drawing. `Bus`
+takes `frequency` (the lane bit rate, default 500 MHz) and `num_lanes` (1 or 2). `Display`
+takes the same keyword arguments as on esp32, with `virtual_channel=0` and `color_depth=16`;
+its `pixel_clock_frequency` is met by changing only PLL3's R divider, the LTDC's clock, and
+leaving PLL3's other outputs (SPI1/2/3) alone. While a display is up, the ADC's kernel clock,
+also PLL3 R, runs at the pixel clock; deinit and soft reset put the divider back. Init commands
+go out as DCS writes over the DSI host's command interface. Panel power and backlight GPIO are
+owned by board_config, not `Display`. Other stm32 chips, and an H747 board that leaves the
+HAL's DSI driver off, get the stub.
 
 The DSI host counts each line in lane byte clocks (the lane bit rate / 8, 62.5 MHz at
 500 Mbit/s), so pick horizontal timings whose total, at your pixel clock, is a whole number of

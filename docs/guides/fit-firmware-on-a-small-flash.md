@@ -21,15 +21,15 @@ tool refuses a table larger than the configured flash, so give `--flash`.
 
 The build finds out by trying. The first link fails, loudly, and only then does
 it build again. On esp32 that is a red `Error: app partition is too small for
-binary micropython.bin size 0x…`, then `ninja: build stopped`, `make: ***
-Error 1` and a Build-Troubleshooting link. On rp2 it is ``region `FLASH'
-overflowed by … bytes``, `collect2: error: ld returned 1 exit status` and
-nested `Error 2` lines; on the GIGA, ``region `FLASH_TEXT' overflowed by …
-bytes``. Then an `autosize:` line says the image didn't fit and the build is
-running once more. On the GIGA that second build starts from scratch, because
-leaving out OpenAMP changes what every file is compiled with; a later build of
-the same modules starts in the larger region. With `all`, expect that second pass on every
-esp32 and rp2 board; it roughly doubles the build time, because the whole esp32
+binary micropython.bin size 0x…`, then `ninja: build stopped`, `make: *** Error
+1` and a Build-Troubleshooting link. On rp2 it is ``region `FLASH' overflowed
+by … bytes``, `collect2: error: ld returned 1 exit status` and nested `Error 2`
+lines; on the GIGA, ``region `FLASH_TEXT' overflowed by … bytes``. Then an
+`autosize:` line says the image didn't fit and the build is running once more.
+On the GIGA that second build starts from scratch, because leaving out OpenAMP
+changes what every file is compiled with; a later build of the same modules
+starts in the larger region. With `all`, expect that second pass on every esp32
+and rp2 board; it roughly doubles the build time, because the whole esp32
 compile runs twice.
 
 ## When nothing will fit
