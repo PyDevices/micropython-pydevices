@@ -62,9 +62,10 @@ picotts, speech on the board:
 
 Bluetooth audio:
 
-- **btaudio, a Bluetooth speaker.** Play from your phone to an original ESP32,
-  out through `audioif`, with the title, play state and controls in Python.
-  The same module is meant for the ESP32-S31 once MicroPython supports it.
+- **btaudio on the ESP32-S31.** The S31 has Bluetooth Classic too, and
+  btaudio's C already builds for it on ESP-IDF 6.1; the module follows once
+  MicroPython builds for the chip.
+- **btaudio alongside Wi-Fi.** Today Wi-Fi has to be off while it plays.
 
 Every module, the same kit:
 

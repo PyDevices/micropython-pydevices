@@ -9,6 +9,7 @@ tracked here or linked from a sibling checkout or cloned at the commit in
 | Module | What it is |
 |---|---|
 | [`audioif`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/audioif) | The audio hardware under the audio pump, with CircuitPython's `audiobusio.I2SOut` and `audioi2sin.I2SIn` on top. |
+| [`btaudio`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/btaudio) | Bluetooth audio in, as a speaker: A2DP from a phone or computer, with its title, play state, volume and transport (classic ESP32). Opt-in: a firmware with it has no `bluetooth` (BLE) module. |
 | [`cameraif`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/cameraif) | A MIPI-CSI camera as a MicroPython object, on the ESP32-P4. |
 | [`castif`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/castif) | Casts an ESP32-P4's screen and sound to a TV over Wi-Fi Display, or serves them as live HLS. |
 | [`displayif`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/displayif) | The display buses and panels under `displaydev` (SPI, I2C, i80, QSPI, dot-clock RGB, MIPI-DSI, PicoDVI, RGB matrix, SDL2). The dot-clock, MIPI-DSI, PicoDVI and RGB matrix modules keep CircuitPython's names. |
@@ -59,6 +60,7 @@ it is. "Unix" is CircuitPython's unix port, built and imported in
 | castif | no: it is the ESP32-P4's | ESP32-P4, with no network | Talks to lwIP directly, the lwIP under CircuitPython's own `socketpool`. CircuitPython's P4 port has no network until it drives the boards' ESP32-C6, so castif is built without one and `start()` says so. Name tsmux, h264enc and ppa with it. |
 | h264enc | no: it is the ESP32-P4's encoder | ESP32-P4 | Espressif's `esp_h264`, which CircuitPython's port, built with the component manager off, can't fetch itself, is pinned in `deps.lock` and fetched by [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py). Name ppa with it. |
 | picotts | no | no, on purpose | CircuitPython has Adafruit's `adafruit_picotts`, the same engine and API as a native `.mpy`. |
+| btaudio | no | no | MicroPython only for now. |
 | tflite, vision | no | no, on purpose | esp-vision's modules, for MicroPython only. |
 | lvgl | yes | all five | One name for both interpreters: a CircuitPython build compiles omnipython-lvgl's `ports/circuitpython`. A board build needs `CIRCUITPY_GIFIO=0`, since LVGL links its own AnimatedGIF decoder; our boards set it. |
 | micropython-lib | no | no | MicroPython's own upstream packages. |
