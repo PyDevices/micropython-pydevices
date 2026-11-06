@@ -150,22 +150,28 @@ static uint32_t audioif_space(void) {
 
 // --- the kick: the pump runs here, on the interpreter ---------------------
 
+// Run the pump only while the ring has a block's room, so the sink write
+// never waits for the DMA. Bounded, so a pump that stopped writing can't hold
+// the interpreter.
+void audiopump_i2s_service(void) {
+    for (int i = 0; i < 32; i++) {
+        audioif_poll();
+        if (audioif_space() < audioif_block) {
+            break;
+        }
+        uint64_t before = audioif_written;
+        audiopump_c_service(1);
+        if (audioif_written == before) {
+            break;
+        }
+    }
+}
+
 static void audioif_kick_cb(mp_sched_node_t *node) {
     (void)node;
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
-        // Bounded, so a pump that stopped writing can't hold the interpreter.
-        for (int i = 0; i < 32; i++) {
-            audioif_poll();
-            if (audioif_space() < audioif_block) {
-                break;
-            }
-            uint64_t before = audioif_written;
-            audiopump_c_service(1);
-            if (audioif_written == before) {
-                break;
-            }
-        }
+        audiopump_i2s_service();
         nlr_pop();
     } else {
         audioif_service_errors++;
