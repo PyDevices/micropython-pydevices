@@ -34,6 +34,11 @@ dfu-util -a 1 -d 2341:0366 -s 0x90F00000 -D firmware1.bin
 dfu-util -a 0 -d 2341:0366 -s 0x08040000:leave -D firmware0.bin
 ```
 
+A firmware release carries the same two files with the address each is written
+at in its name: `...firmware1-at-0x90F00000.bin` is `firmware1.bin` and
+`...firmware0-at-0x08040000.bin` is `firmware0.bin`. Use them in the commands
+above, and the release notes list both lines with the names filled in.
+
 `firmware1.bin` only changes when the Wi-Fi driver does, so after the first
 time you can write `firmware0.bin` alone. A build without the variant keeps the
 Wi-Fi firmware inside its one image, `firmware.bin`, which the second command

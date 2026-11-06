@@ -46,6 +46,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import time
@@ -59,7 +60,9 @@ MB = 1024 * 1024
 # image is written with: `offset` is the flash address of the merged image's
 # first byte (MicroPython's P4 image starts at its bootloader, 0x2000;
 # CircuitPython's is padded from 0). The bootloader itself is at BOOTLOADER.
-# `deps` names the cache the workflow keeps its toolchains in.
+# `deps` names the cache the workflow keeps its toolchains in. An stm32 cell
+# also has `base`, where the chip's flash starts: `offset` is an address there,
+# and the Wi-Fi firmware goes to WIFI_OFFSET in the QSPI flash.
 CELLS = [
     dict(id="mp-p4-devkit", label="ESP32-P4-WIFI6-DEV-KIT", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_P4", variant="WIFI6_DEV_KIT_H2", flash="16MB", modules="all",
@@ -95,6 +98,10 @@ CELLS = [
     dict(id="cp-feather-rp2040", label="Adafruit Feather RP2040 + display wing", interpreter="circuitpython",
          port="raspberrypi", board="feather_rp2040_lvgl", variant=None, flash="8MB",
          modules="pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl", chip="rp2040", offset=None, kind="rp2", deps="none"),
+    dict(id="mp-giga-shield", label="Arduino GIGA R1 WiFi + GIGA Display Shield", interpreter="micropython",
+         port="stm32", board="ARDUINO_GIGA", variant="DISPLAY_SHIELD", flash="2MB",
+         modules="displayif,lvgl,audiodsp,audioif", chip="stm32h747", offset=0x08040000, base=0x08000000,
+         kind="stm32", deps="none"),
     # Off by default until a board is on the bench to run it on.
     dict(id="mp-pico2", label="Raspberry Pi Pico 2", interpreter="micropython", port="rp2",
          board="RPI_PICO2", variant=None, flash="4MB", modules="all",
@@ -116,10 +123,32 @@ FILES = {
                                ("map", "firmware.elf.map", True)],
     ("micropython", "rp2"): [("uf2", "firmware.uf2", True), ("elf", "firmware.elf", True),
                              ("map", "firmware.elf.map", True)],
+    # `flash` is firmware0.bin, for the microcontroller; `wifi` is firmware1.bin, the Wi-Fi chip's.
+    ("micropython", "stm32"): [("flash", "firmware0.bin", True), ("wifi", "firmware1.bin", True),
+                               ("elf", "firmware.elf", True), ("map", "firmware.map", True)],
 }
 
 EXTENSION = {"flash": ".bin", "app": ".app.bin", "uf2": ".uf2", "elf": ".elf", "map": ".map",
-             "partitions": ".partitions.bin"}
+             "partitions": ".partitions.bin", "wifi": ".bin"}
+
+# The Wi-Fi firmware's address in the GIGA's QSPI flash, and where that flash ends.
+WIFI_OFFSET = 0x90F00000
+QSPI_END = 0x91000000
+
+
+def hex8(n):
+    """An address as the flash guide writes it: 0x08040000, 0x90F00000."""
+    return "0x%08X" % n
+
+
+def asset_extension(c, role):
+    """The end of a release file's name. A GIGA's two images say which they are
+    and where they go, so nobody has to open the notes to tell them apart."""
+    if c["kind"] == "stm32" and role == "flash":
+        return f".firmware0-at-{hex8(c['offset'])}.bin"
+    if c["kind"] == "stm32" and role == "wifi":
+        return f".firmware1-at-{hex8(WIFI_OFFSET)}.bin"
+    return EXTENSION[role]
 
 
 class Failed(Exception):
@@ -262,6 +291,8 @@ def build(cell_id, out):
 
     meta = {k: c[k] for k in ("id", "label", "interpreter", "port", "board", "variant", "chip", "flash", "modules")}
     meta["flash_offset"] = None if c["offset"] is None else hex(c["offset"])
+    if c["kind"] == "stm32":
+        meta["flash_offset"], meta["wifi_offset"] = hex8(c["offset"]), hex8(WIFI_OFFSET)
     meta["flash_bytes"] = int(c["flash"][:-2]) * MB
     meta["kind"] = c["kind"]
     if c["interpreter"] == "circuitpython":
@@ -290,7 +321,35 @@ ESP_IMAGE_MAGIC = 0xE9
 BOOTLOADER = {"esp32s3": 0x0, "esp32p4": 0x2000}
 UF2_MAGICS = (b"UF2\n", b"WQ]\x9e", b"\x30\x6f\xb1\x0a")  # start magic 0, 1 and the end magic
 # Smallest sizes a firmware that carries this interpreter and its modules can have.
-MIN_BYTES = {"esp32": 1 * MB, "espressif": 1 * MB, "rp2": 512 * 1024}
+MIN_BYTES = {"esp32": 1 * MB, "espressif": 1 * MB, "rp2": 512 * 1024, "stm32": 1 * MB}
+
+
+def check_stm32(c, data, flash_bytes):
+    """What a download would trip over in a GIGA's two images: firmware0.bin has to
+    start with a Cortex-M vector table (a stack in RAM, a Thumb reset address
+    inside the image) and fit the chip's flash from where it is written, and
+    firmware1.bin has to fit the QSPI flash from where it is written."""
+    problems = []
+    if "flash" in data:
+        img = data["flash"].read_bytes()
+        name = data["flash"].name
+        if len(img) < MIN_BYTES["stm32"]:
+            problems.append(f"{c['id']}: {name} is only {len(img)} bytes")
+        start = c["offset"] - c["base"]
+        if start + len(img) > flash_bytes:
+            problems.append(f"{c['id']}: {name} ends at {c['base'] + start + len(img):#x}, "
+                            f"past the {c['flash']} flash")
+        if len(img) >= 8:
+            stack, reset = struct.unpack("<II", img[:8])
+            if not 0x20000000 <= stack <= 0x30000000 or not reset & 1 \
+                    or not c["offset"] <= reset < c["offset"] + len(img):
+                problems.append(f"{c['id']}: {name} does not start with a vector table "
+                                f"(stack {stack:#x}, reset {reset:#x}) for an image written at {c['offset']:#x}")
+    if "wifi" in data:
+        size = data["wifi"].stat().st_size
+        if WIFI_OFFSET + size > QSPI_END:
+            problems.append(f"{c['id']}: {data['wifi'].name} ends at {WIFI_OFFSET + size:#x}, past the QSPI flash")
+    return problems
 
 
 def check_cell(d, c):
@@ -325,8 +384,10 @@ def check_cell(d, c):
         data[role] = f
 
     flash_bytes = meta.get("flash_bytes", 0)
+    if c["kind"] == "stm32":
+        problems += check_stm32(c, data, flash_bytes)
     # A flash image: starts like one, fits the flash, carries the app image.
-    if "flash" in data:
+    elif "flash" in data:
         img = data["flash"].read_bytes()
         offset = c["offset"]
         if len(img) < MIN_BYTES[c["kind"]]:
@@ -428,7 +489,7 @@ def assemble(indir, out, pico2, tag, run_url, now=None):
             base = f"omnipython-cp-{stem}-{re.sub(r'-dirty$', '', m['interpreter_version'])}-{date}"
         files = []
         for role, info in m["files"].items():
-            name = base + EXTENSION[role]
+            name = base + asset_extension(c, role)
             shutil.copyfile(d / info["file"], out / name)
             files.append({"role": role, "name": name, "size": info["size"], "sha256": info["sha256"]})
         entry = {k: m[k] for k in ("id", "label", "interpreter", "interpreter_version", "board", "variant",
@@ -436,6 +497,8 @@ def assemble(indir, out, pico2, tag, run_url, now=None):
                                    "module_revisions")}
         if m.get("app_offset"):
             entry["app_offset"] = m["app_offset"]
+        if m.get("wifi_offset"):
+            entry["wifi_offset"] = m["wifi_offset"]
         if "esptool" in m:
             entry["esptool"] = m["esptool"]
         if "circuitpython_patches" in m:
@@ -484,7 +547,14 @@ def check_draft_tag(doc):
 
 
 def write_command(b, f):
-    """The esptool line that writes one ESP flash image, or None for a file that isn't one."""
+    """The line that writes one flash image, or None for a file that isn't one.
+    A GIGA's is dfu-util, and its Wi-Fi image goes first (see `notes`)."""
+    if b["chip"] == "stm32h747":
+        if f["role"] == "wifi":
+            return f"dfu-util -a 1 -d 2341:0366 -s {b['wifi_offset']} -D {f['name']}"
+        if f["role"] == "flash":
+            return f"dfu-util -a 0 -d 2341:0366 -s {b['flash_offset']}:leave -D {f['name']}"
+        return None
     if f["role"] != "flash":
         return None
     return f"esptool --chip {b['chip']} write-flash {b['flash_offset']} {f['name']}"
@@ -510,8 +580,22 @@ def notes(doc):
         f = next(x for x in b["files"] if x["role"] in ("flash", "uf2"))
         how = ("copy it onto the board's BOOTSEL drive" if f["role"] == "uf2"
                else f"`{write_command(b, f)}`")
+        names = f"`{f['name']}`"
+        wifi = next((x for x in b["files"] if x["role"] == "wifi"), None)
+        if wifi:
+            # Two images, the Wi-Fi firmware first.
+            names = f"`{wifi['name']}`, then `{f['name']}`"
+            how = f"`{write_command(b, wifi)}`, then `{write_command(b, f)}`"
         kind = "MicroPython" if b["interpreter"] == "micropython" else "CircuitPython-compatible"
-        lines.append(f"| {b['label']} | {kind} {b['interpreter_version']} | `{f['name']}` | {how} |")
+        lines.append(f"| {b['label']} | {kind} {b['interpreter_version']} | {names} | {how} |")
+    if any(b["chip"] == "stm32h747" for b in doc["builds"]):
+        lines += ["",
+                  "The GIGA's two images are written in its bootloader (`machine.bootloader()` at the REPL, or "
+                  "double-tap RESET), the Wi-Fi firmware first. The Wi-Fi image only changes when its driver does, "
+                  "so after the first time you can write the other alone. The other image overwrites any program on the "
+                  "board's M4 core, and the OmniPython libraries go in its ROMFS afterwards: "
+                  f"[the flash guide](https://github.com/{REPO_SLUG}/blob/main/docs/guides/flash-a-board.md"
+                  "#stm32-arduino-giga-r1-wifi) has the steps."]
     lines += ["",
               "Each build also ships its `.elf` and `.map`, and the ESP32 builds their `.app.bin` (the application "
               "alone, for a board that keeps its other partitions) and partition table. The `.elf` that matches a "

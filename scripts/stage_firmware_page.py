@@ -103,6 +103,8 @@ def stage(firmware_dir, page_dir, interpreters=None):
     doc = json.loads((src / "firmware.json").read_text())
     todo = []
     for b in doc["builds"]:
+        if b.get("wifi_offset"):
+            continue  # a GIGA's two DFU images: the page has no browser flasher for them
         for f in b["files"]:
             if f["role"] in SERVED:
                 p = src / f["name"]
