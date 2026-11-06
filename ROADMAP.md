@@ -60,6 +60,12 @@ picotts, speech on the board:
   the P4 WIFI6 DEV-KIT (whose app slot is now 6 MB so it fits); the P4 panels
   aren't built or run yet.
 
+Bluetooth audio:
+
+- **btaudio, a Bluetooth speaker.** Play from your phone to an original ESP32,
+  out through `audioif`, with the title, play state and controls in Python.
+  The same module is meant for the ESP32-S31 once MicroPython supports it.
+
 Every module, the same kit:
 
 - **Type stubs and `__revision__` everywhere.** castif, h264enc, jpegio, mdns,
