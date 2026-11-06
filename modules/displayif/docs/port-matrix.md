@@ -34,6 +34,7 @@ names (`mipidsi`, `i80bus`, `picodvi`, …).
 | `src/ports/mimxrt` | `i80bus` | bus driver | FlexIO MCULCD 8080 on MIMXRT1062 |
 | [`src/ports/samd`](../src/ports/samd) | `i80bus` | bus driver | GPIO bit-bang (SAMD51) via `common/i80bus` |
 | `src/ports/samd` | stubs | `dotclockframebuffer`, `mipidsi` | import ok; ctor raises |
+| [`src/ports/stm32`](../src/ports/stm32) | `mipidsi` | **FBDisplay** | MIPI DSI on STM32H747/H757 (DSI host + LTDC) |
 
 All parallel dot-clock RGB panels use **`dotclockframebuffer.DotClockFramebuffer`** + **`FBDisplay`**.
 There is no separate `RGBDisplay` / `present()` path. CircuitPython board configs use the same import name.
@@ -147,6 +148,24 @@ make USER_C_MODULES=../../.. BOARD=ADAFRUIT_METRO_M4_EXPRESS
 make USER_C_MODULES=../../.. BOARD=ADAFRUIT_FEATHER_M4_EXPRESS
 ```
 
+### stm32
+
+`mipidsi` (**STM32H747/H757**): drives the chip's DSI host in video burst mode, fed by the
+**LTDC**, which scans an RGB565 framebuffer allocated from the MicroPython heap (SDRAM on the
+Arduino GIGA R1). The LTDC reads that memory continuously, so `refresh()` only writes the CPU's
+dirty data-cache lines back to it; `blit` and `fill_rect` do the same after drawing. `Bus` takes
+`frequency` (the lane bit rate, default 500 MHz) and `num_lanes` (1 or 2). `Display` takes the
+same keyword arguments as on esp32, with `virtual_channel=0` and `color_depth=16`; its
+`pixel_clock_frequency` is met by changing only PLL3's R divider, the LTDC's clock, and leaving
+PLL3's other outputs (SPI1/2/3) alone. While a display is up, the ADC's kernel clock, also
+PLL3 R, runs at the pixel clock; deinit and soft reset put the divider back. Init commands go
+out as DCS writes over the DSI host's command interface. Panel power and backlight GPIO are
+owned by board_config, not `Display`. Other stm32 chips get the stub.
+
+The board needs the HAL's DSI and LTDC drivers: micropython-pydevices'
+`ARDUINO_GIGA` `DISPLAY_SHIELD` variant adds them, through its `stm32h7xx_hal_conf.h` and
+`HAL_SRC_C`. Example pydevices config: `fbdisplay/arduino-giga-display-shield`.
+
 ---
 
 ## pydevices board configs (MicroPython)
@@ -162,6 +181,7 @@ These configs import displayif modules when firmware is built with the matching 
 | `fbdisplay/mimxrt1060_evk_rk043_rgb` | `dotclockframebuffer` |
 | `fbdisplay/mimxrt1170_evk_waveshare_5dsi` | `mipidsi` |
 | `fbdisplay/esp32-p4-wifi6-touch-lcd-4b` | `mipidsi` |
+| `fbdisplay/arduino-giga-display-shield` | `mipidsi` |
 | `fbdisplay/pico2_dvi_sock_640x480` | `picodvi` |
 | `fbdisplay/t-rgb_480` | `dotclockframebuffer` |
 | parallel RGB `fbdisplay/*` (MP) | `dotclockframebuffer` |
@@ -204,6 +224,7 @@ displayif/
 │       ├── esp32/       # dotclockframebuffer, i80bus, qspibus, mipidsi, rgbmatrix (S3)
 │       ├── mimxrt/      # rgbmatrix; eLCDIF dotclockframebuffer; RT1176 mipidsi; FlexIO i80bus
 │       ├── samd/        # rgbmatrix; GPIO i80bus (SAMD51); stubs
+│       ├── stm32/       # H747/H757 mipidsi; stubs
 │       └── rp2/         # rgbmatrix; i80bus PIO+DMA; picodvi
 ├── docs/                # markdown (port notes under docs/ports/)
 ├── tests/               # unit tests only
