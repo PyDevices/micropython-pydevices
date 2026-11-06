@@ -160,7 +160,7 @@ same keyword arguments as on esp32, with `virtual_channel=0` and `color_depth=16
 PLL3's other outputs (SPI1/2/3) alone. While a display is up, the ADC's kernel clock, also
 PLL3 R, runs at the pixel clock; deinit and soft reset put the divider back. Init commands go
 out as DCS writes over the DSI host's command interface. Panel power and backlight GPIO are
-owned by board_config, not `Display`. Other stm32 chips get the stub.
+owned by board_config, not `Display`. Other stm32 chips, and an H747 board that leaves the HAL's DSI driver off, get the stub.
 
 The DSI host counts each line in lane byte clocks (the lane bit rate / 8, 62.5 MHz at
 500 Mbit/s), so pick horizontal timings whose total, at your pixel clock, is a whole number of

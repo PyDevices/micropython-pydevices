@@ -23,7 +23,11 @@
 #include "displayif/fb_fill.h"
 #include "displayif/soft_reset.h"
 
-#if defined(DSI) && defined(LTDC)
+// The driver needs the HAL's DSI and LTDC drivers, which a board turns on in
+// its stm32h7xx_hal_conf.h and HAL_SRC_C (the GIGA's DISPLAY_SHIELD variant
+// does). A board without them gets the stub, as other chips do, so displayif
+// still builds there for its other displays.
+#if defined(DSI) && defined(LTDC) && defined(HAL_DSI_MODULE_ENABLED)
 
 #include "stm32h7xx_hal_dsi.h"
 #include "stm32h7xx_hal_ltdc.h"
@@ -521,4 +525,11 @@ const mp_obj_module_t mipidsi_user_cmodule = {
 
 MP_REGISTER_MODULE(MP_QSTR_mipidsi, mipidsi_user_cmodule);
 
-#endif /* DSI && LTDC */
+#else
+
+#if defined(DSI) && !defined(DISPLAYIF_STUB_MIPIDSI_MSG)
+#define DISPLAYIF_STUB_MIPIDSI_MSG "mipidsi needs a firmware built with the HAL's DSI driver, such as the ARDUINO_GIGA DISPLAY_SHIELD variant"
+#endif
+#include "../common/notimpl/mod_mipidsi.c"
+
+#endif /* DSI && LTDC && HAL_DSI_MODULE_ENABLED */
