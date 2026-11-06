@@ -1624,9 +1624,12 @@ static uint32_t audiopump_i2s_open_raw(const audiopump_i2s_cfg_t *cfg) {
     }
 
     const int bits = cfg->bits;
+    // The slot macro tests its width argument in a condition, so hand it a
+    // plain variable: a ?: expression there fails -Werror=int-in-bool-context.
+    const i2s_data_bit_width_t slot_width = bits == 32 ? I2S_DATA_BIT_WIDTH_32BIT :
+        (bits == 24 ? I2S_DATA_BIT_WIDTH_24BIT : I2S_DATA_BIT_WIDTH_16BIT);
     i2s_std_slot_config_t slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
-        bits == 32 ? I2S_DATA_BIT_WIDTH_32BIT :
-        (bits == 24 ? I2S_DATA_BIT_WIDTH_24BIT : I2S_DATA_BIT_WIDTH_16BIT),
+        slot_width,
         cfg->channels == 1 ? I2S_SLOT_MODE_MONO : I2S_SLOT_MODE_STEREO);
     slot_cfg.slot_mask = I2S_STD_SLOT_BOTH;
 
