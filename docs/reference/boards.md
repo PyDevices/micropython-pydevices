@@ -18,6 +18,7 @@ top. Add `--modules` to any of these:
 | Raspberry Pi Pico (RP2040) | `--port rp2 --board RPI_PICO` (not `--modules all`: [it doesn't fit](../guides/fit-firmware-on-a-small-flash.md)) |
 | Raspberry Pi Pico 2 (RP2350) | `--port rp2 --board RPI_PICO2` |
 | Pimoroni Pico Plus 2 W (16 MB flash, 8 MB PSRAM, 48 GPIOs) | `--port rp2 --board RPI_PICO2_W --variant PIMORONI_PICO_PLUS2_W` |
+| Arduino GIGA R1 WiFi with the GIGA Display Shield | `--port stm32 --board ARDUINO_GIGA --variant DISPLAY_SHIELD --modules displayif,lvgl` ([two images to flash](../guides/flash-a-board.md#stm32-arduino-giga-r1-wifi)) |
 
 Our ESP32-S3 builds need an S3 with PSRAM: they keep the TLS library in PSRAM,
 and on an S3 without it, Wi-Fi can't join a WPA2 network. Most S3 boards have
@@ -40,6 +41,7 @@ Our variants, in [`variants/`](https://github.com/PyDevices/micropython-pydevice
 | esp32 | `ESP32_GENERIC_S3` `LCD_4_3`, `LCD_7`, `T_EMBED` | The S3 boards in the table above. |
 | esp32 | `ESP32_GENERIC_P4` `WIFI6_DEV_KIT`, `WIFI6_DEV_KIT_H2` | The P4 DEV-KIT, with the USB device on the two different connectors in the table above. |
 | rp2 | `RPI_PICO2_W` `PIMORONI_PICO_PLUS2_W` | The Pimoroni Pico Plus 2 W. |
+| stm32 | `ARDUINO_GIGA` `DISPLAY_SHIELD` | The GIGA R1 WiFi with room for LVGL and the shield's MIPI DSI panel: the Wi-Fi firmware moved to QSPI flash as a second image, Bluetooth off, LVGL's 40 px font left out. |
 
 The esp32 [`variants/esp32/`](https://github.com/PyDevices/micropython-pydevices/tree/main/variants/esp32) folder also holds the `sdkconfig` fragments and
 partition table every esp32 or every chip gets:

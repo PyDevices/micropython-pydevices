@@ -61,6 +61,24 @@ unchanged and adds what the variant holds:
 Pimoroni board's 16 MB flash, 8 MB PSRAM, 48 GPIOs and its own pin names, and
 its files say why each setting is there.
 
+## An stm32 board
+
+An stm32 variant of ours works the same way, in
+`variants/stm32/<BOARD>/<VARIANT>/`, with `make` files instead of cmake ones.
+`build_mp.py` makes `builds/stm32/<BOARD>/<VARIANT>/<BOARD>/` from upstream's
+board, unchanged, and adds:
+
+- `mpconfigvariant.mk` (required): make settings, included after the board's
+  `mpconfigboard.mk`, so it can change what the board sets.
+- A header named like one of the board's (`mpconfigboard.h`,
+  `stm32h7xx_hal_conf.h`): included after the board's own.
+- Any other file, such as a linker script fragment: put beside the board's
+  files, where the variant's settings reach it as `$(BOARD_DIR)/<name>`.
+
+`ARDUINO_GIGA`'s `DISPLAY_SHIELD` is the one stm32 variant of ours. It moves
+the Wi-Fi chip's firmware into QSPI flash with a linker script fragment and
+turns on the HAL's DSI driver for displayif's `mipidsi`.
+
 ## Desktop variants
 
 The unix and windows ports take our `pydevices` and `vst3-engine` variants, and
