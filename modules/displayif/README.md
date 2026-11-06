@@ -31,11 +31,11 @@ failure modes (P4 `mipidsi`, Qualia `dotclockframebuffer.DotClockFramebuffer`):
 | `dotclockframebuffer` | `esp32` (RGB LCD), `mimxrt` (1062 eLCDIF)                                              | **FBDisplay**     |
 | `i80bus`            | `esp32` (S3), `rp2` (PIO+DMA), `mimxrt` (1062 FlexIO), `samd` (SAMD51 GPIO)                     | **BusDisplay**    |
 | `qspibus`           | `esp32` (S3 esp_lcd SPI quad_mode); stubs elsewhere                                             | **BusDisplay**    |
-| `mipidsi`           | `esp32` (P4), `mimxrt` (1176)                                                                   | **FBDisplay**     |
+| `mipidsi`           | `esp32` (P4), `mimxrt` (1176), `stm32` (H747/H757)                                              | **FBDisplay**     |
 | `picodvi`           | `rp2` (RP2040 PIO / RP2350 HSTX)                                                                | **FBDisplay**     |
 | `rgbmatrix`         | `esp32` (S3) / `mimxrt` (1062) / `samd` (SAMD51) / `rp2`                                        | **FBDisplay**     |
 | `usdl2`             | `desktop` (MicroPython `unix` / `windows`; CircuitPython unix as a user C module)              | **SDLDisplay**    |
-| stubs               | `samd` / `rp2` / non-1062 mimxrt (`dotclockframebuffer.DotClockFramebuffer`, `mipidsi`); non-1176 mimxrt (`mipidsi`); non-S3 `qspibus` | ctor raises |
+| stubs               | `samd` / `rp2` / non-1062 mimxrt (`dotclockframebuffer.DotClockFramebuffer`, `mipidsi`); non-1176 mimxrt and non-H747/H757 stm32 (`mipidsi`); non-S3 `qspibus` | ctor raises |
 
 
 Parallel dot-clock RGB uses **`dotclockframebuffer.DotClockFramebuffer`** (same module name as CircuitPython) — no `RGBDisplay`.
