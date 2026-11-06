@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 00:00:00 -0500
+Subject: [PATCH] stm32/Makefile: Link the objects from a response file.
+
+A firmware with LVGL as a user C module has over a thousand objects, and
+with the build directory's path in front of each, the link command passes
+the 128 KB that Linux allows a single argument. make hands the recipe to
+/bin/sh as one argument, and it stops with "Argument list too long". An
+Arduino GIGA R1 build with displayif and LVGL failed this way.
+
+Write the objects to $(BUILD)/firmware.elf.objs and pass that to gcc as
+@file, as py/mkrules.mk already does on Windows. $(file) needs GNU make 4.0,
+so an older make keeps the command line as it was.
+
+--- a/ports/stm32/Makefile
++++ b/ports/stm32/Makefile
+@@ -572,9 +572,19 @@
+ 	$(Q)$(OPENOCD) -f $(OPENOCD_CONFIG) -c "stm_flash $(1) $(2) $(3) $(4)"
+ endef
+ 
++# The objects for the link go in a response file, which gcc reads as @file:
++# with large user C modules (LVGL) the command line passes the 128 KB a single
++# argument may hold on Linux, and /bin/sh refuses it. $(file) needs GNU make
++# 4.0; an older make keeps the command line as it was.
++ifeq ($(filter 3.%,$(MAKE_VERSION)),)
++LINK_OBJ = $(file >$(1).objs,$(2))@$(1).objs
++else
++LINK_OBJ = $(2)
++endif
++
+ define GENERATE_ELF
+ 	$(ECHO) "LINK $(1)"
+-	$(Q)$(CC) $(LDFLAGS) -o $(1) $(2) $(LDFLAGS_MOD) $(LIBS)
++	$(Q)$(CC) $(LDFLAGS) -o $(1) $(call LINK_OBJ,$(1),$(2)) $(LDFLAGS_MOD) $(LIBS)
+ 	$(Q)$(SIZE) $(1)
+ 	$(if $(filter-out $(TEXT0_ADDR),0x08000000), \
+ 		$(ECHO) "INFO: this build requires mboot to be installed first")
+-- 
+2.43.0
+

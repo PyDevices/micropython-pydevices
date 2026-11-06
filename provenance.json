@@ -139,6 +139,9 @@
   },
   "0047-micropython-py-scheduler-no-wait-with-a-callback-ready.patch": {
    "sha256": "b01cd7d260563082e788e0e160e51e3179f127a86fa323755732cfd5a45cffc8"
+  },
+  "0048-micropython-stm32-link-objects-from-a-response-file.patch": {
+   "sha256": "3c1dd4732af29c9164615dddea2eb12740e503a723be854e83bd65c830a77cbb"
   }
  },
  "tinyusb_patches": {

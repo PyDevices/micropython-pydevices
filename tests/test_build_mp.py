@@ -538,6 +538,61 @@ class Rp2BoardDir(unittest.TestCase):
             build_mp.rp2_board_dir(self.gen, self.base, "BOARD", "NOPE")
 
 
+class Stm32BoardDir(unittest.TestCase):
+    """A variant of ours on stm32 gets a board directory: upstream's, linked
+    through unchanged, a variant file that includes ours, our headers after
+    the board's, and our other files beside the board's."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.base = root / "mp" / "BOARD"
+        self.base.mkdir(parents=True)
+        for name, text in (("mpconfigboard.mk", "A = 1"), ("mpconfigboard.h", "#define NAME 1"),
+                           ("stm32h7xx_hal_conf.h", "// hal"), ("board.ld", "/* ld */"), ("manifest.py", "")):
+            (self.base / name).write_text(text)
+        self.ours = root / "variants" / "stm32" / "BOARD" / "OURS"
+        self.ours.mkdir(parents=True)
+        (self.ours / "mpconfigvariant.mk").write_text("B = 2")
+        self.gen = root / "gen"
+        self.saved = build_mp.VARIANTS_DIR
+        build_mp.VARIANTS_DIR = root / "variants"
+
+    def tearDown(self):
+        build_mp.VARIANTS_DIR = self.saved
+        self.tmp.cleanup()
+
+    def test_variant_file_only(self):
+        build_mp.stm32_board_dir(self.gen, self.base, "BOARD", "OURS")
+        for name in ("mpconfigboard.mk", "mpconfigboard.h", "stm32h7xx_hal_conf.h", "board.ld"):
+            self.assertEqual(self.gen.joinpath(name).resolve(), self.base.joinpath(name).resolve(), name)
+            self.assertTrue(self.gen.joinpath(name).is_symlink(), name)
+        text = (self.gen / "mpconfigvariant_OURS.mk").read_text()
+        self.assertIn(f"include {self.ours.as_posix()}/mpconfigvariant.mk", text)
+
+    def test_our_headers_follow_the_boards_and_other_files_sit_beside_them(self):
+        (self.ours / "stm32h7xx_hal_conf.h").write_text("#define MORE 1")
+        (self.ours / "extra.ld").write_text("/* ours */")
+        (self.ours / "manifest.py").write_text("")
+        build_mp.stm32_board_dir(self.gen, self.base, "BOARD", "OURS")
+        header = (self.gen / "stm32h7xx_hal_conf.h").read_text()
+        self.assertFalse((self.gen / "stm32h7xx_hal_conf.h").is_symlink())
+        self.assertLess(header.index(self.base.as_posix()), header.index(self.ours.as_posix()))
+        self.assertEqual((self.gen / "extra.ld").resolve(), (self.ours / "extra.ld").resolve())
+        # The variant's manifest is the build's FROZEN_MANIFEST, not a board file.
+        self.assertEqual((self.gen / "manifest.py").resolve(), (self.base / "manifest.py").resolve())
+        self.assertEqual((self.base / "stm32h7xx_hal_conf.h").read_text(), "// hal")  # upstream untouched
+
+    def test_a_file_of_ours_may_not_replace_one_of_the_boards(self):
+        (self.ours / "board.ld").write_text("/* ours */")
+        with self.assertRaises(SystemExit):
+            build_mp.stm32_board_dir(self.gen, self.base, "BOARD", "OURS")
+
+    def test_a_variant_that_is_not_ours_is_refused(self):
+        with self.assertRaises(SystemExit):
+            build_mp.stm32_board_dir(self.gen, self.base, "BOARD", "NOPE")
+
+
 class CircuitPythonFrozenLibraries(unittest.TestCase):
     """A CircuitPython build that freezes our Python freezes asyncio and
     adafruit_ticks too, unless the board already does."""
