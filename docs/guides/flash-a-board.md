@@ -37,10 +37,24 @@ dfu-util -a 0 -d 2341:0366 -s 0x08040000:leave -D firmware0.bin
 `firmware1.bin` only changes when the Wi-Fi driver does, so after the first
 time you can write `firmware0.bin` alone.
 
-PyDevices' Python libraries don't fit in the firmware beside LVGL. Put them in
-the board's ROMFS partition instead, which MicroPython searches before
-`/flash/lib`: copy the `.mpy` files into a `lib` folder and deploy its parent
-with `mpremote romfs deploy <folder>`.
+The OmniPython libraries don't fit in this firmware beside LVGL, so they go on
+the board after it, in its 4 MB ROMFS partition, where MicroPython runs them in
+place and finds them before `/flash/lib`. From a clone of
+[pydevices](https://github.com/PyDevices/pydevices), deploy its `lib/` folder
+with [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html):
+
+```bash
+git clone --depth 1 https://github.com/PyDevices/pydevices.git
+mpremote romfs deploy pydevices/lib
+```
+
+mpremote compiles each `.py` to `.mpy` on the way when the `mpy-cross` Python
+package is installed (`pip install mpy-cross`; its 1.29 release writes `.mpy`
+files this firmware reads). Without it, mpremote copies the `.py` files and the
+board compiles them as they're imported. A deploy replaces the whole partition,
+so the board's own drivers go in the same folder:
+[the GIGA Display Shield's board page](https://github.com/PyDevices/pydevices/blob/main/docs/boards/display-boards.md#arduino-giga-r1-wifi--giga-display-shield)
+has that recipe.
 
 ## With mpftp
 
