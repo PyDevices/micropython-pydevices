@@ -12,6 +12,7 @@ import io
 import json
 import os
 import subprocess
+import struct
 import sys
 import tempfile
 import unittest
@@ -536,6 +537,68 @@ class Rp2BoardDir(unittest.TestCase):
     def test_a_variant_that_is_not_ours_is_refused(self):
         with self.assertRaises(SystemExit):
             build_mp.rp2_board_dir(self.gen, self.base, "BOARD", "NOPE")
+
+
+class Stm32M4Slot(unittest.TestCase):
+    """An Arduino GIGA firmware that overflows its 1,280 KB region is built
+    again over the M4 core's flash, without OpenAMP; and no GIGA image may
+    leave a runnable vector table where the M4 starts at reset."""
+
+    LD = ("MEMORY\n{\n"
+          "    FLASH_TEXT (rx) : ORIGIN = 0x08040000, LENGTH = 1280K   /* CM7 firmware */\n"
+          "    FLASH_CM4 (rx)  : ORIGIN = 0x08180000, LENGTH = 512K    /* CM4 firmware */\n"
+          "}\n")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.base = root / "mp" / "ARDUINO_GIGA"
+        self.base.mkdir(parents=True)
+        (self.base / "stm32h747.ld").write_text(self.LD)
+        (self.base / "mpconfigboard.mk").write_text("MICROPY_PY_OPENAMP = 1")
+        self.build = root / "build"
+        self.gen = self.build / "ARDUINO_GIGA"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_the_overflow_is_read_from_the_linkers_message(self):
+        log = "arm-none-eabi/bin/ld: region `FLASH_TEXT' overflowed by 172404 bytes\ncollect2: error"
+        self.assertEqual(build_mp.stm32_overflow(log), 172404)
+        self.assertIsNone(build_mp.stm32_overflow("region `RAM' overflowed by 12 bytes"))
+
+    def test_the_grown_region_covers_the_m4_slot_and_drops_openamp(self):
+        build_mp.stm32_plain_board_dir(self.gen, self.base)
+        build_mp.stm32_m4_slot(self.build, self.gen, self.base, "ARDUINO_GIGA", None)
+        ld = (self.build / "stm32h747_m4_slot.ld").read_text()
+        self.assertIn("ORIGIN = 0x08040000, LENGTH = 1792K", ld)
+        self.assertNotIn("FLASH_CM4", ld)
+        mk = (self.build / build_mp.M4_SLOT_MK).read_text()
+        self.assertIn("MICROPY_PY_OPENAMP = 0", mk)
+        self.assertIn("MICROPY_PY_OPENAMP_REMOTEPROC = 0", mk)
+        self.assertIn("$(patsubst boards/ARDUINO_GIGA/stm32h747.ld,", mk)
+        self.assertIn(f"include {(self.build / build_mp.M4_SLOT_MK).as_posix()}",
+                      (self.gen / "mpconfigvariant.mk").read_text())
+        self.assertEqual((self.base / "stm32h747.ld").read_text(), self.LD)  # upstream untouched
+
+    def test_a_linker_script_laid_out_otherwise_is_refused(self):
+        (self.base / "stm32h747.ld").write_text("MEMORY { FLASH (rx) : ORIGIN = 0x08000000, LENGTH = 2048K }")
+        build_mp.stm32_plain_board_dir(self.gen, self.base)
+        with self.assertRaises(SystemExit):
+            build_mp.stm32_m4_slot(self.build, self.gen, self.base, "ARDUINO_GIGA", None)
+
+    def test_the_m4_boot_words_and_whether_an_m4_would_run_them(self):
+        image = self.build / "firmware0.bin"
+        self.build.mkdir(parents=True, exist_ok=True)
+        off = build_mp.STM32_M4_BOOT_DEFAULT - 0x08040000
+        image.write_bytes(bytes(off) + struct.pack("<II", 0xF880B508, 0xF8D021FC))
+        self.assertEqual(build_mp.stm32_m4_boot_words(image, 0x08040000), (0xF880B508, 0xF8D021FC))
+        self.assertFalse(build_mp.m4_would_run(0xF880B508, 0xF8D021FC))  # the GIGA's bytes on 11-06
+        self.assertTrue(build_mp.m4_would_run(0x10048000, 0x08100101))
+        self.assertFalse(build_mp.m4_would_run(0x10048000, 0x08100100))  # even: not Thumb, faults
+        self.assertFalse(build_mp.m4_would_run(0x60000000, 0x08100101))  # SDRAM isn't up at reset
+        image.write_bytes(bytes(off))
+        self.assertIsNone(build_mp.stm32_m4_boot_words(image, 0x08040000))
 
 
 class Stm32BoardDir(unittest.TestCase):

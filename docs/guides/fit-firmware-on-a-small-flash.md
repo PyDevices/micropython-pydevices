@@ -5,6 +5,13 @@ image: on esp32 the app partition, on rp2 the region before the filesystem. It
 leaves 1/32 of the flash as headroom, 64 KB to 256 KB. That moves the
 filesystem, so a board flashed with that image comes up with an empty one.
 
+On the Arduino GIGA R1 the firmware has 1,280 KB, and the 512 KB after it is
+the M4 core's. A build that doesn't fit takes that too, 1,792 KB in all, and
+leaves out OpenAMP, which loads and talks to M4 programs: with its flash taken,
+the board has nowhere to keep one. The filesystem doesn't move. The [flash
+guide](flash-a-board.md#stm32-arduino-giga-r1-wifi) says what that means for
+the M4.
+
 To refuse the growth and stop instead, add `--no-autosize`.
 
 On esp32, autosize works only if the flash size is right: the partition table
@@ -17,8 +24,11 @@ it build again. On esp32 that is a red `Error: app partition is too small for
 binary micropython.bin size 0x…`, then `ninja: build stopped`, `make: ***
 Error 1` and a Build-Troubleshooting link. On rp2 it is ``region `FLASH'
 overflowed by … bytes``, `collect2: error: ld returned 1 exit status` and
-nested `Error 2` lines. Then an `autosize:` line says the image didn't fit and
-the build is running once more. With `all`, expect that second pass on every
+nested `Error 2` lines; on the GIGA, ``region `FLASH_TEXT' overflowed by …
+bytes``. Then an `autosize:` line says the image didn't fit and the build is
+running once more. On the GIGA that second build starts from scratch, because
+leaving out OpenAMP changes what every file is compiled with; a later build of
+the same modules starts in the larger region. With `all`, expect that second pass on every
 esp32 and rp2 board; it roughly doubles the build time, because the whole esp32
 compile runs twice.
 

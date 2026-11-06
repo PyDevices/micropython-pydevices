@@ -21,7 +21,7 @@ optional. Leave out `--modules` and it lists [`modules/`](https://github.com/PyD
 | `--variant` | A variant of the board or port: upstream's, or one of ours in [`variants/`](https://github.com/PyDevices/micropython-pydevices/tree/main/variants). |
 | `--modules` | A comma list of short names, full paths, or `all`. See [Modules](modules.md). |
 | `--flash` | esp32 flash size, such as `16MB`. |
-| `--no-autosize` | esp32 and rp2: refuse instead of growing the firmware's share of flash. |
+| `--no-autosize` | esp32, rp2 and the Arduino GIGA: refuse instead of growing the firmware's share of flash. |
 | `--coredump` | esp32: a troubleshooting build that writes a core dump to flash on a crash. Standard builds don't. |
 | `--clean` | Delete this target's build directory first. |
 
