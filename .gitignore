@@ -18,6 +18,7 @@
 !/modules/castif/
 !/modules/usbhost/
 !/modules/audioif/
+!/modules/btaudio/
 !/modules/cameraif/
 !/modules/displayif/
 !/modules/h264enc/
