@@ -26,12 +26,16 @@
 # PYDEVICES_BOARD_MANIFEST naming it, and that is the base instead of the
 # port's.
 #
+# options.board_manifest=False starts from the port's manifest even when the
+# board has its own, for a variant that wants only part of what the board's
+# adds (the GIGA's DISPLAY_SHIELD, which has no Bluetooth for its aioble).
+#
 # options.base=False leaves the port's content out, for a manifest that brings
 # its own (the webassembly variant's, whose Fetch-backed requests must be
 # frozen before anything else resolves one).
 import os
 
-options.defaults(base=True, modules=None)
+options.defaults(base=True, modules=None, board_manifest=True)
 
 # lib-overrides/ holds the few micropython-lib packages we freeze our own copy
 # of (mip, for a connection kept open per host). Searched ahead of
@@ -39,7 +43,7 @@ options.defaults(base=True, modules=None)
 add_library("pydevices-overrides", "../lib-overrides", prepend=True)
 
 _board_manifest = os.environ.get("PYDEVICES_BOARD_MANIFEST")
-if options.base and _board_manifest:
+if options.base and options.board_manifest and _board_manifest:
     # Upstream's own manifest for the board, which build_mp.py names when
     # the board has one. It starts from the port's and adds what the board
     # freezes beyond it: the GIGA's networking bundle with webrepl, its
