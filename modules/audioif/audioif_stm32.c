@@ -16,7 +16,7 @@
 // bytecodes, and while the interpreter waits in sleep() or a blocking read,
 // never inside an interrupt: a graph may allocate and may raise, and neither
 // is allowed there. What that costs is that a C call that holds the
-// interpreter longer than the ring (93 ms at 22.05 kHz) underruns, and the
+// interpreter longer than the ring (about 93 ms at any rate) underruns, and the
 // ring plays silence until the pump catches up.
 //
 // The hook table is in this file, with MP_REGISTER_MODULE, so that a static
@@ -45,8 +45,12 @@
 
 #if defined(AUDIOIF_DRIVER_STM32)
 
-// Frames in the ring: 93 ms at 22.05 kHz, 43 ms at 48 kHz. A word per frame.
-#define AUDIOIF_RING_FRAMES (2048)
+// The ring holds about 93 ms at whatever rate the DAC opens at, up to
+// AUDIOIF_RING_MAX frames (93 ms at 44.1 kHz, 85 ms at 48 kHz): how long a C
+// call may hold the interpreter before the DAC underruns. A word per frame.
+#define AUDIOIF_RING_MS (93)
+#define AUDIOIF_RING_MAX (4096)
+#define AUDIOIF_RING_MIN (512)
 // How often the soft timer looks at the DMA.
 #define AUDIOIF_KICK_MS (4)
 // DAC midscale, the silence of an unsigned 12-bit output, on both channels.
@@ -56,7 +60,11 @@
 // can read it; DMA1 can't reach the DTCM, and audiopump_i2s_open() refuses a
 // board that puts .bss there. The CPU writes the ring through the data cache,
 // so every write is cleaned out to memory before the DMA can get to it.
-static uint32_t audioif_ring[AUDIOIF_RING_FRAMES] __attribute__((aligned(32)));
+static uint32_t audioif_ring[AUDIOIF_RING_MAX] __attribute__((aligned(32)));
+// Frames of it in use, set on each open from the rate; a multiple of eight,
+// so the ring is whole cache lines.
+static uint32_t audioif_ring_frames = 2048;
+#define AUDIOIF_RING_FRAMES (audioif_ring_frames)
 
 // The DMA stream that dma.c gives DAC1 channel 1 on an H7 (dma_DAC_1_TX).
 #define AUDIOIF_DMA_STREAM DMA1_Stream5
@@ -300,6 +308,10 @@ uint32_t audiopump_i2s_open(const audiopump_i2s_cfg_t *cfg) {
     }
     audioif_live = *cfg;
     audioif_channels = (uint8_t)cfg->channels;
+    uint32_t frames = ((uint32_t)cfg->rate * AUDIOIF_RING_MS / 1000 + 7) & ~7u;
+    audioif_ring_frames = frames < AUDIOIF_RING_MIN ? AUDIOIF_RING_MIN
+        : frames > AUDIOIF_RING_MAX ? AUDIOIF_RING_MAX : frames;
+    audioif_block = 512 < audioif_ring_frames / 2 ? 512 : audioif_ring_frames / 2;
     audioif_swap = left == 2;
     audioif_hw_start(left, right, (uint32_t)cfg->rate);
     return AUDIOIF_RING_FRAMES * 4;

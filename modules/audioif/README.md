@@ -134,9 +134,9 @@ only CircuitPython's default, 0x8000, which is where the DAC rests, and
 
 The port has no threads, so the pump runs in the engine's service mode, on the
 interpreter: a soft timer looks at the DMA every 4 ms and schedules the pump
-whenever a block's worth of the 2,048-frame ring has played. It runs between
+whenever a block's worth of its ring has played. It runs between
 bytecodes and while the interpreter sleeps. A C call that holds the interpreter
-for longer than the ring (93 ms at 22.05 kHz) underruns, and the DAC plays
+for longer than the ring underruns, and the DAC plays
 silence until the pump catches up; `starved()` counts it.
 
 ## `audioi2sin.I2SIn` — recording from a microphone
