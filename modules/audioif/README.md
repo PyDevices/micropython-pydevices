@@ -119,11 +119,12 @@ GIGA R1's headphone jack, the output is CircuitPython's `audioio.AudioOut`, and
 ```python
 import audiocore, audioio, pyb
 
-out = audioio.AudioOut(pyb.Pin("PA4"), right_channel=pyb.Pin("PA5"))
+out = audioio.AudioOut(pyb.Pin("PA5"), right_channel=pyb.Pin("PA4"))
 out.play(sample, loop=True)
 ```
 
-PA4 and PA5 are the GIGA's A12 and A13, its jack's left and right. The DAC
+PA5 and PA4 are the GIGA's DAC1 (A13) and DAC0 (A12), its jack's left and
+right. Each channel plays on the pin you name for it. The DAC
 plays 12 bits, so each 16-bit sample loses its low four. Everything after the
 constructor is `I2SOut`'s: `play`, `stop`, `pause`, `resume`, `retarget`,
 `playing`, `starved()` and `status`. It plays a `RawSample` or a `WaveFile`,
