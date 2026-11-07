@@ -9,7 +9,7 @@ by the board's own ADC.
     mpftp exec -d COM5 "import giga_wavefile_probe as p; p.run()"
 
 The probe writes a one-second 551.25 Hz WAV to /flash if there isn't one, plays
-it through the DAC, and samples PA4 (the jack's left) at 48 kHz with the ADC.
+it through the DAC, and samples PA4 (the jack's right) at 48 kHz with the ADC.
 A tone there swings about 1,500 counts; the DAC at rest swings under 10.
 
 The legs that matter read `playing` while the file plays, as
@@ -82,7 +82,7 @@ def read_playing(out, adc, name):
 def run():
     write_wav()
     adc = pyb.ADC(pyb.Pin("PA4"))
-    out = audioio.AudioOut(pyb.Pin("PA4"), right_channel=pyb.Pin("PA5"))
+    out = audioio.AudioOut(pyb.Pin("PA5"), right_channel=pyb.Pin("PA4"))
     try:
         tone = array.array("h", [int(12000 * math.sin(2 * math.pi * i / 20)) for i in range(400)])
         out.play(audiocore.RawSample(tone, sample_rate=RATE), loop=True)

@@ -2,8 +2,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 PyDevices
 //
 // The audio pump's output on an STM32H7's DAC: the Arduino GIGA R1's headphone
-// jack, whose left and right are DAC1's two channels on PA4 (A12) and PA5
-// (A13).
+// jack, whose left is DAC1's channel 2 on PA5 (DAC1, A13) and whose right is
+// channel 1 on PA4 (DAC0, A12), per Arduino's schematic. Each sample goes to
+// the pin audioio.AudioOut names for its side.
 //
 // The stm32 port has no threads to give the pump, so the engine runs in its
 // service mode and this driver is what calls service(). The DAC plays a ring
@@ -77,6 +78,9 @@ static bool audioif_starved_pending;
 static bool audioif_open;
 static audiopump_i2s_cfg_t audioif_live;
 static uint8_t audioif_channels;   // the stream's: 1 or 2
+// True when the left channel's pin is PA5, DAC channel 2: DHR12RD holds
+// channel 1 in its low half, so each frame is packed the other way round.
+static bool audioif_swap;
 // The largest block the pump has written, in frames: the room a kick waits
 // for, so a block is never cut short.
 static uint32_t audioif_block = 512;
@@ -296,6 +300,7 @@ uint32_t audiopump_i2s_open(const audiopump_i2s_cfg_t *cfg) {
     }
     audioif_live = *cfg;
     audioif_channels = (uint8_t)cfg->channels;
+    audioif_swap = left == 2;
     audioif_hw_start(left, right, (uint32_t)cfg->rate);
     return AUDIOIF_RING_FRAMES * 4;
 }
@@ -439,7 +444,7 @@ static uint32_t audioif_sink_write(const uint8_t *buffer, uint32_t length,
         for (uint32_t k = 0; k < n; k++) {
             uint32_t l = audioif_u12(in[0]);
             uint32_t r = audioif_channels == 2 ? audioif_u12(in[1]) : l;
-            audioif_ring[i + k] = l | (r << 16);
+            audioif_ring[i + k] = audioif_swap ? (r | (l << 16)) : (l | (r << 16));
             in += audioif_channels;
         }
         audioif_clean(i, n);
