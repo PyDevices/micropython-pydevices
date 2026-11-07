@@ -48,6 +48,9 @@ typedef struct {
     // stm32 only: the right channel's DAC pin, as port * 16 + pin, or -1 for
     // a mono output; `dout` is the left's. audioio.AudioOut fills both.
     int dac_right;
+    // stm32 only: the audio the DAC's ring holds, in milliseconds, or 0 for
+    // the default (about 93 ms). audioio.AudioOut's buffer_ms= fills it.
+    int dac_ring_ms;
 } audiopump_i2s_cfg_t;
 
 // Who is holding the open channel. The output (`audiobusio.I2SOut`, or

@@ -137,7 +137,10 @@ interpreter: a soft timer looks at the DMA every 4 ms and schedules the pump
 whenever a block's worth of its ring has played. It runs between
 bytecodes and while the interpreter sleeps. A C call that holds the interpreter
 for longer than the ring underruns, and the DAC plays
-silence until the pump catches up; `starved()` counts it.
+silence until the pump catches up; `starved()` counts it. The ring holds about
+93 ms; `buffer_ms=` (ours) asks for more or less, up to 12,288 frames (278 ms at
+44.1 kHz). More rides out longer stalls and puts the sound further behind, so a
+music player can ask for 250 and an instrument should leave it alone.
 
 ## `audioi2sin.I2SIn` — recording from a microphone
 
