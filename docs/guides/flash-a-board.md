@@ -46,8 +46,9 @@ with micropython-lib's `usb-device-midi`. The REPL's serial port and the
 time and gives the serial port a new COM number. `machine.bootloader()` still
 reaches the DFU bootloader.
 
-`firmware1.bin` only changes when the Wi-Fi driver does, so after the first
-time you can write `firmware0.bin` alone. A build without the variant keeps the
+`firmware1.bin` holds the radio's firmware for Wi-Fi and for Bluetooth, and
+only changes when the Wi-Fi driver does, so after the first time you can write
+`firmware0.bin` alone. A build without the variant keeps the
 Wi-Fi firmware inside its one image, `firmware.bin`, which the second command
 writes in place of `firmware0.bin`.
 
