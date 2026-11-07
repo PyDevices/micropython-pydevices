@@ -2,12 +2,12 @@
 //
 // The `_usbhost` native module: the MicroPython-facing surface of usbhost.
 //
-// The host port (ESP-IDF's USB host library, usbhost_host.c) and what usb.core
-// and the usb.host.* packages build on: the device list and descriptors,
-// generic control, bulk and interrupt transfers (usbhost_host_xfer.c),
-// isochronous streams (usbhost_host_stream.c) and the tethering adapter
-// (usbhost_host_net.c). The class drivers are those Python packages; this module
-// is their only caller.
+// The host port and what usb.core and the usb.host.* packages build on: the
+// device list and descriptors, generic control, bulk and interrupt transfers,
+// isochronous streams and the tethering adapter. Each comes from the build's
+// host engine (usbhost_engine.h says which, and what it offers); on ESP-IDF
+// that's usbhost_host.c and the files beside it. The class drivers are those
+// Python packages; this module is their only caller.
 
 #include "py/runtime.h"
 #include "py/obj.h"
@@ -17,43 +17,23 @@
 #include <string.h>
 
 #include "shared/usbhost_ringbuf.h"
-
-#if defined(MICROPY_HW_ENABLE_USBDEV) && MICROPY_HW_ENABLE_USBDEV
-#include "tusb.h"
-#include "mp_usbd.h"
-#endif
-
 #include "usbhost_classes.h"
 #include "pcm_c_sink.h"
 
-// Host engine availability: the IDF USB Host Library, on chips with an OTG
-// controller. The same gate guards usbhost_host.c; elsewhere the host_* calls
-// keep their Phase-1 stub behaviour (an honest empty capability set).
-// Usermod sources build with MicroPython's define set, not the IDF's, so
-// ESP_PLATFORM is NOT defined here -- learned the hard way when this gate
-// silently compiled the engine out and the Phase 1 stubs answered in its
-// place. sdkconfig.h existing (and naming an OTG controller) is the real
-// signal that the IDF host library is available. A make build that leaves the
-// engine out says so with USBHOST_NO_HOST_ENGINE (micropython.mk): a
-// CircuitPython ESP32-S3 has the controller, and it's CircuitPython's.
-#if defined(__has_include)
-#if __has_include("sdkconfig.h")
-#include "sdkconfig.h"
-#endif
-#endif
-#if defined(CONFIG_SOC_USB_OTG_SUPPORTED) && CONFIG_SOC_USB_OTG_SUPPORTED && !defined(USBHOST_NO_HOST_ENGINE)
-#define USBHOST_HAVE_HOST (1)
+// The engine and what it offers: USBHOST_HAVE_HOST, _STREAM and _NET. A
+// build without an engine keeps the stubs below (an honest empty capability
+// set).
+#include "usbhost_engine.h"
+#if USBHOST_ENGINE_IDF
 #include "usbhost_host.h"
-#else
-#define USBHOST_HAVE_HOST (0)
 #endif
 
-// The tethering adapter needs lwIP, which a firmware with no network leaves
-// out (CircuitPython's ESP32-P4 port, until it drives the boards' ESP32-C6).
-#if USBHOST_HAVE_HOST && !defined(USBHOST_NO_NETWORK)
-#define USBHOST_HAVE_NET (1)
-#else
-#define USBHOST_HAVE_NET (0)
+// A stream can run into a machine.USBDevice.Ring. Only streams need it, and
+// not every port with TinyUSB puts mp_usbd.h on a user module's path (stm32
+// doesn't).
+#if USBHOST_HAVE_STREAM && defined(MICROPY_HW_ENABLE_USBDEV) && MICROPY_HW_ENABLE_USBDEV
+#include "tusb.h"
+#include "mp_usbd.h"
 #endif
 
 // Event capacity. Sized from measurement rather than a round number: the worst
@@ -65,14 +45,19 @@
 #define USBHOST_EVENT_CAPACITY (256)
 
 // The ring's records are taken from the heap the first time a host starts,
-// PSRAM first, and kept from then on: internal RAM is what Wi-Fi, BLE and a
-// display's DMA need, and a firmware that never starts a host spends nothing.
-// Only the host task writes them and only the interpreter reads them, neither
-// from an interrupt, so PSRAM serves. Without the engine nothing is ever
-// queued, and a one-record ring (which holds nothing) stands in.
-#if USBHOST_HAVE_HOST
+// so a firmware that never starts a host spends nothing. On ESP-IDF they come
+// from PSRAM first and are kept from then on: internal RAM is what Wi-Fi, BLE
+// and a display's DMA need, and only the host task writes them and only the
+// interpreter reads them, neither from an interrupt, so PSRAM serves. Off
+// ESP-IDF they come from the Python heap, held by a root pointer so a
+// collection keeps them, until a soft reset lets them go with the heap
+// (usbhost_soft_reset_teardown). Without an engine nothing is ever queued,
+// and a one-record ring (which holds nothing) stands in.
+#if USBHOST_ENGINE_IDF
 #include "esp_heap_caps.h"
 static usbhost_event_t *usbhost_event_slots;
+#elif USBHOST_HAVE_HOST
+MP_REGISTER_ROOT_POINTER(void *usbhost_event_slots);
 #else
 static usbhost_event_t usbhost_event_none[1];
 #endif
@@ -83,13 +68,10 @@ static bool usbhost_host_running = false;
 // "Soft reset" at the end of this file.
 static void usbhost_arm_soft_reset(void);
 
-// Producer hook for the host engine (usbhost_host.c). Called only from the
-// host task, preserving the ring's single-producer contract. Declared here
-// too for a build without the engine, where nothing calls it: CircuitPython
-// builds with -Wmissing-prototypes -Werror.
-#if !USBHOST_HAVE_HOST
-void usbhost_host_emit(const usbhost_event_t *event);
-#endif
+// Producer hook for the host engine. Called only from the host task,
+// preserving the ring's single-producer contract. Declared in
+// usbhost_engine.h for every build, an engine or not: CircuitPython builds
+// with -Wmissing-prototypes -Werror.
 void usbhost_host_emit(const usbhost_event_t *event) {
     if (usbhost_events.slots != NULL) {
         usbhost_rb_push(&usbhost_events, event);
@@ -99,7 +81,7 @@ void usbhost_host_emit(const usbhost_event_t *event) {
 // The ring's records, ready for usbhost_rb_init(); raises MemoryError if the
 // heap can't give them.
 static void usbhost_events_reserve(void) {
-    #if USBHOST_HAVE_HOST
+    #if USBHOST_ENGINE_IDF
     if (usbhost_event_slots == NULL) {
         usbhost_event_slots = heap_caps_calloc_prefer(USBHOST_EVENT_CAPACITY, sizeof(usbhost_event_t), 2,
             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_DEFAULT);
@@ -108,6 +90,11 @@ static void usbhost_events_reserve(void) {
         }
     }
     usbhost_rb_init(&usbhost_events, usbhost_event_slots, USBHOST_EVENT_CAPACITY);
+    #elif USBHOST_HAVE_HOST
+    if (MP_STATE_VM(usbhost_event_slots) == NULL) {
+        MP_STATE_VM(usbhost_event_slots) = m_malloc0(USBHOST_EVENT_CAPACITY * sizeof(usbhost_event_t));
+    }
+    usbhost_rb_init(&usbhost_events, MP_STATE_VM(usbhost_event_slots), USBHOST_EVENT_CAPACITY);
     #else
     usbhost_rb_init(&usbhost_events, usbhost_event_none, 1);
     #endif
@@ -240,13 +227,15 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(usbhost_host_start_obj, 1, usbhost_host_start)
 // A running host stream's ring, kept reachable here so a collection can't
 // free it under the transfers. Index = the stream's slot (USBHOST_HOST_STREAMS).
 MP_REGISTER_ROOT_POINTER(mp_obj_t usbhost_stream_owner[4]);
-#if USBHOST_HAVE_HOST
+#if USBHOST_HAVE_STREAM
 static void usbhost_stream_release_owners(void);
 #endif
 
 static mp_obj_t usbhost_host_stop(void) {
     #if USBHOST_HAVE_HOST
     usbhost_host_stop_c();
+    #endif
+    #if USBHOST_HAVE_STREAM
     usbhost_stream_release_owners();
     #endif
     usbhost_host_running = false;
@@ -460,7 +449,7 @@ static MP_DEFINE_CONST_FUN_OBJ_3(usbhost_host_poll_obj, usbhost_host_poll_py);
 // to or from a ring in C, for usb.host.audio and usb.host.video. The ring is
 // a machine.USBDevice.Ring, the same one a device-side stream uses, or, for
 // a capture stream, an audiodsp audiopump.Ring the pump plays from.
-#if USBHOST_HAVE_HOST
+#if USBHOST_HAVE_STREAM
 #include "usbhost_host_stream.h"
 
 // USBHOST_NO_AUDIOPUMP: the header can be on the path while the pump isn't
@@ -508,7 +497,7 @@ static mp_obj_t usbhost_host_stream_py(size_t n_args, const mp_obj_t *pos_args, 
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
-    #if USBHOST_HAVE_HOST
+    #if USBHOST_HAVE_STREAM
     uint32_t dev_id = (uint32_t)args[ARG_dev].u_int;
     uint8_t ep = (uint8_t)args[ARG_ep].u_int;
     mp_obj_t ring = args[ARG_ring].u_obj;
@@ -568,6 +557,8 @@ static mp_obj_t usbhost_host_stream_py(size_t n_args, const mp_obj_t *pos_args, 
     usbhost_stream_release_owners();
     MP_STATE_VM(usbhost_stream_owner)[slot] = ring;
     return mp_const_none;
+    #elif USBHOST_HAVE_HOST
+    mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("this firmware's USB host has no isochronous streams"));
     #else
     mp_raise_OSError(MP_EOPNOTSUPP);
     #endif
@@ -577,7 +568,7 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(usbhost_host_stream_obj, 3, usbhost_host_strea
 // host_stream_stats(dev_id, ep): (packets, bytes, dropped, starved, errors,
 // empty, frames, torn, big), or None when ep has no stream.
 static mp_obj_t usbhost_host_stream_stats_py(mp_obj_t dev_in, mp_obj_t ep_in) {
-    #if USBHOST_HAVE_HOST
+    #if USBHOST_HAVE_STREAM
     usbhost_stream_stats_t st;
     if (usbhost_stream_stats((uint32_t)mp_obj_get_int(dev_in), (uint8_t)mp_obj_get_int(ep_in), &st) < 0) {
         return mp_const_none;
@@ -601,7 +592,7 @@ static MP_DEFINE_CONST_FUN_OBJ_2(usbhost_host_stream_stats_obj, usbhost_host_str
 // taken, whole frames, 0 when the ring is full. Through the same gate as a
 // C sink's writes, so the two never race on the ring.
 static mp_obj_t usbhost_host_stream_write_py(mp_obj_t dev_in, mp_obj_t ep_in, mp_obj_t buf_in) {
-    #if USBHOST_HAVE_HOST
+    #if USBHOST_HAVE_STREAM
     mp_buffer_info_t buf;
     mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_READ);
     return usbhost_xfer_check(usbhost_stream_write((uint32_t)mp_obj_get_int(dev_in),
@@ -614,7 +605,7 @@ static MP_DEFINE_CONST_FUN_OBJ_3(usbhost_host_stream_write_obj, usbhost_host_str
 
 // host_stream_space(dev_id, ep): bytes a write can take now, whole frames.
 static mp_obj_t usbhost_host_stream_space_py(mp_obj_t dev_in, mp_obj_t ep_in) {
-    #if USBHOST_HAVE_HOST
+    #if USBHOST_HAVE_STREAM
     return usbhost_xfer_check(usbhost_stream_space((uint32_t)mp_obj_get_int(dev_in), (uint8_t)mp_obj_get_int(ep_in)));
     #else
     mp_raise_OSError(MP_EOPNOTSUPP);
@@ -627,7 +618,7 @@ static MP_DEFINE_CONST_FUN_OBJ_2(usbhost_host_stream_space_obj, usbhost_host_str
 // and write to from its own task. Dead (-1 from both calls) once the stream
 // stops; a new stream issues a new one.
 static mp_obj_t usbhost_host_stream_c_sink_py(size_t n_args, const mp_obj_t *args) {
-    #if USBHOST_HAVE_HOST
+    #if USBHOST_HAVE_STREAM
     pcm_c_sink_t sink;
     int r = usbhost_stream_c_sink((uint32_t)mp_obj_get_int(args[0]), (uint8_t)mp_obj_get_int(args[1]), &sink,
         (uint32_t)mp_obj_get_int(args[2]), (uint32_t)mp_obj_get_int(args[3]));
@@ -776,7 +767,14 @@ static void usbhost_soft_reset_teardown(void) {
     // Closes whatever class drivers the program left open, then stops the
     // host task and uninstalls the host library: host_start() starts fresh.
     usbhost_host_stop_c();
+    #endif
+    #if USBHOST_HAVE_STREAM
     usbhost_stream_release_owners();
+    #endif
+    #if USBHOST_HAVE_HOST && !USBHOST_ENGINE_IDF
+    // The event ring's records are in the heap being swept.
+    usbhost_rb_init(&usbhost_events, NULL, 0);
+    MP_STATE_VM(usbhost_event_slots) = NULL;
     #endif
     usbhost_host_running = false;
     // The guard is being swept with the rest of the heap. Its root has to go
