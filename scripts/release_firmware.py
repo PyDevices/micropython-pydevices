@@ -100,7 +100,7 @@ CELLS = [
          modules="pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl", chip="rp2040", offset=None, kind="rp2", deps="none"),
     dict(id="mp-giga-shield", label="Arduino GIGA R1 WiFi + GIGA Display Shield", interpreter="micropython",
          port="stm32", board="ARDUINO_GIGA", variant="DISPLAY_SHIELD", flash="2MB",
-         modules="displayif,lvgl,audiodsp,audioif,usbhost", chip="stm32h747", offset=0x08040000, base=0x08000000,
+         modules="displayif,lvgl,audiodsp,audioif,ulab,usbhost", chip="stm32h747", offset=0x08040000, base=0x08000000,
          kind="stm32", deps="none"),
     # Off by default until a board is on the bench to run it on.
     dict(id="mp-pico2", label="Raspberry Pi Pico 2", interpreter="micropython", port="rp2",
