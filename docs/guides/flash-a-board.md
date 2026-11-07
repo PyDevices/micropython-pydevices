@@ -39,6 +39,13 @@ at in its name: `...firmware1-at-0x90F00000.bin` is `firmware1.bin` and
 `...firmware0-at-0x08040000.bin` is `firmware0.bin`. Use them in the commands
 above, and the release notes list both lines with the names filled in.
 
+The `DISPLAY_SHIELD` firmware runs its USB-C port on TinyUSB, so a program can
+add USB interfaces at run time with `machine.USBDevice`, such as a MIDI device
+with micropython-lib's `usb-device-midi`. The REPL's serial port and the
+`/flash` drive are there as before, but Windows sees a new device the first
+time and gives the serial port a new COM number. `machine.bootloader()` still
+reaches the DFU bootloader.
+
 `firmware1.bin` only changes when the Wi-Fi driver does, so after the first
 time you can write `firmware0.bin` alone. A build without the variant keeps the
 Wi-Fi firmware inside its one image, `firmware.bin`, which the second command
