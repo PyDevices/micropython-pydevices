@@ -177,6 +177,23 @@ void audiopump_i2s_starved_resume(void);
 // The DAC driver's service(), for a port with no thread to give the pump:
 // run the pump while the DAC's ring has room for a block, and no further.
 void audiopump_i2s_service(void);
+
+// The STM32H7's capture: no I2S, but a PDM microphone on DFSDM1 or an analog
+// one on ADC1, either recording into the ring the rx_ functions above read,
+// as signed 16-bit mono (or, from the ADC with `raw`, its unsigned values).
+// Each raises, and returns the rate it really runs at.
+#include "pin.h"
+// The clock edge a PDM microphone's data is read on unless asked otherwise:
+// 0 the rising, 1 the falling, as its L/R pin is tied.
+#define AUDIOIF_PDM_EDGE (0)
+uint32_t audioif_rx_pdm_begin(const machine_pin_obj_t *clock, const machine_pin_obj_t *data,
+    uint32_t rate, int edge);
+uint32_t audioif_rx_adc_begin(const machine_pin_obj_t *pin, uint32_t rate, bool raw);
+// Bytes waiting in the ring, and the rate of the recording (0 with none).
+uint32_t audioif_rx_waiting(void);
+uint32_t audioif_rx_live_rate(void);
+// The capture's gain in dB; 0 puts the input's full scale at int16's.
+void audioif_rx_set_gain(float db);
 #endif
 
 #ifdef __cplusplus
