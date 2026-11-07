@@ -1108,6 +1108,14 @@ TINYUSB_CHIPS = ("esp32s2", "esp32s3", "esp32p4")
 TINYUSB_PATCHES = REPO / "patches" / "tinyusb"
 
 
+def make_submodules(shell, make, mp):
+    """A make port's `make submodules`, with patches/lib-tinyusb/ taken off
+    lib/tinyusb before it and put back on after."""
+    apply_patches.unprepare_tinyusb(mp)
+    shell(make + ["submodules"])
+    apply_patches.prepare_tinyusb(mp)
+
+
 def tinyusb_component(mp, chip):
     """deps/espressif__tinyusb at its deps.lock tag with patches/tinyusb/
     applied (one local commit, like the MicroPython tree's), or None for a
@@ -2048,7 +2056,7 @@ def main():
                 gen = build / board
                 rp2_board_dir(gen, board_dir(port, board), board, variant)
                 make += [f"BOARD_DIR={gen}"]
-            shell(make + ["submodules"])
+            make_submodules(shell, make, mp)
             storage = None
             for attempt in (1, 2):
                 extra = [f"MICROPY_HW_FLASH_STORAGE_BYTES={storage}"] if storage else []
@@ -2093,7 +2101,7 @@ def main():
                 if grown:
                     stm32_m4_slot(build, gen, board_dir(port, board), board, variant)
                 if attempt == 1:
-                    shell(make + ["submodules"])
+                    make_submodules(shell, make, mp)
                 rc, out = shell(make, log=True)
                 if rc == 0 or attempt == 2 or grown:
                     break
@@ -2146,7 +2154,7 @@ def main():
                 gen = build / board
                 stm32_board_dir(gen, board_dir(port, board), board, variant)
                 make += [f"BOARD_DIR={gen}"]
-            shell(make + ["submodules"])
+            make_submodules(shell, make, mp)
             if port == "windows" and os.name != "nt":  # cross-built: failure_hint() reads the log
                 rc, out = shell(make, log=True)
             else:

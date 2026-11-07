@@ -20,7 +20,7 @@ tracked here or linked from a sibling checkout or cloned at the commit in
 | [`pngio`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/pngio) | PNG encode and decode, RGB565 in and out. |
 | [`ppa`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/ppa) | Scale, rotate, convert and fill pixel buffers, on the ESP32-P4's Pixel Processing Accelerator or in portable C elsewhere. |
 | [`tsmux`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/tsmux) | MPEG-TS and HLS segments from H.264. |
-| [`usbhost`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/usbhost) | The USB host port and isochronous streams that `usb.core` and the `usb.host.*` packages are built on (ESP32-S2, S3 and P4). |
+| [`usbhost`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/usbhost) | The USB host port and isochronous streams that `usb.core` and the `usb.host.*` packages are built on (ESP32-S2, S3 and P4, and the Arduino GIGA R1's USB-A port without isochronous streams). |
 
 ## Modules from other repositories
 
