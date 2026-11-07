@@ -42,7 +42,7 @@ from pathlib import Path
 
 CHIP_FAMILY = {"esp32s3": "ESP32-S3", "esp32p4": "ESP32-P4", "esp32": "ESP32", "esp32c3": "ESP32-C3",
                "esp32c6": "ESP32-C6", "esp32s2": "ESP32-S2"}
-SERVED = ("flash", "uf2")
+SERVED = ("flash", "wifi", "uf2")
 
 
 class Failed(Exception):
@@ -103,8 +103,6 @@ def stage(firmware_dir, page_dir, interpreters=None):
     doc = json.loads((src / "firmware.json").read_text())
     todo = []
     for b in doc["builds"]:
-        if b.get("wifi_offset"):
-            continue  # a GIGA's two DFU images: the page has no browser flasher for them
         for f in b["files"]:
             if f["role"] in SERVED:
                 p = src / f["name"]

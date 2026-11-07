@@ -36,14 +36,29 @@ class Stage(unittest.TestCase):
 
     def test_files_manifests_and_firmware_json_land(self):
         sp.stage(self.fw, self.page)
-        served = {f["name"] for b in self.doc["builds"] if not b.get("wifi_offset")
-                  for f in b["files"] if f["role"] in ("flash", "uf2")}
+        served = {f["name"] for b in self.doc["builds"]
+                  for f in b["files"] if f["role"] in ("flash", "wifi", "uf2")}
         self.assertEqual({p.name for p in (self.page / "files").iterdir()}, served)
-        self.assertEqual(len(served), 10)
+        self.assertEqual(len(served), 12)
         self.assertEqual(json.loads((self.page / "firmware.json").read_text()), self.doc)
         ids = sorted(p.stem for p in (self.page / "manifests").iterdir())
         self.assertEqual(ids, sorted(b["id"] for b in self.doc["builds"] if b["chip"] not in ("rp2040", "stm32h747")))
         self.assertFalse((self.page / "interpreters.json").exists())
+
+    def test_a_giga_serves_both_images_and_has_no_manifest(self):
+        sp.stage(self.fw, self.page)
+        giga = next(b for b in self.doc["builds"] if b["id"] == "mp-giga-shield")
+        for role in ("flash", "wifi"):
+            name = next(f["name"] for f in giga["files"] if f["role"] == role)
+            self.assertTrue((self.page / "files" / name).is_file(), name)
+        self.assertFalse((self.page / "manifests" / "mp-giga-shield.json").exists())
+
+    def test_a_giga_wifi_image_that_does_not_match_its_sha256_is_refused(self):
+        giga = next(b for b in self.doc["builds"] if b["id"] == "mp-giga-shield")
+        wifi = next(f for f in giga["files"] if f["role"] == "wifi")
+        (self.fw / wifi["name"]).write_bytes(b"not the wifi image")
+        with self.assertRaisesRegex(sp.Failed, "firmware1.*does not match the sha256"):
+            sp.stage(self.fw, self.page)
 
     def test_the_manifest_writes_the_image_at_its_flash_offset(self):
         sp.stage(self.fw, self.page)
