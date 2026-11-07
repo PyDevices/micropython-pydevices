@@ -924,20 +924,15 @@ static uint32_t audioif_sink_write(const uint8_t *buffer, uint32_t length,
         audioif_starved_pending = false;
         audioif_starved_counting = true;
     }
-    // The service loop waits for a block's room before it runs the pump, so
-    // this is a block bigger than any before it. The DMA frees room as it
-    // plays, so wait for it, as long as the engine allows, rather than cut
-    // the block short.
+    // What fits, at once. The pump runs on the interpreter here, so waiting
+    // for the DMA to make room would hold everything else up for as long as
+    // the block is longer than the ring: a one-shot RawSample is one block,
+    // however long. The engine keeps what isn't taken and offers it again on
+    // the next service, so nothing is lost and nothing waits.
+    (void)timeout_ms;
     uint32_t space = audioif_space();
-    for (uint32_t waited_us = 0; frames > space && waited_us < timeout_ms * 1000u;
-         waited_us += 250) {
-        mp_hal_delay_us(250);
-        audioif_poll();
-        space = audioif_space();
-    }
     if (frames > space) {
         frames = space;
-        *timed_out = true;
     }
     const int16_t *in = (const int16_t *)buffer;
     uint64_t at = audioif_written;
