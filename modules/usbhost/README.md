@@ -9,6 +9,15 @@ It builds on the ESP32-S2, S3 and P4, the parts with a USB OTG controller, on
 ESP-IDF's USB host library. Its CMake glue skips every other part, so a
 firmware for those still builds, without the host.
 
+On the Arduino GIGA R1 it runs on TinyUSB's host, on the USB-A port at full
+speed, while the USB-C port stays the board's REPL and USB device. There it has
+control, bulk and interrupt transfers but no isochronous streams, so a drive, a
+keyboard or a MIDI controller works and a USB sound card or webcam doesn't. The
+USB-A port has no power until `usb.core.start()`, and none again after a soft
+reset. Bus-powered devices that draw more than about 500 mA may not run; use a
+powered hub. The port's switch stops near 0.6 A, and a GIGA powered from a
+computer shares that computer's 500 mA with its own board and display.
+
 On CircuitPython the host builds for the ESP32-P4, where the boards leave the
 high-speed controller free. On the Waveshare ESP32-P4-WIFI6-DEV-KIT it
 enumerates a webcam and a wireless keyboard-and-mouse dongle behind the

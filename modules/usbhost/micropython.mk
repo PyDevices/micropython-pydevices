@@ -7,7 +7,8 @@
 # to your manifest, or point USER_C_MODULES at this directory.
 #
 # Most builds here get `_usbhost` with no host engine: the module imports, and
-# its capabilities are an empty set. CircuitPython's ESP32-P4 builds get the
+# its capabilities are an empty set. A MicroPython board whose variant turns on
+# TinyUSB's host stack gets usbhost_tuh.c, the engine over it. CircuitPython's ESP32-P4 builds get the
 # whole host, on the chip's high-speed USB controller, which CircuitPython
 # leaves alone on the boards that run it as a host:
 #
@@ -69,10 +70,15 @@ CFLAGS_USERMOD += -DUSBHOST_NO_NETWORK=1
 else
 SRC_USERMOD_C += $(USBHOST_SRC_DIR)/usbhost_host_net.c
 endif
-else
+else ifneq ($(wildcard $(TOP)/py/circuitpy_mpconfig.h),)
 # Built without the engine, even on a chip with a USB OTG controller (a
 # CircuitPython ESP32-S3, whose one controller is its drive and REPL).
 CFLAGS_USERMOD += -DUSBHOST_NO_HOST_ENGINE=1
+else
+# MicroPython's make ports: TinyUSB's host stack, on a board whose variant
+# names a root port for it (USBHOST_TUH_RHPORT, the Arduino GIGA R1 with the
+# Display Shield). Elsewhere the file compiles to nothing.
+SRC_USERMOD_C += $(USBHOST_SRC_DIR)/usbhost_tuh.c
 endif
 
 # --- which usbhost this firmware was built from ----------------------

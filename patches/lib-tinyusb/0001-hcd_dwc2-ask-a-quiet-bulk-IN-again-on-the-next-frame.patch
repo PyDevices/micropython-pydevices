@@ -1,0 +1,149 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 23:30:00 -0600
+Subject: [PATCH] hcd_dwc2: ask a quiet bulk IN again on the next frame, and
+ end an aborted transfer cleanly.
+
+In slave mode a bulk IN the device NAKs is retried at once, from the
+channel's halt interrupt, for as long as the device has nothing to send.
+With a MIDI keyboard armed for its next note that is all the time: on an
+STM32H747 at full speed it took about 37% of the CPU in NAK interrupts.
+Now a bulk IN that is NAKed before any data has come gives up its channel
+and is asked again on the next SOF, as an interrupt endpoint already is.
+Control transfers, splits, DMA and a transfer part-way through keep the
+immediate retry.
+
+hcd_edpt_abort_xfer() disabled the channel, but its halt was taken for a
+NAK and retried, so the channel was never freed and the next transfer on
+the endpoint took another; 16 timed-out reads used every channel. When a
+NAK and the halt came in one interrupt, the NAK branch took it and the
+halt was lost, which left an aborted interrupt IN's channel allocated
+and the periodic schedule stuck: bulk INs to other devices on the bus
+stopped completing. An aborted channel now ends at its halt, whatever
+else came with it, with no completion reported, and keeps the data
+toggle the channel reached rather than the one guessed at its start. An
+IN waiting for its next frame is forgotten.
+---
+--- a/src/portable/synopsys/dwc2/hcd_dwc2.c
++++ b/src/portable/synopsys/dwc2/hcd_dwc2.c
+@@ -105,6 +105,7 @@
+                            // be composed of multiple channel_xfer_start() (retry with NAK/NYET)
+   uint16_t fifo_bytes;     // bytes written/read from/to FIFO (may not be transferred on USB bus).
+   uint8_t  retry_disabled; // 1: channel was disabled to throttle a split retry (NAK in / XactErr out); re-arm on its halt
++  uint8_t  aborting;       // 1: hcd_edpt_abort_xfer() disabled the channel; free it on its halt, with no event
+ } hcd_xfer_t;
+ 
+ typedef struct {
+@@ -757,8 +758,12 @@
+   const uint8_t ch_id = channel_find_enabled(dwc2, dev_addr, ep_num, ep_dir);
+   if (ch_id < 16) {
+     dwc2_channel_t* channel = &dwc2->channel[ch_id];
++    // halted, the channel is freed without retrying or reporting the transfer
++    _hcd_data.xfer[ch_id].aborting = 1;
+     channel_disable(dwc2, channel);
+   }
++  // an IN waiting for the next frame to ask again has no channel: forget it
++  _hcd_data.edpt[ep_id].uframe_countdown = 0;
+ 
+   // hcd_int_enable(rhport);
+ 
+@@ -837,8 +842,23 @@
+       channel_dealloc(dwc2, ch_id);
+     }
+   } else {
+-    // for control/bulk: retry immediately
+-    channel_send_in_token(dwc2, channel);
++    const dwc2_channel_split_t hcsplt = {.value = channel->hcsplt};
++    if (hcchar.ep_num != 0 && !hcsplt.split_en && xfer->xferred_bytes == 0 && !dma_host_enabled(dwc2)) {
++      // bulk IN NAKed with nothing received yet: the device has nothing to send. Ask again on the next frame, as for
++      // an interrupt endpoint, instead of at once: an immediate retry keeps the core NAKing and the CPU in this
++      // interrupt for as long as the device stays quiet, which for a MIDI keyboard is most of the time.
++      const dwc2_channel_tsize_t hctsiz = {.value = channel->hctsiz};
++      edpt->next_pid = hctsiz.pid; // save PID
++      edpt->uframe_countdown = (hprt_speed_get(dwc2) == TUSB_SPEED_HIGH ? 1 : 8);
++      if (0 == (dwc2->gintmsk & GINTMSK_SOFM)) {
++        dwc2->gintsts = GINTSTS_SOF;
++        dwc2->gintmsk |= GINTMSK_SOFM;
++      }
++      channel_dealloc(dwc2, ch_id);
++    } else {
++      // for control/bulk: retry immediately
++      channel_send_in_token(dwc2, channel);
++    }
+   }
+ }
+ 
+@@ -944,6 +964,19 @@
+   const dwc2_channel_tsize_t hctsiz = {.value = channel->hctsiz};
+   bool is_done = false;
+ 
++  // An aborted channel ends at its halt, whatever else came in with it: a NAK
++  // and the halt often arrive together, and the NAK branch below would
++  // otherwise take the interrupt and leave the channel allocated for good.
++  // The toggle is what the channel last had, not the one channel_xfer_start()
++  // guessed for a transfer that never got its data.
++  if (xfer->aborting && (hcint & HCINT_HALTED)) {
++    channel->hcintmsk &= ~HCINT_HALTED;
++    if (edpt->hcchar_bm.ep_num != 0) {
++      edpt->next_pid = hctsiz.pid;
++    }
++    return true;
++  }
++
+   // if (hcsplt.split_en) {
+   // if (edpt->hcchar_bm.ep_num == 1) {
+   //   TU_LOG1("Frame %u, ch %u: ep %u, hcint 0x%04lX ", dwc2->hfnum_bm.num, ch_id, hcsplt.ep_num, hcint);
+@@ -1022,7 +1055,7 @@
+     } else if (xfer->err_count == HCD_XFER_ERROR_MAX) {
+       xfer->result = XFER_RESULT_FAILED;
+       is_done      = true;
+-    } else if (xfer->closing == 1) {
++    } else if (xfer->closing == 1 || xfer->aborting) {
+       is_done = true;
+     } else {
+       // got here due to NAK or NYET
+@@ -1047,6 +1080,16 @@
+   dwc2_channel_split_t hcsplt = {.value = channel->hcsplt};
+   bool is_done = false;
+ 
++  if (xfer->aborting && (hcint & HCINT_HALTED)) {
++    // as for IN: end at the halt, and keep the toggle the channel reached
++    channel->hcintmsk &= ~HCINT_HALTED;
++    if (edpt->hcchar_bm.ep_num != 0) {
++      const dwc2_channel_tsize_t hctsiz = {.value = channel->hctsiz};
++      edpt->next_pid = hctsiz.pid;
++    }
++    return true;
++  }
++
+   if (hcint & HCINT_XFER_COMPLETE) {
+     is_done = true;
+     xfer->result = XFER_RESULT_SUCCESS;
+@@ -1089,7 +1132,7 @@
+     } else if (xfer->err_count == HCD_XFER_ERROR_MAX) {
+       xfer->result = XFER_RESULT_FAILED;
+       is_done      = true;
+-    } else if (xfer->closing == 1) {
++    } else if (xfer->closing == 1 || xfer->aborting) {
+       is_done = true;
+     } else {
+       // Got here due to NAK or NYET
+@@ -1368,7 +1411,7 @@
+         if (xfer->closing == 1) {
+           hcd_endpoint_t *edpt = &_hcd_data.edpt[xfer->ep_id];
+           edpt_dealloc(edpt);
+-        } else {
++        } else if (!xfer->aborting) {
+           const uint8_t ep_addr = tu_edpt_addr(hcchar.ep_num, hcchar.ep_dir);
+           hcd_event_xfer_complete(hcchar.dev_addr, ep_addr, xfer->xferred_bytes, (xfer_result_t)xfer->result, in_isr);
+         }
+@@ -1392,7 +1435,8 @@
+   for(uint8_t ep_id = 0; ep_id < CFG_TUH_DWC2_ENDPOINT_MAX; ep_id++) {
+     hcd_endpoint_t *edpt = &_hcd_data.edpt[ep_id];
+     if (edpt->closing == 0) {
+-      if (edpt->hcchar_bm.enable && channel_is_periodic(edpt->hcchar) && edpt->uframe_countdown > 0) {
++      // periodic endpoints between transfers, and bulk IN asking again after a NAK
++      if (edpt->hcchar_bm.enable && edpt->uframe_countdown > 0) {
+         edpt->uframe_countdown -= tu_min32(ucount, edpt->uframe_countdown);
+         if (edpt->uframe_countdown == 0) {
+           if (!edpt_xfer_kickoff(dwc2, ep_id)) {

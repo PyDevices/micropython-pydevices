@@ -43,7 +43,15 @@
 #define USBHOST_ENGINE_IDF (0)
 #endif
 
-#define USBHOST_HAVE_HOST (USBHOST_ENGINE_IDF)
+// TinyUSB's host stack (usbhost_tuh.c), on a board whose variant names the
+// root port for it (USBHOST_TUH_RHPORT, in its mpconfigboard.h).
+#if !USBHOST_ENGINE_IDF && defined(USBHOST_TUH_RHPORT) && !defined(USBHOST_NO_HOST_ENGINE)
+#define USBHOST_ENGINE_TUH (1)
+#else
+#define USBHOST_ENGINE_TUH (0)
+#endif
+
+#define USBHOST_HAVE_HOST (USBHOST_ENGINE_IDF || USBHOST_ENGINE_TUH)
 #define USBHOST_HAVE_STREAM (USBHOST_ENGINE_IDF)
 
 // The tethering adapter needs lwIP, which a firmware with no network leaves

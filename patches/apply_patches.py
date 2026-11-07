@@ -28,6 +28,12 @@ the submodule's working tree after every update, not into the local commit,
 and a patch the submodule already has (applied before, or upstream's own
 after a pin move) is skipped. Every package a firmware freezes and every
 copy staged from the submodule for a board's /lib then carries them.
+
+patches/lib-tinyusb/ is the same for lib/tinyusb, the TinyUSB that the
+stm32, rp2 and other make ports build. That submodule is fetched by a
+port's `make submodules`, not here, so build_mp.py puts these on after it
+(prepare_tinyusb()). ESP-IDF builds use their own TinyUSB component, which
+gets patches/tinyusb/ instead.
 """
 
 import hashlib
@@ -40,6 +46,8 @@ REPO = Path(__file__).resolve().parent.parent
 OVERLAY = REPO / "patches" / "micropython"
 LIB_OVERLAY = REPO / "patches" / "micropython-lib"
 LIB = Path("lib") / "micropython-lib"
+TUSB_OVERLAY = REPO / "patches" / "lib-tinyusb"
+TUSB = Path("lib") / "tinyusb"
 MODULES = REPO / "modules"
 
 
@@ -68,6 +76,11 @@ def lib_series():
     return sorted(LIB_OVERLAY.glob("*.patch"))
 
 
+def tinyusb_series():
+    """The lib/tinyusb patches, in order."""
+    return sorted(TUSB_OVERLAY.glob("*.patch"))
+
+
 def _quiet(repo, *args):
     return subprocess.run(["git", "-C", str(repo), *args], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
 
@@ -86,15 +99,30 @@ def lib_files(patches):
     return sorted(files)
 
 
-def apply_lib(lib, patches):
+def apply_lib(lib, patches, where=LIB):
     for patch in patches:
         name = patch.relative_to(REPO)
         if lib_applied(lib, patch):
-            print(f"already in micropython-lib: {name}", flush=True)
+            print(f"already in {where.name}: {name}", flush=True)
         elif git(lib, "apply", str(patch), check=False) != 0:
-            sys.exit(f"apply_patches: {name} does not apply to {LIB}")
+            sys.exit(f"apply_patches: {name} does not apply to {where}")
         else:
             print(f"applied {name}", flush=True)
+
+
+def unprepare_tinyusb(mp):
+    """Take our patches off lib/tinyusb, so `make submodules` can move it."""
+    tusb = Path(mp) / TUSB
+    patches = tinyusb_series()
+    if patches and (tusb / ".git").exists():
+        git(tusb, "checkout", "--quiet", "--", *lib_files(patches), check=False)
+
+
+def prepare_tinyusb(mp):
+    """Put patches/lib-tinyusb/ onto lib/tinyusb, once a port has fetched it."""
+    tusb = Path(mp) / TUSB
+    if (tusb / ".git").exists():
+        apply_lib(tusb, tinyusb_series(), TUSB)
 
 
 def lib_record(mp):
@@ -132,6 +160,9 @@ def check(mp, upstream, patches):
             if lib_series():
                 git(tree, "submodule", "update", "--init", "--depth", "1", "--quiet", str(LIB))
                 apply_lib(tree / LIB, lib_series())
+            if tinyusb_series():
+                git(tree, "submodule", "update", "--init", "--depth", "1", "--quiet", str(TUSB))
+                apply_lib(tree / TUSB, tinyusb_series(), TUSB)
         finally:
             git(mp, "worktree", "remove", "--force", str(tree), check=False)
     print(f"the series applies clean to {upstream}", flush=True)
