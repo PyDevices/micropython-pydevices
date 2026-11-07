@@ -45,11 +45,13 @@
 
 #if defined(AUDIOIF_DRIVER_STM32)
 
-// The ring holds about 93 ms at whatever rate the DAC opens at, up to
-// AUDIOIF_RING_MAX frames (93 ms at 44.1 kHz, 85 ms at 48 kHz): how long a C
-// call may hold the interpreter before the DAC underruns. A word per frame.
+// The ring holds about 93 ms at whatever rate the DAC opens at, or what
+// audioio.AudioOut's buffer_ms= asks for, up to AUDIOIF_RING_MAX frames (278
+// ms at 44.1 kHz, 256 ms at 48 kHz): how long a C call may hold the
+// interpreter before the DAC underruns, and how far behind the sound is. A
+// word per frame.
 #define AUDIOIF_RING_MS (93)
-#define AUDIOIF_RING_MAX (4096)
+#define AUDIOIF_RING_MAX (12288)
 #define AUDIOIF_RING_MIN (512)
 // How often the soft timer looks at the DMA.
 #define AUDIOIF_KICK_MS (4)
@@ -308,7 +310,8 @@ uint32_t audiopump_i2s_open(const audiopump_i2s_cfg_t *cfg) {
     }
     audioif_live = *cfg;
     audioif_channels = (uint8_t)cfg->channels;
-    uint32_t frames = ((uint32_t)cfg->rate * AUDIOIF_RING_MS / 1000 + 7) & ~7u;
+    uint32_t ms = cfg->dac_ring_ms > 0 ? (uint32_t)cfg->dac_ring_ms : AUDIOIF_RING_MS;
+    uint32_t frames = ((uint32_t)cfg->rate * ms / 1000 + 7) & ~7u;
     audioif_ring_frames = frames < AUDIOIF_RING_MIN ? AUDIOIF_RING_MIN
         : frames > AUDIOIF_RING_MAX ? AUDIOIF_RING_MAX : frames;
     audioif_block = 512 < audioif_ring_frames / 2 ? 512 : audioif_ring_frames / 2;

@@ -1114,7 +1114,7 @@ static int audioio_dac_pin(mp_obj_t obj) {
 static mp_obj_t audioio_audioout_make_new(const mp_obj_type_t *type,
     size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
     enum { ARG_left_channel, ARG_right_channel, ARG_quiescent_value,
-           ARG_sample_rate };
+           ARG_sample_rate, ARG_buffer_ms };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_left_channel,    MP_ARG_OBJ | MP_ARG_REQUIRED,
           { .u_obj = MP_OBJ_NULL } },
@@ -1127,10 +1127,18 @@ static mp_obj_t audioio_audioout_make_new(const mp_obj_type_t *type,
         // Ours: the rate the DAC is opened at until the first play() retunes it.
         { MP_QSTR_sample_rate,     MP_ARG_INT | MP_ARG_KW_ONLY,
           { .u_int = 22050 } },
+        // Ours: the audio the DAC's ring holds, in milliseconds; 0 is about
+        // 93 ms. More rides out longer stalls of the interpreter and puts the
+        // sound further behind.
+        { MP_QSTR_buffer_ms,       MP_ARG_INT | MP_ARG_KW_ONLY,
+          { .u_int = 0 } },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed),
         allowed, args);
+    if (args[ARG_buffer_ms].u_int < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("buffer_ms"));
+    }
     if (args[ARG_quiescent_value].u_int != 0x8000) {
         mp_raise_NotImplementedError(MP_ERROR_TEXT("quiescent_value"));
     }
@@ -1159,6 +1167,7 @@ static mp_obj_t audioio_audioout_make_new(const mp_obj_type_t *type,
     self->wire.bits = 16;
     self->wire.channels = 2;
     self->wire.dma_frame = audiobusio_dma_frame(self->wire.rate);
+    self->wire.dac_ring_ms = args[ARG_buffer_ms].u_int;
     self->rate = (uint32_t)self->wire.rate;
 
     (void)audiopump_i2s_open(&self->wire);
