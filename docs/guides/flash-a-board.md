@@ -90,11 +90,10 @@ print(machine.mem32[0x5200201C] >> 22 & 1)
 ```
 
 Any GIGA firmware longer than 768 KB covers that address, upstream's included,
-so the M4 starts from whatever bytes of it are there. They are almost never a
-valid stack and reset address, so the M4 faults on its first instruction and
-stops. Every GIGA build checks the bytes it puts there and fails, saying so, if
-they look like a vector table the M4 could run; a module more or less moves
-them.
+so the M4 starts from whatever bytes of it are there. Usually they point
+nowhere it can reach, so it faults and stops. When they point at memory, the M4
+can hang the board, so every GIGA build checks them and, if it must, moves the
+code a few bytes and links again, saying so in an `m4 pad:` line.
 
 To stop the M4 starting at all, clear BCM4: ST's
 [STM32CubeProgrammer](https://www.st.com/en/development-tools/stm32cubeprog.html)

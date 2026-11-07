@@ -587,18 +587,85 @@ class Stm32M4Slot(unittest.TestCase):
         with self.assertRaises(SystemExit):
             build_mp.stm32_m4_slot(self.build, self.gen, self.base, "ARDUINO_GIGA", None)
 
-    def test_the_m4_boot_words_and_whether_an_m4_would_run_them(self):
+    # The vector table (stack, reset, NMI, HardFault) at 0x08100000 in each
+    # GIGA image we had on 11-06, and whether the build must refuse it.
+    IMAGES = {
+        "lean, ran": ((0xF880B508, 0xF8D021FC, 0x68522214, 0x20004790), False),
+        "display+audio release, ran": ((0x1A3FFF9B, 0x4404D0F3, 0x407FF425, 0x0080F020), False),
+        "display+audio, earlier": ((0xF0232100, 0xB118BC3F, 0x718CF44F, 0xBF48F009), False),
+        "display+audio+USB, ran": ((0xF5044629, 0xF7FC70E5, 0x4633FB7A, 0xE7349A05), False),
+        "autosize test, HardFault in SDRAM": ((0x4E2A300D, 0xF043BF18, 0xF8DF0301, 0x603A80B4), True),
+        "ulab, hung at the DAC": ((0xD0522E00, 0x92014630, 0xF98AF03D, 0x9A011A20), True),
+        "ulab moved 16 bytes, ran": ((0xF8030302, 0xBB4D1C01, 0x1E9C2130, 0x1C02F803), False),
+    }
+
+    def _image(self, words):
         image = self.build / "firmware0.bin"
         self.build.mkdir(parents=True, exist_ok=True)
         off = build_mp.STM32_M4_BOOT_DEFAULT - 0x08040000
-        image.write_bytes(bytes(off) + struct.pack("<II", 0xF880B508, 0xF8D021FC))
-        self.assertEqual(build_mp.stm32_m4_boot_words(image, 0x08040000), (0xF880B508, 0xF8D021FC))
-        self.assertFalse(build_mp.m4_would_run(0xF880B508, 0xF8D021FC))  # the GIGA's bytes on 11-06
-        self.assertTrue(build_mp.m4_would_run(0x10048000, 0x08100101))
-        self.assertFalse(build_mp.m4_would_run(0x10048000, 0x08100100))  # even: not Thumb, faults
-        self.assertFalse(build_mp.m4_would_run(0x60000000, 0x08100101))  # SDRAM isn't up at reset
-        image.write_bytes(bytes(off))
+        image.write_bytes(bytes(off) + struct.pack("<IIII", *words))
+        return image
+
+    def test_the_m4_boot_words(self):
+        image = self._image((1, 2, 3, 4))
+        self.assertEqual(build_mp.stm32_m4_boot_words(image, 0x08040000), (1, 2, 3, 4))
+        image.write_bytes(bytes(build_mp.STM32_M4_BOOT_DEFAULT - 0x08040000))
         self.assertIsNone(build_mp.stm32_m4_boot_words(image, 0x08040000))
+
+    def test_each_image_we_had_is_refused_or_passed(self):
+        for name, (words, refused) in self.IMAGES.items():
+            with self.subTest(name):
+                self.assertEqual(build_mp.m4_reaches_memory(*words), refused)
+
+    def test_a_harmless_reset_with_a_hardfault_handler_in_flash_is_refused(self):
+        self.assertTrue(build_mp.m4_reaches_memory(0xF0000000, 0xF0000001, 0, 0x08100101))
+
+    def test_a_stack_in_memory_is_refused_whatever_the_reset_address(self):
+        self.assertTrue(build_mp.m4_reaches_memory(0x24080000, 0xF0000001, 0, 0xF0000001))
+        self.assertTrue(build_mp.m4_reaches_memory(0xD0522E00, 0xF0000001, 0, 0xF0000001))
+
+    def test_the_m7s_tightly_coupled_memory_is_out_of_the_m4s_reach(self):
+        self.assertFalse(build_mp.m4_reaches_memory(0x20010000, 0x00000101, 0, 0x20004791))
+
+    def test_a_refused_image_is_padded_until_one_passes(self):
+        ulab = self.IMAGES["ulab, hung at the DAC"][0]
+        moved = self.IMAGES["ulab moved 16 bytes, ran"][0]
+        image = self._image(ulab)
+        links = []
+
+        def relink(pad):
+            links.append(pad)
+            stm32 = moved if pad == 32 else ulab  # 16 still refused, 32 passes
+            image.write_bytes(bytes(build_mp.STM32_M4_BOOT_DEFAULT - 0x08040000) + struct.pack("<IIII", *stm32))
+            return 0
+
+        pad, words, refused = build_mp.stm32_m4_settle(image, 0x08040000, 0, relink)
+        self.assertEqual((pad, words, refused), (32, moved, ulab))
+        self.assertEqual(links, [16, 32])
+
+    def test_an_image_that_passes_is_not_relinked(self):
+        image = self._image(self.IMAGES["lean, ran"][0])
+        pad, _words, refused = build_mp.stm32_m4_settle(image, 0x08040000, 0, lambda p: self.fail("relinked"))
+        self.assertEqual((pad, refused), (0, None))
+
+    def test_every_size_refused_leaves_the_image_refused(self):
+        ulab = self.IMAGES["ulab, hung at the DAC"][0]
+        image = self._image(ulab)
+        links = []
+        pad, words, _refused = build_mp.stm32_m4_settle(image, 0x08040000, 0, lambda p: links.append(p) or 0)
+        self.assertEqual(links, list(build_mp.M4_PAD_SIZES))
+        self.assertTrue(build_mp.m4_reaches_memory(*words))
+
+    def test_the_padding_module(self):
+        d = build_mp.stm32_m4_pad_module(self.build, 0)
+        self.assertNotIn("SRC_USERMOD_C", (d / "micropython.mk").read_text())
+        self.assertEqual(build_mp.stm32_m4_pad_now(self.build), 0)
+        build_mp.stm32_m4_pad_module(self.build, 48)
+        mk = (d / "micropython.mk").read_text()
+        self.assertIn("SRC_USERMOD_C += $(USERMOD_DIR)/m4pad.c", mk)
+        self.assertIn("-Wl,-u," + build_mp.M4_PAD_SYMBOL, mk)
+        self.assertIn(".rept 24", (d / "m4pad.c").read_text())
+        self.assertEqual(build_mp.stm32_m4_pad_now(self.build), 48)
 
 
 class Stm32BoardDir(unittest.TestCase):
