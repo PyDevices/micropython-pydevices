@@ -724,8 +724,9 @@ static usbhost_tuh_pipe_t *usbhost_tuh_pipe(const usbhost_tuh_dev_t *d, uint8_t 
     return p;
 }
 
-// `keep`: an IN transfer that times out stays armed and this returns 0; the
-// next call on the endpoint collects it. `now`, with keep: don't wait at all.
+// An IN transfer that times out stays armed and the next call on the
+// endpoint collects it: with `keep` this returns 0, without it -ETIMEDOUT.
+// `now`, with keep: don't wait at all.
 static int usbhost_tuh_xfer(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t len, uint32_t timeout_ms, bool keep,
     bool now) {
     const bool in = (ep & 0x80) != 0;
@@ -808,10 +809,15 @@ static int usbhost_tuh_xfer(uint32_t dev_id, uint8_t ep, uint8_t *data, size_t l
         done = p->state == USBHOST_TUH_DONE;
     }
     if (!done) {
-        if (keep && in) {
+        // An IN that times out stays armed, with or without keep, and the
+        // next read on the endpoint collects what it brings. Aborting it
+        // would lose a report that lands during the abort, and on the dwc2
+        // in slave mode an aborted interrupt IN can stall the periodic
+        // schedule for every device on the bus.
+        if (in) {
             p->kept = true;
             usbhost_tuh_unlock(st);
-            return 0;
+            return keep ? 0 : -MP_ETIMEDOUT;
         }
         usbhost_tuh_abort((uint8_t)dev_id, ep);
         p->gen++;
