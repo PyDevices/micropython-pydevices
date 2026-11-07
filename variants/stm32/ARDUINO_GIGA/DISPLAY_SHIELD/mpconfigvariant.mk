@@ -12,9 +12,13 @@ TEXT1_ADDR = 0x90F00000
 TEXT0_SECTIONS = .isr_vector .isr_extratext .text .gc.blocks.table .data .ARM
 TEXT1_SECTIONS = .cyw43_fw
 
-# Bluetooth off, to make room for LVGL and displayif.
-MICROPY_PY_BLUETOOTH = 0
-MICROPY_BLUETOOTH_NIMBLE = 0
+# Bluetooth LE through NimBLE, over UART7 to the Murata 1DX, as upstream's
+# ARDUINO_GIGA has it. Its patch for the radio is a CYW43 resource like the
+# Wi-Fi firmware, so it lands in firmware1.bin too.
+
+# ulab with numpy's array core and elementwise maths only (ulab_config.h),
+# which leaves room for Bluetooth beside LVGL, audiodsp and usbhost.
+CFLAGS += -DULAB_CONFIG_FILE='"ulab_config.h"'
 
 # LVGL without its 40 px font, to make room as well. A program that wants it
 # can load omnipython-lvgl's montserrat_40.bin at run time.

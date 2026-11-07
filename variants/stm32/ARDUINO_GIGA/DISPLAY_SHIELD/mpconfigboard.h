@@ -37,3 +37,7 @@
 #undef MICROPY_BOARD_EARLY_INIT
 #define MICROPY_BOARD_EARLY_INIT    GIGA_DISPLAY_SHIELD_early_init
 void GIGA_DISPLAY_SHIELD_early_init(void);
+
+// os.dupterm_notify(), which bledev's BLE REPL calls so a Ctrl-C sent over
+// Bluetooth interrupts a running program.
+#define MICROPY_PY_OS_DUPTERM_NOTIFY (1)
