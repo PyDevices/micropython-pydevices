@@ -90,11 +90,13 @@ print(machine.mem32[0x5200201C] >> 22 & 1)
 ```
 
 Any GIGA firmware longer than 768 KB covers that address, upstream's included,
-so the M4 starts from whatever bytes of it are there. They are almost never a
-valid stack and reset address, so the M4 faults on its first instruction and
-stops. Every GIGA build checks the bytes it puts there and fails, saying so, if
-they look like a vector table the M4 could run; a module more or less moves
-them.
+so the M4 starts from whatever bytes of it are there. Usually the reset address
+they hold is somewhere the M4 can't fetch from, so it faults on its first
+instruction and stops. When it points into flash, RAM or the QSPI window, the
+M4 can run something, and a board with such an image has hung as soon as it
+started its DAC. Every GIGA build checks the bytes it puts there and fails,
+saying so, when they point anywhere the M4 can fetch from; a module more or
+less moves them.
 
 To stop the M4 starting at all, clear BCM4: ST's
 [STM32CubeProgrammer](https://www.st.com/en/development-tools/stm32cubeprog.html)

@@ -595,8 +595,15 @@ class Stm32M4Slot(unittest.TestCase):
         self.assertEqual(build_mp.stm32_m4_boot_words(image, 0x08040000), (0xF880B508, 0xF8D021FC))
         self.assertFalse(build_mp.m4_would_run(0xF880B508, 0xF8D021FC))  # the GIGA's bytes on 11-06
         self.assertTrue(build_mp.m4_would_run(0x10048000, 0x08100101))
-        self.assertFalse(build_mp.m4_would_run(0x10048000, 0x08100100))  # even: not Thumb, faults
-        self.assertFalse(build_mp.m4_would_run(0x60000000, 0x08100101))  # SDRAM isn't up at reset
+        self.assertTrue(build_mp.m4_would_run(0x10048000, 0x08100100))  # even: faults into the next words
+        # A ulab build's words on 11-06: a stack in no RAM, an even reset
+        # address in the QSPI window. The board hung when it started its DAC.
+        self.assertTrue(build_mp.m4_would_run(0xD0522E00, 0x92014630))
+        self.assertTrue(build_mp.m4_would_run(0x60000000, 0x08100101))  # the stack doesn't matter
+        self.assertTrue(build_mp.m4_would_run(0, 0x24001001))  # AXI SRAM
+        self.assertFalse(build_mp.m4_would_run(0x24080000, 0x00000101))  # ITCM: the M7's
+        self.assertFalse(build_mp.m4_would_run(0x24080000, 0xBB4D1C01))  # device memory: faults
+        self.assertFalse(build_mp.m4_would_run(0xF5044629, 0xF7FC70E5))  # the image that ran fine
         image.write_bytes(bytes(off))
         self.assertIsNone(build_mp.stm32_m4_boot_words(image, 0x08040000))
 

@@ -1018,14 +1018,26 @@ def stm32_m4_boot_words(image, text):
     return struct.unpack_from("<II", data, off)
 
 
+# Where an M4 can fetch instructions from: both banks of internal flash, the
+# QSPI window, AXI SRAM, SRAM1-3 (and their alias at 0x10000000) and SRAM4.
+# ITCM and DTCM are the M7's alone.
+M4_CODE_REGIONS = (
+    (0x08000000, 0x08200000),
+    (0x10000000, 0x10048000),
+    (0x24000000, 0x24080000),
+    (0x30000000, 0x30048000),
+    (0x38000000, 0x38010000),
+    (0x90000000, 0xA0000000),
+)
+
+
 def m4_would_run(sp, pc):
-    """True when (sp, pc) look like a vector table an M4 would run from: a
-    stack in its RAM and a Thumb (odd) address in flash. Anything else faults
-    on the first instruction and the M4 stops there."""
-    ram = ((0x10000000, 0x10048000), (0x20000000, 0x20020000), (0x24000000, 0x24080000),
-           (0x30000000, 0x30048000), (0x38000000, 0x38010000))
-    in_ram = any(lo < sp <= hi for lo, hi in ram)
-    return in_ram and pc & 1 == 1 and 0x08000000 <= pc < 0x08200000
+    """True when *pc* points anywhere the M4 can fetch from, whatever *sp*
+    holds and whichever its low bit. The M4 loads its stack pointer without
+    checking it. An even reset address faults, and the fault handler is the
+    image's next words. A reset address in the QSPI window hung a GIGA as soon
+    as its M7 started the DAC. Anything else faults at once and the M4 stops."""
+    return any(lo <= pc & ~1 < hi for lo, hi in M4_CODE_REGIONS)
 
 
 # TinyUSB, for the esp32 targets that build it. The port takes it from the
