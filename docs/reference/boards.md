@@ -43,7 +43,7 @@ Our variants, in [`variants/`](https://github.com/PyDevices/micropython-pydevice
 | esp32 | `ESP32_GENERIC_S3` `LCD_4_3`, `LCD_7`, `T_EMBED` | The S3 boards in the table above. |
 | esp32 | `ESP32_GENERIC_P4` `WIFI6_DEV_KIT`, `WIFI6_DEV_KIT_H2` | The P4 DEV-KIT, with the USB device on the two different connectors in the table above. |
 | rp2 | `RPI_PICO2_W` `PIMORONI_PICO_PLUS2_W` | The Pimoroni Pico Plus 2 W. |
-| stm32 | `ARDUINO_GIGA` `DISPLAY_SHIELD` | The GIGA R1 WiFi with room for LVGL and the shield's MIPI DSI panel: the Wi-Fi firmware moved to QSPI flash as a second image, Bluetooth off, LVGL's 40 px font left out. |
+| stm32 | `ARDUINO_GIGA` `DISPLAY_SHIELD` | The GIGA R1 WiFi with room for LVGL and the shield's MIPI DSI panel: the Wi-Fi firmware moved to QSPI flash as a second image, Bluetooth off, LVGL's 40 px font left out, and USB through TinyUSB, for `machine.USBDevice`. |
 
 The esp32 [`variants/esp32/`](https://github.com/PyDevices/micropython-pydevices/tree/main/variants/esp32) folder also holds the `sdkconfig` fragments and
 partition table every esp32 or every chip gets:

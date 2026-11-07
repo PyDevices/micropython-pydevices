@@ -77,7 +77,9 @@ board, unchanged, and adds:
 
 `ARDUINO_GIGA`'s `DISPLAY_SHIELD` is the one stm32 variant of ours. It moves
 the Wi-Fi chip's firmware into QSPI flash with a linker script fragment and
-turns on the HAL's DSI driver for displayif's `mipidsi`.
+turns on the HAL's DSI driver for displayif's `mipidsi`. Its
+`mpconfigboard.h` also switches USB to TinyUSB, which is one line:
+`#define MICROPY_HW_TINYUSB_STACK (1)`.
 
 On `ARDUINO_GIGA`, with a variant or without one, a firmware too big for its
 1,280 KB grows over the M4 core's flash instead of failing, and the build adds
