@@ -592,6 +592,15 @@ def frozen_manifest(port, board, variant):
     return MODULES_DIR / "manifest.py"
 
 
+def board_manifest(port, board):
+    """Upstream's own manifest for the board, if it has one: what the board
+    freezes beyond its port (the GIGA's networking bundle, for one).
+    modules/manifest.py includes it in place of the port-wide manifest it
+    starts from."""
+    own = board_dir(port, board) / "manifest.py" if board else None
+    return own if own is not None and own.exists() else None
+
+
 def module_choices():
     return sorted(p.name for p in MODULES_DIR.iterdir() if p.is_dir() and not p.name.startswith("."))
 
@@ -1919,9 +1928,12 @@ def main():
 
     env = dict(os.environ)
     for leak in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "BOARD_DIR", "VARIANT_DIR",
-                 "BINDINGS_DIR", "PYDEVICES_LVGL"):
+                 "BINDINGS_DIR", "PYDEVICES_LVGL", "PYDEVICES_BOARD_MANIFEST"):
         env.pop(leak, None)
     env["PYDEVICES_MODULES"] = spec
+    own = board_manifest(port, board)
+    if own is not None:
+        env["PYDEVICES_BOARD_MANIFEST"] = own.as_posix()
     if port == "stm32" and board in STM32_M4_SLOT:
         # The padding module that moves the code at the M4's boot address
         # when it must; empty until then. Regenerated before each make.

@@ -485,6 +485,33 @@ class FrozenManifest(unittest.TestCase):
                 build_mp.VARIANTS_DIR, build_mp.MODULES_DIR = saved
 
 
+class BoardManifest(unittest.TestCase):
+    """A board with a manifest of its own upstream gets it as the base."""
+
+    def test_upstream_board_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mp = Path(tmp)
+            own = mp / "ports" / "stm32" / "boards" / "OWN"
+            own.mkdir(parents=True)
+            (own / "manifest.py").write_text('include("$(PORT_DIR)/boards/manifest.py")\n')
+            (mp / "ports" / "stm32" / "boards" / "BARE").mkdir(parents=True)
+            saved = build_mp.MP
+            build_mp.MP = mp
+            try:
+                self.assertEqual(build_mp.board_manifest("stm32", "OWN"), own / "manifest.py")
+                self.assertIsNone(build_mp.board_manifest("stm32", "BARE"))
+                self.assertIsNone(build_mp.board_manifest("unix", None))
+            finally:
+                build_mp.MP = saved
+
+    def test_the_manifest_takes_it_in_place_of_the_port(self):
+        text = (build_mp.MODULES_DIR / "manifest.py").read_text()
+        board = text.index("include(_board_manifest)")
+        port = text.index('include("$(PORT_DIR)/boards/manifest.py")')
+        self.assertLess(board, port)
+        self.assertIn("elif options.base:", text[board:port])
+
+
 class Rp2BoardDir(unittest.TestCase):
     """A variant of ours on rp2 gets a board directory: upstream's, linked
     through unchanged, with our files added where the port looks for them."""
