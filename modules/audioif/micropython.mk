@@ -29,10 +29,13 @@ SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audioif_wasapi.c
 
 # An STM32H7 plays through its DAC (audioio.AudioOut), with the pump in the
 # engine's service mode; audioif_stm32.c is that driver, and _audioif.c then
-# compiles to no driver of its own.
+# compiles to no driver of its own. It records from a PDM microphone on DFSDM
+# or an analog pin on ADC1, and audioin_stm32.c is CircuitPython's two classes
+# for those, audiobusio.PDMIn and analogbufio.BufferedIn.
 ifeq ($(MCU_SERIES),h7)
 CFLAGS_USERMOD += -DAUDIOIF_DRIVER_STM32
 SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audioif_stm32.c
+SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audioin_stm32.c
 endif
 
 # --- which audioif this firmware was built from ----------------------

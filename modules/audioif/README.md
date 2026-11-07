@@ -213,6 +213,50 @@ an audiosample yet, so `I2SOut.play(mic)` does not work here.
 **The mono path is not written.** A board with one transducer fed by a
 two-slot wire gets the same signal in both slots and has no answer here.
 
+## `audiobusio.PDMIn` and `analogbufio.BufferedIn` — recording on an STM32H7
+
+The Arduino GIGA R1 has no I2S microphone, but it has two others: the GIGA
+Display Shield's MP34DT06J, a PDM microphone on PD3 (clock) and PC1 (data), and
+the headphone jack's microphone ring on A7 (PA0). CircuitPython's classes for
+those record from them, with CircuitPython's arguments and buffers:
+
+```python
+import array, audiobusio, analogbufio
+
+buf = array.array("H", [0] * 16000)
+with audiobusio.PDMIn("PD3", "PC1", sample_rate=16000, bit_depth=16) as mic:
+    mic.record(buf, len(buf))          # one second from the shield's microphone
+
+with analogbufio.BufferedIn("PA0", sample_rate=16000) as adc:
+    adc.readinto(buf)                  # one second of the jack's microphone ring
+```
+
+`PDMIn` clocks the microphone from DFSDM1, which turns its bit stream into
+PCM in hardware with a sinc3 filter, so the CPU only copies samples. The clock
+divider and the decimation are chosen together to land on `sample_rate`:
+8, 16, 24, 32 and 48 kHz come out exact from the GIGA's 120 MHz APB2 clock, and
+another rate runs at the nearest one DFSDM can divide to, which `sample_rate`
+then reports. The samples have their DC removed, and a 16-bit `'H'` buffer
+rests at 32768, as on CircuitPython; a signed `'h'` or `'b'` buffer is taken too.
+`mono` must be True, and `oversample` is checked but not used, since the
+decimation follows the rate.
+
+`BufferedIn` samples an ADC1 pin on each update of TIM15, averaging a few
+conversions in hardware, and gives the ADC's own 16-bit values untouched.
+`readinto(buffer)` fills the buffer and returns; `loop=True` raises
+`NotImplementedError`. While it records, `machine.ADC` on ADC1 has to wait.
+
+Under both is one capture ring of 16 KB in AXI SRAM, a quarter of a second at
+16 kHz, which a circular DMA on DMA2 stream 0 fills and the CPU reads behind,
+invalidating the cache lines it reads. A reader that falls further behind
+than the ring loses the oldest samples, and they are counted. Only one of the
+two records at a time; a second raises `"Peripheral in use"`. Neither shares a
+clock with `audioio.AudioOut`, so either records while it plays. A soft reset
+ends a recording.
+
+audiodev's `pcm_in` reads the same ring, through `_audioif.pdm_open` and
+`_audioif.adc_open` below, with a high-pass near 20 Hz and a gain applied.
+
 ## `_audioif` — the module this half publishes
 
 Private by convention, the way `usbhost` ships a C `_usbhost` under a Python
@@ -246,6 +290,10 @@ audiopump.shutdown()          # closes the channel with the task
 | `Input(sample_rate=, channel_count=, frames=, timeout_ms=)` | An audiosample whose `get_buffer` is an I2S read, so a live microphone is a source like any other and `audioeffects.create(name, Input(…), rate)` builds a graph on it. The read blocks, and that is the pacing. `stats()` reports what it has read and what it has missed. |
 | `rt_probe(capture, frames=, lead=, prime=, level=, channels=, timeout_ms=)` | Round-trip latency in frames rather than in host time: it preloads a click into the TX DMA *before* either channel is enabled and captures RX from the same instant. Runs with no pump spawned — two owners of one channel is the failure that sounds like silence. |
 | `driver()` | The same name `audiopump.driver()` returns. |
+| `pdm_open(clock, data, rate, edge=0)` | STM32H7 only: records a PDM microphone through DFSDM1 into the capture ring, as signed 16-bit mono, and returns the rate it really runs at. `edge` is the clock edge its data is read on, 0 rising and 1 falling, which follows how the microphone's L/R pin is tied. `rx_read`, `rx_close` and `rx_stats` read and end it. |
+| `adc_open(pin, rate, raw=False)` | STM32H7 only: the same from an ADC1 pin paced by TIM15. `raw=True` gives the ADC's unsigned values with no high-pass or gain. |
+| `rx_gain([db])` | STM32H7 only: the capture's gain in dB, read, or set from -40 to 60. 0 dB puts the input's full scale at int16's; it holds across recordings. |
+| `rx_rate()` | STM32H7 only: the rate the recording runs at, 0 with none. |
 
 **Two ports are not sample-locked.** `din=` alone opens one channel pair, and
 there BCLK and WS are generated once, so capture and playback cannot drift.
@@ -264,7 +312,7 @@ it and it has not been done.
 | **ESP32 family** | a FreeRTOS task pinned to the core the interpreter is not on, optionally with its stack in PSRAM | `xSemaphoreCreateRecursiveMutex`, which is priority-inheriting | `esp_timer_get_time` | the I2S channel, written from the pull loop | `Input`, single-port or two-port |
 | **unix** | `pthread` | recursive `pthread_mutex` | `clock_gettime` | a file the loop `write(2)`s each block to | — |
 | **Windows** | `_beginthreadex` | `CRITICAL_SECTION` | `QueryPerformanceCounter` | a file descriptor, or a WASAPI speaker written from the pull loop | `Input`, a WASAPI microphone read on the pump's thread |
-| **STM32H7** (Arduino GIGA R1) | none: the engine's service mode, run by a soft timer that schedules the pump on the interpreter whenever the DAC has played a block | — | `mp_hal_ticks_us` | the DAC's two channels, through a circular DMA paced by TIM6 | — |
+| **STM32H7** (Arduino GIGA R1) | none: the engine's service mode, run by a soft timer that schedules the pump on the interpreter whenever the DAC has played a block | — | `mp_hal_ticks_us` | the DAC's two channels, through a circular DMA paced by TIM6 | a PDM microphone through DFSDM1, or an ADC1 pin paced by TIM15, into one ring by DMA; not an `Input` |
 | **WebAssembly** | none — **and none is needed** | — | — | — | — |
 
 WebAssembly is not a gap. That build has no threads (no `-pthread`, no

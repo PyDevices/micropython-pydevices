@@ -1054,18 +1054,22 @@ MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &audiobusio_i2sout_locals
     );
 
-// --- the input half, named and refused ------------------------------------
+// --- the input half --------------------------------------------------------
 //
 // CircuitPython puts PDM microphones in `audiobusio.PDMIn` and I2S capture in
 // a module of its own, `audioi2sin.I2SIn` -- not in audiobusio -- and this
 // firmware does the same: `I2SIn` is in audioi2sin.c, over the capture half
 // of `_audioif`. PDMIn is a different mode of the peripheral and a different
-// decimation filter, and no board this firmware supports has one wired.
+// decimation filter. An STM32H7 has one, DFSDM, and audioin_stm32.c is the
+// class there.
 //
-// The name exists and says so, which is displayif's precedent for a bus a
-// port cannot do (src/ports/common/notimpl/): a NotImplementedError naming the
-// class, rather than an AttributeError that reads like a typo.
+// Elsewhere the name exists and says so, which is displayif's precedent for a
+// bus a port cannot do (src/ports/common/notimpl/): a NotImplementedError
+// naming the class, rather than an AttributeError that reads like a typo.
 
+#if defined(AUDIOIF_DRIVER_STM32)
+extern const mp_obj_type_t audiobusio_pdmin_type;
+#else
 static mp_obj_t audiobusio_pdmin_make_new(const mp_obj_type_t *type,
     size_t n_args, size_t n_kw, const mp_obj_t *args) {
     (void)type;
@@ -1082,6 +1086,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     MP_TYPE_FLAG_NONE,
     make_new, audiobusio_pdmin_make_new
     );
+#endif
 
 static const mp_rom_map_elem_t audiobusio_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_audiobusio) },

@@ -4,7 +4,9 @@
 // The audio pump's output on an STM32H7's DAC: the Arduino GIGA R1's headphone
 // jack, whose left is DAC1's channel 2 on PA5 (DAC1, A13) and whose right is
 // channel 1 on PA4 (DAC0, A12), per Arduino's schematic. Each sample goes to
-// the pin audioio.AudioOut names for its side.
+// the pin audioio.AudioOut names for its side. Its capture half, further down,
+// records the GIGA Display Shield's PDM microphone or the jack's microphone
+// ring, for audiodev's pcm_in and CircuitPython's PDMIn and BufferedIn.
 //
 // The stm32 port has no threads to give the pump, so the engine runs in its
 // service mode and this driver is what calls service(). The DAC plays a ring
@@ -22,9 +24,10 @@
 // The hook table is in this file, with MP_REGISTER_MODULE, so that a static
 // archive can't let the engine's weak default win (audiodsp's
 // src/shared/audiodsp_port.h says why). _audioif.c compiles to no driver on
-// this port, and the functions audiobusio.c asks of an I2S channel are
-// answered here, for the DAC.
+// this port, and the functions audiobusio.c and audioi2sin.c ask of an I2S
+// channel are answered here, for the DAC and the capture ring.
 
+#include <math.h>
 #include <string.h>
 
 #include "py/mperrno.h"
@@ -33,6 +36,7 @@
 #include "py/runtime.h"
 #include "shared/runtime/softtimer.h"
 
+#include "adc.h"
 #include "dma.h"
 #include "pin.h"
 #include "timer.h"
@@ -355,33 +359,521 @@ void audiopump_i2s_starved_resume(void) {
     audioif_starved_pending = true;
 }
 
-// The DAC has no capture half; audioi2sin.I2SIn says so.
+// --- the capture half: the board's two microphones -------------------------
+//
+// The GIGA has no I2S microphone. It has two others, and this records from
+// either, one at a time, into one ring:
+//
+//   - A PDM microphone (the GIGA Display Shield's MP34DT06J, clock PD3, data
+//     PC1). DFSDM1 clocks it from its CKOUT pin and turns its bit stream
+//     into PCM in hardware, with a sinc3 filter; filter 0 reads channel 0,
+//     which is the DATIN0 pin.
+//   - An analog input on ADC1 (the jack's microphone ring on A7, PA0),
+//     converted on each update of TIM15 and averaged in hardware over a few
+//     conversions.
+//
+// Either way a circular DMA on DMA2_Stream0, a stream dma.c gives nobody,
+// writes into a ring in AXI SRAM, and the CPU reads behind it. Nothing runs
+// per block: a soft timer counts the DMA's laps often enough that it can't
+// miss one, and a reader that falls more than a ring behind loses the oldest
+// samples and has them counted. The CPU only reads the ring, so before each
+// read the lines it covers are invalidated, which the ring being whole cache
+// lines makes safe.
+//
+// What a reader gets is signed 16-bit mono, with the DC taken out by a
+// one-pole high-pass near 20 Hz and a gain applied. analogbufio.BufferedIn
+// asks for the ADC's own unsigned values instead, untouched.
+
+// The ring: 16 KB, 4096 DFSDM words (256 ms at 16 kHz) or 8192 ADC samples.
+#define AUDIOIF_RX_BYTES (16384)
+static uint32_t audioif_rx_ring[AUDIOIF_RX_BYTES / 4] __attribute__((aligned(32)));
+#define AUDIOIF_RX_STREAM DMA2_Stream0
+#define AUDIOIF_RX_DMAMUX DMAMUX1_Channel8   // DMA2 stream 0's request line
+#define AUDIOIF_RX_POLL_MS (8)
+// The samples behind the DMA a reader may not come within, so a copy can't
+// race the DMA onto the same samples.
+#define AUDIOIF_RX_MARGIN (256)
+
+#ifndef ADC_CR_BITS_PROPERTY_RS
+// The CR bits that read back as set and ignore a written 0.
+#define ADC_CR_BITS_PROPERTY_RS (ADC_CR_ADCAL | ADC_CR_JADSTP | ADC_CR_ADSTP \
+    | ADC_CR_JADSTART | ADC_CR_ADSTART | ADC_CR_ADDIS | ADC_CR_ADEN)
+#endif
+
+enum { AUDIOIF_RX_NONE, AUDIOIF_RX_PDM, AUDIOIF_RX_ADC };
+static uint8_t audioif_rx_source;
+static bool audioif_rx_raw;
+static uint32_t audioif_rx_samples;      // the ring's length in samples
+static uint32_t audioif_rx_last_pos;
+static volatile uint64_t audioif_rx_head;   // samples the DMA has written
+static volatile uint64_t audioif_rx_tail;   // samples read or skipped
+static volatile uint32_t audioif_rx_dropped;
+static uint32_t audioif_rx_skip;         // samples left to throw away
+static uint32_t audioif_rx_rate;         // the rate it really runs at
+static uint32_t audioif_rx_full;         // a sample's full scale as read
+static float audioif_rx_gain_db;
+static int64_t audioif_rx_mul;           // full scale and gain, Q32
+static int64_t audioif_rx_dc;            // the DC estimate, Q8
+static uint8_t audioif_rx_hp;            // the high-pass's shift, from the rate
+static bool audioif_rx_dc_primed;
+static const machine_pin_obj_t *audioif_rx_pins[2];
+static soft_timer_entry_t audioif_rx_timer;
+
+// A recording outlives no soft reset. The DMA would go on writing and the
+// ring would stay held, so the next recording would find it "in use". An
+// object with a finaliser, rooted while a recording runs, is what a soft
+// reset reaches: gc_sweep_all() finalises every such object, rooted or not,
+// and this one ends the recording it was made for.
+typedef struct {
+    mp_obj_base_t base;
+    uint32_t generation;
+} audioif_rx_guard_t;
+static uint32_t audioif_rx_generation;
+MP_REGISTER_ROOT_POINTER(mp_obj_t audioif_rx_guard);
+
+static void audioif_rx_set_mul(void) {
+    float lin = powf(10.0f, audioif_rx_gain_db / 20.0f);
+    audioif_rx_mul = (int64_t)(lin * 32768.0f / (float)audioif_rx_full * 4294967296.0f);
+}
+
+void audioif_rx_set_gain(float db) {
+    if (db < -40.0f || db > 60.0f) {
+        mp_raise_ValueError(MP_ERROR_TEXT("gain is -40 to 60 dB"));
+    }
+    audioif_rx_gain_db = db;
+    if (audioif_rx_full != 0) {
+        audioif_rx_set_mul();
+    }
+}
+
+// Bring `head` up to the DMA, and keep the reader within a ring of it.
+// From the soft timer and from the reader, so with interrupts off.
+static void audioif_rx_poll(void) {
+    if (audioif_rx_source == AUDIOIF_RX_NONE) {
+        return;
+    }
+    mp_uint_t state = MICROPY_BEGIN_ATOMIC_SECTION();
+    uint32_t pos = audioif_rx_samples - AUDIOIF_RX_STREAM->NDTR;
+    if (pos >= audioif_rx_samples) {
+        pos = 0;
+    }
+    uint32_t moved = (pos + audioif_rx_samples - audioif_rx_last_pos) % audioif_rx_samples;
+    audioif_rx_last_pos = pos;
+    audioif_rx_head += moved;
+    if (audioif_rx_skip > 0) {
+        uint64_t avail = audioif_rx_head - audioif_rx_tail;
+        uint32_t n = avail < audioif_rx_skip ? (uint32_t)avail : audioif_rx_skip;
+        audioif_rx_tail += n;
+        audioif_rx_skip -= n;
+    }
+    uint64_t limit = audioif_rx_samples - AUDIOIF_RX_MARGIN;
+    if (audioif_rx_head - audioif_rx_tail > limit) {
+        uint64_t lost = audioif_rx_head - audioif_rx_tail - limit;
+        audioif_rx_dropped += (uint32_t)lost;
+        audioif_rx_tail += lost;
+    }
+    MICROPY_END_ATOMIC_SECTION(state);
+}
+
+static void audioif_rx_timer_cb(soft_timer_entry_t *self) {
+    (void)self;
+    audioif_rx_poll();
+}
+
+static void audioif_rx_dma_stop(void) {
+    AUDIOIF_RX_STREAM->CR &= ~DMA_SxCR_EN;
+    while (AUDIOIF_RX_STREAM->CR & DMA_SxCR_EN) {
+    }
+    DMA2->LIFCR = 0x3d;   // stream 0's flags
+    AUDIOIF_RX_DMAMUX->CCR = 0;
+}
+
+// A circular peripheral-to-memory DMA of `count` items of `size` bytes (2 or
+// 4) from `from` into the ring, on DMAMUX request `request`.
+static void audioif_rx_dma_start(uint32_t request, volatile void *from, uint32_t size,
+    uint32_t count) {
+    // dma.c leaves this stream to us; acquiring it keeps DMA2's clock on.
+    // Controllers count from 0 here, so DMA2 is 1: a 2 names no stream, and
+    // dma.c's idle tick then turns DMA2's clock off under the recording.
+    dma_external_acquire(1, 0);
+    audioif_rx_dma_stop();
+    SCB_InvalidateDCache_by_Addr(audioif_rx_ring, AUDIOIF_RX_BYTES);
+    AUDIOIF_RX_DMAMUX->CCR = request;
+    AUDIOIF_RX_STREAM->PAR = (uint32_t)from;
+    AUDIOIF_RX_STREAM->M0AR = (uint32_t)audioif_rx_ring;
+    AUDIOIF_RX_STREAM->NDTR = count;
+    AUDIOIF_RX_STREAM->FCR = 0;   // direct mode
+    uint32_t width = size == 4 ? (DMA_SxCR_PSIZE_1 | DMA_SxCR_MSIZE_1)
+        : (DMA_SxCR_PSIZE_0 | DMA_SxCR_MSIZE_0);
+    AUDIOIF_RX_STREAM->CR = DMA_SxCR_PL_1 | DMA_SxCR_MINC | DMA_SxCR_CIRC | width;
+    AUDIOIF_RX_STREAM->CR |= DMA_SxCR_EN;
+}
+
+static void audioif_rx_reset(uint8_t source, uint32_t samples, uint32_t rate, uint32_t full,
+    bool raw) {
+    audioif_rx_samples = samples;
+    audioif_rx_last_pos = 0;
+    audioif_rx_head = 0;
+    audioif_rx_tail = 0;
+    audioif_rx_dropped = 0;
+    audioif_rx_rate = rate;
+    audioif_rx_full = full;
+    audioif_rx_raw = raw;
+    audioif_rx_dc = 0;
+    audioif_rx_dc_primed = false;
+    // A one-pole high-pass near 20 Hz: k = 2^shift with rate / (2 pi k) at
+    // about 20, which takes out the DC and the room's rumble below speech.
+    audioif_rx_hp = 0;
+    while ((1u << audioif_rx_hp) * 126u < rate) {
+        audioif_rx_hp++;
+    }
+    audioif_rx_set_mul();
+    audioif_rx_source = source;
+}
+
+void audiopump_i2s_rx_end(void);
+
+static mp_obj_t audioif_rx_guard_del(mp_obj_t self_in) {
+    audioif_rx_guard_t *self = MP_OBJ_TO_PTR(self_in);
+    if (self->generation == audioif_rx_generation) {
+        audiopump_i2s_rx_end();
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(audioif_rx_guard_del_obj, audioif_rx_guard_del);
+
+static const mp_rom_map_elem_t audioif_rx_guard_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&audioif_rx_guard_del_obj) },
+};
+static MP_DEFINE_CONST_DICT(audioif_rx_guard_locals, audioif_rx_guard_locals_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    audioif_rx_guard_type,
+    MP_QSTR_capture,
+    MP_TYPE_FLAG_NONE,
+    locals_dict, &audioif_rx_guard_locals
+    );
+
+static void audioif_rx_timer_start(void) {
+    soft_timer_static_init(&audioif_rx_timer, SOFT_TIMER_MODE_PERIODIC, AUDIOIF_RX_POLL_MS,
+        audioif_rx_timer_cb);
+    soft_timer_insert(&audioif_rx_timer, AUDIOIF_RX_POLL_MS);
+}
+
+static void audioif_rx_check_free(void) {
+    if (audioif_rx_source != AUDIOIF_RX_NONE) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("Peripheral in use"));
+    }
+    if ((uintptr_t)audioif_rx_ring >= 0x20000000u && (uintptr_t)audioif_rx_ring < 0x20020000u) {
+        mp_raise_msg(&mp_type_RuntimeError,
+            MP_ERROR_TEXT("this board's .bss is in DTCM, which the capture DMA can't write"));
+    }
+    // Made before any hardware starts, so running out of memory can't leave
+    // a recording nothing will end.
+    audioif_rx_guard_t *guard = mp_obj_malloc_with_finaliser(audioif_rx_guard_t,
+        &audioif_rx_guard_type);
+    guard->generation = ++audioif_rx_generation;
+    MP_STATE_VM(audioif_rx_guard) = MP_OBJ_FROM_PTR(guard);
+}
+
+// --- the PDM microphone on DFSDM1 ---
+
+// The DFSDM's kernel clock: APB2's, or the system clock's when RCC picks it.
+static uint32_t audioif_dfsdm_clock(void) {
+    if (RCC->D2CCIP1R & RCC_D2CCIP1R_DFSDM1SEL) {
+        return HAL_RCC_GetSysClockFreq();
+    }
+    return HAL_RCC_GetPCLK2Freq();
+}
+
+uint32_t audioif_rx_pdm_begin(const machine_pin_obj_t *clock, const machine_pin_obj_t *data,
+    uint32_t rate, int edge) {
+    audioif_rx_check_free();
+    if (clock != pin_D3 || data != pin_C1) {
+        mp_raise_ValueError(MP_ERROR_TEXT("the PDM microphone is on PD3 (clock) and PC1 (data)"));
+    }
+    if (rate < 4000 || rate > 64000) {
+        mp_raise_ValueError(MP_ERROR_TEXT("sample_rate out of range"));
+    }
+    // The microphone wants a clock of 1.0 to 3.25 MHz. Find the divider and
+    // decimation that land on the rate exactly, with the fastest clock, or
+    // failing that the nearest rate.
+    uint32_t kernel = audioif_dfsdm_clock();
+    uint32_t best_div = 0, best_osr = 0, best_err = 0xffffffffu;
+    for (uint32_t div = 2; div <= 256; div++) {
+        uint32_t ck = kernel / div;
+        if (ck > 3250000u) {
+            continue;
+        }
+        if (ck < 1000000u) {
+            break;
+        }
+        uint32_t osr = (ck + rate / 2) / rate;
+        if (osr < 16 || osr > 1024) {
+            continue;
+        }
+        uint32_t got = kernel / (div * osr);
+        uint32_t err = got > rate ? got - rate : rate - got;
+        if (err < best_err) {
+            best_err = err;
+            best_div = div;
+            best_osr = osr;
+        }
+    }
+    if (best_div == 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("sample_rate out of range"));
+    }
+    // Sinc3 grows the 1-bit stream to +/- osr^3; shift it into the 24 bits
+    // the filter's data register holds.
+    uint32_t full = best_osr * best_osr * best_osr;
+    uint32_t shift = 0;
+    while ((full >> shift) > 0x7fffffu) {
+        shift++;
+    }
+
+    __HAL_RCC_DFSDM1_CLK_ENABLE();
+    DFSDM1_Filter0->FLTCR1 = 0;
+    DFSDM1_Channel0->CHCFGR1 = 0;
+    DFSDM1_Channel0->CHCFGR2 = shift << DFSDM_CHCFGR2_DTRBS_Pos;
+    DFSDM1_Channel0->CHCFGR1 = ((best_div - 1) << DFSDM_CHCFGR1_CKOUTDIV_Pos)
+        | (1u << DFSDM_CHCFGR1_SPICKSEL_Pos)   // clocked by our own CKOUT
+        | ((edge ? 1u : 0u) << DFSDM_CHCFGR1_SITP_Pos)
+        | DFSDM_CHCFGR1_CHEN;
+    DFSDM1_Filter0->FLTFCR = (3u << DFSDM_FLTFCR_FORD_Pos)
+        | ((best_osr - 1) << DFSDM_FLTFCR_FOSR_Pos);
+    DFSDM1_Filter0->FLTCR1 = DFSDM_FLTCR1_FAST | DFSDM_FLTCR1_RCONT | DFSDM_FLTCR1_RDMAEN
+        | (0u << DFSDM_FLTCR1_RCH_Pos);
+
+    audioif_rx_reset(AUDIOIF_RX_PDM, AUDIOIF_RX_BYTES / 4, kernel / (best_div * best_osr),
+        full >> shift, false);
+    audioif_rx_pins[0] = clock;
+    audioif_rx_pins[1] = data;
+    audioif_rx_dma_start(DMA_REQUEST_DFSDM1_FLT0, &DFSDM1_Filter0->FLTRDATAR, 4,
+        audioif_rx_samples);
+    mp_hal_pin_config(clock, MP_HAL_PIN_MODE_ALT, MP_HAL_PIN_PULL_NONE, 3);
+    mp_hal_pin_config(data, MP_HAL_PIN_MODE_ALT, MP_HAL_PIN_PULL_NONE, 3);
+    DFSDM1_Channel0->CHCFGR1 |= DFSDM_CHCFGR1_DFSDMEN;
+    DFSDM1_Filter0->FLTCR1 |= DFSDM_FLTCR1_DFEN;
+    DFSDM1_Filter0->FLTCR1 |= DFSDM_FLTCR1_RSWSTART;
+    // The microphone takes up to 10 ms to wake, the filter three outputs to
+    // settle and the high-pass a few of its time constants; the first 100 ms
+    // are thrown away.
+    audioif_rx_skip = audioif_rx_rate / 10;
+    audioif_rx_timer_start();
+    return audioif_rx_rate;
+}
+
+static void audioif_rx_pdm_stop(void) {
+    DFSDM1_Filter0->FLTCR1 &= ~DFSDM_FLTCR1_DFEN;
+    DFSDM1_Channel0->CHCFGR1 &= ~DFSDM_CHCFGR1_DFSDMEN;
+    DFSDM1_Filter0->FLTCR1 = 0;
+    DFSDM1_Channel0->CHCFGR1 = 0;
+}
+
+// --- an analog input on ADC1, paced by TIM15 ---
+
+uint32_t audioif_rx_adc_begin(const machine_pin_obj_t *pin, uint32_t rate, bool raw) {
+    audioif_rx_check_free();
+    if (!(pin->adc_num & PIN_ADC1)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("that pin has no ADC1 channel"));
+    }
+    if (rate < 1000 || rate > 96000) {
+        mp_raise_ValueError(MP_ERROR_TEXT("sample_rate out of range"));
+    }
+    uint32_t channel = pin->adc_channel;
+    ADC_TypeDef *adc = ADC1;
+
+    // TIM15 updates at the rate, and its TRGO starts each conversion.
+    __HAL_RCC_TIM15_CLK_ENABLE();
+    uint32_t tclk = timer_get_source_freq(15);
+    uint32_t psc = 1;
+    while (tclk / psc / rate > 65536u) {
+        psc++;
+    }
+    uint32_t period = (tclk / psc + rate / 2) / rate;
+    TIM15->CR1 = 0;
+    TIM15->PSC = psc - 1;
+    TIM15->ARR = period - 1;
+    TIM15->CR2 = TIM_TRGO_UPDATE;
+    TIM15->EGR = TIM_EGR_UG;
+    uint32_t real = tclk / psc / period;
+
+    // A conversion is about 1.4 us (32.5 cycles to sample and 8.5 to convert
+    // at 30 MHz); average as many as fit in half a period, up to 16.
+    uint32_t ratio = 16, ovss = 4;
+    while (ratio > 1 && ratio * 1400u * 2u > 1000000000u / real) {
+        ratio >>= 1;
+        ovss--;
+    }
+
+    mp_hal_pin_config(pin, MP_HAL_PIN_MODE_ADC, MP_HAL_PIN_PULL_NONE, 0);
+    adc_config(adc, 16);
+    adc->CR = (adc->CR & ~(ADC_CR_BITS_PROPERTY_RS | ADC_CR_BOOST)) | ADC_CR_BOOST;
+    adc->PCSEL |= 1u << channel;
+    adc->SQR1 = channel << ADC_SQR1_SQ1_Pos;   // one conversion
+    if (channel <= 9) {
+        adc->SMPR1 = (adc->SMPR1 & ~(7u << (channel * 3))) | (4u << (channel * 3));
+    } else {
+        adc->SMPR2 = (adc->SMPR2 & ~(7u << ((channel - 10) * 3))) | (4u << ((channel - 10) * 3));
+    }
+    adc->CFGR2 = ratio > 1
+        ? (((ratio - 1) << ADC_CFGR2_OVSR_Pos) | (ovss << ADC_CFGR2_OVSS_Pos) | ADC_CFGR2_ROVSE)
+        : 0;
+    adc->CFGR = (adc->CFGR & ~(ADC_CFGR_CONT | ADC_CFGR_EXTEN | ADC_CFGR_EXTSEL | ADC_CFGR_DMNGT))
+        | ADC_CFGR_OVRMOD
+        | (1u << ADC_CFGR_EXTEN_Pos)     // the rising edge
+        | (14u << ADC_CFGR_EXTSEL_Pos)   // tim15_trgo
+        | (3u << ADC_CFGR_DMNGT_Pos);    // circular DMA
+    adc->ISR = ADC_ISR_ADRDY;
+    adc->CR = (adc->CR & ~ADC_CR_BITS_PROPERTY_RS) | ADC_CR_ADEN;
+    for (mp_uint_t t0 = mp_hal_ticks_ms(); !(adc->ISR & ADC_ISR_ADRDY);) {
+        if (mp_hal_ticks_ms() - t0 > 100) {
+            mp_raise_OSError(MP_ETIMEDOUT);
+        }
+    }
+
+    audioif_rx_reset(AUDIOIF_RX_ADC, AUDIOIF_RX_BYTES / 2, real, 32768, raw);
+    audioif_rx_pins[0] = pin;
+    audioif_rx_pins[1] = NULL;
+    audioif_rx_dma_start(DMA_REQUEST_ADC1, &adc->DR, 2, audioif_rx_samples);
+    adc->CR = (adc->CR & ~ADC_CR_BITS_PROPERTY_RS) | ADC_CR_ADSTART;
+    TIM15->CR1 = TIM_CR1_CEN;
+    // Long enough for the high-pass to find the input's DC.
+    audioif_rx_skip = raw ? 0 : real / 50;
+    audioif_rx_timer_start();
+    return real;
+}
+
+static void audioif_rx_adc_stop(void) {
+    ADC_TypeDef *adc = ADC1;
+    TIM15->CR1 = 0;
+    if (adc->CR & ADC_CR_ADSTART) {
+        adc->CR = (adc->CR & ~ADC_CR_BITS_PROPERTY_RS) | ADC_CR_ADSTP;
+        for (mp_uint_t t0 = mp_hal_ticks_ms(); (adc->CR & ADC_CR_ADSTP)
+             && mp_hal_ticks_ms() - t0 < 100;) {
+        }
+    }
+    // Leave ADC1 as machine.ADC expects it: no trigger, no DMA, no averaging.
+    adc->CFGR &= ~(ADC_CFGR_EXTEN | ADC_CFGR_EXTSEL | ADC_CFGR_DMNGT);
+    adc->CFGR2 = 0;
+}
+
+// --- the reader ---
+
+uint32_t audiopump_i2s_rx_pull(uint8_t *dst, uint32_t want) {
+    if (audioif_rx_source == AUDIOIF_RX_NONE) {
+        return 0;
+    }
+    audioif_rx_poll();
+    uint64_t tail = audioif_rx_tail;
+    uint64_t avail = audioif_rx_head - tail;
+    uint32_t n = want / 2;
+    if ((uint64_t)n > avail) {
+        n = (uint32_t)avail;
+    }
+    int16_t *out = (int16_t *)dst;
+    uint32_t done = 0;
+    while (done < n) {
+        uint32_t at = (uint32_t)((tail + done) % audioif_rx_samples);
+        uint32_t run = audioif_rx_samples - at;
+        if (run > n - done) {
+            run = n - done;
+        }
+        uint32_t size = audioif_rx_source == AUDIOIF_RX_PDM ? 4 : 2;
+        uintptr_t a = ((uintptr_t)audioif_rx_ring + at * size) & ~(uintptr_t)31;
+        uintptr_t b = (uintptr_t)audioif_rx_ring + (at + run) * size;
+        SCB_InvalidateDCache_by_Addr((uint32_t *)a, (int32_t)(b - a));
+        for (uint32_t i = 0; i < run; i++) {
+            int32_t s;
+            if (audioif_rx_source == AUDIOIF_RX_PDM) {
+                s = (int32_t)audioif_rx_ring[at + i] >> 8;
+            } else {
+                uint16_t u = ((const uint16_t *)audioif_rx_ring)[at + i];
+                if (audioif_rx_raw) {
+                    ((uint16_t *)out)[done + i] = u;
+                    continue;
+                }
+                s = (int32_t)u - 32768;
+            }
+            if (!audioif_rx_dc_primed) {
+                audioif_rx_dc = (int64_t)s << 8;
+                audioif_rx_dc_primed = true;
+            }
+            audioif_rx_dc += (((int64_t)s << 8) - audioif_rx_dc) >> audioif_rx_hp;
+            int64_t v = (((int64_t)s << 8) - audioif_rx_dc) * audioif_rx_mul >> 40;
+            out[done + i] = v > 32767 ? 32767 : v < -32768 ? -32768 : (int16_t)v;
+        }
+        done += run;
+    }
+    mp_uint_t state = MICROPY_BEGIN_ATOMIC_SECTION();
+    // The poll may have pushed the tail on while this copied; a copy that
+    // lost that race was within the margin, so it is still good, and the
+    // tail goes to whichever is further on.
+    if (audioif_rx_tail < tail + n) {
+        audioif_rx_tail = tail + n;
+    }
+    MICROPY_END_ATOMIC_SECTION(state);
+    return n * 2;
+}
+
+void audiopump_i2s_rx_discard(void) {
+    audioif_rx_poll();
+    mp_uint_t state = MICROPY_BEGIN_ATOMIC_SECTION();
+    audioif_rx_tail = audioif_rx_head;
+    MICROPY_END_ATOMIC_SECTION(state);
+}
+
+void audiopump_i2s_rx_counts(uint32_t *frames, uint32_t *dropped) {
+    audioif_rx_poll();
+    *frames = (uint32_t)audioif_rx_head;
+    *dropped = audioif_rx_dropped;
+}
+
+uint32_t audioif_rx_waiting(void) {
+    audioif_rx_poll();
+    return (uint32_t)(audioif_rx_head - audioif_rx_tail) * 2u;
+}
+
+uint32_t audioif_rx_live_rate(void) {
+    return audioif_rx_source == AUDIOIF_RX_NONE ? 0 : audioif_rx_rate;
+}
+
+void audiopump_i2s_rx_end(void) {
+    if (audioif_rx_source == AUDIOIF_RX_NONE) {
+        return;
+    }
+    soft_timer_remove(&audioif_rx_timer);
+    audioif_rx_generation++;
+    MP_STATE_VM(audioif_rx_guard) = MP_OBJ_NULL;
+    if (audioif_rx_source == AUDIOIF_RX_PDM) {
+        audioif_rx_pdm_stop();
+    } else {
+        audioif_rx_adc_stop();
+    }
+    audioif_rx_dma_stop();
+    dma_external_release(1, 0);
+    // The pins go back to inputs, which stops the microphone's clock and so
+    // the microphone.
+    for (int i = 0; i < 2; i++) {
+        if (audioif_rx_pins[i] != NULL) {
+            mp_hal_pin_config(audioif_rx_pins[i], MP_HAL_PIN_MODE_ANALOG, MP_HAL_PIN_PULL_NONE, 0);
+            audioif_rx_pins[i] = NULL;
+        }
+    }
+    audioif_rx_source = AUDIOIF_RX_NONE;
+}
+
+bool audiopump_i2s_rx_held(void) {
+    return audioif_rx_source != AUDIOIF_RX_NONE;
+}
+
+// This board has no I2S microphone: audioi2sin.I2SIn says where to look.
 uint32_t audiopump_i2s_rx_begin(const audiopump_i2s_cfg_t *cfg, uint32_t ring, int take) {
     (void)cfg;
     (void)ring;
     (void)take;
-    mp_raise_NotImplementedError(MP_ERROR_TEXT("this board's audio is a DAC, with no I2S input"));
-}
-
-uint32_t audiopump_i2s_rx_pull(uint8_t *dst, uint32_t want) {
-    (void)dst;
-    (void)want;
-    return 0;
-}
-
-void audiopump_i2s_rx_discard(void) {
-}
-
-void audiopump_i2s_rx_counts(uint32_t *frames, uint32_t *dropped) {
-    *frames = 0;
-    *dropped = 0;
-}
-
-void audiopump_i2s_rx_end(void) {
-}
-
-bool audiopump_i2s_rx_held(void) {
-    return false;
+    mp_raise_NotImplementedError(MP_ERROR_TEXT(
+        "this board has no I2S input: record with audiobusio.PDMIn or analogbufio.BufferedIn"));
 }
 
 // --- the engine's hooks ----------------------------------------------------
@@ -518,10 +1010,105 @@ static mp_obj_t audioif_stm32_driver(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(audioif_stm32_driver_obj, audioif_stm32_driver);
 
+// --- capture, for audiodev's pcm_in ----------------------------------------
+//
+//     _audioif.pdm_open("PD3", "PC1", 16000)    # the shield's microphone
+//     _audioif.adc_open("PA0", 16000)           # the jack's microphone ring
+//     n = _audioif.rx_read(buf)                  # never blocks; int16 mono
+//     _audioif.rx_close()
+//
+// Both return the rate they really run at, which can differ from the one
+// asked for by a fraction of a percent when no divider lands on it exactly.
+
+static mp_obj_t audioif_stm32_pdm_open(size_t n_args, const mp_obj_t *pos_args,
+    mp_map_t *kw_args) {
+    enum { ARG_clock, ARG_data, ARG_rate, ARG_edge };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_clock, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
+        { MP_QSTR_data,  MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
+        { MP_QSTR_rate,  MP_ARG_REQUIRED | MP_ARG_INT, { .u_int = 16000 } },
+        // Which clock edge the microphone's data is read on: 0 the rising,
+        // 1 the falling. It follows how the microphone's L/R pin is tied.
+        { MP_QSTR_edge,  MP_ARG_KW_ONLY | MP_ARG_INT,  { .u_int = AUDIOIF_PDM_EDGE } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
+    uint32_t rate = audioif_rx_pdm_begin(pin_find(args[ARG_clock].u_obj),
+        pin_find(args[ARG_data].u_obj), (uint32_t)args[ARG_rate].u_int,
+        (int)args[ARG_edge].u_int);
+    return mp_obj_new_int_from_uint(rate);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(audioif_stm32_pdm_open_obj, 3, audioif_stm32_pdm_open);
+
+static mp_obj_t audioif_stm32_adc_open(size_t n_args, const mp_obj_t *pos_args,
+    mp_map_t *kw_args) {
+    enum { ARG_pin, ARG_rate, ARG_raw };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_pin,  MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
+        { MP_QSTR_rate, MP_ARG_REQUIRED | MP_ARG_INT, { .u_int = 16000 } },
+        // The ADC's own unsigned values, with no high-pass and no gain.
+        { MP_QSTR_raw,  MP_ARG_KW_ONLY | MP_ARG_BOOL, { .u_bool = false } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
+    uint32_t rate = audioif_rx_adc_begin(pin_find(args[ARG_pin].u_obj),
+        (uint32_t)args[ARG_rate].u_int, args[ARG_raw].u_bool);
+    return mp_obj_new_int_from_uint(rate);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(audioif_stm32_adc_open_obj, 2, audioif_stm32_adc_open);
+
+static mp_obj_t audioif_stm32_rx_read(mp_obj_t buf_in) {
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_WRITE);
+    return mp_obj_new_int_from_uint(audiopump_i2s_rx_pull(buf.buf, (uint32_t)buf.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(audioif_stm32_rx_read_obj, audioif_stm32_rx_read);
+
+static mp_obj_t audioif_stm32_rx_close(void) {
+    audiopump_i2s_rx_end();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(audioif_stm32_rx_close_obj, audioif_stm32_rx_close);
+
+// (frames captured, frames dropped, bytes waiting), as on the I2S ports.
+static mp_obj_t audioif_stm32_rx_stats(void) {
+    uint32_t frames, dropped;
+    audiopump_i2s_rx_counts(&frames, &dropped);
+    mp_obj_t items[3] = {
+        mp_obj_new_int_from_uint(frames),
+        mp_obj_new_int_from_uint(dropped),
+        mp_obj_new_int_from_uint(audioif_rx_waiting()),
+    };
+    return mp_obj_new_tuple(3, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(audioif_stm32_rx_stats_obj, audioif_stm32_rx_stats);
+
+// The capture's gain in dB, read, or set with an argument; it holds across
+// recordings. 0 dB puts the microphone's full scale at the int16's.
+static mp_obj_t audioif_stm32_rx_gain(size_t n_args, const mp_obj_t *args) {
+    if (n_args == 1) {
+        audioif_rx_set_gain(mp_obj_get_float(args[0]));
+    }
+    return mp_obj_new_float(audioif_rx_gain_db);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(audioif_stm32_rx_gain_obj, 0, 1, audioif_stm32_rx_gain);
+
+static mp_obj_t audioif_stm32_rx_rate(void) {
+    return mp_obj_new_int_from_uint(audioif_rx_live_rate());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(audioif_stm32_rx_rate_obj, audioif_stm32_rx_rate);
+
 static const mp_rom_map_elem_t audioif_stm32_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR__audioif) },
     { MP_ROM_QSTR(MP_QSTR_driver), MP_ROM_PTR(&audioif_stm32_driver_obj) },
     { MP_ROM_QSTR(MP_QSTR_dac_stats), MP_ROM_PTR(&audioif_stm32_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pdm_open), MP_ROM_PTR(&audioif_stm32_pdm_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_adc_open), MP_ROM_PTR(&audioif_stm32_adc_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rx_read), MP_ROM_PTR(&audioif_stm32_rx_read_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rx_close), MP_ROM_PTR(&audioif_stm32_rx_close_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rx_stats), MP_ROM_PTR(&audioif_stm32_rx_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rx_gain), MP_ROM_PTR(&audioif_stm32_rx_gain_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rx_rate), MP_ROM_PTR(&audioif_stm32_rx_rate_obj) },
 };
 static MP_DEFINE_CONST_DICT(audioif_stm32_globals, audioif_stm32_globals_table);
 
