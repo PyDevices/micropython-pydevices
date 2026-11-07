@@ -22,6 +22,10 @@
 #   PYDEVICES_MODULES=audiodsp,displayif make -C ports/unix \
 #       FROZEN_MANIFEST=<this repo>/modules/manifest.py
 #
+# A board with a manifest.py of its own upstream (the GIGA's) is built with
+# PYDEVICES_BOARD_MANIFEST naming it, and that is the base instead of the
+# port's.
+#
 # options.base=False leaves the port's content out, for a manifest that brings
 # its own (the webassembly variant's, whose Fetch-backed requests must be
 # frozen before anything else resolves one).
@@ -34,7 +38,16 @@ options.defaults(base=True, modules=None)
 # micropython-lib, so the port's require() of one of them gets ours.
 add_library("pydevices-overrides", "../lib-overrides", prepend=True)
 
-if options.base:
+_board_manifest = os.environ.get("PYDEVICES_BOARD_MANIFEST")
+if options.base and _board_manifest:
+    # Upstream's own manifest for the board, which build_mp.py names when
+    # the board has one. It starts from the port's and adds what the board
+    # freezes beyond it: the GIGA's networking bundle with webrepl, its
+    # logging and aioble. Upstream's, never a board directory of ours, so
+    # nothing here is included twice.
+    include(_board_manifest)
+    require("mip-cmdline")
+elif options.base:
     # Board ports (esp32, rp2) carry a port-wide boards/manifest.py; variant
     # ports (unix, windows, webassembly) have no boards/ at all, so that
     # include fails on the path itself. Only THAT failure means "not a board
