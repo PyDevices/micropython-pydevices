@@ -465,7 +465,8 @@ static void on_ids_query(uint8_t packet_type, uint16_t channel, uint8_t *packet,
         case SDP_EVENT_QUERY_ATTRIBUTE_VALUE: {
             uint16_t len = sdp_event_query_attribute_byte_get_attribute_length(packet);
             uint16_t off = sdp_event_query_attribute_byte_get_data_offset(packet);
-            if (len > sizeof(ids_attr) || off >= len) {
+            // The element's first byte comes before its length is known, with a length of 0.
+            if (len > sizeof(ids_attr) || off >= sizeof(ids_attr)) {
                 break;
             }
             ids_attr[off] = sdp_event_query_attribute_byte_get_data(packet);
@@ -615,7 +616,10 @@ int btc_hid_host_connect(const uint8_t *addr, bool boot) {
     } else {
         return BTC_ERR_ARG;
     }
-    uint8_t s = hid_host_connect(a, boot ? HID_PROTOCOL_MODE_BOOT : HID_PROTOCOL_MODE_REPORT_WITH_FALLBACK_TO_BOOT, &h.cid);
+    // Report mode opens both channels before any request on the control channel.
+    // With the fallback mode BTstack sends SET_PROTOCOL first, and a device that
+    // answers only once both channels are up (an ESP32 on Bluedroid) never replies.
+    uint8_t s = hid_host_connect(a, boot ? HID_PROTOCOL_MODE_BOOT : HID_PROTOCOL_MODE_REPORT, &h.cid);
     btc_log("hid: calling %s: 0x%02x", bd_addr_to_str(a), s);
     return s == ERROR_CODE_SUCCESS ? BTC_OK : BTC_ERR_FAIL;
 }
