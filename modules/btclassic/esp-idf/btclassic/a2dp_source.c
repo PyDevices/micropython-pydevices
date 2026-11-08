@@ -401,6 +401,7 @@ int btc_source_start(size_t ring_frames) {
         s.ring_buf = NULL;
         return btc_err(err);
     }
+    btc_radio_profile(BTC_PROFILE_SOURCE, true, 0);
     return BTC_OK;
 }
 
@@ -418,6 +419,7 @@ void btc_source_stop(void) {
     s.started = false;
     esp_a2d_source_deinit();
     avrcp_stop();
+    btc_radio_profile(BTC_PROFILE_SOURCE, false, 0);
     // Bluedroid's encoder task may still be in the data callback.
     vTaskDelay(pdMS_TO_TICKS(50));
     btc_ring_init(&s.ring, NULL, 0, 2);

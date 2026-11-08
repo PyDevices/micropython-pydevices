@@ -14,6 +14,7 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic.c
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_source.c
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_serial.c
+        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_hid.c
         ${BTCLASSIC_IDF}/radio.c
         ${BTCLASSIC_IDF}/a2dp_sink.c
         ${BTCLASSIC_IDF}/avrcp_ct.c
@@ -22,7 +23,8 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
         ${BTCLASSIC_IDF}/a2dp_source.c
         ${BTCLASSIC_IDF}/avrcp_tg.c
         ${BTCLASSIC_IDF}/inquiry.c
-        ${BTCLASSIC_IDF}/spp.c)
+        ${BTCLASSIC_IDF}/spp.c
+        ${BTCLASSIC_IDF}/hid.c)
     target_include_directories(usermod_btclassic INTERFACE ${BTCLASSIC_IDF}/include ${BTCLASSIC_IDF})
     # The source's track metadata for a remote, through link-time hooks into
     # Bluedroid (avrcp_tg.c); off where they aren't known to fit.
@@ -30,4 +32,6 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
     btclassic_avrcp_tg(usermod_btclassic ${BTCLASSIC_IDF}/avrcp_tg.c)
     target_link_libraries(usermod INTERFACE usermod_btclassic)
     list(APPEND MICROPY_DEF_BOARD MICROPY_PY_BLUETOOTH=0)
+    # Through MICROPY_DEF_BOARD, so the qstr scan sees the HID entries too.
+    list(APPEND MICROPY_DEF_BOARD BTC_HAS_HID=1)
 endif()

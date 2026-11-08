@@ -83,7 +83,7 @@ jobs:
       - name: Build a classic ESP32 firmware with btclassic
         run: python3 build_mp.py --port esp32 --board ESP32_GENERIC --variant SPIRAM --modules btclassic
 
-      - name: btclassic is linked in, with Bluedroid's A2DP sink and source and the track metadata
+      - name: btclassic is linked in, with Bluedroid's A2DP sink and source, HID and the track metadata
         run: |
           map=builds/esp32/ESP32_GENERIC/SPIRAM/micropython.map
           grep -q 'btc_sink_start' "$map"
@@ -92,6 +92,9 @@ jobs:
           grep -q 'esp_a2d_sink_init' "$map"
           grep -q 'esp_a2d_source_init' "$map"
           grep -q '__wrap_btc_rc_handler' "$map"
+          grep -q 'btc_hid_device_start' "$map"
+          grep -q 'esp_bt_hid_device_init' "$map"
+          grep -q 'esp_bt_hid_host_init' "$map"
 
   idf61:
     runs-on: ubuntu-latest

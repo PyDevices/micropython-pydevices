@@ -63,6 +63,15 @@ size_t btc_get_text(const char *field, char *dst, size_t size);
 // one, and shows it again (as the settings say) when it leaves.
 void btc_radio_hold_hidden(bool hidden);
 
+// The profiles running, for the Class of Device. Each profile says when it
+// starts and stops; the HID device also gives its subclass.
+#define BTC_PROFILE_SINK 0x01
+#define BTC_PROFILE_SOURCE 0x02
+#define BTC_PROFILE_HF 0x04
+#define BTC_PROFILE_SERIAL 0x08
+#define BTC_PROFILE_HID_DEVICE 0x10
+void btc_radio_profile(uint32_t profile, bool running, uint8_t hid_subclass);
+
 // Set radio changes() bits, from another part of the backend.
 void btc_radio_mark(uint32_t bits);
 

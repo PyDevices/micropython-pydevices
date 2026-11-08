@@ -190,6 +190,8 @@ static mp_obj_t bluetooth_config(size_t n_args, const mp_obj_t *args, mp_map_t *
                 return mp_obj_new_bool(discoverable);
             case MP_QSTR_connectable:
                 return mp_obj_new_bool(connectable);
+            case MP_QSTR_device_class:
+                return mp_obj_new_int_from_uint(btc_radio_class());
             case MP_QSTR_mac: {
                 btc_addr_t mac;
                 done(btc_radio_mac(mac));
@@ -221,6 +223,9 @@ static mp_obj_t bluetooth_config(size_t n_args, const mp_obj_t *args, mp_map_t *
                 break;
             case MP_QSTR_connectable:
                 btc_radio_set_visibility(discoverable, mp_obj_is_true(value));
+                break;
+            case MP_QSTR_device_class:
+                done(btc_radio_set_class(value == mp_const_none ? 0 : mp_obj_get_int(value)));
                 break;
             default:
                 mp_raise_ValueError(MP_ERROR_TEXT("unknown config param"));
@@ -977,6 +982,12 @@ extern const mp_obj_type_t btc_source_type;
 // Serial, in mod_btclassic_serial.c.
 extern const mp_obj_type_t btc_serial_type;
 
+// HIDDevice and HIDHost, in mod_btclassic_hid.c, where the backend has HID.
+#if BTC_HAS_HID
+extern const mp_obj_type_t btc_hid_device_type;
+extern const mp_obj_type_t btc_hid_host_type;
+#endif
+
 // =========================================================================
 // the module
 // =========================================================================
@@ -988,6 +999,15 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_HandsFree), MP_ROM_PTR(&btc_hf_type) },
     { MP_ROM_QSTR(MP_QSTR_AudioSource), MP_ROM_PTR(&btc_source_type) },
     { MP_ROM_QSTR(MP_QSTR_Serial), MP_ROM_PTR(&btc_serial_type) },
+    #if BTC_HAS_HID
+    { MP_ROM_QSTR(MP_QSTR_HIDDevice), MP_ROM_PTR(&btc_hid_device_type) },
+    { MP_ROM_QSTR(MP_QSTR_HIDHost), MP_ROM_PTR(&btc_hid_host_type) },
+    { MP_ROM_QSTR(MP_QSTR_HID), MP_ROM_INT(BTC_CHANGED_HID) },
+    // HIDDevice subclasses: what kind of device the host sees.
+    { MP_ROM_QSTR(MP_QSTR_HID_KEYBOARD), MP_ROM_INT(0x40) },
+    { MP_ROM_QSTR(MP_QSTR_HID_MOUSE), MP_ROM_INT(0x80) },
+    { MP_ROM_QSTR(MP_QSTR_HID_GAMEPAD), MP_ROM_INT(0x08) },
+    #endif
     { MP_ROM_QSTR(MP_QSTR_CONNECTION), MP_ROM_INT(BTC_CHANGED_CONNECTION) },
     { MP_ROM_QSTR(MP_QSTR_STREAM), MP_ROM_INT(BTC_CHANGED_STREAM) },
     { MP_ROM_QSTR(MP_QSTR_FORMAT), MP_ROM_INT(BTC_CHANGED_FORMAT) },

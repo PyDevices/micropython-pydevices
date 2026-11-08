@@ -26,6 +26,8 @@ void app_main(void) {
     btc_addr_t paired[4];
     btc_radio_paired(paired, 4);
     btc_radio_changes();
+    btc_radio_set_class(0);
+    btc_radio_class();
 
     // The sink.
     btc_sink_start(24576, true);
@@ -113,6 +115,23 @@ void app_main(void) {
     btc_spp_disconnect();
     btc_spp_started();
     btc_spp_stop();
+
+    static const uint8_t mouse[] = {0x05, 0x01, 0x09, 0x02, 0xa1, 0x01, 0xc0};
+    btc_hid_device_start(mouse, sizeof(mouse), 0x80, "Mouse", true);
+    btc_hid_device_connect(NULL);
+    btc_hid_device_send(bytes, 4);
+    btc_hid_device_output(bytes, sizeof(bytes));
+    btc_hid_stop();
+    btc_hid_host_start();
+    btc_hid_host_connect(NULL, true);
+    btc_hid_host_read(bytes, sizeof(bytes));
+    btc_hid_host_send(1, bytes, 1);
+    btc_hid_host_descriptor(bytes, sizeof(bytes));
+    btc_hid_status_t hid;
+    btc_hid_status(&hid);
+    btc_hid_changes();
+    btc_hid_disconnect();
+    btc_hid_stop();
     btc_radio_unpair(NULL);
     btc_radio_active();
     btc_radio_stop();

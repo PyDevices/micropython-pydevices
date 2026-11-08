@@ -51,6 +51,8 @@ per profile that takes it.
 | `HandsFree(bt)` | Follows a phone (HFP hands-free): `battery`, `signal`, `operator`, the `call` and its `caller`, `answer()`, `hangup()`, `dial()`, and the call's audio through its own `readinto()` and `write()`. |
 | `AudioSource(bt)` | Sends audio to headphones, a speaker or a car stereo (A2DP source) and acts as their remote's target (AVRCP): `write()`, the receiver's keys through `key()`, the `volume`, and the `track()` and `status` its display shows. `Bluetooth.inquiry()` and `found()` find the receiver. |
 | `Serial(bt)` | A serial port (SPP), as a stream like `machine.UART`: a computer gets a Bluetooth COM port to the board, or `connect()` calls another device's port. |
+| `HIDDevice(bt)` | The board as a keyboard, mouse or game controller (HID device): `type()`, `keyboard()`, `mouse()`, `gamepad()`, or `send()` with your own report descriptor, and the keyboard `leds` the computer sends back. |
+| `HIDHost(bt)` | The board reads a keyboard, mouse or controller (HID host): `connect()`, `read()` its reports, `decode()` them, and `send()` its output reports. |
 
 Nothing calls back into Python. Each object's state is properties, and its
 `changes()` returns a bit for each kind of state that changed since you last
@@ -103,7 +105,7 @@ which another Bluetooth host could implement as well.
 else, and [`micropython.cmake`](micropython.cmake) compiles both as an
 ordinary user C module, so a stock MicroPython esp32 build takes it with
 `USER_C_MODULES`. Two settings go with it: [`sdkconfig.esp32`](sdkconfig.esp32)
-in the board's `SDKCONFIG_DEFAULTS` turns Bluedroid, A2DP, AVRCP cover art and
+in the board's `SDKCONFIG_DEFAULTS` turns Bluedroid, A2DP, AVRCP cover art, HID and
 HFP on, and `micropython.cmake` turns the `bluetooth` module off itself.
 `build_mp.py` does the first for you.
 
@@ -143,3 +145,31 @@ one task, at any rate, and returns how much it took.
 The same folder is also an ESP-IDF component of its own. CI builds it in a
 plain ESP-IDF 6.1 app for the ESP32-S31, which has Bluetooth Classic too, so
 it is ready for that chip once MicroPython supports it.
+
+## Keyboards, mice and game controllers
+
+```python
+import btclassic
+
+bt = btclassic.Bluetooth()
+hid = btclassic.HIDDevice(bt, btclassic.HIDDevice.COMBO)
+# ... pair from your computer, wait for hid.connected ...
+hid.type("Hello\n")                         # US layout
+hid.mouse(40, -20)                          # move the pointer
+```
+
+`HIDDevice` comes with four report descriptors: `KEYBOARD`, `MOUSE`,
+`COMBO` (both, plus media keys through `consumer()`) and `GAMEPAD`. Pass any
+other descriptor as bytes and send its reports with `send()`, report ID
+first when the descriptor has IDs. The computer's keyboard LEDs come back
+in `leds`, and `changes()` sets `btclassic.HID` when they do.
+[`examples/btclassic_hid_keyboard.py`](examples/btclassic_hid_keyboard.py)
+types a line and moves the pointer.
+
+`HIDHost` is the other end: `connect(address)` opens a keyboard, mouse or
+controller, `descriptor` holds its report descriptor, and `read()` returns
+each input report. `decode()` turns a report into a tuple such as
+`("keyboard", modifiers, keys)` when the device uses the boot layout
+(`connect(address, boot=True)`) or is another btclassic board. A board is a
+device or a host, one at a time.
+

@@ -317,6 +317,7 @@ int btc_hf_start(uint32_t ring_ms, uint8_t channels) {
         return btc_err(err);
     }
     h.started = true;
+    btc_radio_profile(BTC_PROFILE_HF, true, 0);
     // Follow a sender that's already here.
     btc_addr_t peer;
     if (btc_sink_peer(peer)) {
@@ -337,6 +338,7 @@ void btc_hf_stop(void) {
     }
     h.started = false;
     esp_hf_client_deinit();
+    btc_radio_profile(BTC_PROFILE_HF, false, 0);
     // Bluedroid's task may still be finishing a callback that writes the ring.
     vTaskDelay(pdMS_TO_TICKS(50));
     h.audio = false;
