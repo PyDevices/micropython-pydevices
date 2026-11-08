@@ -96,8 +96,10 @@ class Bluetooth:
     def active(self, active: bool | None = None) -> bool:
         """Turn the radio on or off, and say whether it's on.
 
-        Turning it off ends every profile's links and shuts Bluetooth down;
-        profile objects made before then raise OSError until made again.
+        Turning it off ends every profile's links and shuts Bluetooth down.
+        The methods of profile objects made before then raise OSError, and
+        their properties read as not connected, until the profile is made
+        again.
 
         Args:
             active: True starts the radio, False stops it, None only asks.
@@ -225,8 +227,11 @@ class AudioSink:
         """The loudest left and right samples since the last call, 0 to
         32767, before `volume`."""
     def stats(self) -> dict[str, int]:
-        """Counters for the buffer: buffered, capacity, received,
-        underruns, overruns, dropped and repeated frames."""
+        """Counters for the buffer, in frames: buffered, capacity,
+        received, underruns, overruns, dropped and repeated (one at a time,
+        to follow the sender's clock), and skipped (the oldest, when a read
+        that came late finds the buffer over its fill point as playback
+        starts)."""
     def play(self) -> None: ...
     def pause(self) -> None: ...
     def stop(self) -> None: ...
@@ -280,7 +285,8 @@ class AudioSink:
         """Drop the sender. The board is discoverable again afterwards."""
     def deinit(self) -> None:
         """Drop the sender and stop the sink. The radio stays on, and a new
-        `AudioSink` starts the sink again."""
+        `AudioSink` starts the sink again. Until then the methods raise
+        OSError and the properties read as not connected."""
     def __enter__(self) -> AudioSink: ...
     def __exit__(self, *args: object) -> None:
         """`deinit`."""

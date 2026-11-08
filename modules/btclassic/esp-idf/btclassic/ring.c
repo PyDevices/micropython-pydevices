@@ -101,6 +101,20 @@ size_t btc_ring_read(btc_ring_t *r, int16_t *dst, size_t frames, uint8_t out_cha
             return 0;
         }
         r->running = true;
+        // Play from the fill point. A reader that came late while the ring
+        // refilled (a stream that starts as the program decodes a cover)
+        // finds it well above, and at one frame a read the excess takes
+        // minutes to drain; meanwhile any short stall overflows the ring and
+        // loses packets. Skipping the oldest costs the first moment of the
+        // stream, once. Only here: in steady state a program that keeps a
+        // deep output queue reads its backlog back after a stall, and a skip
+        // then would throw away audio about to play.
+        if (avail > target + slack) {
+            uint32_t skip = avail - target;
+            rp += skip;
+            avail = target;
+            r->skipped += skip;
+        }
     }
 
     // Take one frame more or less than asked for when the ring has drifted
@@ -157,6 +171,7 @@ void btc_ring_stats(const btc_ring_t *r, btc_ring_stats_t *out) {
     out->overruns = r->overruns;
     out->dropped = r->dropped;
     out->repeated = r->repeated;
+    out->skipped = r->skipped;
 }
 
 void btc_ring_levels(btc_ring_t *r, uint16_t *left, uint16_t *right) {

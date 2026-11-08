@@ -66,6 +66,7 @@ typedef struct {
     uint32_t overruns;      // writes that found the ring full
     uint32_t dropped;       // frames dropped to keep up with the sender
     uint32_t repeated;      // frames repeated to wait for it
+    uint32_t skipped;       // frames skipped to start at the fill point
 } btc_ring_stats_t;
 
 // ---- the radio ----

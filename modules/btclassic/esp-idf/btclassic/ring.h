@@ -34,7 +34,7 @@ typedef struct {
     volatile uint32_t peak_l, peak_r;
     volatile bool peak_clear;   // set by the reader: the writer starts the peaks over
     // The reader's.
-    volatile uint32_t underruns, dropped, repeated;
+    volatile uint32_t underruns, dropped, repeated, skipped;
 } btc_ring_t;
 
 // Point the ring at `buf` and clear it. A NULL buf makes a ring that reads

@@ -114,7 +114,7 @@ static mp_obj_t hf_text(btc_hf_text_t which) {
 }
 
 static mp_obj_t stats_obj(const btc_ring_stats_t *st) {
-    mp_obj_t d = mp_obj_new_dict(7);
+    mp_obj_t d = mp_obj_new_dict(8);
     store(d, MP_QSTR_buffered, mp_obj_new_int_from_uint(st->buffered));
     store(d, MP_QSTR_capacity, mp_obj_new_int_from_uint(st->capacity));
     store(d, MP_QSTR_received, mp_obj_new_int_from_uint(st->received));
@@ -122,6 +122,7 @@ static mp_obj_t stats_obj(const btc_ring_stats_t *st) {
     store(d, MP_QSTR_overruns, mp_obj_new_int_from_uint(st->overruns));
     store(d, MP_QSTR_dropped, mp_obj_new_int_from_uint(st->dropped));
     store(d, MP_QSTR_repeated, mp_obj_new_int_from_uint(st->repeated));
+    store(d, MP_QSTR_skipped, mp_obj_new_int_from_uint(st->skipped));
     return d;
 }
 

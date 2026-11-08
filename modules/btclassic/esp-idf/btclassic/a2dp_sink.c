@@ -270,6 +270,10 @@ int btc_sink_start(size_t ring_frames, bool reconnect) {
         return btc_err(err);
     }
 
+    // Visible again as the settings say, now the sink's services are there:
+    // the order Bluedroid's own examples use.
+    btc_radio_hold_hidden(false);
+
     const esp_timer_create_args_t targs = {.callback = poll, .name = "btclassic"};
     if (esp_timer_create(&targs, &s_poll) == ESP_OK) {
         esp_timer_start_periodic(s_poll, POLL_US);
