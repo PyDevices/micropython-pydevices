@@ -32,7 +32,16 @@ static const char *TAG = "btclassic";
 
 btc_sink_state_t btc_sink;
 static esp_timer_handle_t s_poll;
+static esp_timer_handle_t s_retry;
 static int16_t *s_ring_buf;
+// Calling the last sender back: how many tries so far. A sender that still
+// thinks the old link is up (the board lost power mid-stream) refuses the
+// first calls until its own link times out.
+static volatile bool s_calling_back;
+static int s_tries;
+
+#define CALL_BACK_TRIES 12
+#define CALL_BACK_US 6000000        // apart, longer than a page times out: 72 s in all
 
 #define s btc_sink
 
@@ -122,9 +131,27 @@ static bool is_paired(const uint8_t *addr) {
 static void reconnect_last_sender(void) {
     btc_addr_t last;
     if (load_last_sender(last) && is_paired(last)) {
-        ESP_LOGI(TAG, "calling back the last sender");
+        ESP_LOGI(TAG, "calling back the last sender (try %d)", s_tries + 1);
+        s_calling_back = true;
         esp_a2d_sink_connect(last);
+        // Try again later unless the link comes up first.
+        if (s_retry) {
+            esp_timer_start_once(s_retry, CALL_BACK_US);
+        }
     }
+}
+
+static void retry(void *arg) {
+    (void)arg;
+    if (!s.started || !s_calling_back || s.connected) {
+        return;
+    }
+    if (++s_tries >= CALL_BACK_TRIES) {
+        s_calling_back = false;
+        ESP_LOGI(TAG, "the last sender didn't answer");
+        return;
+    }
+    reconnect_last_sender();
 }
 
 // ---- A2DP: the link, the stream's format, and the audio ----
@@ -140,6 +167,7 @@ static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
             esp_a2d_connection_state_t state = param->conn_stat.state;
             if (state == ESP_A2D_CONNECTION_STATE_CONNECTED) {
                 uint8_t *a = param->conn_stat.remote_bda;
+                s_calling_back = false;
                 BTC_LOCK();
                 memcpy(s.peer, a, sizeof(btc_addr_t));
                 s.connected = true;
@@ -252,8 +280,13 @@ int btc_sink_start(size_t ring_frames, bool reconnect) {
     s.channels = 2;
     s.rssi_delta = BTC_UNKNOWN;
     s.reconnect = reconnect;
+    s_calling_back = false;
+    s_tries = 0;
     btc_avrcp_reset();
     s.started = true;
+
+    const esp_timer_create_args_t rargs = {.callback = retry, .name = "btclassic_call"};
+    esp_timer_create(&rargs, &s_retry);
 
     // AVRCP first, then A2DP, as Bluedroid asks.
     btc_avrcp_start();
@@ -264,6 +297,8 @@ int btc_sink_start(size_t ring_frames, bool reconnect) {
         ESP_LOGE(TAG, "A2DP sink didn't start: %s", esp_err_to_name(err));
         btc_avrcp_stop();
         s.started = false;
+        esp_timer_delete(s_retry);
+        s_retry = NULL;
         btc_ring_init(&s.ring, NULL, 0, 2);
         heap_caps_free(s_ring_buf);
         s_ring_buf = NULL;
@@ -285,10 +320,16 @@ void btc_sink_stop(void) {
     if (!s.started) {
         return;
     }
+    s_calling_back = false;
     if (s_poll) {
         esp_timer_stop(s_poll);
         esp_timer_delete(s_poll);
         s_poll = NULL;
+    }
+    if (s_retry) {
+        esp_timer_stop(s_retry);
+        esp_timer_delete(s_retry);
+        s_retry = NULL;
     }
     if (s.connected) {
         btc_sink_disconnect();
