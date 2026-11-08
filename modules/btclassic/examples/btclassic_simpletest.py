@@ -9,20 +9,20 @@ speaker and prints each new title, with the left and right levels once a
 second.
 
 Needs: a classic ESP32 board with a speaker or I2S amplifier, firmware built
-with the btaudio module, and a board config with a pcm_out role.
+with the btclassic module, and a board config with a pcm_out role.
 
 Run it:
 
-    mpftp run btaudio_simpletest.py
+    mpftp run btclassic_simpletest.py
 
 Tested on: Adafruit QT Py ESP32 Pico with the Audio BFF, MicroPython
-1.30.0-preview with btaudio, playing from a Windows 11 PC.
+1.30.0-preview, playing from a Windows 11 PC.
 """
 
 import time
 
 import board_peripherals
-import btaudio
+import btclassic
 import network
 from audiodev import AudioFormat
 
@@ -33,8 +33,9 @@ FRAMES = 512  # frames per write; 512 is about 12 ms at 44.1 kHz
 # arrives slower than it plays, in bursts. Turn Wi-Fi off while listening.
 network.WLAN(network.STA_IF).active(False)
 
-# Start Bluetooth. The board appears under its hostname.
-receiver = btaudio.Receiver()
+# Start Bluetooth and the audio sink. The board appears under its hostname.
+bt = btclassic.Bluetooth()
+receiver = btclassic.AudioSink(bt)
 print("Pair with %s and play something." % network.hostname())
 buf = bytearray(FRAMES * 4)
 speaker = None
@@ -59,7 +60,7 @@ while True:
         time.sleep_ms(5)
 
     # Say what's playing when the track changes.
-    if receiver.changes() & btaudio.TRACK and receiver.title:
+    if receiver.changes() & btclassic.TRACK and receiver.title:
         print("Playing:", receiver.title, "-", receiver.artist)
 
     # Print the levels once a second.

@@ -1,4 +1,0 @@
-Opt-in: name btaudio to build it; --modules all leaves it out.
-It turns on ESP-IDF's Bluedroid for Bluetooth Classic audio, and an ESP-IDF
-build runs one Bluetooth host, so a build with btaudio has no `bluetooth`
-(BLE) module.

@@ -1,26 +1,26 @@
-# btaudio from a bare clone: a classic ESP32 firmware with the module, built
+# btclassic from a bare clone: a classic ESP32 firmware with the module, built
 # as a release would (ESP-IDF at deps.lock's pin, under the esp32 port's
 # -Werror=all), and the ESP-IDF component alone on ESP-IDF 6.1 for every chip
 # it is written for, the ESP32-S31 among them, which MicroPython can't build
 # for yet.
-name: btaudio
+name: btclassic
 
 on:
   push:
     branches: [main]
     paths:
-      - 'modules/btaudio/**'
-      - '!modules/btaudio/*.md'
-      - '!modules/btaudio/examples/**'
+      - 'modules/btclassic/**'
+      - '!modules/btclassic/*.md'
+      - '!modules/btclassic/examples/**'
       - 'build_mp.py'
-      - '.github/workflows/btaudio.yml'
+      - '.github/workflows/btclassic.yml'
   pull_request:
     paths:
-      - 'modules/btaudio/**'
-      - '!modules/btaudio/*.md'
-      - '!modules/btaudio/examples/**'
+      - 'modules/btclassic/**'
+      - '!modules/btclassic/*.md'
+      - '!modules/btclassic/examples/**'
       - 'build_mp.py'
-      - '.github/workflows/btaudio.yml'
+      - '.github/workflows/btclassic.yml'
   # Everything, weekly: the path filters skip what a change can't reach.
   schedule:
     - cron: '15 7 * * 1'
@@ -75,19 +75,19 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /home/runner/.cache/ccache
-          key: ccache-btaudio-esp32-${{ hashFiles('UPSTREAM', 'modules.lock') }}-${{ github.run_id }}
+          key: ccache-btclassic-esp32-${{ hashFiles('UPSTREAM', 'modules.lock') }}-${{ github.run_id }}
           restore-keys: |
-            ccache-btaudio-esp32-${{ hashFiles('UPSTREAM', 'modules.lock') }}-
-            ccache-btaudio-esp32-
+            ccache-btclassic-esp32-${{ hashFiles('UPSTREAM', 'modules.lock') }}-
+            ccache-btclassic-esp32-
 
-      - name: Build a classic ESP32 firmware with btaudio
-        run: python3 build_mp.py --port esp32 --board ESP32_GENERIC --variant SPIRAM --modules btaudio
+      - name: Build a classic ESP32 firmware with btclassic
+        run: python3 build_mp.py --port esp32 --board ESP32_GENERIC --variant SPIRAM --modules btclassic
 
-      - name: btaudio is linked in, and Bluedroid's A2DP sink with it
+      - name: btclassic is linked in, and Bluedroid's A2DP sink with it
         run: |
           map=builds/esp32/ESP32_GENERIC/SPIRAM/micropython.map
-          grep -q 'btaudio_start' "$map"
-          grep -q 'btaudio_module' "$map"
+          grep -q 'btc_sink_start' "$map"
+          grep -q 'btclassic_module' "$map"
           grep -q 'esp_a2d_sink_init' "$map"
 
   idf61:
@@ -105,6 +105,6 @@ jobs:
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
-          cd modules/btaudio/tests/idf_app
+          cd modules/btclassic/tests/idf_app
           # The S31 is a preview target in ESP-IDF 6.1, which idf.py makes you say.
           idf.py --preview -B "build-${{ matrix.target }}" set-target ${{ matrix.target }} build

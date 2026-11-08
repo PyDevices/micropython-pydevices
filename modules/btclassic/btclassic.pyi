@@ -1,0 +1,432 @@
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: MIT
+"""Bluetooth Classic: the radio, and the profiles that make a board a speaker
+or a hands-free unit.
+
+`Bluetooth` is the radio, one per board, shaped like `bluetooth.BLE`: turn
+it on with `active`, and read and set its name, visibility and pairing PIN
+with `config`. Each profile is an object of its own that takes the radio:
+
+- `AudioSink` receives audio from a phone or computer (A2DP sink) and talks
+  to its player (AVRCP controller): what's playing, cover art included, its
+  position and transport, and the volume slider shared with the sender.
+- `HandsFree` follows the phone itself (HFP hands-free unit): battery,
+  signal, carrier and calls, which it can answer, end and dial, with the
+  call's audio both ways.
+
+Audio is a stream: `AudioSink.readinto` and `HandsFree.readinto` fill a
+buffer with 16-bit PCM and never wait, and `HandsFree.write` takes the
+microphone. Your program chooses what to play: the music, or the call while
+`HandsFree.audio` is True.
+
+State is properties. Nothing calls back into Python from the Bluetooth task:
+each object's `changes()` returns a bit for each kind of state that changed
+since the last call, so a program polls it as often as it redraws. The bits
+are module constants, and each object returns only its own.
+
+Everything keeps running across a soft reset. Making an object again takes
+over the running one, link and all, which is how a program picks Bluetooth
+up again after Ctrl-D.
+
+Addresses are 6 bytes, most significant first, as `bluetooth.BLE` gives
+them.
+"""
+
+# -- changes() bits ---------------------------------------------------------
+
+CONNECTION: int
+"""`AudioSink.changes` and `HandsFree.changes` bit: the profile's link came
+up or went down."""
+STREAM: int
+"""`AudioSink.changes` bit: audio started or stopped flowing."""
+FORMAT: int
+"""`AudioSink.changes` bit: the stream's sample rate is known or changed."""
+TRACK: int
+"""`AudioSink.changes` bit: the track's metadata changed: title, artist,
+album, genre, number, count or duration."""
+PLAYING: int
+"""`AudioSink.changes` bit: the play status changed."""
+VOLUME: int
+"""`AudioSink.changes` bit: the volume changed, here or on the sender."""
+POSITION: int
+"""`AudioSink.changes` bit: the sender reported where playback is."""
+PEER: int
+"""`AudioSink.changes` bit: the sender's name, signal, battery or link
+details changed."""
+COVER: int
+"""`AudioSink.changes` bit: a new cover image arrived, or the track has
+none."""
+PHONE: int
+"""`HandsFree.changes` bit: the phone's battery, signal, carrier, gains or
+other hands-free state changed."""
+CALL: int
+"""`HandsFree.changes` bit: a call started, changed state or ended, or the
+caller is known."""
+AUDIO: int
+"""`HandsFree.changes` bit: the call's audio came or went. `sample_rate`
+says its rate while it's up."""
+PAIRED: int
+"""`Bluetooth.changes` bit: a device paired, or a pairing was removed."""
+
+# -- AudioSink.key codes -----------------------------------------------------
+
+KEY_VOLUME_UP: int
+"""`AudioSink.key` code for the sender's volume up key."""
+KEY_VOLUME_DOWN: int
+KEY_MUTE: int
+KEY_REWIND: int
+"""`AudioSink.key` code for rewind: hold it with state 0, release with 1."""
+KEY_FAST_FORWARD: int
+
+class Bluetooth:
+    """The board's Bluetooth Classic radio. There is one: every
+    `Bluetooth()` returns it.
+
+    The radio starts off. Turn it on with `active(True)`, or let the first
+    profile do it: a program reads as `bt = Bluetooth()`, then
+    `AudioSink(bt)`.
+
+    Pairing needs nothing typed on the board: a device that asks to compare
+    numbers is accepted, and an older device that asks for a PIN gets the
+    `pin` setting.
+    """
+
+    def __init__(self) -> None: ...
+    def active(self, active: bool | None = None) -> bool:
+        """Turn the radio on or off, and say whether it's on.
+
+        Turning it off ends every profile's links and shuts Bluetooth down.
+        The methods of profile objects made before then raise OSError, and
+        their properties read as not connected, until the profile is made
+        again.
+
+        Args:
+            active: True starts the radio, False stops it, None only asks.
+
+        Returns:
+            Whether the radio is on.
+        """
+    def config(self, *names: str, **settings: object) -> object:
+        """Read one setting by name, or change settings by keyword.
+
+        `config("mac")` reads, `config(name="kitchen")` sets. Settings:
+
+        - name (str): what other devices list the board as. Defaults to the
+          board's hostname, `network.hostname()`.
+        - discoverable (bool): other devices can find the board when they
+          search. On by default. A profile that takes one device at a time
+          hides the board while that device is connected, and shows it
+          again afterwards if this is True.
+        - connectable (bool): devices already paired can connect. On by
+          default.
+        - pin (str): the PIN for devices that pair the old way, 1 to 16
+          characters, "0000" by default as on most speakers.
+        - mac (bytes): the board's Bluetooth address. Read only, and only
+          while the radio is on.
+
+        Raises:
+            ValueError: an unknown setting, or a value it doesn't take.
+        """
+    def paired(self) -> list[bytes]:
+        """The addresses of the devices the board is paired with. Pairings
+        are kept in flash and survive a reset."""
+    def unpair(self, addr: bytes | None = None) -> None:
+        """Forget a paired device, or every one with no argument. The
+        device has to pair again before it can connect."""
+    def changes(self) -> int:
+        """The bits (`PAIRED`) for what changed since the last call, which
+        clears them."""
+
+class AudioSink:
+    """Receive audio from a phone or computer, as a speaker does, and drive
+    its player.
+
+    The board accepts one sender at a time, and pairs without a PIN. Through
+    A2DP the sender's audio arrives and `readinto` hands it over decoded,
+    for any PCM output. Through AVRCP you read everything the sender says
+    about the track, cover art included, its play status and position, and
+    you drive its transport, volume and player settings.
+
+    There is one sink. A second `AudioSink` takes over the running one, link
+    and all, and its arguments then change nothing.
+
+    A property the sender hasn't reported reads None until it does. Not
+    every sender reports everything: a podcast app may send no album, genre
+    or track number.
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+        buffer_ms: how much audio to hold, 50 to 5000. Playback starts once
+            half of it has arrived, so that half is the delay to the
+            speaker. The other half absorbs reads that come late: a program
+            that redraws a screen between reads wants 1000.
+        reconnect: call the last sender back, if it is still paired, as a
+            speaker does: when the sink starts, and whenever the link drops
+            (the sender went out of range, or its Bluetooth went off),
+            every few seconds for about a minute. It stops early when the
+            sender has forgotten the board, so the sender can pair again.
+            `disconnect` doesn't call back.
+    """
+
+    connected: bool
+    """A sender is connected."""
+    streaming: bool
+    """Audio is flowing from the sender."""
+    playing: bool
+    """The sender says it is playing."""
+    status: str | None
+    """The sender's play status: "stopped", "playing", "paused",
+    "seeking forward", "seeking back" or "error"."""
+    sample_rate: int
+    """The stream's rate in Hz, or 0 before the first stream. Phones send
+    44100 almost always; A2DP allows 16000, 32000 and 48000 too."""
+    volume: int
+    """0 to 127, shared with the sender's volume slider. Setting it moves the
+    slider; the sender moving it changes this."""
+    title: str
+    """The current track's title, or "" if the sender hasn't said."""
+    artist: str
+    album: str
+    genre: str
+    track_number: int | None
+    """The track's place on its album, from 1."""
+    track_count: int | None
+    """How many tracks the album has."""
+    duration: int | None
+    """The track's length in milliseconds."""
+    position: int | None
+    """Where playback is, in milliseconds. It moves on between the sender's
+    reports while playing, so it can be read at any rate."""
+    cover: bytes | None
+    """The track's cover art as a JPEG, 200 by 200 pixels, or None while it
+    is on its way or when the sender has none. Each read copies the bytes,
+    so read it once after each `COVER` change."""
+    cover_size: int
+    """The cover's length in bytes, 0 with none."""
+    peer: bytes | None
+    """The sender's address, or None with none connected."""
+    peer_name: str
+    """The sender's device name, or "" before it is known."""
+
+    def __init__(self, bt: Bluetooth, *, buffer_ms: int = 500, reconnect: bool = True) -> None: ...
+    def readinto(self, buf: bytearray | memoryview) -> int:
+        """Fill `buf` with 16-bit stereo frames (4 bytes each) at
+        `sample_rate`, scaled by `volume`. Never waits: silence fills
+        whatever the stream can't.
+
+        Read a block when your output has room for one, so its clock sets
+        the pace. The sender's clock and your output's never quite agree, so
+        the sink keeps its buffer near half full by dropping or repeating
+        one frame now and then.
+
+        Returns:
+            How many frames came from the stream.
+
+        Raises:
+            ValueError: `buf` doesn't hold whole frames.
+        """
+    def cover_into(self, buf: bytearray | memoryview) -> int:
+        """Copy the cover's JPEG into `buf`, a buffer you keep, so each new
+        cover makes no garbage. Thumbnails are a few tens of KB.
+
+        Returns:
+            Its length in bytes, or 0 with no cover.
+
+        Raises:
+            ValueError: `buf` is smaller than the cover (`cover_size`).
+        """
+    def changes(self) -> int:
+        """The bits (`CONNECTION`, `TRACK` ...) for what changed since the
+        last call, which clears them."""
+    def levels(self) -> tuple[int, int]:
+        """The loudest left and right samples since the last call, 0 to
+        32767, before `volume`."""
+    def stats(self) -> dict[str, int]:
+        """Counters for the buffer, in frames: buffered, capacity,
+        received, underruns, overruns, dropped and repeated (one at a time,
+        to follow the sender's clock), and skipped (the oldest, when a read
+        that came late finds the buffer over its fill point as playback
+        starts)."""
+    def play(self) -> None: ...
+    def pause(self) -> None: ...
+    def stop(self) -> None: ...
+    def next(self) -> None: ...
+    def previous(self) -> None: ...
+    def seek(self, direction: int) -> None:
+        """Hold fast forward (1) or rewind (-1) on the sender until the next
+        `seek(0)`. Starting one direction releases the other."""
+    def key(self, code: int, state: int = 2) -> None:
+        """Send any AVRCP pass-through key, such as `KEY_MUTE`.
+
+        Args:
+            code: the key's AVRCP operation id, 0 to 127.
+            state: 0 presses the key, 1 releases it, 2 does both.
+        """
+    def setting(self, name: str, value: str) -> None:
+        """Ask the sender to change a player setting. Many senders ignore
+        these, and AVRCP has no way to read them back.
+
+        Args:
+            name: "equalizer", "repeat", "shuffle" or "scan".
+            value: "off" or "on" for the equalizer; "off", "single" or "all"
+                for repeat; "off", "all" or "group" for shuffle and scan.
+
+        Raises:
+            ValueError: an unknown name, or a value that name doesn't take.
+        """
+    def refresh(self) -> None:
+        """Ask the sender for its play status, position and signal now,
+        instead of at the next one-second poll."""
+    def link(self) -> dict:
+        """The connection, as a dict.
+
+        Returns:
+            address (bytes or None) and name: the sender's. rssi_delta: the
+            signal in dB from the controller's ideal range, 0 inside it,
+            None unknown. codec ("SBC"), sample_rate, channels, channel_mode
+            ("mono", "dual", "stereo" or "joint stereo"), block_length,
+            subbands, allocation ("snr" or "loudness"), bitpool_min and
+            bitpool_max: the stream as configured. delay_ms: the delay
+            reported to the sender, which it may use to move video to match.
+            avrcp_features and avrcp_target_flags: the sender's AVRCP
+            feature bits. cover_art: the cover art channel is open.
+            battery: the sender's battery as AVRCP reports it ("normal",
+            "warning", "critical", "external" or "full"), or None.
+        """
+    def connect(self, addr: bytes | None = None) -> None:
+        """Call a paired sender, or the last one with no argument. The link
+        comes up later; watch for `CONNECTION`."""
+    def disconnect(self) -> None:
+        """Drop the sender, without calling it back. The board is
+        discoverable again afterwards."""
+    def deinit(self) -> None:
+        """Drop the sender and stop the sink. The radio stays on, and a new
+        `AudioSink` starts the sink again. Until then the methods raise
+        OSError and the properties read as not connected."""
+    def __enter__(self) -> AudioSink: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
+
+class HandsFree:
+    """Follow a phone as a car kit or a headset does: the phone's battery,
+    signal and carrier, its calls, and their audio.
+
+    When `AudioSink` connects to a phone, the hands-free link follows it to
+    the same phone. Without a sink, `connect` calls a phone yourself. A
+    computer has no hands-free side, and then `connected` stays False.
+
+    During a call's audio, `readinto` gives you the phone's voice and
+    `write` takes your microphone. The phone decides when the audio comes
+    to the board: for a call when the board is its audio device, and for a
+    voice or video chat app. `connect_audio` asks for it and
+    `disconnect_audio` hands it back to the phone.
+
+    There is one hands-free unit. A second `HandsFree` takes over the
+    running one, link and all, and its arguments then change nothing.
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+        buffer_ms: how much of the phone's voice to hold, 50 to 1000.
+            Playback starts once half of it has arrived, so that half is the
+            delay in the conversation.
+        channels: 1 to read the call as it comes, mono; 2 to read it copied
+            to both sides, for an output that is always stereo.
+    """
+
+    connected: bool
+    """The hands-free link to the phone is up."""
+    peer: bytes | None
+    """The phone's address, or None with no link."""
+    service: bool | None
+    """The phone has network service."""
+    roaming: bool | None
+    signal: int | None
+    """The phone's signal, 0 to 5."""
+    battery: int | None
+    """The phone's battery, 0 to 5."""
+    operator: str
+    """The network's name, or "" before the phone says."""
+    number: str
+    """The phone's own number, or "" if it doesn't say."""
+    call: str | None
+    """The call's state: "idle", "incoming", "dialing", "alerting",
+    "active" or "held"; None with no link."""
+    caller: str
+    """The number of the current or last call, or "" if unknown."""
+    held: int
+    """0 with no held call, 1 with a call held beside an active one, 2 with
+    held calls only."""
+    waiting: bool
+    """A second call is waiting."""
+    ringing: bool
+    """The phone is ringing now."""
+    in_band_ring: bool
+    """The phone sends its own ringtone as call audio."""
+    voice_recognition: bool
+    """The phone's voice assistant is listening. Set it to start or stop the
+    assistant; the phone may refuse, and then it stays as it was."""
+    speaker_gain: int | None
+    """The call's volume, 0 to 15, shared with the phone's call volume.
+    `readinto` scales the call by it. Setting it tells the phone."""
+    mic_gain: int | None
+    """The microphone's gain the phone asks for, 0 to 15. Setting it tells
+    the phone; the board doesn't apply it to what you `write`."""
+    audio: bool
+    """The call's audio is up: `readinto` returns the phone's voice and
+    `write` sends the microphone."""
+    sample_rate: int
+    """The call audio's rate: 8000, or 16000 for wideband; 0 while it's not
+    up."""
+
+    def __init__(self, bt: Bluetooth, *, buffer_ms: int = 400, channels: int = 1) -> None: ...
+    def readinto(self, buf: bytearray | memoryview) -> int:
+        """Fill `buf` with the phone's voice: 16-bit frames of `channels`
+        at `sample_rate`, scaled by `speaker_gain`. Never waits: silence
+        fills whatever the call can't, and all of it while `audio` is False.
+
+        Returns:
+            How many frames came from the call.
+
+        Raises:
+            ValueError: `buf` doesn't hold whole frames.
+        """
+    def write(self, buf: bytes | bytearray | memoryview) -> int:
+        """Send microphone audio to the phone: 16-bit mono at
+        `sample_rate`. Up to half a second queues; it goes out once 120 ms
+        has, and silence goes out until then.
+
+        Returns:
+            How many bytes were taken: fewer when the queue is full, 0 while
+            `audio` is False.
+        """
+    def changes(self) -> int:
+        """The bits (`CONNECTION`, `PHONE`, `CALL`, `AUDIO`) for what changed
+        since the last call, which clears them."""
+    def stats(self) -> dict[str, int]:
+        """Counters for the call's buffer, as `AudioSink.stats` has them."""
+    def answer(self) -> None:
+        """Answer the incoming call."""
+    def hangup(self) -> None:
+        """End the active call, or reject the incoming one."""
+    def dial(self, number: str | None = None) -> None:
+        """Have the phone call `number`, or redial the last one."""
+    def dtmf(self, digits: str) -> None:
+        """Send touch tones during a call, one per character: 0 to 9, * and
+        #."""
+    def connect_audio(self) -> None:
+        """Ask the phone to bring the call's audio to the board. Watch for
+        `AUDIO`."""
+    def disconnect_audio(self) -> None:
+        """Hand the call's audio back to the phone; the call goes on."""
+    def connect(self, addr: bytes | None = None) -> None:
+        """Call a paired phone, or the sink's sender with no argument. The
+        link comes up later; watch for `CONNECTION`."""
+    def disconnect(self) -> None:
+        """Drop the hands-free link. Music, if any, goes on."""
+    def deinit(self) -> None:
+        """Drop the link and stop the hands-free unit. The radio stays on,
+        and a new `HandsFree` starts it again."""
+    def __enter__(self) -> HandsFree: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
