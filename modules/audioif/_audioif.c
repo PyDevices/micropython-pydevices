@@ -2005,7 +2005,12 @@ void audiopump_i2s_rx_end(void) {
     if (!(audiopump_i2s_holds & AUDIOPUMP_I2S_HOLD_IN)) {
         return;
     }
+    // A source the pump pulls may read the ring from the pump's task
+    // (btclassic's HandsFree.uplink() does), and the pump holds its lock
+    // for each whole pull: take it, so no pull is inside the ring as it goes.
+    audiodsp_pump_lock_acquire();
     audiopump_cap_release();
+    audiodsp_pump_lock_release();
     audiopump_i2s_holds &= (uint8_t)~AUDIOPUMP_I2S_HOLD_IN;
     if (audiopump_i2s_rx_alone) {
         audiopump_i2s_close_rx_alone();

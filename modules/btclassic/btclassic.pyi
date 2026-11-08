@@ -215,6 +215,12 @@ class AudioSink:
     about the track, cover art included, its play status and position, and
     you drive its transport, volume and player settings.
 
+    In a firmware with audiodsp, the sink is also an audiosample: hand it to
+    the audio pump, alone or into a `Mixer` beside a synth, and the pump
+    pulls the music in C on its own task. Nothing your program does then
+    holds the audio up: not a garbage collection, not a cover decoding, not
+    a redraw. Read it either way, not both: one reader per stream.
+
     There is one sink. A second `AudioSink` takes over the running one, link
     and all, and its arguments then change nothing.
 
@@ -227,7 +233,8 @@ class AudioSink:
         buffer_ms: how much audio to hold, 50 to 5000. Playback starts once
             half of it has arrived, so that half is the delay to the
             speaker. The other half absorbs reads that come late: a program
-            that redraws a screen between reads wants 1000.
+            that redraws a screen between reads wants 1000. Played by the
+            audio pump, nothing reads late, and 500 is plenty.
         reconnect: call the last sender back, if it is still paired, as a
             speaker does: when the sink starts, and whenever the link drops
             (the sender went out of range, or its Bluetooth went off),
@@ -247,7 +254,13 @@ class AudioSink:
     "seeking forward", "seeking back" or "error"."""
     sample_rate: int
     """The stream's rate in Hz, or 0 before the first stream. Phones send
-    44100 almost always; A2DP allows 16000, 32000 and 48000 too."""
+    44100 almost always; A2DP allows 16000, 32000 and 48000 too. The pump
+    pulls at the rate this last read, so play the sink after the `FORMAT`
+    bit, and again when it comes back with a new rate."""
+    channel_count: int
+    """2: the sink's frames are stereo. An audiosample's field."""
+    bits_per_sample: int
+    """16. An audiosample's field."""
     volume: int
     """0 to 127, shared with the sender's volume slider. Setting it moves the
     slider; the sender moving it changes this."""
@@ -384,7 +397,10 @@ class HandsFree:
     computer has no hands-free side, and then `connected` stays False.
 
     During a call's audio, `readinto` gives you the phone's voice and
-    `write` takes your microphone. The phone decides when the audio comes
+    `write` takes your microphone. In a firmware with audiodsp, the
+    hands-free unit is also an audiosample the audio pump pulls in C, as
+    `AudioSink` is, and `uplink` sends the microphone from that same pull, so
+    a call needs no Python in its path either way. The phone decides when the audio comes
     to the board: for a call when the board is its audio device, and for a
     voice or video chat app. `connect_audio` asks for it and
     `disconnect_audio` hands it back to the phone.
@@ -444,7 +460,12 @@ class HandsFree:
     `write` sends the microphone."""
     sample_rate: int
     """The call audio's rate: 8000, or 16000 for wideband; 0 while it's not
-    up."""
+    up. The pump pulls at the rate this last read: play the hands-free unit
+    after the `AUDIO` bit says the call's audio is up."""
+    channel_count: int
+    """`channels`, as given. An audiosample's field."""
+    bits_per_sample: int
+    """16. An audiosample's field."""
 
     def __init__(self, bt: Bluetooth, *, buffer_ms: int = 400, channels: int = 1) -> None: ...
     def readinto(self, buf: bytearray | memoryview) -> int:
@@ -467,11 +488,31 @@ class HandsFree:
             How many bytes were taken: fewer when the queue is full, 0 while
             `audio` is False.
         """
+    def uplink(self, mic: object) -> None:
+        """Send the board's microphone to the phone from the audio pump's
+        pull of this hands-free unit, with no Python in the path; None
+        stops it, and the phone hears silence. While it runs, nothing else
+        may read the microphone, and `write` would interleave with it.
+
+        The microphone and the speaker share the output's clock, so the
+        call keeps one pace both ways.
+
+        Args:
+            mic: the open `pcm_in` the microphone records with, at the
+                call's `sample_rate`, one 16-bit channel.
+
+        Raises:
+            ValueError: `mic` records another shape, or at another rate.
+            OSError: this firmware has no audio pump or no capture.
+        """
     def changes(self) -> int:
         """The bits (`CONNECTION`, `PHONE`, `CALL`, `AUDIO`) for what changed
         since the last call, which clears them."""
     def stats(self) -> dict[str, int]:
-        """Counters for the call's buffer, as `AudioSink.stats` has them."""
+        """Counters for the call's buffer, as `AudioSink.stats` has them.
+        Also `sent`, the microphone frames `uplink` or `write` queued for
+        the phone during a call, and `unsent`, those the queue had no room
+        for."""
     def answer(self) -> None:
         """Answer the incoming call."""
     def hangup(self) -> None:
@@ -725,6 +766,11 @@ class HIDDevice:
         boot: the descriptor's keyboard and mouse reports follow the boot
             protocol's layouts. None: True for this class's descriptors
             that have them, False for your own.
+        ids: (vendor, product) or (vendor, product, version), published
+            in a Device ID record so a host can tell which product this
+            is, as it does a USB device by its IDs. The vendor is a USB
+            vendor ID. None publishes no record. A host that has already
+            paired with the board may keep the IDs it learned then.
     """
     KEYBOARD: bytes
     """A keyboard with media keys: report IDs 1 and 3."""
@@ -735,7 +781,8 @@ class HIDDevice:
     GAMEPAD: bytes
     """A gamepad with 16 buttons, a hat and four axes: report ID 4."""
     def __init__(self, bt: Bluetooth, descriptor: bytes = ..., *, subclass: int | None = None,
-                 name: str | None = None, boot: bool | None = None) -> None: ...
+                 name: str | None = None, boot: bool | None = None,
+                 ids: tuple[int, ...] | None = None) -> None: ...
     connected: bool
     """A host is connected."""
     peer: bytes | None
@@ -789,6 +836,15 @@ class HIDDevice:
         """Press and release a media key by its HID Consumer usage: 0xcd
         play/pause, 0xb5 next, 0xb6 previous, 0xe9 volume up, 0xea volume
         down, 0xe2 mute."""
+    def set_feature(self, report: bytes) -> None:
+        """Give a feature report its value, report ID first when the
+        descriptor has IDs: a setting the host reads when it asks, such as
+        a firmware version or a sensitivity. Up to four IDs. The host can
+        change one you have set; that raises `HID`, and `feature` reads it.
+        The host can't add an ID you haven't set."""
+    def feature(self, report_id: int = 0) -> bytes | None:
+        """A feature report as it stands, ID first when it has one, or None
+        if neither you nor the host has set it."""
     def changes(self) -> int:
         """What changed since the last call: `CONNECTION` and `HID` bits."""
     def stats(self) -> dict:
@@ -832,6 +888,17 @@ class HIDHost:
     have the fixed boot layouts (ID 1 and 2), which `decode` reads."""
     descriptor: bytes | None
     """The device's HID report descriptor, once connected."""
+    ids: tuple[int, int, int] | None
+    """The device's (vendor, product, version) from its service record,
+    once connected: what tells one gamepad from another, to map its
+    buttons. None before, or when the device publishes no Device ID
+    record. The board keeps what a device published when they first
+    paired, even through `unpair`: a device that changes or drops its
+    record later still shows the IDs it had then."""
+    INPUT: int
+    OUTPUT: int
+    FEATURE: int
+    """Report types, for `get_report` and `set_report`."""
     def connect(self, addr: bytes | None = None, *, boot: bool = False) -> None:
         """Call a device, or with no address the last one it was connected
         to, remembered across resets. boot asks for the boot protocol,
@@ -846,15 +913,32 @@ class HIDHost:
         """Send an output report, report ID first when the descriptor has
         IDs or the link runs the boot protocol: a keyboard's Caps Lock LED
         is `bytes((1, 2))`."""
+    def get_report(self, report_id: int = 0, type: int = 3, *, timeout: int = 1000) -> bytes:
+        """Ask the device for one report and wait for it, report ID first
+        when it has one. Most often a `FEATURE` report, which some gamepads
+        need read before they send their full input reports.
+
+        Raises:
+            OSError: ETIMEDOUT after timeout ms, or the device refused.
+        """
+    def set_report(self, report: bytes, type: int = 3, *, timeout: int = 1000) -> None:
+        """Set one report on the device, report ID first when the
+        descriptor has IDs: a `FEATURE` report by default, or an `OUTPUT`
+        report sent the slower, acknowledged way. Waits up to timeout
+        milliseconds for the device to accept it: OSError if it refuses,
+        ETIMEDOUT if it doesn't answer."""
     def decode(self, report: bytes) -> tuple | None:
-        """Take a report apart, when its layout is known: in the boot
-        protocol, or from a device whose descriptor is one of `HIDDevice`'s.
-        None otherwise; read the descriptor and the bytes yourself.
+        """Take an input report apart by what its descriptor says each
+        field means, so any keyboard, mouse, gamepad or media remote reads
+        the same. None for a report it can't place (a vendor's own); read
+        the descriptor and the bytes yourself then.
 
         - ("keyboard", modifiers, (key, ...)): the keys held.
         - ("mouse", buttons, x, y, wheel)
         - ("consumer", usage): 0 when the key is released.
-        - ("gamepad", buttons, hat, x, y, z, rz): hat None when centred.
+        - ("gamepad", buttons, hat, x, y, z, rz): buttons 1 to 32 as bits
+          0 to 31, hat 0 to 7 clockwise from up and None when centred, the
+          axes on -127..127 whatever range the device sends.
         """
     @staticmethod
     def char(key: int, modifiers: int = 0) -> str | None:
