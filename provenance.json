@@ -142,6 +142,9 @@
   },
   "0048-micropython-stm32-link-objects-from-a-response-file.patch": {
    "sha256": "3c1dd4732af29c9164615dddea2eb12740e503a723be854e83bd65c830a77cbb"
+  },
+  "0049-micropython-esp32-spi-raise-when-a-transfer-cant-be-queued.patch": {
+   "sha256": "dfcc439dbc66dd97077b723be329018770aade6d5e2d5c19d53ece340d01ba54"
   }
  },
  "tinyusb_patches": {

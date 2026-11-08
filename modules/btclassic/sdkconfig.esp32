@@ -24,6 +24,10 @@ CONFIG_BT_AVRCP_ENABLED=y
 # Bluedroid's buffers go to PSRAM when the board has it, leaving internal
 # RAM to the controller and MicroPython.
 CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST=y
+# Bluedroid's control blocks (the A2DP sink's alone is 9.7 KB) are allocated
+# when the stack starts instead of sitting in internal RAM, so with PSRAM they
+# go there too, and internal DMA-capable RAM is left for SPI and I2S.
+CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY=y
 # AVRCP 1.6 cover art: the album image, over OBEX (GOEP client).
 CONFIG_BT_AVRCP_CT_COVER_ART_ENABLED=y
 # Hands-free unit (HFP), for the phone's battery, signal, carrier and calls.
