@@ -84,6 +84,10 @@ static void mark(uint32_t bits) {
     BTC_UNLOCK();
 }
 
+void btc_radio_mark(uint32_t bits) {
+    mark(bits);
+}
+
 static void apply_scan_mode(void) {
     if (!r.on) {
         return;
@@ -109,6 +113,8 @@ static void apply_pin(void) {
 // ---- GAP: pairing with no PIN to type, a peer's name and signal ----
 
 static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
+    // Inquiry results, and remote names for the source.
+    btc_inquiry_on_gap(event, param);
     switch (event) {
         case ESP_BT_GAP_AUTH_CMPL_EVT:
             btc_sink_on_auth(param->auth_cmpl.bda);
@@ -188,6 +194,9 @@ void btc_radio_stop(void) {
     }
     btc_hf_stop();
     btc_sink_stop();
+    btc_source_stop();
+    btc_spp_stop();
+    btc_inquiry_stop();
     r.on = false;
     esp_bluedroid_disable();
     esp_bluedroid_deinit();

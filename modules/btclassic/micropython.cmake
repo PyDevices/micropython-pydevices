@@ -12,12 +12,22 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
     add_library(usermod_btclassic INTERFACE)
     target_sources(usermod_btclassic INTERFACE
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic.c
+        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_source.c
+        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_serial.c
         ${BTCLASSIC_IDF}/radio.c
         ${BTCLASSIC_IDF}/a2dp_sink.c
         ${BTCLASSIC_IDF}/avrcp_ct.c
         ${BTCLASSIC_IDF}/hfp_hf.c
-        ${BTCLASSIC_IDF}/ring.c)
+        ${BTCLASSIC_IDF}/ring.c
+        ${BTCLASSIC_IDF}/a2dp_source.c
+        ${BTCLASSIC_IDF}/avrcp_tg.c
+        ${BTCLASSIC_IDF}/inquiry.c
+        ${BTCLASSIC_IDF}/spp.c)
     target_include_directories(usermod_btclassic INTERFACE ${BTCLASSIC_IDF}/include ${BTCLASSIC_IDF})
+    # The source's track metadata for a remote, through link-time hooks into
+    # Bluedroid (avrcp_tg.c); off where they aren't known to fit.
+    include(${BTCLASSIC_IDF}/avrcp_tg.cmake)
+    btclassic_avrcp_tg(usermod_btclassic ${BTCLASSIC_IDF}/avrcp_tg.c)
     target_link_libraries(usermod INTERFACE usermod_btclassic)
     list(APPEND MICROPY_DEF_BOARD MICROPY_PY_BLUETOOTH=0)
 endif()
