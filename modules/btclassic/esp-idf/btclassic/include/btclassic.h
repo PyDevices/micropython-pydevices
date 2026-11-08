@@ -54,6 +54,8 @@ extern "C" {
 #define BTC_CHANGED_CALL       (1u << 10)   // hf: call state or caller
 #define BTC_CHANGED_AUDIO      (1u << 11)   // hf: call audio came or went
 #define BTC_CHANGED_PAIRED     (1u << 12)   // radio: a device paired or was unpaired
+#define BTC_CHANGED_REMOTE     (1u << 13)   // source: the remote pressed or released a key
+#define BTC_CHANGED_FOUND      (1u << 14)   // radio: an inquiry found a device, or ended
 
 typedef uint8_t btc_addr_t[6];  // most significant byte first
 
@@ -255,6 +257,101 @@ int btc_hf_disconnect_audio(void);
 // Call a paired phone, or the sink's sender with NULL.
 int btc_hf_connect(const uint8_t *addr);
 int btc_hf_disconnect(void);
+
+// ---- discovery: inquiry, on the radio ----
+
+// A device an inquiry found. Fields it didn't send are empty, 0 or BTC_UNKNOWN.
+typedef struct {
+    btc_addr_t addr;
+    char name[64];          // from its inquiry response, UTF-8; "" if it sent none
+    uint32_t cod;           // Class of Device: service bits, major and minor class
+    int rssi;               // dBm, or BTC_UNKNOWN
+} btc_found_t;
+
+#define BTC_FOUND_MAX 20    // devices one inquiry keeps
+
+// Look for discoverable devices for `duration_ms` (1280 to 61440, in steps
+// of 1.28 s), forgetting the last inquiry's results. 0 stops one running.
+int btc_radio_inquiry(uint32_t duration_ms);
+bool btc_radio_inquiring(void);
+// Copy up to `max` of the devices found so far; returns how many there are.
+int btc_radio_found(btc_found_t *out, int max);
+
+// ---- the audio source: A2DP source and AVRCP target ----
+//
+// The board plays to headphones, a speaker or another board. Bluedroid runs
+// one A2DP role at a time: btc_source_start() fails with BTC_ERR_STATE
+// while the sink is started, and btc_sink_start() while the source is.
+//
+// Audio goes in with btc_source_write() from any one task: a program's
+// write(), or a C producer such as an audio graph's output. It is resampled
+// to the stream's rate and widened to its channels, and buffered in a ring
+// Bluedroid's encoder task drains at the stream's clock.
+
+typedef enum {
+    BTC_SOURCE_PEER_NAME = 0,   // the sink's device name
+    BTC_SOURCE_TITLE,           // what the AVRCP target tells the remote
+    BTC_SOURCE_ARTIST,
+    BTC_SOURCE_ALBUM,
+    BTC_SOURCE_GENRE,
+    BTC_SOURCE_TEXT_COUNT,
+} btc_source_text_t;
+
+typedef struct {
+    bool connected;         // an A2DP link to a sink is up
+    bool streaming;         // the stream is started and audio is flowing
+    btc_addr_t peer;
+    uint32_t sample_rate;   // the stream's rate (44100 on IDF 5.x), 0 before one
+    uint8_t channels;       // the stream's channels, 1 or 2
+    uint8_t volume;         // 0..127
+    bool absolute_volume;   // the sink takes the volume; else it scales the samples
+    bool avrcp;             // the remote control link is up
+    uint8_t sbc_channel_mode, sbc_block_length, sbc_subbands, sbc_allocation;
+    uint8_t sbc_min_bitpool, sbc_max_bitpool;
+    uint16_t delay_ms;      // the delay the sink reported, 0 if none
+    bool metadata;          // this build answers the remote's track and play status queries
+    int play_status;        // what the target reports: btc_play_status_t
+    int64_t position_ms;    // and where, counted on while playing; BTC_UNKNOWN
+} btc_source_status_t;
+
+// Start the source (the radio must be on). `ring_frames` sizes the buffer
+// in stereo frames at the stream's rate.
+int btc_source_start(size_t ring_frames);
+void btc_source_stop(void);
+bool btc_source_started(void);
+
+// Call a sink, or the last one with NULL. The stream starts once it's up.
+int btc_source_connect(const uint8_t *addr);
+int btc_source_disconnect(void);
+// Start or suspend the stream on a connected sink.
+int btc_source_stream(bool on);
+
+// Queue `frames` frames of 16-bit PCM, `channels` (1 or 2) interleaved, at
+// `rate` Hz (8000..48000). Returns the frames taken: fewer when the buffer
+// holds its share (half, plus a little), so a producer that writes as fast
+// as it can is paced by the stream. Never waits.
+size_t btc_source_write(const int16_t *pcm, size_t frames, uint32_t rate, uint8_t channels);
+uint32_t btc_source_changes(void);
+void btc_source_status(btc_source_status_t *out);
+void btc_source_stats(btc_ring_stats_t *out);
+size_t btc_source_text(btc_source_text_t which, char *dst, size_t size);
+// Set the volume (0..127): sent to a sink that takes absolute volume,
+// otherwise applied to the samples.
+void btc_source_set_volume(uint8_t volume);
+
+// The remote's keys, oldest first: AVRCP operation id (0..0x7f) in the low
+// byte, bit 8 set for a press and clear for a release. -1 with none queued.
+int btc_source_key(void);
+
+// What the AVRCP target tells the remote (a car stereo shows it). NULL
+// texts leave a field as it is; BTC_UNKNOWN numbers clear one. A new title
+// counts as a new track.
+int btc_source_set_track(const char *title, const char *artist, const char *album,
+    const char *genre, int track_number, int track_count, int64_t duration_ms);
+// The play status (btc_play_status_t), or BTC_UNKNOWN to keep it, and the
+// position in milliseconds, or BTC_UNKNOWN to keep counting from the last
+// one while playing.
+int btc_source_set_play_status(int status, int64_t position_ms);
 
 #ifdef __cplusplus
 }

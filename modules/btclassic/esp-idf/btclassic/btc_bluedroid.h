@@ -36,6 +36,13 @@
 #define BTC_COVER 0
 #endif
 
+// The AVRCP target answers a remote's track and play status queries, which
+// Bluedroid's public API can't (avrcp_tg.c). The build defines it where the
+// link-time hooks it needs are known to fit.
+#ifndef BTC_TG_METADATA
+#define BTC_TG_METADATA 0
+#endif
+
 #define BTC_TEXT_MAX 128
 #define BTC_HANDLE_LEN 7    // AVRCP image handles are 7 digits
 
@@ -55,6 +62,9 @@ size_t btc_get_text(const char *field, char *dst, size_t size);
 // A profile that takes one device at a time hides the board while it has
 // one, and shows it again (as the settings say) when it leaves.
 void btc_radio_hold_hidden(bool hidden);
+
+// Set radio changes() bits, from another part of the backend.
+void btc_radio_mark(uint32_t bits);
 
 // ---- the sink: A2DP (a2dp_sink.c) and AVRCP (avrcp_ct.c) share this ----
 
@@ -125,3 +135,34 @@ bool btc_sink_peer(btc_addr_t out);
 
 // The sink connected to `bda`: the hands-free link follows, if started.
 void btc_hf_follow(const uint8_t *bda);
+
+// ---- discovery (inquiry.c) ----
+
+// Every GAP event, from radio.c's callback: inquiry results, and the names
+// the source asked for. `event` and `param` are Bluedroid's GAP types.
+void btc_inquiry_on_gap(int event, void *param);
+void btc_inquiry_stop(void);
+
+// ---- the source (a2dp_source.c) and its AVRCP target metadata (avrcp_tg.c) ----
+
+void btc_source_on_remote_name(const uint8_t *bda, const char *name);
+
+// What avrcp_tg.c answers the remote with, under the lock.
+typedef struct {
+    char title[BTC_TEXT_MAX], artist[BTC_TEXT_MAX], album[BTC_TEXT_MAX], genre[BTC_TEXT_MAX];
+    int track_number, track_count;
+    int64_t duration_ms;
+    int play_status;
+    int64_t position_ms;    // now, counted on while playing
+    uint32_t track_id;      // goes up with each new track
+} btc_tg_track_t;
+
+bool btc_source_tg_active(void);
+void btc_source_tg_track(btc_tg_track_t *out);
+
+// avrcp_tg.c, when BTC_TG_METADATA: the remote registered for these events,
+// and they changed. Safe from any task.
+#if BTC_TG_METADATA
+void btc_tg_metadata_reset(void);
+void btc_tg_metadata_changed(uint8_t event_id);
+#endif
