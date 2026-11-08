@@ -76,6 +76,13 @@ static mp_obj_t ser_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
     if (!btc_spp_started()) {
         mp_obj_t name = args[ARG_name].u_obj;
         ser_done(btc_spp_start(name == mp_const_none ? NULL : mp_obj_str_get_str(name), (size_t)rxbuf));
+        // The server comes up a moment later; wait for it so channel is set.
+        mp_uint_t start = mp_hal_ticks_ms();
+        btc_spp_status_t st;
+        do {
+            mp_event_wait_ms(10);
+            btc_spp_status(&st);
+        } while (!st.listening && !st.connected && mp_hal_ticks_ms() - start < 1000);
     }
     ser_timeout = args[ARG_timeout].u_int;
     return MP_OBJ_FROM_PTR(mp_obj_malloc(ser_obj_t, type));

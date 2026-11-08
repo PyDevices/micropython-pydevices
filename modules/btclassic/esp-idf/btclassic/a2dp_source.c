@@ -482,10 +482,9 @@ static uint32_t write_room(void) {
     if (r->buf == NULL) {
         return 0;
     }
+    // A restart waits for the reader, which drops what's there when the
+    // stream starts again; until then the ring stays full and writes wait.
     uint32_t used = __atomic_load_n(&r->write_pos, __ATOMIC_ACQUIRE) - __atomic_load_n(&r->read_pos, __ATOMIC_ACQUIRE);
-    if (r->reset) {
-        used = 0;   // the reader starts over from what's written next
-    }
     uint32_t cap = r->limit / 2 + r->limit / 16;
     return used < cap ? cap - used : 0;
 }
