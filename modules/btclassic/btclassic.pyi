@@ -481,6 +481,11 @@ class HandsFree:
         at `sample_rate`, scaled by `speaker_gain`. Never waits: silence
         fills whatever the call can't, and all of it while `audio` is False.
 
+        Read a block when your output has room for one, or by the clock at
+        `sample_rate`, never just because the call has data: a reader that
+        runs ahead empties the buffer, which then refills to half before
+        playing on and repeats frames while it is low.
+
         Returns:
             How many frames came from the call.
 
@@ -1141,7 +1146,8 @@ class AudioGateway:
         """Keypad digits the headset sent since the last call."""
     def readinto(self, buf: bytearray | memoryview) -> int:
         """Fill `buf` with the headset's microphone, 16-bit, `channels` per
-        frame. Returns frames; silence fills what hasn't arrived."""
+        frame. Returns frames; silence fills what hasn't arrived. Read at
+        your output's pace, as with `HandsFree.readinto`."""
     def write(self, buf: bytes | bytearray | memoryview) -> int:
         """Queue 16-bit mono for the headset's speaker. Returns the bytes
         taken, fewer when the buffer is full."""
