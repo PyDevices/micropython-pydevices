@@ -850,7 +850,8 @@ class HIDHost:
     ids: tuple[int, int, int] | None
     """The device's (vendor, product, version) from its service record,
     once connected: what tells one gamepad from another, to map its
-    buttons. None before."""
+    buttons. None before, or when the device publishes no Device ID
+    record."""
     INPUT: int
     OUTPUT: int
     FEATURE: int

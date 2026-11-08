@@ -824,7 +824,9 @@ static void hidh_cb(esp_hidh_cb_event_t event, esp_hidh_cb_param_t *param) {
                 h.vendor = param->dscp.vendor_id;
                 h.product = param->dscp.product_id;
                 h.version = param->dscp.version;
-                h.have_ids = true;
+                // Vendor 0xffff is what the stack reports for a device with
+                // no Device ID record.
+                h.have_ids = param->dscp.vendor_id != 0xffff;
                 ESP_LOGI(TAG, "hid: descriptor %u bytes, vendor %04x product %04x", (unsigned)n,
                     param->dscp.vendor_id, param->dscp.product_id);
             }
