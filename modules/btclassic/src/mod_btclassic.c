@@ -16,6 +16,7 @@
 #include "py/mperrno.h"
 #include "py/obj.h"
 #include "py/objstr.h"
+#include "py/gc.h"
 #include "py/runtime.h"
 
 #if MICROPY_PY_NETWORK
@@ -576,12 +577,20 @@ static mp_obj_t sbc_pick(uint8_t bits, int v8, int v4, int v2, int v1) {
     return maybe_int(v);
 }
 
-// AudioSink(bt, *, buffer_ms=500, reconnect=True)
+// The sink's default buffer: 500 ms on a board with megabytes of heap
+// (PSRAM), 250 ms otherwise, where 500 ms of 48 kHz stereo is 96 KB.
+static mp_int_t sink_default_ms(void) {
+    gc_info_t info;
+    gc_info(&info);
+    return info.total > 1024 * 1024 ? 500 : 250;
+}
+
+// AudioSink(bt, *, buffer_ms=None, reconnect=True)
 static mp_obj_t sink_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
     enum { ARG_bt, ARG_buffer_ms, ARG_reconnect };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_bt, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
-        { MP_QSTR_buffer_ms, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 500} },
+        { MP_QSTR_buffer_ms, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
         { MP_QSTR_reconnect, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
@@ -593,7 +602,8 @@ static mp_obj_t sink_make_new(const mp_obj_type_t *type, size_t n_args, size_t n
             mp_raise_msg(&mp_type_OSError,
                 MP_ERROR_TEXT("btclassic: an AudioSource is running; deinit() it first (one A2DP role at a time)"));
         }
-        mp_int_t ms = args[ARG_buffer_ms].u_int;
+        mp_obj_t ms_in = args[ARG_buffer_ms].u_obj;
+        mp_int_t ms = ms_in == mp_const_none ? sink_default_ms() : mp_obj_get_int(ms_in);
         if (ms < 50 || ms > 5000) {
             mp_raise_ValueError(MP_ERROR_TEXT("buffer_ms must be 50 to 5000"));
         }
