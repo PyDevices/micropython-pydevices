@@ -21,6 +21,18 @@ void app_main(void) {
     btaudio_levels(&l, &r);
     btaudio_changes();
     btaudio_command(BTAUDIO_CMD_PLAY);
+    btaudio_key(0x49, 2);
+    btaudio_set_player(2, 1);
+    btaudio_refresh();
+    uint8_t cover[64];
+    btaudio_cover(cover, btaudio_cover_size() < sizeof(cover) ? btaudio_cover_size() : sizeof(cover));
+    btaudio_answer();
+    btaudio_hangup();
+    btaudio_dial(NULL);
+    btaudio_voice(false);
+    btaudio_dtmf('1');
+    int16_t mic[32] = {0};
+    btaudio_write_mic(mic, 32);
     btaudio_set_volume(64);
     btaudio_disconnect();
     btaudio_started();

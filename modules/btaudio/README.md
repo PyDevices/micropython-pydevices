@@ -3,7 +3,10 @@
 `import btaudio` makes the board a Bluetooth speaker's receiving half. Your
 phone or computer lists the board under its hostname, pairs with it without a
 PIN, and plays to it. Your program reads the decoded audio into any PCM output,
-shows what's playing, and sends play, pause and skip back.
+shows everything the phone says about what's playing, cover art included, and
+drives the player. It also follows the phone itself: battery, signal, carrier
+and calls, which it can answer and end, with the call's audio heard on the
+board and its microphone sent back.
 
 ```python
 import board_peripherals
@@ -63,28 +66,55 @@ buffer near half full by dropping or repeating one frame now and then.
 | `connected`, `streaming`, `playing` | A sender is connected; audio is flowing; the sender says it is playing. |
 | `sample_rate` | The stream's rate in Hz, 0 before the first stream. |
 | `volume` | 0 to 127, shared with the sender's slider: set it here and the slider moves. |
-| `title`, `artist`, `album` | What's playing, or `""` if the sender hasn't said. |
-| `peer` | The sender's Bluetooth address, `""` with none connected. |
+| `status` | `"playing"`, `"paused"`, `"stopped"`, `"seeking forward"`, `"seeking back"` or `"error"`. |
+| `title`, `artist`, `album`, `genre` | What's playing, or `""` if the sender hasn't said. |
+| `track_number`, `track_count` | Its place on the album, and the album's length. |
+| `duration`, `position` | In milliseconds. `position` moves on between the sender's reports, so read it as often as you redraw. |
+| `cover` | The cover art as a 200 by 200 JPEG, or `None`. |
+| `peer`, `peer_name` | The sender's Bluetooth address and device name. |
+
+A value the sender hasn't reported reads `None`, and not every sender reports
+everything.
 
 `changes()` returns a bit for each of `CONNECTION`, `STREAM`, `FORMAT`,
-`TRACK`, `PLAYING` and `VOLUME` that changed since the last call. `levels()`
-returns the loudest left and right sample since the last call (0 to 32767),
-for a meter. `stats()` returns the buffer's counters.
+`TRACK`, `PLAYING`, `VOLUME`, `POSITION`, `PEER`, `COVER`, `PHONE` and `CALL`
+that changed since the last call. `levels()` returns the loudest left and
+right sample since the last call (0 to 32767), for a meter. `stats()` returns
+the buffer's counters.
 
-`play()`, `pause()`, `next()` and `previous()` drive the sender.
-`disconnect()` drops it, and `close()` shuts Bluetooth down.
+`play()`, `pause()`, `stop()`, `next()` and `previous()` drive the sender.
+`seek(1)` holds fast forward and `seek(-1)` rewind until `seek(0)`.
+`key(code)` sends any other AVRCP key, such as `btaudio.KEY_MUTE`.
+`setting("repeat", "all")` and its kin (`equalizer`, `shuffle`, `scan`) ask
+the player to change mode; many ignore it, and none can be read back.
+`disconnect()` drops the sender, and `close()` shuts Bluetooth down.
+
+`link()` returns the connection as a dict: the sender's name, its signal and
+battery, the codec and its settings, and the delay reported to the sender.
+`phone()` returns the phone's side over the hands-free link: battery,
+signal, carrier, roaming, and the call's state and number. `answer()`,
+`hangup()`, `dial()`, `voice()` and `dtmf()` act on calls.
+
+While a call's audio is up, `call_audio` is True, `FORMAT` changes and
+`sample_rate` becomes the call's (8000, or 16000 for wideband). `readinto()`
+then returns the phone's voice instead of music, so a player hears calls
+without a line of its own, once it reopens its output at the new rate.
+`write(buf)` sends the microphone back, 16-bit mono at that rate. A call
+keeps 200 ms in the buffer rather than half of `buffer_ms`, so the
+conversation doesn't lag.
 
 The type stub, [`btaudio.pyi`](btaudio.pyi), has the same in full.
 
 ## How it's built
 
 [`esp-idf/btaudio`](esp-idf/btaudio) is the C that does the work, with no
-MicroPython in it: A2DP sink, AVRCP and the buffer, on the public Bluedroid
-API. [`src/mod_btaudio.c`](src/mod_btaudio.c) wraps it, and
+MicroPython in it: A2DP sink, AVRCP with cover art, the HFP hands-free
+client with call audio over HCI (Bluedroid codes CVSD and mSBC) and the
+buffer, on the public Bluedroid API. [`src/mod_btaudio.c`](src/mod_btaudio.c) wraps it, and
 [`micropython.cmake`](micropython.cmake) compiles both as an ordinary user C
 module, so a stock MicroPython esp32 build takes it with `USER_C_MODULES`.
 Two settings go with it: [`sdkconfig.esp32`](sdkconfig.esp32) in the board's
-`SDKCONFIG_DEFAULTS` turns Bluedroid, A2DP and AVRCP on, and
+`SDKCONFIG_DEFAULTS` turns Bluedroid, A2DP, AVRCP cover art and HFP on, and
 `micropython.cmake` turns the `bluetooth` module off itself. `build_mp.py`
 does the first for you.
 
