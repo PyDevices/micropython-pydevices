@@ -510,8 +510,8 @@ class HandsFree:
         since the last call, which clears them."""
     def stats(self) -> dict[str, int]:
         """Counters for the call's buffer, as `AudioSink.stats` has them.
-        Also `sent`, the microphone frames `uplink`
-        queued for the phone, and `unsent`, those the queue had no room
+        Also `sent`, the microphone frames `uplink` or `write` queued for
+        the phone during a call, and `unsent`, those the queue had no room
         for."""
     def answer(self) -> None:
         """Answer the incoming call."""

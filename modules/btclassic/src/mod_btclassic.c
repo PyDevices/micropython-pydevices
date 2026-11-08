@@ -1003,7 +1003,17 @@ static mp_obj_t hf_write(mp_obj_t self_in, mp_obj_t buf_in) {
     hf_check();
     mp_buffer_info_t buf;
     mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_READ);
-    return MP_OBJ_NEW_SMALL_INT(btc_hf_write((const int16_t *)buf.buf, buf.len / 2) * 2);
+    size_t frames = buf.len / 2;
+    size_t took = btc_hf_write((const int16_t *)buf.buf, frames);
+    // stats() counts what write() queued as well as what uplink() did; with
+    // no call to send it to, nothing is counted, as with uplink().
+    btc_hf_status_t st;
+    btc_hf_status(&st);
+    if (st.audio) {
+        uplink_sent += took;
+        uplink_lost += frames - took;
+    }
+    return MP_OBJ_NEW_SMALL_INT(took * 2);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(hf_write_obj, hf_write);
 
