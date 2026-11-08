@@ -728,7 +728,8 @@ class HIDDevice:
         ids: (vendor, product) or (vendor, product, version), published
             in a Device ID record so a host can tell which product this
             is, as it does a USB device by its IDs. The vendor is a USB
-            vendor ID. None publishes no record.
+            vendor ID. None publishes no record. A host that has already
+            paired with the board may keep the IDs it learned then.
     """
     KEYBOARD: bytes
     """A keyboard with media keys: report IDs 1 and 3."""
@@ -798,7 +799,8 @@ class HIDDevice:
         """Give a feature report its value, report ID first when the
         descriptor has IDs: a setting the host reads when it asks, such as
         a firmware version or a sensitivity. Up to four IDs. The host can
-        set one too; that raises `HID`, and `feature` reads it."""
+        change one you have set; that raises `HID`, and `feature` reads it.
+        The host can't add an ID you haven't set."""
     def feature(self, report_id: int = 0) -> bytes | None:
         """A feature report as it stands, ID first when it has one, or None
         if neither you nor the host has set it."""
@@ -875,10 +877,12 @@ class HIDHost:
         Raises:
             OSError: ETIMEDOUT after timeout ms, or the device refused.
         """
-    def set_report(self, report: bytes, type: int = 3) -> None:
+    def set_report(self, report: bytes, type: int = 3, *, timeout: int = 1000) -> None:
         """Set one report on the device, report ID first when the
         descriptor has IDs: a `FEATURE` report by default, or an `OUTPUT`
-        report sent the slower, acknowledged way."""
+        report sent the slower, acknowledged way. Waits up to timeout
+        milliseconds for the device to accept it: OSError if it refuses,
+        ETIMEDOUT if it doesn't answer."""
     def decode(self, report: bytes) -> tuple | None:
         """Take an input report apart by what its descriptor says each
         field means, so any keyboard, mouse, gamepad or media remote reads

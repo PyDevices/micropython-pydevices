@@ -456,8 +456,12 @@ int btc_hid_host_get_report(uint8_t type, uint8_t report_id);
 // hasn't come, or a negative BTC_ERR_* (BTC_ERR_FAIL: the device refused).
 int btc_hid_host_got_report(uint8_t *dst, size_t size);
 // Set one report over the control channel, report ID first when the
-// descriptor has IDs. Returns once the request is sent.
+// descriptor has IDs. Returns once the request is sent; it shares the one
+// request at a time with btc_hid_host_get_report().
 int btc_hid_host_set_report(uint8_t type, const uint8_t *report, size_t len);
+// The device's answer to the set: 1 accepted, 0 while it hasn't come, or a
+// negative BTC_ERR_* (BTC_ERR_FAIL: the device refused).
+int btc_hid_host_set_done(void);
 int btc_hid_disconnect(void);
 void btc_hid_stop(void);
 void btc_hid_status(btc_hid_status_t *out);

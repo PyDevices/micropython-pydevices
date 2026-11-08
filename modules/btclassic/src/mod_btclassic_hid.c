@@ -967,19 +967,42 @@ static mp_obj_t host_get_report(size_t n_args, const mp_obj_t *pos_args, mp_map_
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(host_get_report_obj, 1, host_get_report);
 
-// set_report(report, type=FEATURE): set one report over the control
-// channel, ID first when the descriptor has IDs.
-static mp_obj_t host_set_report(size_t n_args, const mp_obj_t *args) {
+// set_report(report, type=FEATURE, *, timeout=1000): set one report over
+// the control channel, ID first when the descriptor has IDs, and wait for
+// the device to accept it.
+static mp_obj_t host_set_report(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_report, ARG_type, ARG_timeout };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_report, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_type, MP_ARG_INT, {.u_int = BTC_HID_FEATURE} },
+        { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 1000} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
     hid_check(true);
     mp_buffer_info_t r;
-    mp_get_buffer_raise(args[1], &r, MP_BUFFER_READ);
-    mp_int_t type = n_args > 2 ? mp_obj_get_int(args[2]) : BTC_HID_FEATURE;
+    mp_get_buffer_raise(args[ARG_report].u_obj, &r, MP_BUFFER_READ);
+    mp_int_t type = args[ARG_type].u_int;
     if (r.len == 0 || r.len > 128 || type < BTC_HID_INPUT || type > BTC_HID_FEATURE) {
         mp_raise_ValueError(MP_ERROR_TEXT("a report is 1 to 128 bytes; type is INPUT, OUTPUT or FEATURE"));
     }
-    return hid_done(btc_hid_host_set_report((uint8_t)type, r.buf, r.len));
+    hid_done(btc_hid_host_set_report((uint8_t)type, r.buf, r.len));
+    mp_uint_t start = mp_hal_ticks_ms();
+    for (;;) {
+        int done = btc_hid_host_set_done();
+        if (done > 0) {
+            return mp_const_none;
+        }
+        if (done < 0) {
+            hid_raise(done);
+        }
+        if (mp_hal_ticks_ms() - start >= (mp_uint_t)args[ARG_timeout].u_int) {
+            mp_raise_OSError(MP_ETIMEDOUT);
+        }
+        mp_event_wait_ms(5);
+    }
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(host_set_report_obj, 2, 3, host_set_report);
+static MP_DEFINE_CONST_FUN_OBJ_KW(host_set_report_obj, 1, host_set_report);
 
 // char(key, modifiers=0) -> str or None: what a key types on a US layout.
 static mp_obj_t host_char(size_t n_args, const mp_obj_t *args) {

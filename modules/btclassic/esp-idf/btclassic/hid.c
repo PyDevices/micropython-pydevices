@@ -91,7 +91,7 @@ static struct {
     uint16_t descriptor_len;
     bool have_ids;
     uint16_t vendor, product, version;
-    int8_t got_state;       // GET_REPORT: 0 none, 1 waiting, 2 answered, <0 error
+    int8_t got_state;       // GET or SET_REPORT: 0 none, 1 waiting, 2 answered, <0 error
     uint8_t got_len;
     uint8_t got[GOT_MAX];
 } h;
@@ -546,8 +546,11 @@ static void hidd_cb(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param) {
                 store_output(param->set_report.report_id, param->set_report.data, param->set_report.len);
                 esp_bt_hid_device_report_error(ESP_HID_PAR_HANDSHAKE_RSP_SUCCESS);
             } else if (param->set_report.report_type == ESP_HIDD_REPORT_TYPE_FEATURE) {
+                // Only a feature the program has given a value: anything else
+                // isn't one this device has.
                 BTC_LOCK();
-                bool ok = feature_put(param->set_report.report_id, param->set_report.data, param->set_report.len);
+                bool ok = feature_slot(param->set_report.report_id, false) >= 0
+                    && feature_put(param->set_report.report_id, param->set_report.data, param->set_report.len);
                 if (ok) {
                     h.changes |= BTC_CHANGED_HID;
                 }
@@ -841,6 +844,15 @@ static void hidh_cb(esp_hidh_cb_event_t event, esp_hidh_cb_param_t *param) {
             }
             BTC_UNLOCK();
             break;
+        case ESP_HIDH_SET_RPT_EVT:
+            BTC_LOCK();
+            if (h.got_state == 1) {
+                h.got_len = 0;
+                h.got_state = param->set_rpt.status == ESP_HIDH_OK ? 2 : -1;
+                h.changes |= BTC_CHANGED_HID;
+            }
+            BTC_UNLOCK();
+            break;
         case ESP_HIDH_SET_PROTO_EVT:
             if (param->set_proto.status == ESP_HIDH_OK) {
                 BTC_LOCK();
@@ -1024,11 +1036,38 @@ int btc_hid_host_set_report(uint8_t type, const uint8_t *report, size_t len) {
     if (type < BTC_HID_INPUT || type > BTC_HID_FEATURE || len == 0 || len > GOT_MAX) {
         return BTC_ERR_ARG;
     }
+    BTC_LOCK();
+    bool busy = h.got_state == 1;
+    if (!busy) {
+        h.got_state = 1;
+        h.got_len = 0;
+    }
+    BTC_UNLOCK();
+    if (busy) {
+        return BTC_ERR_STATE;
+    }
     uint8_t buf[GOT_MAX];
     memcpy(buf, report, len);
     esp_bd_addr_t a;
     memcpy(a, h.peer, 6);
-    return btc_err(esp_bt_hid_host_set_report(a, (esp_hidh_report_type_t)type, buf, len));
+    esp_err_t err = esp_bt_hid_host_set_report(a, (esp_hidh_report_type_t)type, buf, len);
+    if (err != ESP_OK) {
+        h.got_state = 0;
+    }
+    return btc_err(err);
+}
+
+int btc_hid_host_set_done(void) {
+    BTC_LOCK();
+    int state = h.got_state;
+    if (state != 1) {
+        h.got_state = 0;
+    }
+    BTC_UNLOCK();
+    if (state == 1) {
+        return h.connected ? 0 : BTC_ERR_STATE;
+    }
+    return state == 2 ? 1 : BTC_ERR_FAIL;
 }
 
 size_t btc_hid_host_descriptor(uint8_t *dst, size_t size) {
@@ -1083,6 +1122,9 @@ int btc_hid_host_got_report(uint8_t *dst, size_t size) {
     return BTC_ERR_UNSUPPORTED;
 }
 int btc_hid_host_set_report(uint8_t type, const uint8_t *report, size_t len) {
+    return BTC_ERR_UNSUPPORTED;
+}
+int btc_hid_host_set_done(void) {
     return BTC_ERR_UNSUPPORTED;
 }
 size_t btc_hid_host_descriptor(uint8_t *dst, size_t size) {
@@ -1204,6 +1246,9 @@ int btc_hid_host_got_report(uint8_t *dst, size_t size) {
     return BTC_ERR_UNSUPPORTED;
 }
 int btc_hid_host_set_report(uint8_t type, const uint8_t *report, size_t len) {
+    return BTC_ERR_UNSUPPORTED;
+}
+int btc_hid_host_set_done(void) {
     return BTC_ERR_UNSUPPORTED;
 }
 size_t btc_hid_host_descriptor(uint8_t *dst, size_t size) {
