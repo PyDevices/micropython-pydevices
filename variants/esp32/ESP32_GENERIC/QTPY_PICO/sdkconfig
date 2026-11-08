@@ -1,0 +1,10 @@
+# Adafruit QT Py ESP32 Pico (ESP32-PICO-V3-02, 8 MB flash, 2 MB PSRAM): flash
+# and PSRAM at 80 MHz. On a classic ESP32 they share one bus with the code the
+# Bluetooth stack runs from. At the default 40 MHz, music from a laptop to an
+# AudioSink fell about 11% behind the speaker and overran 35 times a second;
+# at 80 MHz it keeps up with no overruns.
+# The flash clock is set in the bootloader, so write it with the app.
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=n
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_SPEED_40M=n
