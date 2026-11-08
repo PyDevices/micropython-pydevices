@@ -2,8 +2,10 @@
 # SPIKE. ESP32-P4 and ESP32-S3 only; every other port and chip skips it.
 # Make ports never look here: there is no micropython.mk.
 #
-# Ours: components/vision_deps (the ESP-IDF components it needs) and
-# src/vision_preview_none.c (preview without esp-vision's USB multiplexer).
+# Ours: components/vision_deps (the ESP-IDF components it needs),
+# src/vision_preview_none.c (preview without esp-vision's USB multiplexer),
+# src/vision_espdl_face.cpp (espdl.HumanFaceDetect) and esp-vision-patches/ (two small
+# changes to esp-vision's py_espdl.cpp, applied to a copy in the build tree).
 # Everything else is esp-vision's file as it is, imlib (OpenMV's, MIT)
 # included: compiled here, in MicroPython's own target, because it includes
 # MicroPython's generated headers, and esp-vision's components/imlib
@@ -61,9 +63,32 @@ if(ESP_PLATFORM AND (IDF_TARGET STREQUAL "esp32p4" OR IDF_TARGET STREQUAL "esp32
         list(APPEND _libs idf::espressif__esp_h264)
     endif()
 
-    # espdl: ESP-DL inference, with the model classes esp-vision ships.
+    # espdl: ESP-DL inference, with the model classes esp-vision ships. Its
+    # file gets our patches (esp-vision-patches/, in order) as a copy in the build
+    # tree, so the pinned checkout, which other trees may share, stays as it
+    # is: inference without the GIL, and HumanFaceDetect from
+    # src/vision_espdl_face.cpp in the module's table.
     idf_component_get_property(_dl espressif__esp-dl COMPONENT_DIR)
-    list(APPEND _src ${EV}/modules/py_espdl.cpp)
+    set(_espdl_dir ${CMAKE_BINARY_DIR}/vision)
+    set(_espdl ${_espdl_dir}/py_espdl.cpp)
+    file(MAKE_DIRECTORY ${_espdl_dir})
+    file(GLOB _espdl_patches ${CMAKE_CURRENT_LIST_DIR}/esp-vision-patches/*.patch)
+    list(SORT _espdl_patches)
+    configure_file(${EV}/modules/py_espdl.cpp ${_espdl}.new COPYONLY)
+    foreach(_p ${_espdl_patches})
+        execute_process(
+            COMMAND patch --quiet --forward --no-backup-if-mismatch --reject-file=- ${_espdl}.new ${_p}
+            RESULT_VARIABLE _rc)
+        if(NOT _rc EQUAL 0)
+            message(FATAL_ERROR "vision: ${_p} does not apply to esp-vision's py_espdl.cpp")
+        endif()
+    endforeach()
+    # Only a changed result touches the copy, so a reconfigure doesn't
+    # recompile it.
+    execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_espdl}.new ${_espdl})
+    file(REMOVE ${_espdl}.new)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_espdl_patches})
+    list(APPEND _src ${_espdl} ${CMAKE_CURRENT_LIST_DIR}/src/vision_espdl_face.cpp)
     foreach(_d dl dl/tool/include dl/tensor/include dl/base dl/base/isa dl/math/include
             dl/model/include dl/module/include fbs_loader/include vision/detect vision/image
             vision/image/isa vision/recognition vision/classification audio/common

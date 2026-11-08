@@ -78,6 +78,38 @@ These ran on an ESP32-P4 board, each with an example. The arena is what
 
 Each example's docstring says where to download its model.
 
+## Detect in a thread
+
+`espdl` lets go of the interpreter while a model runs, so detection on a
+`_thread` leaves the main thread free: a display, a UI or a recording loop
+keeps running through each `detect()`, `classify()` or `predict()`. Only the
+image preparation before the model and the results after it hold the
+interpreter. Use each model object from one thread at a time, and don't call
+its `deinit()` while it is detecting.
+[`espdl_thread.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/vision/examples/espdl_thread.py)
+detects on a thread and measures the main loop's longest pause meanwhile.
+
+## Faces with landmarks
+
+`espdl.HumanFaceDetect(msr_path, mnp_path, *, score=0.5, nms=0.5, mnp_score=0.5, mnp_nms=0.5)`
+runs ESP-DL's two-stage face detector: MSR finds candidates in the whole
+picture, then MNP looks at each one closely and places five key points.
+`detect(img)` takes an RGB565 `image.Image` and returns a list of
+`(x, y, w, h, score, keypoints)`, where `keypoints` is ten ints, five (x, y)
+pairs in ESP-DL's order: left eye, left mouth corner, nose, right eye, right
+mouth corner. `set_thresholds()` takes the same four keywords as the
+constructor, and the whole detection runs without the interpreter's lock.
+
+The two model files come from ESP-DL's
+[`models/human_face_detect`](https://github.com/espressif/esp-dl/tree/master/models/human_face_detect),
+in its `models/p4` or `models/s3` folder: `human_face_detect_msr_s8_v1.espdl`
+and `human_face_detect_mnp_s8_v1.espdl`. They are MIT-licensed, by Espressif;
+the firmware doesn't carry them, so copy them to the board's filesystem and pass
+their paths. Release 0.5.0 of the `espressif/human_face_detect` component is
+the one for the ESP-DL this firmware is built with.
+[`espdl_face_landmarks.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/vision/examples/espdl_face_landmarks.py)
+marks the faces in a photo.
+
 ## Run long scripts as `main.py`
 
 An mpftp `exec` that outlasts mpftp's wait resets the board over USB
