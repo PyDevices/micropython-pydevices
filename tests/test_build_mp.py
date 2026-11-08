@@ -78,6 +78,34 @@ class OffPin(unittest.TestCase):
         self.assertIsNone(build_mp.off_pin("pydevices", self.repo, self.commits[0]))
 
 
+class Esp32Speed(unittest.TestCase):
+    """A build that leaves flash or PSRAM below 80 MHz says so after it."""
+
+    def note(self, sdk):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            build_mp.esp32_speed_note(sdk)
+        return out.getvalue()
+
+    def test_40mhz_flash_and_psram_are_named(self):
+        sdk = "CONFIG_ESPTOOLPY_FLASHFREQ_40M=y\nCONFIG_SPIRAM=y\nCONFIG_SPIRAM_SPEED_40M=y\n"
+        self.assertIn("flash at 40 MHz and PSRAM at 40 MHz", self.note(sdk))
+
+    def test_80mhz_is_quiet(self):
+        sdk = "CONFIG_ESPTOOLPY_FLASHFREQ_80M=y\nCONFIG_SPIRAM=y\nCONFIG_SPIRAM_SPEED_80M=y\n"
+        self.assertEqual(self.note(sdk), "")
+
+    def test_psram_speed_ignored_without_psram(self):
+        sdk = "CONFIG_ESPTOOLPY_FLASHFREQ_80M=y\n# CONFIG_SPIRAM is not set\nCONFIG_SPIRAM_SPEED_40M=y\n"
+        self.assertEqual(self.note(sdk), "")
+
+    def test_slow_flash_alone(self):
+        sdk = "CONFIG_ESPTOOLPY_FLASHFREQ_40M=y\n"
+        out = self.note(sdk)
+        self.assertIn("flash at 40 MHz.", out)
+        self.assertNotIn("PSRAM at 40", out)
+
+
 class ModulesMoved(unittest.TestCase):
     def test_nothing_moved(self):
         now = {"pydevices": row(), "displayif": row(B)}
