@@ -175,7 +175,14 @@ static uint32_t auto_class(void) {
     if (p & BTC_PROFILE_HF) {
         service |= ESP_BT_COD_SRVC_AUDIO | ESP_BT_COD_SRVC_TELEPHONY;
     }
-    if (p & (BTC_PROFILE_SINK | BTC_PROFILE_SOURCE | BTC_PROFILE_HF)) {
+    if (p & BTC_PROFILE_AG) {
+        service |= ESP_BT_COD_SRVC_AUDIO | ESP_BT_COD_SRVC_TELEPHONY;
+    }
+    if (p & BTC_PROFILE_AG) {
+        // The board is the phone: headsets and car kits look for one.
+        major = ESP_BT_COD_MAJOR_DEV_PHONE;
+        minor = 0x03;                            // smartphone
+    } else if (p & (BTC_PROFILE_SINK | BTC_PROFILE_SOURCE | BTC_PROFILE_HF)) {
         // Audio/Video, even with a keyboard: a computer offers audio by it.
         major = ESP_BT_COD_MAJOR_DEV_AV;
         minor = (p & BTC_PROFILE_HF) ? 0x02      // hands-free
@@ -291,6 +298,8 @@ void btc_radio_stop(void) {
     if (!r.on) {
         return;
     }
+    btc_pb_stop();
+    btc_ag_stop();
     btc_hf_stop();
     btc_sink_stop();
     btc_source_stop();
