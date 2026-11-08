@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 00:00:00 -0500
+Subject: [PATCH] rp2: Let a board or user C module name the BTstack config.
+
+extmod/btstack already takes its config from whatever header
+MICROPY_BLUETOOTH_BTSTACK_CONFIG_FILE names, but the rp2 port sets it
+unconditionally to btstack_inc/btstack_config.h, which leaves Bluetooth
+Classic off with no way to turn it on short of editing the port.
+
+Keep that header as the default and use the CMake variable of the same name
+when a board's mpconfigboard.cmake or a user C module's micropython.cmake sets
+it first.
+
+diff --git a/ports/rp2/CMakeLists.txt b/ports/rp2/CMakeLists.txt
+--- a/ports/rp2/CMakeLists.txt
++++ b/ports/rp2/CMakeLists.txt
+@@ -377,9 +377,15 @@
+     include(${MICROPY_DIR}/extmod/btstack/btstack.cmake)
+     target_link_libraries(${MICROPY_TARGET} micropy_extmod_btstack)
+ 
++    # A board or user C module may name its own BTstack config header, for
++    # example to enable Bluetooth Classic.
++    if(NOT MICROPY_BLUETOOTH_BTSTACK_CONFIG_FILE)
++        set(MICROPY_BLUETOOTH_BTSTACK_CONFIG_FILE "btstack_inc/btstack_config.h")
++    endif()
++
+     target_compile_definitions(${MICROPY_TARGET} PRIVATE
+         MICROPY_BLUETOOTH_BTSTACK=1
+-        "MICROPY_BLUETOOTH_BTSTACK_CONFIG_FILE=\"btstack_inc/btstack_config.h\""
++        "MICROPY_BLUETOOTH_BTSTACK_CONFIG_FILE=\"${MICROPY_BLUETOOTH_BTSTACK_CONFIG_FILE}\""
+     )
+ 
+     # For modbluetooth_btstack.c includes
