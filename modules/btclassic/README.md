@@ -23,15 +23,16 @@ while True:
     if speaker.space() >= len(buf):         # the speaker sets the pace
         music.readinto(buf)                 # silence until audio arrives
         speaker.write(buf)
-    if music.changes() & btclassic.TRACK:
+    if music.changes() & btclassic.TRACK and music.title:
         print(music.title, "-", music.artist)
 ```
 
-Pair a phone, play a song, and the board prints its title and artist each
-time the track changes:
+Pair a phone or computer and play, and the board prints the title and
+artist each time the track changes. Playing a tagged test file from a
+Windows PC:
 
 ```text
-XXOUTPUTXX
+Bench Tone A - Test Signals
 ```
 
 Phones send 44.1 kHz almost always. A program that should follow any rate
