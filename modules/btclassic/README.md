@@ -74,6 +74,48 @@ board is its audio device, and for a voice or video chat app. While
 `HandsFree.write()`. The type stub, [`btclassic.pyi`](btclassic.pyi), has
 every property and method.
 
+## Let the audio pump play it
+
+In a firmware with audiodsp, `AudioSink` and `HandsFree` are audiosamples,
+like a synth or an MP3 decoder. Hand one to a board's `audio_out` and the
+audio pump pulls it in C on its own task: a garbage collection, a cover
+decoding or a slow redraw in your program can't make the music stutter.
+
+```python
+music = btclassic.AudioSink(bt)
+while not music.sample_rate:                # until the first stream
+    time.sleep_ms(100)
+speaker = board_peripherals.audio_out(AudioFormat(music.sample_rate, 2, 16))
+speaker.play(music)                         # nothing to do in the loop now
+```
+
+It goes into a `Mixer` beside anything else at the same rate, too. For a
+call, play the `HandsFree` once `audio` is True, at its `sample_rate`, and
+hand `HandsFree.uplink()` the board's open `pcm_in`: the pump's pull then
+sends the microphone to the phone as well. A profile is read one way or the
+other, by the pump or with `readinto()`, not both.
+
+If the phone's caller hears your microphone break up while the board is busy
+(redrawing, decoding a cover, collecting garbage), raise the PSRAM and flash
+clock to 80 MHz. On a classic ESP32, PSRAM and flash share one bus, and the
+Bluetooth stack on the other core waits on it: at the default 40 MHz a busy
+program holds it long enough to lose call audio. On an ESP32 Audio Kit
+(ESP32-A1S module) with the display redrawing through a call, 15 s of
+microphone tone had 8 or 9 dropouts at 40 MHz, and none in 13 calls at
+80 MHz. If your module's PSRAM is rated for 80 MHz, add these to the board's
+sdkconfig, and write the bootloader as well as the app, because the flash
+clock is set in the bootloader:
+
+```text
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_SPIRAM_SPEED_80M=y
+```
+
+On the unix port the module builds on a loopback backend with no radio, so
+these paths have desktop tests: [`tests/host_probe.py`](tests/host_probe.py)
+plays music and a call through the pump while the interpreter collects
+garbage and stalls.
+
 ## Before you start
 
 Wi-Fi and Bluetooth share the ESP32's one radio. With Wi-Fi connected, audio
@@ -101,8 +143,9 @@ controller with cover art, the HFP hands-free unit with call audio over HCI
 (Bluedroid codes CVSD and mSBC), and the audio ring they play through. They
 sit behind one header, [`btclassic.h`](esp-idf/btclassic/include/btclassic.h),
 which another Bluetooth host could implement as well.
-[`src/mod_btclassic.c`](src/mod_btclassic.c) wraps that header and nothing
-else, and [`micropython.cmake`](micropython.cmake) compiles both as an
+[`src/mod_btclassic.c`](src/mod_btclassic.c) wraps that header, and makes
+the two profiles audiosamples when audiodsp is in the build.
+[`micropython.cmake`](micropython.cmake) compiles both as an
 ordinary user C module, so a stock MicroPython esp32 build takes it with
 `USER_C_MODULES`. Two settings go with it: [`sdkconfig.esp32`](sdkconfig.esp32)
 in the board's `SDKCONFIG_DEFAULTS` turns Bluedroid, A2DP, AVRCP cover art, HID and
