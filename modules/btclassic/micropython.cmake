@@ -65,4 +65,19 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
         MICROPY_PY_BLUETOOTH_RINGBUF_SIZE=1024)
     # Through MICROPY_DEF_BOARD, so the qstr scan sees the HID entries too.
     list(APPEND MICROPY_DEF_BOARD BTC_HAS_HID=1)
+elseif(MICROPY_BLUETOOTH_BTSTACK)
+    # Ports that build BTstack for the `bluetooth` module (rp2 boards with a
+    # CYW43 radio): the BTstack backend in btstack/ turns Classic on in the
+    # same stack, so BLE stays.
+    include(${CMAKE_CURRENT_LIST_DIR}/btstack/btstack.cmake)
+    add_library(usermod_btclassic INTERFACE)
+    target_sources(usermod_btclassic INTERFACE
+        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic.c
+        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_source.c
+        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_serial.c
+        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_hid.c)
+    # Through MICROPY_DEF_BOARD, so the qstr scan sees the HID entries too.
+    list(APPEND MICROPY_DEF_BOARD BTC_HAS_HID=1)
+    target_link_libraries(usermod_btclassic INTERFACE usermod_btclassic_btstack)
+    target_link_libraries(usermod INTERFACE usermod_btclassic)
 endif()

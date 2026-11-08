@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 00:00:00 -0500
+Subject: [PATCH] hfp: leave SCO requests alone with ENABLE_HFP_DECLINE_SCO
+
+Not from upstream. The CYW43439's Bluetooth firmware on Pico W boards
+accepts a synchronous connection and never completes it, and the ACL
+link to the phone then drops with a supervision timeout
+(raspberrypi/pico-sdk#1461). HFP answers a SCO or eSCO request from its
+HCI event handler, ahead of the host's connection filter, so a filter
+alone can't decline it. With ENABLE_HFP_DECLINE_SCO, HFP leaves the
+request to the filter, and the call's audio stays on the phone.
+
+--- a/src/classic/hfp.c
++++ b/src/classic/hfp.c
+@@ -875,6 +875,10 @@
+             switch(hci_event_connection_request_get_link_type(packet)){
+                 case 0: //  SCO
+                 case 2: // eSCO
++#ifdef ENABLE_HFP_DECLINE_SCO
++                    // the controller can't carry SCO: leave the request to the connection filter, which declines it
++                    break;
++#endif
+                     hci_event_connection_request_get_bd_addr(packet, event_addr);
+                     hfp_connection = get_hfp_connection_context_for_bd_addr(event_addr, local_role);
+                     if (!hfp_connection) break;

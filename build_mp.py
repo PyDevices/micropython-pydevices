@@ -1118,11 +1118,12 @@ TINYUSB_PATCHES = REPO / "patches" / "tinyusb"
 
 
 def make_submodules(shell, make, mp):
-    """A make port's `make submodules`, with patches/lib-tinyusb/ taken off
-    lib/tinyusb before it and put back on after."""
-    apply_patches.unprepare_tinyusb(mp)
+    """A make port's `make submodules`, with patches/lib-tinyusb/ and
+    patches/lib-btstack/ taken off their submodules before it and put back
+    on after."""
+    apply_patches.unprepare_submodules(mp)
     shell(make + ["submodules"])
-    apply_patches.prepare_tinyusb(mp)
+    apply_patches.prepare_submodules(mp)
 
 
 def tinyusb_component(mp, chip):

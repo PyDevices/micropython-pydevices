@@ -1,0 +1,26 @@
+From bcaa0699e2cfb5b7798a9f3862d72678f69016dd Mon Sep 17 00:00:00 2001
+From: Matthias Ringwald <matthias@ringwald.ch>
+Date: Wed, 27 Sep 2023 15:43:53 +0200
+Subject: [PATCH] hid_host: fix send protocol
+
+Backported to BTstack v1.5.6.2, the version MicroPython carries. A host
+connecting in report mode with fallback to boot sent SET_PROTOCOL with that
+internal mode's value, 2, as its parameter, which is neither boot (0) nor
+report (1). A device that ignores the bad request never answers, so the
+host waits on the control channel and never opens the interrupt channel.
+
+diff --git a/src/classic/hid_host.c b/src/classic/hid_host.c
+--- a/src/classic/hid_host.c
++++ b/src/classic/hid_host.c
+@@ -931,7 +931,8 @@
+                             case HID_HOST_W4_INTERRUPT_CONNECTION_ESTABLISHED:
+                                 if (connection->set_protocol){
+                                     connection->set_protocol = false;
+-                                    uint8_t header = (HID_MESSAGE_TYPE_SET_PROTOCOL << 4) | connection->requested_protocol_mode;
++                                    uint8_t protocol_mode = connection->requested_protocol_mode == HID_PROTOCOL_MODE_BOOT ? 0 : 1;
++                                    uint8_t header = (HID_MESSAGE_TYPE_SET_PROTOCOL << 4) | protocol_mode;
+                                     uint8_t report[] = {header};
+                                     connection->w4_set_protocol_response = true;
+                                     l2cap_send(connection->control_cid, (uint8_t*) report, sizeof(report));
+-- 
+2.43.0
