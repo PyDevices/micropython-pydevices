@@ -159,6 +159,15 @@ class Bluetooth:
           default.
         - pin (str): the PIN for devices that pair the old way, 1 to 16
           characters, "0000" by default as on most speakers.
+        - device_class (int): the Class of Device, the 24 bits a computer
+          or phone uses to pick an icon and decide what to offer. By default
+          the profiles running set it: Audio/Video while a sink, source or
+          hands-free runs (with a keyboard too), Peripheral for a keyboard,
+          mouse or game controller alone, plus the Audio, Rendering,
+          Capturing and Telephony service bits those profiles give. Set an
+          int to use your own whatever runs, for example
+          `config(device_class=0x240404)` for a headset, and None to go back
+          to the default. Reading it gives the class in use.
         - mac (bytes): the board's Bluetooth address. Read only, and only
           while the radio is on.
 

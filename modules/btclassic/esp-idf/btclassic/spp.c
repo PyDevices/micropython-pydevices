@@ -236,6 +236,7 @@ int btc_spp_start(const char *name, size_t rx_bytes) {
         return btc_err(err);
     }
     p.started = true;
+    btc_radio_profile(BTC_PROFILE_SERIAL, true, 0);
     return BTC_OK;
 }
 
@@ -249,6 +250,7 @@ void btc_spp_stop(void) {
             vTaskDelay(pdMS_TO_TICKS(10));
         }
     }
+    btc_radio_profile(BTC_PROFILE_SERIAL, false, 0);
     BTC_LOCK();
     p.started = false;
     p.handle = 0;

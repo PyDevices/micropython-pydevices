@@ -26,6 +26,8 @@ void app_main(void) {
     btc_addr_t paired[4];
     btc_radio_paired(paired, 4);
     btc_radio_changes();
+    btc_radio_set_class(0);
+    btc_radio_class();
 
     // The sink.
     btc_sink_start(24576, true);
