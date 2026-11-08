@@ -851,7 +851,9 @@ class HIDHost:
     """The device's (vendor, product, version) from its service record,
     once connected: what tells one gamepad from another, to map its
     buttons. None before, or when the device publishes no Device ID
-    record."""
+    record. The board keeps what a device published when they first
+    paired, even through `unpair`: a device that changes or drops its
+    record later still shows the IDs it had then."""
     INPUT: int
     OUTPUT: int
     FEATURE: int
