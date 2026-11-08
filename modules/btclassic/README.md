@@ -118,11 +118,14 @@ static RAM, and go back when you close it:
 boards fit any one profile; on a Pico W, a sink and hands-free open together
 leave little heap for anything else.
 
-`HandsFree` on a Pico follows calls, dials, answers and hangs up, but the
-call's audio stays on the phone and `HandsFree.audio` stays False. The
-CYW43439's Bluetooth firmware never completes the audio link a call needs
+Call audio is a known limit on these boards. The CYW43439's Bluetooth
+firmware accepts the audio link a call needs but never completes it
 ([raspberrypi/pico-sdk#1461](https://github.com/raspberrypi/pico-sdk/issues/1461)),
-and the phone then drops the board altogether, so the board declines it.
+and the phone then drops the board altogether, so `HandsFree` declines the
+link and the call's audio stays on the phone. Everything else works:
+`HandsFree` follows the call, its caller and the phone's signal, battery,
+service and operator, and answers, dials, hangs up and sends tones.
+`HandsFree.audio` stays False, and `connect_audio()` raises OSError.
 
 ## How it's built
 

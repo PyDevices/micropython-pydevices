@@ -559,6 +559,9 @@ int btc_hf_set_mic_gain(int gain) {
 }
 
 int btc_hf_connect_audio(void) {
+    #ifdef ENABLE_HFP_DECLINE_SCO
+    return BTC_ERR_UNSUPPORTED;     // the controller can't carry call audio: see radio.c
+    #endif
     NEED_LINK();
     return result(hfp_hf_establish_audio_connection(acl));
 }
