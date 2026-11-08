@@ -45,3 +45,7 @@ stops at the first link with the overflow error. Name what your project uses ins
 
 A display project's set like this one builds to about 540 KB and fits with the
 Pico's default 1408 KB filesystem untouched.
+
+On a 4 MB ESP32, `audioinstruments` is the biggest of the modules, and you can
+freeze only the instruments you play:
+[Build with a few instruments](build-with-a-few-instruments.md).
