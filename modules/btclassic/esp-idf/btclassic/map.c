@@ -1087,12 +1087,32 @@ bool btc_msg_started(void) {
     return m.started;
 }
 
+// Start the notification server and wait for its SDP record.
+static int notify_server_up(void) {
+    BT_HDR *c = osi_malloc(sizeof(*c));
+    if (c == NULL) {
+        return BTC_ERR_NOMEM;
+    }
+    c->event = EV_API_NOTIFY_SERVER;
+    bta_sys_sendmsg(c);
+    for (int i = 0; i < 50 && (m.record_pending || !m.obex_server); i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return m.obex_server ? BTC_OK : BTC_ERR_FAIL;
+}
+
 int btc_msg_connect(const uint8_t *addr, int instance) {
     if (!m.started) {
         return BTC_ERR_STATE;
     }
     if (m.connected) {
         return BTC_OK;
+    }
+    // Android looks for the notification record once, as the session opens,
+    // and drops later registrations if it found none: so the record goes up
+    // first. Without it everything but notify() still works.
+    if (!m.obex_server && notify_server_up() != BTC_OK) {
+        ESP_LOGW(TAG, "messages: no notification server; notify() will fail");
     }
     btc_addr_t a;
     if (addr) {
@@ -1298,18 +1318,9 @@ int btc_msg_notify(bool on) {
         return BTC_ERR_STATE;
     }
     if (on && !m.obex_server) {
-        BT_HDR *c = osi_malloc(sizeof(*c));
-        if (c == NULL) {
-            return BTC_ERR_NOMEM;
-        }
-        c->event = EV_API_NOTIFY_SERVER;
-        bta_sys_sendmsg(c);
-        // Give the record a moment to be made before the phone looks.
-        for (int i = 0; i < 50 && (m.record_pending || !m.obex_server); i++) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-        }
-        if (!m.obex_server) {
-            return BTC_ERR_FAIL;
+        int err = notify_server_up();
+        if (err != BTC_OK) {
+            return err;
         }
     }
     req_msg_t *r = new_req(OP_REGISTER, "", NULL);
