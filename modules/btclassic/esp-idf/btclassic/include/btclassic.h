@@ -413,7 +413,9 @@ typedef struct {
 // boot protocol's keyboard (ID 1) or mouse (ID 2) layout.
 int btc_hid_device_start(const uint8_t *descriptor, size_t len, uint8_t subclass, const char *name, bool boot);
 int btc_hid_device_connect(const uint8_t *addr);      // NULL: the last host
-// Queue one input report; 1 if queued, 0 if the queue is full.
+// Queue one input report; 1 if queued, 0 if the queue is full or no host
+// is connected (a report kept for a later host would reach whatever has
+// its focus by then).
 int btc_hid_device_send(const uint8_t *report, size_t len);
 // The last output report the host set (a keyboard's LEDs), ID first.
 size_t btc_hid_device_output(uint8_t *dst, size_t size);
