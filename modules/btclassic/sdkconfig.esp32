@@ -41,7 +41,9 @@ CONFIG_BT_HID_HOST_ENABLED=y
 CONFIG_BT_HID_DEVICE_ENABLED=y
 
 # SDP records of our own: the Device ID record an HIDDevice gives a host so
-# it knows the product.
+# it knows the product, and the record where a phone sends Messages its
+# reports. Messages also finds the phone's message service through it.
 CONFIG_BT_SDP_COMMON_ENABLED=y
+
 # Phone book access (PBAP client, over OBEX): contacts and call history.
 CONFIG_BT_PBAC_ENABLED=y

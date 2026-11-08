@@ -17,3 +17,6 @@ CONFIG_BT_HFP_AUDIO_DATA_PATH_HCI=y
 
 # Phone book access (PBAP client, over OBEX): contacts and call history.
 CONFIG_BT_PBAC_ENABLED=y
+# Messages (MAP client) finds the phone's message service, and advertises
+# where the phone sends its reports, through SDP.
+CONFIG_BT_SDP_COMMON_ENABLED=y

@@ -1271,9 +1271,10 @@ extern const mp_obj_type_t btc_hid_device_type;
 extern const mp_obj_type_t btc_hid_host_type;
 #endif
 
-// PhoneBook and AudioGateway, in mod_btclassic_phone.c.
+// PhoneBook, AudioGateway and Messages, in mod_btclassic_phone.c.
 extern const mp_obj_type_t btc_phonebook_type;
 extern const mp_obj_type_t btc_gateway_type;
+extern const mp_obj_type_t btc_messages_type;
 
 // =========================================================================
 // the module
@@ -1290,6 +1291,9 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_AudioGateway), MP_ROM_PTR(&btc_gateway_type) },
     { MP_ROM_QSTR(MP_QSTR_PHONEBOOK), MP_ROM_INT(BTC_CHANGED_PHONEBOOK) },
     { MP_ROM_QSTR(MP_QSTR_REQUEST), MP_ROM_INT(BTC_CHANGED_REQUEST) },
+    { MP_ROM_QSTR(MP_QSTR_Messages), MP_ROM_PTR(&btc_messages_type) },
+    { MP_ROM_QSTR(MP_QSTR_MESSAGES), MP_ROM_INT(BTC_CHANGED_MESSAGES) },
+    { MP_ROM_QSTR(MP_QSTR_NOTIFY), MP_ROM_INT(BTC_CHANGED_NOTIFY) },
     #if BTC_HAS_HID
     { MP_ROM_QSTR(MP_QSTR_HIDDevice), MP_ROM_PTR(&btc_hid_device_type) },
     { MP_ROM_QSTR(MP_QSTR_HIDHost), MP_ROM_PTR(&btc_hid_host_type) },

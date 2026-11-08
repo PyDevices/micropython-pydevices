@@ -298,6 +298,7 @@ void btc_radio_stop(void) {
     if (!r.on) {
         return;
     }
+    btc_msg_stop();
     btc_pb_stop();
     btc_ag_stop();
     btc_hf_stop();

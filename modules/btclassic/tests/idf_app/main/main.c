@@ -156,6 +156,25 @@ void app_main(void) {
     btc_pb_disconnect();
     btc_pb_stop();
 
+    btc_msg_start(65536);
+    btc_msg_connect(NULL, -1);
+    btc_msg_folders("telecom/msg", 0, 64);
+    btc_msg_list("telecom/msg", "inbox", 0, 10, BTC_MSG_UNREAD, BTC_MSG_NO_EMAIL, 0, 32);
+    btc_msg_get("0001", false, true);
+    btc_msg_set_status("0001", BTC_MSG_STATUS_READ, true);
+    btc_msg_push("telecom/msg", "draft", bytes, sizeof(bytes), true, true);
+    btc_msg_update_inbox();
+    btc_msg_notify(true);
+    btc_msg_data(bytes, sizeof(bytes));
+    btc_msg_release();
+    btc_msg_event(bytes, sizeof(bytes));
+    btc_msg_status_t msg;
+    btc_msg_status(&msg);
+    btc_msg_changes();
+    btc_msg_started();
+    btc_msg_disconnect();
+    btc_msg_stop();
+
     btc_hf_stop();
     btc_ag_start(400);
     btc_ag_connect(NULL);
