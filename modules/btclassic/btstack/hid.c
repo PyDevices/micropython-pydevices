@@ -22,6 +22,8 @@
 #define MAX_REPORT 64
 #define HOST_DESCRIPTOR_MAX 512
 #define LAST_INPUTS 4           // input reports kept to answer GET_REPORT
+#define FEATURES 4              // feature reports, by ID
+#define GOT_MAX 128             // a GET_REPORT answer, ID first
 
 #define MINOR_KEYBOARD 0x40       // the minor device class: 0x40 keyboard, 0x80 mouse, 0x08 gamepad
 
@@ -46,6 +48,19 @@ static struct {
         uint8_t len;
         uint8_t report[MAX_REPORT];
     } last_input[LAST_INPUTS];
+    struct {
+        uint8_t len;
+        uint8_t report[MAX_REPORT];
+    } feature[FEATURES];
+    // host: one GET_REPORT or SET_REPORT at a time
+    int8_t got_state;       // 0 none, 1 waiting, 2 answered, -1 refused
+    uint8_t got_len;
+    uint8_t got[GOT_MAX];
+    uint8_t set_buf[GOT_MAX];
+    // host: the device's Device ID record
+    bool have_ids;
+    uint16_t ids[3];        // vendor, product, version
+    uint16_t ids_cid;       // the link the query is for
 } h;
 
 // The last peer, for connect() with none; kept across stop and start.
@@ -53,6 +68,9 @@ static bool have_last;
 static btc_addr_t last;
 
 static uint8_t sdp_hid[400];
+static uint8_t sdp_did[64];
+static uint16_t dev_ids[3];     // device: the Device ID record's IDs, all 0 for none
+static bool did_registered;
 #define SDP_HID_OVERHEAD 160     // the record around the descriptor, name included
 static uint8_t *descriptor;     // device: the program's, copied to the heap
 static uint16_t descriptor_len;
@@ -105,6 +123,11 @@ static void link_down(void) {
     h.connected = false;
     h.boot = false;
     h.q.head = h.q.count = 0;
+    if (h.got_state == 1) {
+        h.got_state = -1;
+    }
+    h.have_ids = false;
+    h.ids_cid = 0;
     h.changes |= BTC_CHANGED_CONNECTION;
     btc_log("hid: closed");
 }
@@ -134,8 +157,24 @@ static void keep_input(const uint8_t *report, size_t n) {
     }
 }
 
-// The host asks for a report: the last input report with that ID, or the
-// last output report, without the ID (BTstack adds it). BTstack wants the
+// The feature report kept under an ID (any, without IDs), or with `make`
+// a free slot for it; -1 for none.
+static int feature_slot(uint8_t id, bool make) {
+    int free_slot = -1;
+    for (int i = 0; i < FEATURES; i++) {
+        if (h.feature[i].len && (!has_ids || h.feature[i].report[0] == id)) {
+            return i;
+        }
+        if (free_slot < 0 && h.feature[i].len == 0) {
+            free_slot = i;
+        }
+    }
+    return make ? free_slot : -1;
+}
+
+// The host asks for a report: the last input report with that ID, the
+// last output report, or the feature report, without the ID (BTstack adds
+// it). BTstack wants the
 // size the descriptor (or the boot protocol) gives, so pad or cut to it.
 static int on_get_report(uint16_t cid, hid_report_type_t type, uint16_t report_id, int *out_size, uint8_t *out) {
     bool ids = ids_on_link();
@@ -152,6 +191,15 @@ static int on_get_report(uint16_t cid, hid_report_type_t type, uint16_t report_i
     } else if (type == HID_REPORT_TYPE_OUTPUT && h.output_len && (!ids || h.output[0] == report_id)) {
         r = h.output;
         n = h.output_len;
+    } else if (type == HID_REPORT_TYPE_FEATURE) {
+        int i = feature_slot((uint8_t)report_id, false);
+        if (i >= 0) {
+            r = h.feature[i].report;
+            n = h.feature[i].len;
+            if (!has_ids && ids) {
+                ids = false;    // kept without an ID: nothing to strip
+            }
+        }
     }
     if (r && ids) {
         r++;
@@ -227,6 +275,17 @@ static void on_device(uint8_t packet_type, uint16_t channel, uint8_t *packet, ui
 // The host sets an output report: a keyboard's LEDs.
 static void on_set_report(uint16_t cid, hid_report_type_t type, int len, uint8_t *report) {
     (void)cid;
+    if (type == HID_REPORT_TYPE_FEATURE && len > 0) {
+        // Only a feature the program has given a value. BTstack has already
+        // answered the host; a feature this device lacks is left alone.
+        int i = feature_slot(has_ids ? report[0] : 0, false);
+        if (i >= 0 && len <= MAX_REPORT) {
+            memcpy(h.feature[i].report, report, len);
+            h.feature[i].len = (uint8_t)len;
+            h.changes |= BTC_CHANGED_HID;
+        }
+        return;
+    }
     if (type != HID_REPORT_TYPE_OUTPUT || len <= 0) {
         return;
     }
@@ -289,6 +348,13 @@ int btc_hid_device_start(const uint8_t *desc, size_t len, uint8_t subclass, cons
     memset(sdp_hid, 0, sizeof(sdp_hid));
     hid_create_sdp_record(sdp_hid, sdp_create_service_record_handle(), &params);
     sdp_register_service(sdp_hid);
+    if (dev_ids[0] || dev_ids[1] || dev_ids[2]) {
+        memset(sdp_did, 0, sizeof(sdp_did));
+        device_id_create_sdp_record(sdp_did, sdp_create_service_record_handle(),
+            DEVICE_ID_VENDOR_ID_SOURCE_USB, dev_ids[0], dev_ids[1], dev_ids[2]);
+        sdp_register_service(sdp_did);
+        did_registered = true;
+    }
     hid_device_init(boot, (uint16_t)len, descriptor);
     hid_device_register_packet_handler(&on_device);
     hid_device_register_set_report_callback(&on_set_report);
@@ -344,7 +410,108 @@ size_t btc_hid_device_output(uint8_t *dst, size_t size) {
     return n;
 }
 
+int btc_hid_device_set_feature(const uint8_t *report, size_t len) {
+    if (!h.started || h.host) {
+        return BTC_ERR_STATE;
+    }
+    if (len <= (has_ids ? 1u : 0u) || len > MAX_REPORT) {
+        return BTC_ERR_ARG;
+    }
+    int i = feature_slot(has_ids ? report[0] : 0, true);
+    if (i < 0) {
+        return BTC_ERR_ARG;     // FEATURES IDs already
+    }
+    memcpy(h.feature[i].report, report, len);
+    h.feature[i].len = (uint8_t)len;
+    return BTC_OK;
+}
+
+size_t btc_hid_device_feature(uint8_t report_id, uint8_t *dst, size_t size) {
+    int i = feature_slot(report_id, false);
+    if (i < 0) {
+        return 0;
+    }
+    size_t n = h.feature[i].len < size ? h.feature[i].len : size;
+    memcpy(dst, h.feature[i].report, n);
+    return n;
+}
+
+int btc_hid_device_set_ids(uint16_t vendor, uint16_t product, uint16_t version) {
+    if (h.started && !h.host) {
+        return BTC_ERR_STATE;   // the record goes in as the device starts
+    }
+    dev_ids[0] = vendor;
+    dev_ids[1] = product;
+    dev_ids[2] = version;
+    return BTC_OK;
+}
+
 // ---- host ----
+
+// The device's Device ID record, read over SDP once the link is up and the
+// SDP client is free (the HID descriptor query uses it too).
+static uint8_t ids_attr[8];
+static btstack_context_callback_registration_t ids_reg;
+static bool ids_reg_pending;
+
+static void on_ids_query(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
+    (void)channel;
+    (void)size;
+    if (packet_type != HCI_EVENT_PACKET) {
+        return;
+    }
+    bool ours = h.connected && h.host && h.cid == h.ids_cid;
+    switch (hci_event_packet_get_type(packet)) {
+        case SDP_EVENT_QUERY_ATTRIBUTE_VALUE: {
+            uint16_t len = sdp_event_query_attribute_byte_get_attribute_length(packet);
+            uint16_t off = sdp_event_query_attribute_byte_get_data_offset(packet);
+            if (len > sizeof(ids_attr) || off >= len) {
+                break;
+            }
+            ids_attr[off] = sdp_event_query_attribute_byte_get_data(packet);
+            if (off + 1 != len || !ours) {
+                break;
+            }
+            uint16_t id = sdp_event_query_attribute_byte_get_attribute_id(packet);
+            uint16_t v;
+            if (id >= BLUETOOTH_ATTRIBUTE_VENDOR_ID && id <= BLUETOOTH_ATTRIBUTE_VERSION
+                && de_element_get_uint16(ids_attr, &v)) {
+                h.ids[id - BLUETOOTH_ATTRIBUTE_VENDOR_ID] = v;
+                if (id == BLUETOOTH_ATTRIBUTE_VENDOR_ID) {
+                    h.have_ids = v != 0xffff;
+                }
+            }
+            break;
+        }
+        case SDP_EVENT_QUERY_COMPLETE:
+            if (ours && h.have_ids) {
+                h.changes |= BTC_CHANGED_HID;
+                btc_log("hid: device id %04x:%04x v%04x", h.ids[0], h.ids[1], h.ids[2]);
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+static void ids_query_start(void *context) {
+    (void)context;
+    ids_reg_pending = false;
+    if (!h.connected || !h.host || h.cid != h.ids_cid) {
+        return;     // gone before the SDP client was free
+    }
+    sdp_client_query_uuid16(&on_ids_query, h.peer, BLUETOOTH_SERVICE_CLASS_PNP_INFORMATION);
+}
+
+static void ids_query(void) {
+    h.have_ids = false;
+    h.ids_cid = h.cid;
+    if (!ids_reg_pending) {
+        ids_reg_pending = true;
+        ids_reg.callback = &ids_query_start;
+        sdp_client_register_query_callback(&ids_reg);
+    }
+}
 
 static void on_host(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
     (void)channel;
@@ -369,9 +536,33 @@ static void on_host(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint
                 break;
             }
             link_up(packet);
+            ids_query();
             break;
         case HID_SUBEVENT_CONNECTION_CLOSED:
             link_down();
+            break;
+        case HID_SUBEVENT_GET_REPORT_RESPONSE:
+            if (h.got_state == 1) {
+                uint16_t n = hid_subevent_get_report_response_get_report_len(packet);
+                if (hid_subevent_get_report_response_get_handshake_status(packet) == HID_HANDSHAKE_PARAM_TYPE_SUCCESSFUL && n) {
+                    if (n > GOT_MAX) {
+                        n = GOT_MAX;
+                    }
+                    memcpy(h.got, hid_subevent_get_report_response_get_report(packet), n);
+                    h.got_len = (uint8_t)n;
+                    h.got_state = 2;
+                } else {
+                    h.got_state = -1;
+                }
+                h.changes |= BTC_CHANGED_HID;
+            }
+            break;
+        case HID_SUBEVENT_SET_REPORT_RESPONSE:
+            if (h.got_state == 1) {
+                h.got_len = 0;
+                h.got_state = hid_subevent_set_report_response_get_handshake_status(packet) == HID_HANDSHAKE_PARAM_TYPE_SUCCESSFUL ? 2 : -1;
+                h.changes |= BTC_CHANGED_HID;
+            }
             break;
         case HID_SUBEVENT_DESCRIPTOR_AVAILABLE:
             h.changes |= BTC_CHANGED_HID;
@@ -444,6 +635,84 @@ int btc_hid_host_send(uint8_t report_id, const uint8_t *data, size_t len) {
     return s == ERROR_CODE_SUCCESS ? BTC_OK : BTC_ERR_FAIL;
 }
 
+bool btc_hid_host_ids(uint16_t *vendor, uint16_t *product, uint16_t *version) {
+    if (!h.connected || !h.host || !h.have_ids) {
+        return false;
+    }
+    *vendor = h.ids[0];
+    *product = h.ids[1];
+    *version = h.ids[2];
+    return true;
+}
+
+static int request_result(uint8_t s) {
+    if (s == ERROR_CODE_SUCCESS) {
+        return BTC_OK;
+    }
+    h.got_state = 0;
+    return s == ERROR_CODE_COMMAND_DISALLOWED ? BTC_ERR_STATE : BTC_ERR_FAIL;
+}
+
+int btc_hid_host_get_report(uint8_t type, uint8_t report_id) {
+    if (!h.connected || !h.host) {
+        return BTC_ERR_STATE;
+    }
+    if (type < BTC_HID_INPUT || type > BTC_HID_FEATURE) {
+        return BTC_ERR_ARG;
+    }
+    if (h.got_state == 1) {
+        return BTC_ERR_STATE;
+    }
+    h.got_state = 1;
+    h.got_len = 0;
+    return request_result(hid_host_send_get_report(h.cid, (hid_report_type_t)type, report_id));
+}
+
+int btc_hid_host_got_report(uint8_t *dst, size_t size) {
+    int state = h.got_state;
+    if (state == 1) {
+        return h.connected ? 0 : BTC_ERR_STATE;
+    }
+    h.got_state = 0;
+    if (state < 0) {
+        return BTC_ERR_FAIL;
+    }
+    if (state != 2) {
+        return BTC_ERR_STATE;
+    }
+    size_t n = h.got_len < size ? h.got_len : size;
+    memcpy(dst, h.got, n);
+    return (int)n;
+}
+
+int btc_hid_host_set_report(uint8_t type, const uint8_t *report, size_t len) {
+    if (!h.connected || !h.host) {
+        return BTC_ERR_STATE;
+    }
+    if (type < BTC_HID_INPUT || type > BTC_HID_FEATURE || len == 0 || len > GOT_MAX) {
+        return BTC_ERR_ARG;
+    }
+    if (h.got_state == 1) {
+        return BTC_ERR_STATE;
+    }
+    h.got_state = 1;
+    h.got_len = 0;
+    // BTstack sends a byte before the rest as the report ID: the report's
+    // first byte, which is its ID when it has one, so it goes out as given.
+    // It sends from this buffer later, so the copy has to outlive the call.
+    memcpy(h.set_buf, report, len);
+    return request_result(hid_host_send_set_report(h.cid, (hid_report_type_t)type, h.set_buf[0], h.set_buf + 1, (uint8_t)(len - 1)));
+}
+
+int btc_hid_host_set_done(void) {
+    int state = h.got_state;
+    if (state == 1) {
+        return h.connected ? 0 : BTC_ERR_STATE;
+    }
+    h.got_state = 0;
+    return state == 2 ? 1 : BTC_ERR_FAIL;
+}
+
 size_t btc_hid_host_descriptor(uint8_t *dst, size_t size) {
     if (!h.connected || !h.host) {
         return 0;
@@ -490,6 +759,10 @@ void btc_hid_stop(void) {
     } else {
         hid_device_register_packet_handler(&ignore);
         sdp_unregister_service(big_endian_read_32(sdp_hid, 9));
+        if (did_registered) {
+            sdp_unregister_service(big_endian_read_32(sdp_did, 9));
+            did_registered = false;
+        }
         btc_radio_profile(BTC_PROFILE_HID_DEVICE, false, 0);
         btc_btstack_free(descriptor);
         descriptor = NULL;
@@ -506,6 +779,8 @@ void btc_hid_radio_stopping(void) {
 void btc_hid_radio_lost(void) {
     memset(&h, 0, sizeof(h));
     descriptor = NULL;
+    did_registered = false;
+    ids_reg_pending = false;
 }
 
 void btc_hid_status(btc_hid_status_t *out) {
