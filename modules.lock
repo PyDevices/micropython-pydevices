@@ -20,7 +20,7 @@
 # interpreter. Move the commit here to move every LVGL build, MicroPython's and
 # CircuitPython's.
 audiodsp          https://github.com/PyDevices/audiodsp.git           5f670b6b96147cb82777be977f49872a6d05f2ff
-omnipython-lvgl   https://github.com/PyDevices/omnipython-lvgl.git    2206123700ea710f62e66970b69bd61ab975dbf6
+omnipython-lvgl   https://github.com/PyDevices/omnipython-lvgl.git    73a9719b2602a53193cf9312da34b8acd224b16c
 pygraphics        https://github.com/PyDevices/pygraphics.git         f97fd2e20e73f23c2138ab52a630cf04b0a7aea1
 ulab              https://github.com/v923z/micropython-ulab.git       1d3ddd8f5228e2c7335dac71f4846e6abb0ec9f9
 omnipython-lib   https://github.com/PyDevices/pydevices.git          10b54173abc8644005f46f1e4b3ba394d4c843f5
