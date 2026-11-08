@@ -35,6 +35,12 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
     btclassic_avrcp_tg(usermod_btclassic ${BTCLASSIC_IDF}/avrcp_tg.c)
     target_link_libraries(usermod INTERFACE usermod_btclassic)
     list(APPEND MICROPY_DEF_BOARD MICROPY_BLUETOOTH_BLUEDROID=1)
+    # The backend's roles: central and the GATT client as well as the
+    # peripheral and server. Events queue for the scheduler, so the queue is
+    # bigger than upstream's 128 bytes: a discovery's results come in a burst.
+    list(APPEND MICROPY_DEF_BOARD
+        MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE=1
+        MICROPY_PY_BLUETOOTH_RINGBUF_SIZE=1024)
     # Through MICROPY_DEF_BOARD, so the qstr scan sees the HID entries too.
     list(APPEND MICROPY_DEF_BOARD BTC_HAS_HID=1)
 endif()
