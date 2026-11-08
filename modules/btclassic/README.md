@@ -53,6 +53,8 @@ per profile that takes it.
 | `Serial(bt)` | A serial port (SPP), as a stream like `machine.UART`: a computer gets a Bluetooth COM port to the board, or `connect()` calls another device's port. |
 | `HIDDevice(bt)` | The board as a keyboard, mouse or game controller (HID device): `type()`, `keyboard()`, `mouse()`, `gamepad()`, or `send()` with your own report descriptor, and the keyboard `leds` the computer sends back. |
 | `HIDHost(bt)` | The board reads a keyboard, mouse or controller (HID host): `connect()`, `read()` its reports, `decode()` them, and `send()` its output reports. |
+| `PhoneBook(bt)` | Reads a phone's contacts and call history (PBAP client): `pull()` a book as records of names, numbers and emails, `list()` and `entry()` to page through it, `size()`, and `lookup()` for the name behind a caller's number. |
+| `AudioGateway(bt)` | The board as the phone for a headset or car kit (HFP audio gateway): the `signal`, `battery` and `operator` it shows, `ring()` with a caller's number, `dial()`, the headset's answer and hang-up, and the call's audio through `readinto()` and `write()`. |
 
 Nothing calls back into Python. Each object's state is properties, and its
 `changes()` returns a bit for each kind of state that changed since you last
@@ -166,4 +168,29 @@ each input report. `decode()` turns a report into a tuple such as
 `("keyboard", modifiers, keys)` when the device uses the boot layout
 (`connect(address, boot=True)`) or is another btclassic board. A board is a
 device or a host, one at a time.
+
+## Contacts and calls
+
+```python
+import btclassic
+
+bt = btclassic.Bluetooth()
+pb = btclassic.PhoneBook(bt)
+pb.connect()                                # the phone HandsFree follows, or the first paired one
+for card in pb.pull("pb", count=5):
+    print(card["name"], card["numbers"])
+for card in pb.pull("mch", count=3):        # missed calls
+    print(card["time"], card["name"] or card["numbers"])
+print(pb.lookup("+15550100"))               # the name a call screen shows
+```
+
+The phone asks before it shares its contacts the first time; allow it
+there. `pull()` gives records as dicts, and `PhoneBook.parse()` reads a
+`.vcf` file the same way.
+
+`AudioGateway` turns it round: a headset or car kit pairs with the board as
+it would with a phone. `ring("+15550100")` rings it with that number, its
+button answers, and while `audio` is True the call's sound goes both ways
+through `write()` and `readinto()`. A board runs `HandsFree` or
+`AudioGateway`, one at a time.
 

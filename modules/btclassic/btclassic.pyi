@@ -48,8 +48,9 @@ them.
 
 CONNECTION: int
 """`AudioSink.changes`, `AudioSource.changes`, `HandsFree.changes`,
-`Serial.changes`, `HIDDevice.changes` and `HIDHost.changes` bit: the link
-came up or went down."""
+`Serial.changes`, `HIDDevice.changes`, `HIDHost.changes`,
+`PhoneBook.changes` and `AudioGateway.changes` bit: the link came up or went
+down."""
 STREAM: int
 """`AudioSink.changes` bit: audio started or stopped flowing."""
 FORMAT: int
@@ -71,13 +72,14 @@ COVER: int
 none."""
 PHONE: int
 """`HandsFree.changes` bit: the phone's battery, signal, carrier, gains or
-other hands-free state changed."""
+other hands-free state changed. `AudioGateway.changes` bit: the headset
+changed a gain, voice recognition or noise reduction."""
 CALL: int
-"""`HandsFree.changes` bit: a call started, changed state or ended, or the
-caller is known."""
+"""`HandsFree.changes` and `AudioGateway.changes` bit: a call started,
+changed state or ended, or the caller is known."""
 AUDIO: int
-"""`HandsFree.changes` bit: the call's audio came or went. `sample_rate`
-says its rate while it's up."""
+"""`HandsFree.changes` and `AudioGateway.changes` bit: the call's audio
+came or went. `sample_rate` says its rate while it's up."""
 PAIRED: int
 """`Bluetooth.changes` bit: a device paired, or a pairing was removed."""
 FOUND: int
@@ -91,6 +93,12 @@ HID: int
 """`HIDDevice.changes` and `HIDHost.changes` bit: a report came, the host
 set an output report (a keyboard's LEDs), the protocol changed, or there's
 room to send again."""
+
+PHONEBOOK: int
+"""`PhoneBook.changes` bit: a request finished, whether or not it worked."""
+REQUEST: int
+"""`AudioGateway.changes` bit: the headset dialed a number (read `dialed`)
+or sent a keypad digit (read `dtmf()`)."""
 
 HID_KEYBOARD: int
 """`HIDDevice` subclass: a keyboard."""
@@ -863,5 +871,201 @@ class HIDHost:
     def deinit(self) -> None:
         """Drop the device and stop the host. The radio stays on."""
     def __enter__(self) -> HIDHost: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
+
+
+class PhoneBook:
+    """A phone's contacts and call history (PBAP client).
+
+    `connect` opens the phone's phone book; the phone asks its owner the
+    first time, so allow access to contacts on the phone. Each request
+    then waits for the whole reply.
+
+    A book is named as the phone names it: "pb" for contacts, "ich"
+    received calls, "och" dialed calls, "mch" missed calls, "cch" all
+    three, "spd" speed dial and "fav" favourites; `sim=True` reads the
+    SIM's copy. Phones keep the first two or five, as `repositories` says.
+
+    A record is a dict: "name", "numbers" as a list of (number, kind)
+    pairs where kind is "cell", "home", "work", "main", "fax", "pager",
+    "other" or "", and "emails". "org" is there when the card has one.
+    Call history adds "call" ("missed", "received" or "dialed") and
+    "time" ("20261108T091500", the phone's local time).
+
+    One phone book at a time; a second `PhoneBook` takes over the running
+    one.
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+        max_bytes: the largest reply kept, 1024 or more. A longer reply
+            stops there and sets `truncated`; page with `offset` and
+            `count` instead. Kept in PSRAM when the board has it.
+    """
+
+    connected: bool
+    """The phone book is open."""
+    peer: bytes | None
+    """The phone's address, or None."""
+    repositories: list[str]
+    """Where the phone keeps books: "phone", "sim", "speed_dial",
+    "favorites"."""
+    features: int
+    """The phone's PBAP feature bits."""
+    new_missed: int | None
+    """Missed calls the phone hasn't shown yet, from the last pull of a
+    call history, or None."""
+    truncated: bool
+    """The last reply was longer than `max_bytes` and was cut."""
+
+    def __init__(self, bt: Bluetooth, *, max_bytes: int = 262144) -> None: ...
+    def connect(self, addr: bytes | None = None, *, timeout: int = 30000) -> None:
+        """Open the phone book of the phone at `addr`; None picks the phone
+        `HandsFree` or `AudioSink` is connected to, then the first paired
+        device. Waits up to `timeout` ms for the link; 0 returns at once,
+        and `changes` reports `CONNECTION`.
+
+        Raises:
+            OSError: the phone refused, or the wait timed out.
+        """
+    def disconnect(self) -> None: ...
+    def pull(self, book: str = "pb", *, offset: int = 0, count: int | None = None, raw: bool = False,
+             photos: bool = False, sim: bool = False, version: int = 21,
+             timeout: int = 30000) -> list[dict] | bytes:
+        """The book's records from `offset`, `count` of them or all. With
+        `raw` the vCards as the phone sent them. `version` asks for vCard
+        2.1 (21) or 3.0 (30); `photos` adds each contact's picture to the
+        raw vCards."""
+    def size(self, book: str = "pb", *, sim: bool = False, timeout: int = 30000) -> int | None:
+        """How many entries the book holds, without pulling them."""
+    def list(self, book: str = "pb", *, offset: int = 0, count: int | None = None, search: str | None = None,
+             by: str = "name", order: str = "indexed", sim: bool = False,
+             timeout: int = 30000) -> list[tuple[str, str]]:
+        """The book's listing: (handle, name) pairs, where name is the
+        phone's "Family;Given" form. `search` keeps the entries whose
+        `by` ("name" or "number") matches; `order` is "indexed" or
+        "name". Pass a handle to `entry`."""
+    def entry(self, book: str, handle: str, *, raw: bool = False, photos: bool = False,
+              sim: bool = False, version: int = 21, timeout: int = 30000) -> dict | bytes | None:
+        """One record by its handle from `list`, such as "5.vcf"."""
+    def lookup(self, number: str, *, timeout: int = 10000) -> str | None:
+        """The contact name for a phone number, or None: what a call screen
+        shows for `HandsFree.caller`. The phone does the matching."""
+    @staticmethod
+    def parse(data: bytes) -> list[dict]:
+        """Records from vCard text, a .vcf file's for one."""
+    def changes(self) -> int:
+        """The bits (`CONNECTION`, `PHONEBOOK`) for what changed since the
+        last call, which clears them."""
+    def deinit(self) -> None:
+        """Close the phone book. The radio stays on."""
+    def __enter__(self) -> PhoneBook: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
+
+
+class AudioGateway:
+    """The board as the phone, for a headset or car kit (HFP audio
+    gateway).
+
+    A headset pairs with the board, or `connect` calls one. The board
+    reports a network, signal and battery, rings with a caller's number,
+    and takes answer and hang-up from the headset's button. While `audio`
+    is True, `write` sends 16-bit mono to the headset's speaker and
+    `readinto` reads its microphone, at `sample_rate` (8 or 16 kHz).
+
+    The board runs one hands-free role at a time: `deinit` a `HandsFree`
+    before making an `AudioGateway`, and the other way round.
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+        buffer_ms: audio held each way, 50 to 1000 ms.
+        channels: what `readinto` fills, 1 or 2 (the same sound in both).
+    """
+
+    connected: bool
+    """A headset is connected."""
+    peer: bytes | None
+    """The headset's address, or None."""
+    features: int
+    """The headset's HFP feature bits."""
+    service: bool
+    """The network is up. Settable."""
+    signal: int | None
+    """Signal strength 0 to 5. Settable."""
+    roaming: bool
+    """Settable."""
+    battery: int | None
+    """Battery 0 to 5. Settable."""
+    operator: str | None
+    """The network's name the headset shows. Settable."""
+    number: str | None
+    """The board's own number, which a headset may ask for. Settable."""
+    call: str
+    """"idle", "incoming", "dialing", "alerting", "active" or "held"."""
+    caller: str | None
+    """The number of the incoming call."""
+    dialed: str | None
+    """The number the headset last dialed."""
+    in_band_ring: bool
+    """The ring is sent as audio instead of the headset's own tone.
+    Settable."""
+    voice_recognition: bool
+    """Voice recognition is on, from the headset's button or set here.
+    Settable."""
+    nrec: bool
+    """The headset asked for noise reduction and echo cancelling."""
+    speaker_gain: int | None
+    """The headset's speaker volume, 0 to 15. Settable."""
+    mic_gain: int | None
+    """The headset's microphone gain, 0 to 15. Settable."""
+    audio: bool
+    """The call's audio link is up."""
+    sample_rate: int
+    """8000 or 16000 while `audio`, 0 otherwise."""
+    wideband: bool
+    """The audio is wideband (mSBC, 16 kHz)."""
+
+    def __init__(self, bt: Bluetooth, *, buffer_ms: int = 400, channels: int = 1) -> None: ...
+    def connect(self, addr: bytes | None = None) -> None:
+        """Call the headset at `addr`, or the last one. The link comes up
+        later; watch for `CONNECTION`."""
+    def disconnect(self) -> None: ...
+    def connect_audio(self) -> None:
+        """Open the audio link outside a call, for voice recognition or a
+        test. A call opens it on its own."""
+    def disconnect_audio(self) -> None: ...
+    def ring(self, number: str | None = None) -> None:
+        """An incoming call from `number`. The headset rings until it
+        answers (`answer` here works too) or `hangup`."""
+    def dial(self, number: str) -> None:
+        """An outgoing call: `call` goes to "dialing" and the audio opens.
+        `alerting` then `answer` play the far end picking up."""
+    def alerting(self) -> None:
+        """The outgoing call is ringing at the far end."""
+    def answer(self) -> None:
+        """The call is up: answer an incoming one, or the far end answered
+        an outgoing one."""
+    def hangup(self) -> None:
+        """End the call, or reject it while it rings."""
+    def dtmf(self) -> str:
+        """Keypad digits the headset sent since the last call."""
+    def readinto(self, buf: bytearray | memoryview) -> int:
+        """Fill `buf` with the headset's microphone, 16-bit, `channels` per
+        frame. Returns frames; silence fills what hasn't arrived."""
+    def write(self, buf: bytes | bytearray | memoryview) -> int:
+        """Queue 16-bit mono for the headset's speaker. Returns the bytes
+        taken, fewer when the buffer is full."""
+    def stats(self) -> dict[str, int]:
+        """The microphone ring's counters (buffered, capacity, received,
+        underruns, overruns, dropped, repeated, skipped), and sent and
+        silent: frames sent to the headset, and those sent as silence
+        because `write` fell behind."""
+    def changes(self) -> int:
+        """The bits (`CONNECTION`, `PHONE`, `CALL`, `AUDIO`, `REQUEST`) for
+        what changed since the last call, which clears them."""
+    def deinit(self) -> None:
+        """Drop the headset and stop the gateway. The radio stays on."""
+    def __enter__(self) -> AudioGateway: ...
     def __exit__(self, *args: object) -> None:
         """`deinit`."""
