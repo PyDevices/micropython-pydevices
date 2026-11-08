@@ -855,6 +855,37 @@ def esp32_fragment(chip, module_dirs, board, variant, flash, table, coredump=Fal
     return "\n".join(parts) + "\n", used
 
 
+def esp32_clocks(sdk):
+    """The flash and PSRAM clocks an esp32 sdkconfig sets, in MHz (PSRAM None
+    when the build has none)."""
+    def mhz(pattern):
+        m = re.search(pattern, sdk, re.M)
+        return int(m.group(1)) if m else None
+    return (mhz(r"^CONFIG_ESPTOOLPY_FLASHFREQ_(\d+)M=y$"),
+            mhz(r"^CONFIG_SPIRAM_SPEED_(\d+)M=y$") if re.search(r"^CONFIG_SPIRAM=y$", sdk, re.M) else None)
+
+
+def esp32_speed_note(sdk):
+    """Flash and PSRAM should run at the fastest clock the chips are rated for.
+    Below 80 MHz, code and data that miss the cache wait on a slow bus, and on
+    a classic ESP32 that starves Bluetooth audio: two boards that fell behind in
+    A2DP music at 40 MHz played clean at 80 MHz. Say so loudly after a build."""
+    flash, psram = esp32_clocks(sdk)
+    slow = [f"flash at {flash} MHz"] if flash and flash < 80 else []
+    slow += [f"PSRAM at {psram} MHz"] if psram and psram < 80 else []
+    if not slow:
+        return
+    say("\n" + "!" * 72)
+    say(f"  This image runs {' and '.join(slow)}. Run flash and PSRAM at the fastest")
+    say("  clock your board's chips are rated for: most are rated for 80 MHz or more,")
+    say("  and at 40 MHz a classic ESP32 can fall behind in Bluetooth audio. Check")
+    say("  the chips' datasheets (esptool's flash-id reads the flash's JEDEC ID), then")
+    say("  set CONFIG_ESPTOOLPY_FLASHFREQ_80M=y and CONFIG_SPIRAM_SPEED_80M=y in the")
+    say("  board's variant sdkconfig, as variants/esp32/ESP32_GENERIC/QTPY_PICO does.")
+    say("  The flash clock lives in the bootloader: flash it with the app.")
+    say("!" * 72 + "\n")
+
+
 def esp32_table(chip, board, variant):
     """Our partition table, by the same convention as the fragments, the most
     specific one found winning; None keeps the board's own."""
@@ -2082,6 +2113,8 @@ def main():
                 say("  a board flashed with this image comes up with an empty one. Copy your files")
                 say("  back after flashing, or build with --no-autosize to stop here instead.\n")
                 table = grown
+            if rc == 0:
+                esp32_speed_note((build / "sdkconfig").read_text())
             if rc == 0 and table:
                 sdk = (build / "sdkconfig").read_text()
                 got = re.search(r'^CONFIG_PARTITION_TABLE_FILENAME="(.*)"$', sdk, re.M)
