@@ -32,6 +32,52 @@ def row(commit=A, dirty=False, changes=None):
     return {"path": "/x", "revision": commit[:12], "commit": commit, "dirty": dirty, "changes": changes}
 
 
+class OffPin(unittest.TestCase):
+    """A module checkout that isn't at its modules.lock pin is named, with which way it's off."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.repo = Path(self.dir.name)
+        git = ["git", "-C", str(self.repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        self.commits = []
+        for i in range(3):
+            subprocess.run(git + ["commit", "-q", "--allow-empty", "-m", str(i)], check=True)
+            self.commits.append(subprocess.run(git + ["rev-parse", "HEAD"], capture_output=True,
+                                               text=True, check=True).stdout.strip())
+        self.read_lock = build_mp.read_lock
+
+    def tearDown(self):
+        build_mp.read_lock = self.read_lock
+        self.dir.cleanup()
+
+    def off(self, pin, commit):
+        build_mp.read_lock = lambda name: [["audiodsp", "https://example.invalid/audiodsp.git", pin]]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            got = build_mp.off_pin("audiodsp", self.repo, commit)
+        return got, out.getvalue()
+
+    def test_at_pin_says_nothing(self):
+        self.assertEqual(self.off(self.commits[1], self.commits[1]), (None, ""))
+
+    def test_behind_pin_is_named_with_how_to_catch_up(self):
+        got, said = self.off(self.commits[2], self.commits[1])
+        self.assertEqual(got, "behind " + self.commits[2][:12])
+        self.assertIn("audiodsp", said)
+        self.assertIn("pull", said)
+
+    def test_ahead_of_pin(self):
+        self.assertEqual(self.off(self.commits[0], self.commits[2])[0], "ahead of " + self.commits[0][:12])
+
+    def test_pin_not_fetched(self):
+        self.assertTrue(self.off(B, self.commits[2])[0].startswith("not at"))
+
+    def test_module_without_a_lock_row(self):
+        build_mp.read_lock = lambda name: []
+        self.assertIsNone(build_mp.off_pin("pydevices", self.repo, self.commits[0]))
+
+
 class ModulesMoved(unittest.TestCase):
     def test_nothing_moved(self):
         now = {"pydevices": row(), "displayif": row(B)}
