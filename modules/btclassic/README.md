@@ -74,16 +74,58 @@ board is its audio device, and for a voice or video chat app. While
 `HandsFree.write()`. The type stub, [`btclassic.pyi`](btclassic.pyi), has
 every property and method.
 
+## Let the audio pump play it
+
+In a firmware with audiodsp, `AudioSink` and `HandsFree` are audiosamples,
+like a synth or an MP3 decoder. Hand one to a board's `audio_out` and the
+audio pump pulls it in C on its own task: a garbage collection, a cover
+decoding or a slow redraw in your program can't make the music stutter.
+
+```python
+music = btclassic.AudioSink(bt)
+while not music.sample_rate:                # until the first stream
+    time.sleep_ms(100)
+speaker = board_peripherals.audio_out(AudioFormat(music.sample_rate, 2, 16))
+speaker.play(music)                         # nothing to do in the loop now
+```
+
+It goes into a `Mixer` beside anything else at the same rate, too. For a
+call, play the `HandsFree` once `audio` is True, at its `sample_rate`, and
+hand `HandsFree.uplink()` the board's open `pcm_in`: the pump's pull then
+sends the microphone to the phone as well. A profile is read one way or the
+other, by the pump or with `readinto()`, not both.
+
+If the phone's caller hears your microphone break up while the board is busy
+(redrawing, decoding a cover, collecting garbage), raise the PSRAM and flash
+clock to 80 MHz. On a classic ESP32, PSRAM and flash share one bus, and the
+Bluetooth stack on the other core waits on it: at the default 40 MHz a busy
+program holds it long enough to lose call audio. On an ESP32 Audio Kit
+(ESP32-A1S module) with the display redrawing through a call, 15 s of
+microphone tone had 8 or 9 dropouts at 40 MHz, and none in 13 calls at
+80 MHz. If your module's PSRAM is rated for 80 MHz, add these to the board's
+sdkconfig, and write the bootloader as well as the app, because the flash
+clock is set in the bootloader:
+
+```text
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_SPIRAM_SPEED_80M=y
+```
+
+On the unix port the module builds on a loopback backend with no radio, so
+these paths have desktop tests: [`tests/host_probe.py`](tests/host_probe.py)
+plays music and a call through the pump while the interpreter collects
+garbage and stalls.
+
 ## Before you start
 
 Wi-Fi and Bluetooth share the ESP32's one radio. With Wi-Fi connected, audio
 arrives slower than it plays and in bursts, so the speaker runs dry; turn
 Wi-Fi off while listening, as the examples do.
 
-Classic ESP32 only for now: it's the chip in this family with Bluetooth
-Classic and MicroPython support. The module is opt-in (`--modules btclassic`,
-or `--modules all,btclassic`) because it turns ESP-IDF's Bluedroid on in
-place of NimBLE. ESP-IDF runs one Bluetooth host, so a firmware with
+On ESP32, it's the classic ESP32: the chip in that family with Bluetooth
+Classic and MicroPython support. The Pico W and Pico 2 W are covered below.
+The module is opt-in (`--modules btclassic`, or `--modules all,btclassic`)
+because it turns ESP-IDF's Bluedroid on in place of NimBLE. ESP-IDF runs one Bluetooth host, so a firmware with
 btclassic has no `bluetooth` (BLE) module. A board with PSRAM is the
 comfortable fit: the Bluetooth stack's buffers go there.
 
@@ -93,6 +135,40 @@ device has to pair again (forget the board on the phone first). To update a
 board whose partition table hasn't changed, write only the app,
 `micropython.bin`, at 0x10000: pairings and files stay.
 
+## On the Pico W and Pico 2 W
+
+The rp2 port builds btclassic on BTstack, the Bluetooth host its `bluetooth`
+module already uses, so a Pico firmware keeps BLE alongside Classic. Classic
+adds this much to a firmware, measured against the same board built without
+it:
+
+| Board | Flash | Static RAM |
+|---|---|---|
+| Pico 2 W (`RPI_PICO2_W`) | +140 KB, 1037 KB in all (66% of 1.5 MB) | +41 KB, 106 KB of 512 KB |
+| Pico W (`RPI_PICO_W`) | +144 KB, 1062 KB in all (86% of 1.2 MB) | +41 KB, 108 KB of 256 KB |
+
+The big buffers come from the Python heap when you open a profile, not from
+static RAM, and go back when you close it:
+
+| Opened | Heap |
+|---|---|
+| `AudioSink` or `AudioSource` | 48 KB at 250 ms, 96 KB at 500 ms |
+| `HandsFree` | 32 KB |
+| Serial port (SPP) | 6 KB |
+
+`buffer_ms` defaults to 500 on a board with PSRAM and 250 otherwise. Both
+boards fit any one profile; on a Pico W, a sink and hands-free open together
+leave little heap for anything else.
+
+Call audio is a known limit on these boards. The CYW43439's Bluetooth
+firmware accepts the audio link a call needs but never completes it
+([raspberrypi/pico-sdk#1461](https://github.com/raspberrypi/pico-sdk/issues/1461)),
+and the phone then drops the board altogether, so `HandsFree` declines the
+link and the call's audio stays on the phone. Everything else works:
+`HandsFree` follows the call, its caller and the phone's signal, battery,
+service and operator, and answers, dials, hangs up and sends tones.
+`HandsFree.audio` stays False, and `connect_audio()` raises OSError.
+
 ## How it's built
 
 [`esp-idf/btclassic`](esp-idf/btclassic) is the C that does the work, with
@@ -101,8 +177,9 @@ controller with cover art, the HFP hands-free unit with call audio over HCI
 (Bluedroid codes CVSD and mSBC), and the audio ring they play through. They
 sit behind one header, [`btclassic.h`](esp-idf/btclassic/include/btclassic.h),
 which another Bluetooth host could implement as well.
-[`src/mod_btclassic.c`](src/mod_btclassic.c) wraps that header and nothing
-else, and [`micropython.cmake`](micropython.cmake) compiles both as an
+[`src/mod_btclassic.c`](src/mod_btclassic.c) wraps that header, and makes
+the two profiles audiosamples when audiodsp is in the build.
+[`micropython.cmake`](micropython.cmake) compiles both as an
 ordinary user C module, so a stock MicroPython esp32 build takes it with
 `USER_C_MODULES`. Two settings go with it: [`sdkconfig.esp32`](sdkconfig.esp32)
 in the board's `SDKCONFIG_DEFAULTS` turns Bluedroid, A2DP, AVRCP cover art, HID and

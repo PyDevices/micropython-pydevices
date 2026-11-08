@@ -16,6 +16,7 @@
 #include "py/mperrno.h"
 #include "py/obj.h"
 #include "py/objstr.h"
+#include "py/gc.h"
 #include "py/runtime.h"
 
 #if MICROPY_PY_NETWORK
@@ -23,6 +24,11 @@
 #endif
 
 #include "btclassic.h"
+
+#if BTCLASSIC_AUDIOSAMPLE
+#include "audiocore/__init__.h"
+#include "shared/audiodsp_pump_lock.h"
+#endif
 
 // ---- errors ----
 
@@ -133,6 +139,207 @@ static mp_obj_t exit_deinit(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(exit_deinit_obj, 4, 4, exit_deinit);
 
+// ---- AudioSink and HandsFree as sources the audio pump pulls ----
+//
+// With audiodsp in the firmware, both profiles are audiosamples: the pump
+// (or a Mixer, or any node) pulls them on its own task, in C, and a garbage
+// collection or a cover decode in Python can't hold the audio up. The pull
+// reads the same ring readinto() does, so the clock correction happens at
+// the pull, at the output's own pace. One reader per ring: a program either
+// plays a profile on the pump or reads it with readinto(), not both.
+
+#define PULL_FRAMES 256     // frames a pull hands back: 5.8 ms of music, 16 ms of a call
+
+// HandsFree.uplink()'s counters: microphone frames queued for the phone,
+// and those the queue had no room for. Outside the #if, so the qstr scan,
+// which doesn't see this module's definitions, finds the names.
+static volatile uint32_t uplink_sent, uplink_lost;
+
+typedef struct {
+    #if BTCLASSIC_AUDIOSAMPLE
+    audiosample_base_t base;    // starts with the mp_obj_base_t
+    #else
+    mp_obj_base_t base;
+    #endif
+    int16_t *block[2];          // two, so a node downstream may keep the last one
+    uint8_t which;
+    uint8_t channels;
+} btc_source_t;
+
+static btc_source_t *source_new(const mp_obj_type_t *type, uint8_t channels, uint32_t rate) {
+    btc_source_t *self = mp_obj_malloc(btc_source_t, type);
+    self->channels = channels;
+    self->which = 0;
+    for (int i = 0; i < 2; i++) {
+        self->block[i] = m_new0(int16_t, PULL_FRAMES * channels);
+    }
+    #if BTCLASSIC_AUDIOSAMPLE
+    self->base.sample_rate = rate;
+    self->base.max_buffer_length = PULL_FRAMES * channels * sizeof(int16_t);
+    self->base.bits_per_sample = 16;
+    self->base.channel_count = channels;
+    self->base.samples_signed = true;
+    self->base.single_buffer = false;
+    #else
+    (void)rate;
+    #endif
+    return self;
+}
+
+#if BTCLASSIC_AUDIOSAMPLE
+
+// False once a profile is stopped, so a pull that comes after reads
+// silence instead of a ring that's gone. Cleared under the pump's lock,
+// which the pump holds for each whole pull.
+static volatile bool sink_pullable, hf_pullable;
+
+static void set_pullable(volatile bool *flag, bool on) {
+    audiodsp_pump_lock_acquire();
+    *flag = on;
+    audiodsp_pump_lock_release();
+}
+
+static void source_reset(mp_obj_t self_in, bool single_channel_output, uint8_t channel) {
+    (void)single_channel_output;
+    (void)channel;
+    btc_source_t *self = MP_OBJ_TO_PTR(self_in);
+    self->which = 0;
+}
+
+static int16_t *source_block(btc_source_t *self) {
+    int16_t *dst = self->block[self->which];
+    self->which ^= 1;
+    return dst;
+}
+
+static audioio_get_buffer_result_t source_hand(btc_source_t *self, int16_t *dst,
+    bool single_channel_output, uint8_t channel, uint8_t **buffer, uint32_t *buffer_length) {
+    *buffer = (uint8_t *)dst;
+    *buffer_length = PULL_FRAMES * self->channels * sizeof(int16_t);
+    if (single_channel_output) {
+        *buffer += (channel % self->channels) * sizeof(int16_t);
+    }
+    return GET_BUFFER_MORE_DATA;
+}
+
+// Nothing is behind either profile: they're where the audio comes in.
+static mp_obj_t source_sources(mp_obj_t self_in, uint8_t index) {
+    (void)self_in;
+    (void)index;
+    return MP_OBJ_NULL;
+}
+
+static audioio_get_buffer_result_t sink_get_buffer(mp_obj_t self_in, bool single_channel_output,
+    uint8_t channel, uint8_t **buffer, uint32_t *buffer_length) {
+    btc_source_t *self = MP_OBJ_TO_PTR(self_in);
+    int16_t *dst = source_block(self);
+    if (sink_pullable) {
+        btc_sink_read(dst, PULL_FRAMES);
+    } else {
+        memset(dst, 0, PULL_FRAMES * 2 * sizeof(int16_t));
+    }
+    return source_hand(self, dst, single_channel_output, channel, buffer, buffer_length);
+}
+
+static const audiosample_p_t sink_proto = {
+    MP_PROTO_IMPLEMENT(MP_QSTR_protocol_audiosample)
+    .reset_buffer = (audiosample_reset_buffer_fun)source_reset,
+    .get_buffer = (audiosample_get_buffer_fun)sink_get_buffer,
+    .sources = source_sources,
+};
+
+// ---- the call's microphone, sent from the pull ----
+//
+// HandsFree.uplink(mic) has each pull of the call also take whatever the
+// board's microphone captured since the last one and queue it for the phone.
+// The microphone and the speaker share the output's clock, so the two
+// directions keep one pace and Python never touches the audio. The capture
+// ring is audioif's (the one pcm_in opens); a test build points the hook at
+// a ring of its own.
+typedef uint32_t (*btc_mic_pull_t)(uint8_t *dst, uint32_t want);
+extern uint32_t audiopump_i2s_rx_pull(uint8_t *dst, uint32_t want) __attribute__((weak));
+btc_mic_pull_t btc_mic_pull_hook;
+
+static volatile bool hf_uplink;
+
+static btc_mic_pull_t mic_pull(void) {
+    return btc_mic_pull_hook ? btc_mic_pull_hook : audiopump_i2s_rx_pull;
+}
+
+static void hf_send_mic(void) {
+    btc_mic_pull_t pull = mic_pull();
+    if (!hf_uplink || pull == NULL) {
+        return;
+    }
+    btc_hf_status_t st;
+    btc_hf_status(&st);
+    int16_t mic[128];
+    // Bounded, so a backlog can't hold the pump: 2048 frames a pull at most.
+    for (int i = 0; i < 16; i++) {
+        uint32_t n = pull((uint8_t *)mic, sizeof(mic)) / sizeof(int16_t);
+        if (n == 0) {
+            break;
+        }
+        if (!st.audio) {
+            continue;   // no call to send it to: let it go, so none of it is stale
+        }
+        size_t took = btc_hf_write(mic, n);
+        uplink_sent += took;
+        uplink_lost += n - took;
+        if (n < MP_ARRAY_SIZE(mic)) {
+            break;
+        }
+    }
+}
+
+static audioio_get_buffer_result_t hf_get_buffer(mp_obj_t self_in, bool single_channel_output,
+    uint8_t channel, uint8_t **buffer, uint32_t *buffer_length) {
+    btc_source_t *self = MP_OBJ_TO_PTR(self_in);
+    int16_t *dst = source_block(self);
+    if (hf_pullable) {
+        btc_hf_read(dst, PULL_FRAMES);
+        hf_send_mic();
+    } else {
+        memset(dst, 0, PULL_FRAMES * self->channels * sizeof(int16_t));
+    }
+    return source_hand(self, dst, single_channel_output, channel, buffer, buffer_length);
+}
+
+static const audiosample_p_t hf_proto = {
+    MP_PROTO_IMPLEMENT(MP_QSTR_protocol_audiosample)
+    .reset_buffer = (audiosample_reset_buffer_fun)source_reset,
+    .get_buffer = (audiosample_get_buffer_fun)hf_get_buffer,
+    .sources = source_sources,
+};
+
+#endif // BTCLASSIC_AUDIOSAMPLE
+
+// The audiosample attributes the protocol shows Python. False when `attr`
+// isn't one of them.
+static bool source_attr(mp_obj_t self_in, qstr attr, uint32_t rate, mp_obj_t *dest) {
+    btc_source_t *self = MP_OBJ_TO_PTR(self_in);
+    switch (attr) {
+        case MP_QSTR_bits_per_sample:
+            dest[0] = MP_OBJ_NEW_SMALL_INT(16);
+            return true;
+        case MP_QSTR_channel_count:
+            dest[0] = MP_OBJ_NEW_SMALL_INT(self->channels);
+            return true;
+        case MP_QSTR_sample_rate:
+            // The stream's rate, 0 before the first. A pull plays at the rate
+            // the profile had when it was last asked, the usual for a source.
+            #if BTCLASSIC_AUDIOSAMPLE
+            if (rate) {
+                self->base.sample_rate = rate;
+            }
+            #endif
+            dest[0] = mp_obj_new_int_from_uint(rate);
+            return true;
+        default:
+            return false;
+    }
+}
+
 // =========================================================================
 // Bluetooth: the radio
 // =========================================================================
@@ -151,8 +358,10 @@ static mp_obj_t bluetooth_make_new(const mp_obj_type_t *type, size_t n_args, siz
         #if MICROPY_PY_NETWORK
         // The board's network name, so one board has one name everywhere.
         btc_radio_set_name(mod_network_hostname_data);
-        #else
+        #elif defined(MICROPY_HW_BOARD_NAME)
         btc_radio_set_name(MICROPY_HW_BOARD_NAME);
+        #else
+        btc_radio_set_name("MicroPython");
         #endif
     }
     return MP_OBJ_FROM_PTR(&bluetooth_singleton);
@@ -368,12 +577,20 @@ static mp_obj_t sbc_pick(uint8_t bits, int v8, int v4, int v2, int v1) {
     return maybe_int(v);
 }
 
-// AudioSink(bt, *, buffer_ms=500, reconnect=True)
+// The sink's default buffer: 500 ms on a board with megabytes of heap
+// (PSRAM), 250 ms otherwise, where 500 ms of 48 kHz stereo is 96 KB.
+static mp_int_t sink_default_ms(void) {
+    gc_info_t info;
+    gc_info(&info);
+    return info.total > 1024 * 1024 ? 500 : 250;
+}
+
+// AudioSink(bt, *, buffer_ms=None, reconnect=True)
 static mp_obj_t sink_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
     enum { ARG_bt, ARG_buffer_ms, ARG_reconnect };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_bt, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
-        { MP_QSTR_buffer_ms, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 500} },
+        { MP_QSTR_buffer_ms, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
         { MP_QSTR_reconnect, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
@@ -385,14 +602,21 @@ static mp_obj_t sink_make_new(const mp_obj_type_t *type, size_t n_args, size_t n
             mp_raise_msg(&mp_type_OSError,
                 MP_ERROR_TEXT("btclassic: an AudioSource is running; deinit() it first (one A2DP role at a time)"));
         }
-        mp_int_t ms = args[ARG_buffer_ms].u_int;
+        mp_obj_t ms_in = args[ARG_buffer_ms].u_obj;
+        mp_int_t ms = ms_in == mp_const_none ? sink_default_ms() : mp_obj_get_int(ms_in);
         if (ms < 50 || ms > 5000) {
             mp_raise_ValueError(MP_ERROR_TEXT("buffer_ms must be 50 to 5000"));
         }
         // Sized for 48 kHz, the fastest rate A2DP's SBC sends.
         done(btc_sink_start((size_t)(48 * ms), args[ARG_reconnect].u_bool));
     }
-    return MP_OBJ_FROM_PTR(mp_obj_malloc(btc_obj_t, type));
+    btc_sink_status_t st;
+    btc_sink_status(&st);
+    btc_source_t *self = source_new(type, 2, st.sample_rate ? st.sample_rate : 44100);
+    #if BTCLASSIC_AUDIOSAMPLE
+    set_pullable(&sink_pullable, true);
+    #endif
+    return MP_OBJ_FROM_PTR(self);
 }
 
 // readinto(buf) -> frames that came from the stream
@@ -566,6 +790,9 @@ static mp_obj_t sink_disconnect(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(sink_disconnect_obj, sink_disconnect);
 
 static mp_obj_t sink_deinit(mp_obj_t self_in) {
+    #if BTCLASSIC_AUDIOSAMPLE
+    set_pullable(&sink_pullable, false);
+    #endif
     btc_sink_stop();
     return mp_const_none;
 }
@@ -615,6 +842,9 @@ static void sink_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     if (dest[0] == MP_OBJ_NULL) {
         btc_sink_status_t st;
         btc_sink_status(&st);
+        if (source_attr(self_in, attr, st.sample_rate, dest)) {
+            return;
+        }
         switch (attr) {
             case MP_QSTR_connected:
                 dest[0] = mp_obj_new_bool(st.connected);
@@ -627,9 +857,6 @@ static void sink_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
                 return;
             case MP_QSTR_status:
                 dest[0] = maybe_str(play_status_name(st.play_status));
-                return;
-            case MP_QSTR_sample_rate:
-                dest[0] = mp_obj_new_int_from_uint(st.sample_rate);
                 return;
             case MP_QSTR_volume:
                 dest[0] = MP_OBJ_NEW_SMALL_INT(st.volume);
@@ -714,6 +941,9 @@ MP_DEFINE_CONST_OBJ_TYPE(
     MP_TYPE_FLAG_NONE,
     make_new, sink_make_new,
     attr, sink_attr,
+    #if BTCLASSIC_AUDIOSAMPLE
+    protocol, &sink_proto,
+    #endif
     locals_dict, &sink_locals
     );
 
@@ -757,7 +987,13 @@ static mp_obj_t hf_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_k
         done(btc_hf_start((uint32_t)ms, (uint8_t)channels));
         hf_channels = (uint8_t)channels;
     }
-    return MP_OBJ_FROM_PTR(mp_obj_malloc(btc_obj_t, type));
+    btc_hf_status_t st;
+    btc_hf_status(&st);
+    btc_source_t *self = source_new(type, hf_channels ? hf_channels : 1, st.sample_rate ? st.sample_rate : 16000);
+    #if BTCLASSIC_AUDIOSAMPLE
+    set_pullable(&hf_pullable, true);
+    #endif
+    return MP_OBJ_FROM_PTR(self);
 }
 
 static mp_obj_t hf_readinto(mp_obj_t self_in, mp_obj_t buf_in) {
@@ -777,9 +1013,55 @@ static mp_obj_t hf_write(mp_obj_t self_in, mp_obj_t buf_in) {
     hf_check();
     mp_buffer_info_t buf;
     mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_READ);
-    return MP_OBJ_NEW_SMALL_INT(btc_hf_write((const int16_t *)buf.buf, buf.len / 2) * 2);
+    size_t frames = buf.len / 2;
+    size_t took = btc_hf_write((const int16_t *)buf.buf, frames);
+    // stats() counts what write() queued as well as what uplink() did; with
+    // no call to send it to, nothing is counted, as with uplink().
+    btc_hf_status_t st;
+    btc_hf_status(&st);
+    if (st.audio) {
+        uplink_sent += took;
+        uplink_lost += frames - took;
+    }
+    return MP_OBJ_NEW_SMALL_INT(took * 2);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(hf_write_obj, hf_write);
+
+// uplink(mic): send the board's microphone to the phone from the pump's
+// pull, with no Python in the path; uplink(None) stops, and the phone hears
+// silence. `mic` is the open pcm_in the microphone is captured with: one
+// channel, at the call's rate. Nothing else may read it while this does.
+static mp_obj_t hf_uplink_set(mp_obj_t self_in, mp_obj_t mic) {
+    hf_check();
+    #if BTCLASSIC_AUDIOSAMPLE
+    if (mic == mp_const_none) {
+        hf_uplink = false;
+        return mp_const_none;
+    }
+    if (mic_pull() == NULL) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: no microphone capture in this firmware"));
+    }
+    mp_obj_t fmt[2];
+    mp_load_method_maybe(mic, MP_QSTR_format, fmt);
+    if (fmt[0] != MP_OBJ_NULL) {
+        if (mp_obj_get_int(mp_load_attr(fmt[0], MP_QSTR_channels)) != 1
+            || mp_obj_get_int(mp_load_attr(fmt[0], MP_QSTR_bits)) != 16) {
+            mp_raise_ValueError(MP_ERROR_TEXT("the microphone must record one 16-bit channel"));
+        }
+        btc_hf_status_t st;
+        btc_hf_status(&st);
+        if (st.audio && (uint32_t)mp_obj_get_int(mp_load_attr(fmt[0], MP_QSTR_rate)) != st.sample_rate) {
+            mp_raise_ValueError(MP_ERROR_TEXT("the microphone must record at the call's sample_rate"));
+        }
+    }
+    hf_uplink = true;
+    return mp_const_none;
+    #else
+    (void)mic;
+    mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: no audio pump in this firmware"));
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(hf_uplink_obj, hf_uplink_set);
 
 static mp_obj_t hf_changes(mp_obj_t self_in) {
     return MP_OBJ_NEW_SMALL_INT(btc_hf_changes());
@@ -789,7 +1071,10 @@ static MP_DEFINE_CONST_FUN_OBJ_1(hf_changes_obj, hf_changes);
 static mp_obj_t hf_stats(mp_obj_t self_in) {
     btc_ring_stats_t st;
     btc_hf_stats(&st);
-    return stats_obj(&st);
+    mp_obj_t d = stats_obj(&st);
+    store(d, MP_QSTR_sent, mp_obj_new_int_from_uint(uplink_sent));
+    store(d, MP_QSTR_unsent, mp_obj_new_int_from_uint(uplink_lost));
+    return d;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(hf_stats_obj, hf_stats);
 
@@ -849,6 +1134,10 @@ static mp_obj_t hf_disconnect(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(hf_disconnect_obj, hf_disconnect);
 
 static mp_obj_t hf_deinit(mp_obj_t self_in) {
+    #if BTCLASSIC_AUDIOSAMPLE
+    hf_uplink = false;
+    set_pullable(&hf_pullable, false);
+    #endif
     btc_hf_stop();
     return mp_const_none;
 }
@@ -866,6 +1155,9 @@ static void hf_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     if (dest[0] == MP_OBJ_NULL) {
         btc_hf_status_t st;
         btc_hf_status(&st);
+        if (source_attr(self_in, attr, st.sample_rate, dest)) {
+            return;
+        }
         switch (attr) {
             case MP_QSTR_connected:
                 dest[0] = mp_obj_new_bool(st.connected);
@@ -921,9 +1213,6 @@ static void hf_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             case MP_QSTR_audio:
                 dest[0] = mp_obj_new_bool(st.audio);
                 return;
-            case MP_QSTR_sample_rate:
-                dest[0] = mp_obj_new_int_from_uint(st.sample_rate);
-                return;
             default:
                 dest[1] = MP_OBJ_SENTINEL;  // methods, from the locals dict
                 return;
@@ -952,6 +1241,7 @@ static void hf_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
 static const mp_rom_map_elem_t hf_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_readinto), MP_ROM_PTR(&hf_readinto_obj) },
     { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&hf_write_obj) },
+    { MP_ROM_QSTR(MP_QSTR_uplink), MP_ROM_PTR(&hf_uplink_obj) },
     { MP_ROM_QSTR(MP_QSTR_changes), MP_ROM_PTR(&hf_changes_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&hf_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_answer), MP_ROM_PTR(&hf_answer_obj) },
@@ -974,6 +1264,9 @@ MP_DEFINE_CONST_OBJ_TYPE(
     MP_TYPE_FLAG_NONE,
     make_new, hf_make_new,
     attr, hf_attr,
+    #if BTCLASSIC_AUDIOSAMPLE
+    protocol, &hf_proto,
+    #endif
     locals_dict, &hf_locals
     );
 

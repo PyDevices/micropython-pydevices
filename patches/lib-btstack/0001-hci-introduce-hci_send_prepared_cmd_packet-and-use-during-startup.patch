@@ -1,0 +1,90 @@
+From ca6804fd6390f67bf7476d8714a0f9237e6d8866 Mon Sep 17 00:00:00 2001
+From: Matthias Ringwald <matthias@ringwald.ch>
+Date: Mon, 5 Feb 2024 11:02:35 +0100
+Subject: [PATCH] hci: introduce hci_send_prepared_cmd_packet and use during startup
+
+Backported to BTstack v1.5.6.2, the version MicroPython carries, for the two
+calls that matter there: gap_run_set_local_name() and gap_run_set_eir_data()
+sent their command without releasing the HCI packet buffer when the
+transport is synchronous. The CYW43 transport of Pico W boards is, so with
+ENABLE_CLASSIC start-up stalled after HCI_Write_Local_Name and never reached
+HCI_STATE_WORKING. Upstream's commit (in v1.6.1) also moves the baud-change,
+BD_ADDR and init-script sends onto the new funnel; those paths aren't
+reached on a Pico W and are left as they are. As in v1.5.6's
+hci_send_cmd_va_arg(), the funnel also emits the transport-packet-sent event.
+Its only callers here are Classic's, so it is built with ENABLE_CLASSIC only,
+or a BLE-only build fails on an unused static function.
+
+diff --git a/src/hci.c b/src/hci.c
+--- a/src/hci.c
++++ b/src/hci.c
+@@ -216,8 +216,9 @@
+ static void hci_emit_acl_packet(uint8_t * packet, uint16_t size);
+ static void hci_run(void);
+ static int  hci_is_le_connection(hci_connection_t * connection);
+ 
+ #ifdef ENABLE_CLASSIC
++static uint8_t hci_send_prepared_cmd_packet(void);
+ static int hci_have_usb_transport(void);
+ static void hci_trigger_remote_features_for_connection(hci_connection_t * connection);
+ #endif
+@@ -1624,7 +1625,6 @@
+     uint8_t * packet = hci_stack->hci_packet_buffer;
+     // construct HCI Command and send
+     uint16_t opcode = hci_write_local_name.opcode;
+-    hci_stack->last_cmd_opcode = opcode;
+     packet[0] = opcode & 0xff;
+     packet[1] = opcode >> 8;
+     packet[2] = DEVICE_NAME_LEN;
+@@ -1635,7 +1635,9 @@
+     (void)memcpy(&packet[3], hci_stack->local_name, bytes_to_copy);
+     // expand '00:00:00:00:00:00' in name with bd_addr
+     btstack_replace_bd_addr_placeholder(&packet[3], bytes_to_copy, hci_stack->local_bd_addr);
+-    hci_send_cmd_packet(packet, HCI_CMD_HEADER_SIZE + DEVICE_NAME_LEN);
++
++    hci_stack->last_cmd_opcode = opcode;
++    hci_send_prepared_cmd_packet();
+ }
+ 
+ static void gap_run_set_eir_data(void){
+@@ -1643,7 +1645,6 @@
+     uint8_t * packet = hci_stack->hci_packet_buffer;
+     // construct HCI Command in-place and send
+     uint16_t opcode = hci_write_extended_inquiry_response.opcode;
+-    hci_stack->last_cmd_opcode = opcode;
+     uint16_t offset = 0;
+     packet[offset++] = opcode & 0xff;
+     packet[offset++] = opcode >> 8;
+@@ -1676,7 +1677,9 @@
+         // expand '00:00:00:00:00:00' in name with bd_addr
+         btstack_replace_bd_addr_placeholder(&packet[offset], bytes_to_copy, hci_stack->local_bd_addr);
+     }
+-    hci_send_cmd_packet(packet, HCI_CMD_HEADER_SIZE + 1 + EXTENDED_INQUIRY_RESPONSE_DATA_LEN);
++
++    hci_stack->last_cmd_opcode = opcode;
++    hci_send_prepared_cmd_packet();
+ }
+ 
+ static void hci_run_gap_tasks_classic(void){
+@@ -7272,6 +7275,21 @@
+     hci_run_general_pending_commands();
+ }
+ 
++#ifdef ENABLE_CLASSIC
++// funnel for sending cmd packet using single outgoing buffer
++static uint8_t hci_send_prepared_cmd_packet(void) {
++    btstack_assert(hci_stack->hci_packet_buffer_reserved);
++    uint16_t size = 3u + hci_stack->hci_packet_buffer[2u];
++    uint8_t status = hci_send_cmd_packet(hci_stack->hci_packet_buffer, size);
++    // release packet buffer on error or for synchronous transport implementations
++    if ((status != ERROR_CODE_SUCCESS) || hci_transport_synchronous()){
++        hci_release_packet_buffer();
++        hci_emit_transport_packet_sent();
++    }
++    return status;
++}
++#endif
++
+ uint8_t hci_send_cmd_packet(uint8_t *packet, int size){
+     // house-keeping
+     

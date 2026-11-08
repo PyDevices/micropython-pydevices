@@ -42,3 +42,5 @@ The desktop `pydevices` variants freeze a board config that imports
 
 `all` is large. On a small flash, name only what your project uses:
 [Fit firmware on a small flash](fit-firmware-on-a-small-flash.md).
+`audioinstruments` can be cut down to the instruments you play:
+[Build with a few instruments](build-with-a-few-instruments.md).
