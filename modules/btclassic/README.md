@@ -95,6 +95,22 @@ hand `HandsFree.uplink()` the board's open `pcm_in`: the pump's pull then
 sends the microphone to the phone as well. A profile is read one way or the
 other, by the pump or with `readinto()`, not both.
 
+If the phone's caller hears your microphone break up while the board is busy
+(redrawing, decoding a cover, collecting garbage), raise the PSRAM and flash
+clock to 80 MHz. On a classic ESP32, PSRAM and flash share one bus, and the
+Bluetooth stack on the other core waits on it: at the default 40 MHz a busy
+program holds it long enough to lose call audio. On an ESP32 Audio Kit
+(ESP32-A1S module) with the display redrawing through a call, 15 s of
+microphone tone had 8 or 9 dropouts at 40 MHz, and none in 13 calls at
+80 MHz. If your module's PSRAM is rated for 80 MHz, add these to the board's
+sdkconfig, and write the bootloader as well as the app, because the flash
+clock is set in the bootloader:
+
+```text
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_SPIRAM_SPEED_80M=y
+```
+
 On the unix port the module builds on a loopback backend with no radio, so
 these paths have desktop tests: [`tests/host_probe.py`](tests/host_probe.py)
 plays music and a call through the pump while the interpreter collects
