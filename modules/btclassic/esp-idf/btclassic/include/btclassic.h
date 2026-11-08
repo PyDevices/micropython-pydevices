@@ -433,6 +433,23 @@ size_t btc_hid_host_read(uint8_t *dst, size_t size);
 int btc_hid_host_send(uint8_t report_id, const uint8_t *data, size_t len);
 // The connected device's report descriptor; 0 before it is known.
 size_t btc_hid_host_descriptor(uint8_t *dst, size_t size);
+// The connected device's vendor and product IDs and version, from its
+// service record; false before they are known.
+bool btc_hid_host_ids(uint16_t *vendor, uint16_t *product, uint16_t *version);
+// Report types, as HID numbers them.
+#define BTC_HID_INPUT 1
+#define BTC_HID_OUTPUT 2
+#define BTC_HID_FEATURE 3
+// Ask the connected device for one report over the control channel (a
+// gamepad's settings, say); `report_id` 0 when the descriptor has none.
+// One request at a time: btc_hid_host_got_report() gives the answer.
+int btc_hid_host_get_report(uint8_t type, uint8_t report_id);
+// The answer, report ID first when there is one: its length, 0 while it
+// hasn't come, or a negative BTC_ERR_* (BTC_ERR_FAIL: the device refused).
+int btc_hid_host_got_report(uint8_t *dst, size_t size);
+// Set one report over the control channel, report ID first when the
+// descriptor has IDs. Returns once the request is sent.
+int btc_hid_host_set_report(uint8_t type, const uint8_t *report, size_t len);
 int btc_hid_disconnect(void);
 void btc_hid_stop(void);
 void btc_hid_status(btc_hid_status_t *out);

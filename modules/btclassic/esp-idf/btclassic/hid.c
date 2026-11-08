@@ -44,6 +44,7 @@ static const char *TAG = "btclassic";
 #define LAST_INPUTS 4           // input reports kept to answer GET_REPORT
 #define CONGESTED 8             // HID_ERR_CONGESTED, from Bluedroid's hiddefs.h
 #define RETRY_US 5000
+#define GOT_MAX 128              // a GET_REPORT answer, ID first
 
 typedef struct {
     uint8_t buf[QUEUE_BYTES];
@@ -77,6 +78,11 @@ static struct {
     // host
     bool want_boot;
     uint16_t descriptor_len;
+    bool have_ids;
+    uint16_t vendor, product, version;
+    int8_t got_state;       // GET_REPORT: 0 none, 1 waiting, 2 answered, <0 error
+    uint8_t got_len;
+    uint8_t got[GOT_MAX];
 } h;
 
 // The last peer, for connect() with none; kept across stop and start.
@@ -183,6 +189,10 @@ static void link_down(void) {
     h.in_flight = false;
     h.q.head = h.q.count = 0;
     h.descriptor_len = 0;
+    h.have_ids = false;
+    if (h.got_state == 1) {
+        h.got_state = -1;
+    }
     if (was) {
         h.changes |= BTC_CHANGED_CONNECTION;
     }
@@ -631,9 +641,28 @@ static void hidh_cb(esp_hidh_cb_event_t event, esp_hidh_cb_param_t *param) {
                 h.descriptor_len = (uint16_t)n;
                 h.changes |= BTC_CHANGED_HID;
                 BTC_UNLOCK();
+                h.vendor = param->dscp.vendor_id;
+                h.product = param->dscp.product_id;
+                h.version = param->dscp.version;
+                h.have_ids = true;
                 ESP_LOGI(TAG, "hid: descriptor %u bytes, vendor %04x product %04x", (unsigned)n,
                     param->dscp.vendor_id, param->dscp.product_id);
             }
+            break;
+        case ESP_HIDH_GET_RPT_EVT:
+            BTC_LOCK();
+            if (h.got_state == 1) {
+                if (param->get_rpt.status == ESP_HIDH_OK && param->get_rpt.data) {
+                    size_t n = param->get_rpt.len < GOT_MAX ? param->get_rpt.len : GOT_MAX;
+                    memcpy(h.got, param->get_rpt.data, n);
+                    h.got_len = (uint8_t)n;
+                    h.got_state = 2;
+                } else {
+                    h.got_state = -1;
+                }
+                h.changes |= BTC_CHANGED_HID;
+            }
+            BTC_UNLOCK();
             break;
         case ESP_HIDH_SET_PROTO_EVT:
             if (param->set_proto.status == ESP_HIDH_OK) {
@@ -755,6 +784,76 @@ int btc_hid_host_send(uint8_t report_id, const uint8_t *data, size_t len) {
     return btc_err(esp_bt_hid_host_send_data(a, buf, n));
 }
 
+bool btc_hid_host_ids(uint16_t *vendor, uint16_t *product, uint16_t *version) {
+    if (!h.connected || !h.host || !h.have_ids) {
+        return false;
+    }
+    *vendor = h.vendor;
+    *product = h.product;
+    *version = h.version;
+    return true;
+}
+
+int btc_hid_host_get_report(uint8_t type, uint8_t report_id) {
+    if (!h.connected || !h.host) {
+        return BTC_ERR_STATE;
+    }
+    if (type < BTC_HID_INPUT || type > BTC_HID_FEATURE) {
+        return BTC_ERR_ARG;
+    }
+    BTC_LOCK();
+    bool busy = h.got_state == 1;
+    if (!busy) {
+        h.got_state = 1;
+        h.got_len = 0;
+    }
+    BTC_UNLOCK();
+    if (busy) {
+        return BTC_ERR_STATE;
+    }
+    esp_bd_addr_t a;
+    memcpy(a, h.peer, 6);
+    esp_err_t err = esp_bt_hid_host_get_report(a, (esp_hidh_report_type_t)type, report_id, GOT_MAX);
+    if (err != ESP_OK) {
+        h.got_state = 0;
+    }
+    return btc_err(err);
+}
+
+int btc_hid_host_got_report(uint8_t *dst, size_t size) {
+    BTC_LOCK();
+    int state = h.got_state, n = 0;
+    if (state == 2) {
+        n = h.got_len < size ? h.got_len : (int)size;
+        memcpy(dst, h.got, n);
+        h.got_state = 0;
+    } else if (state < 0) {
+        h.got_state = 0;
+    }
+    BTC_UNLOCK();
+    if (state == 1) {
+        return h.connected ? 0 : BTC_ERR_STATE;
+    }
+    if (state < 0) {
+        return BTC_ERR_FAIL;
+    }
+    return state == 2 ? n : BTC_ERR_STATE;
+}
+
+int btc_hid_host_set_report(uint8_t type, const uint8_t *report, size_t len) {
+    if (!h.connected || !h.host) {
+        return BTC_ERR_STATE;
+    }
+    if (type < BTC_HID_INPUT || type > BTC_HID_FEATURE || len == 0 || len > GOT_MAX) {
+        return BTC_ERR_ARG;
+    }
+    uint8_t buf[GOT_MAX];
+    memcpy(buf, report, len);
+    esp_bd_addr_t a;
+    memcpy(a, h.peer, 6);
+    return btc_err(esp_bt_hid_host_set_report(a, (esp_hidh_report_type_t)type, buf, len));
+}
+
 size_t btc_hid_host_descriptor(uint8_t *dst, size_t size) {
     if (!h.connected || !h.host || host_descriptor == NULL) {
         return 0;
@@ -795,6 +894,18 @@ size_t btc_hid_host_read(uint8_t *dst, size_t size) {
     return 0;
 }
 int btc_hid_host_send(uint8_t report_id, const uint8_t *data, size_t len) {
+    return BTC_ERR_UNSUPPORTED;
+}
+bool btc_hid_host_ids(uint16_t *vendor, uint16_t *product, uint16_t *version) {
+    return false;
+}
+int btc_hid_host_get_report(uint8_t type, uint8_t report_id) {
+    return BTC_ERR_UNSUPPORTED;
+}
+int btc_hid_host_got_report(uint8_t *dst, size_t size) {
+    return BTC_ERR_UNSUPPORTED;
+}
+int btc_hid_host_set_report(uint8_t type, const uint8_t *report, size_t len) {
     return BTC_ERR_UNSUPPORTED;
 }
 size_t btc_hid_host_descriptor(uint8_t *dst, size_t size) {
@@ -895,6 +1006,18 @@ size_t btc_hid_host_read(uint8_t *dst, size_t size) {
     return 0;
 }
 int btc_hid_host_send(uint8_t report_id, const uint8_t *data, size_t len) {
+    return BTC_ERR_UNSUPPORTED;
+}
+bool btc_hid_host_ids(uint16_t *vendor, uint16_t *product, uint16_t *version) {
+    return false;
+}
+int btc_hid_host_get_report(uint8_t type, uint8_t report_id) {
+    return BTC_ERR_UNSUPPORTED;
+}
+int btc_hid_host_got_report(uint8_t *dst, size_t size) {
+    return BTC_ERR_UNSUPPORTED;
+}
+int btc_hid_host_set_report(uint8_t type, const uint8_t *report, size_t len) {
     return BTC_ERR_UNSUPPORTED;
 }
 size_t btc_hid_host_descriptor(uint8_t *dst, size_t size) {

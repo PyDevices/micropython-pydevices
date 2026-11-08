@@ -127,6 +127,11 @@ void app_main(void) {
     btc_hid_host_read(bytes, sizeof(bytes));
     btc_hid_host_send(1, bytes, 1);
     btc_hid_host_descriptor(bytes, sizeof(bytes));
+    uint16_t vendor, product, version;
+    btc_hid_host_ids(&vendor, &product, &version);
+    btc_hid_host_get_report(BTC_HID_FEATURE, 0);
+    btc_hid_host_got_report(bytes, sizeof(bytes));
+    btc_hid_host_set_report(BTC_HID_FEATURE, bytes, 1);
     btc_hid_status_t hid;
     btc_hid_status(&hid);
     btc_hid_changes();

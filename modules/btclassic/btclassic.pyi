@@ -832,6 +832,14 @@ class HIDHost:
     have the fixed boot layouts (ID 1 and 2), which `decode` reads."""
     descriptor: bytes | None
     """The device's HID report descriptor, once connected."""
+    ids: tuple[int, int, int] | None
+    """The device's (vendor, product, version) from its service record,
+    once connected: what tells one gamepad from another, to map its
+    buttons. None before."""
+    INPUT: int
+    OUTPUT: int
+    FEATURE: int
+    """Report types, for `get_report` and `set_report`."""
     def connect(self, addr: bytes | None = None, *, boot: bool = False) -> None:
         """Call a device, or with no address the last one it was connected
         to, remembered across resets. boot asks for the boot protocol,
@@ -846,15 +854,30 @@ class HIDHost:
         """Send an output report, report ID first when the descriptor has
         IDs or the link runs the boot protocol: a keyboard's Caps Lock LED
         is `bytes((1, 2))`."""
+    def get_report(self, report_id: int = 0, type: int = 3, *, timeout: int = 1000) -> bytes:
+        """Ask the device for one report and wait for it, report ID first
+        when it has one. Most often a `FEATURE` report, which some gamepads
+        need read before they send their full input reports.
+
+        Raises:
+            OSError: ETIMEDOUT after timeout ms, or the device refused.
+        """
+    def set_report(self, report: bytes, type: int = 3) -> None:
+        """Set one report on the device, report ID first when the
+        descriptor has IDs: a `FEATURE` report by default, or an `OUTPUT`
+        report sent the slower, acknowledged way."""
     def decode(self, report: bytes) -> tuple | None:
-        """Take a report apart, when its layout is known: in the boot
-        protocol, or from a device whose descriptor is one of `HIDDevice`'s.
-        None otherwise; read the descriptor and the bytes yourself.
+        """Take an input report apart by what its descriptor says each
+        field means, so any keyboard, mouse, gamepad or media remote reads
+        the same. None for a report it can't place (a vendor's own); read
+        the descriptor and the bytes yourself then.
 
         - ("keyboard", modifiers, (key, ...)): the keys held.
         - ("mouse", buttons, x, y, wheel)
         - ("consumer", usage): 0 when the key is released.
-        - ("gamepad", buttons, hat, x, y, z, rz): hat None when centred.
+        - ("gamepad", buttons, hat, x, y, z, rz): buttons 1 to 32 as bits
+          0 to 31, hat 0 to 7 clockwise from up and None when centred, the
+          axes on -127..127 whatever range the device sends.
         """
     @staticmethod
     def char(key: int, modifiers: int = 0) -> str | None:

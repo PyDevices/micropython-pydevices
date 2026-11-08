@@ -28,6 +28,7 @@
 #include "py/runtime.h"
 
 #include "btclassic.h"
+#include "hid_parse.h"
 
 extern const mp_obj_type_t btc_bluetooth_type;
 
@@ -669,6 +670,15 @@ MP_DEFINE_CONST_OBJ_TYPE(
 // HIDHost
 // =========================================================================
 
+// The host keeps the connected device's descriptor read into fields, for
+// decode(); read again when the descriptor changes.
+typedef struct {
+    mp_obj_base_t base;
+    hidp_t *fields;
+    uint16_t fields_len;
+    uint32_t fields_sum;
+} host_obj_t;
+
 // HIDHost(bt)
 static mp_obj_t host_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
     mp_arg_check_num(n_args, n_kw, 1, 1, false);
@@ -682,7 +692,10 @@ static mp_obj_t host_make_new(const mp_obj_type_t *type, size_t n_args, size_t n
     if (!st.started) {
         hid_done(btc_hid_host_start());
     }
-    return MP_OBJ_FROM_PTR(mp_obj_malloc(hid_obj_t, type));
+    host_obj_t *self = mp_obj_malloc(host_obj_t, type);
+    self->fields = NULL;
+    self->fields_len = 0;
+    return MP_OBJ_FROM_PTR(self);
 }
 
 // connect(addr=None, *, boot=False): call a keyboard, mouse or gamepad, or
@@ -755,6 +768,65 @@ static mp_obj_t signed_byte(uint8_t b) {
     return MP_OBJ_NEW_SMALL_INT((int8_t)b);
 }
 
+// The device's descriptor as fields; NULL before it is known.
+static const hidp_t *host_fields(host_obj_t *self) {
+    uint8_t *d = m_new(uint8_t, HOST_DESCRIPTOR_MAX);
+    size_t n = btc_hid_host_descriptor(d, HOST_DESCRIPTOR_MAX);
+    uint32_t sum = 0;
+    for (size_t i = 0; i < n; i++) {
+        sum = sum * 31 + d[i];
+    }
+    if (n && (self->fields == NULL || self->fields_len != n || self->fields_sum != sum)) {
+        if (self->fields == NULL) {
+            self->fields = m_new_obj(hidp_t);
+        }
+        hidp_parse(self->fields, d, n);
+        self->fields_len = (uint16_t)n;
+        self->fields_sum = sum;
+    }
+    m_del(uint8_t, d, HOST_DESCRIPTOR_MAX);
+    return n ? self->fields : NULL;
+}
+
+// decode() for a device whose descriptor isn't one of ours: each field
+// read by its usage.
+static mp_obj_t host_decode_any(host_obj_t *self, const uint8_t *p, size_t len) {
+    const hidp_t *fields = host_fields(self);
+    if (fields == NULL) {
+        return mp_const_none;
+    }
+    hidp_report_t o;
+    hidp_decode(fields, p, len, &o);
+    switch (o.kind) {
+        case HIDP_KEYBOARD: {
+            mp_obj_t keys[6];
+            for (int i = 0; i < o.nkeys; i++) {
+                keys[i] = MP_OBJ_NEW_SMALL_INT(o.keys[i]);
+            }
+            mp_obj_t t[3] = {MP_OBJ_NEW_QSTR(MP_QSTR_keyboard), MP_OBJ_NEW_SMALL_INT(o.modifiers),
+                             mp_obj_new_tuple(o.nkeys, keys)};
+            return mp_obj_new_tuple(3, t);
+        }
+        case HIDP_MOUSE: {
+            mp_obj_t t[5] = {MP_OBJ_NEW_QSTR(MP_QSTR_mouse), mp_obj_new_int_from_uint(o.buttons),
+                             mp_obj_new_int(o.x), mp_obj_new_int(o.y), mp_obj_new_int(o.wheel)};
+            return mp_obj_new_tuple(5, t);
+        }
+        case HIDP_CONSUMER: {
+            mp_obj_t t[2] = {MP_OBJ_NEW_QSTR(MP_QSTR_consumer), MP_OBJ_NEW_SMALL_INT(o.usage)};
+            return mp_obj_new_tuple(2, t);
+        }
+        case HIDP_GAMEPAD: {
+            mp_obj_t t[7] = {MP_OBJ_NEW_QSTR(MP_QSTR_gamepad), mp_obj_new_int_from_uint(o.buttons),
+                             o.hat >= 0 ? MP_OBJ_NEW_SMALL_INT(o.hat) : mp_const_none,
+                             MP_OBJ_NEW_SMALL_INT(o.ax), MP_OBJ_NEW_SMALL_INT(o.ay),
+                             MP_OBJ_NEW_SMALL_INT(o.az), MP_OBJ_NEW_SMALL_INT(o.arz)};
+            return mp_obj_new_tuple(7, t);
+        }
+    }
+    return mp_const_none;
+}
+
 // decode(report) -> tuple or None: a report in a layout this module knows,
 // taken apart. Those are the boot protocol's keyboard and mouse, and every
 // report of a device whose descriptor is one of HIDDevice's.
@@ -763,7 +835,6 @@ static mp_obj_t signed_byte(uint8_t b) {
 //   ("consumer", usage)
 //   ("gamepad", buttons, hat, x, y, z, rz)     hat None when centred
 static mp_obj_t host_decode(mp_obj_t self_in, mp_obj_t report_in) {
-    (void)self_in;
     mp_buffer_info_t r;
     mp_get_buffer_raise(report_in, &r, MP_BUFFER_READ);
     const uint8_t *p = r.buf;
@@ -777,7 +848,7 @@ static mp_obj_t host_decode(mp_obj_t self_in, mp_obj_t report_in) {
     if (!st.boot) {
         host_layout(&ids, &which);
         if (which < 0) {
-            return mp_const_none;
+            return host_decode_any(MP_OBJ_TO_PTR(self_in), p, r.len);
         }
     }
     uint8_t has = st.boot ? (HAS_KEYBOARD | HAS_MOUSE) : ours[which].has;
@@ -812,6 +883,57 @@ static mp_obj_t host_decode(mp_obj_t self_in, mp_obj_t report_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(host_decode_obj, host_decode);
 
+// get_report(report_id=0, type=FEATURE, *, timeout=1000) -> bytes: ask the
+// device for one report over the control channel, ID first when it has
+// one, and wait for the answer.
+static mp_obj_t host_get_report(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_self, ARG_id, ARG_type, ARG_timeout };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_self, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_report_id, MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_type, MP_ARG_INT, {.u_int = BTC_HID_FEATURE} },
+        { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 1000} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
+    hid_check(true);
+    mp_int_t id = args[ARG_id].u_int, type = args[ARG_type].u_int;
+    if (id < 0 || id > 255 || type < BTC_HID_INPUT || type > BTC_HID_FEATURE) {
+        mp_raise_ValueError(MP_ERROR_TEXT("report_id is 0 to 255; type is INPUT, OUTPUT or FEATURE"));
+    }
+    hid_done(btc_hid_host_get_report((uint8_t)type, (uint8_t)id));
+    uint8_t buf[128];
+    mp_uint_t start = mp_hal_ticks_ms();
+    for (;;) {
+        int n = btc_hid_host_got_report(buf, sizeof(buf));
+        if (n > 0) {
+            return mp_obj_new_bytes(buf, n);
+        }
+        if (n < 0) {
+            hid_raise(n);
+        }
+        if (mp_hal_ticks_ms() - start >= (mp_uint_t)args[ARG_timeout].u_int) {
+            mp_raise_OSError(MP_ETIMEDOUT);
+        }
+        mp_event_wait_ms(5);
+    }
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(host_get_report_obj, 1, host_get_report);
+
+// set_report(report, type=FEATURE): set one report over the control
+// channel, ID first when the descriptor has IDs.
+static mp_obj_t host_set_report(size_t n_args, const mp_obj_t *args) {
+    hid_check(true);
+    mp_buffer_info_t r;
+    mp_get_buffer_raise(args[1], &r, MP_BUFFER_READ);
+    mp_int_t type = n_args > 2 ? mp_obj_get_int(args[2]) : BTC_HID_FEATURE;
+    if (r.len == 0 || r.len > 128 || type < BTC_HID_INPUT || type > BTC_HID_FEATURE) {
+        mp_raise_ValueError(MP_ERROR_TEXT("a report is 1 to 128 bytes; type is INPUT, OUTPUT or FEATURE"));
+    }
+    return hid_done(btc_hid_host_set_report((uint8_t)type, r.buf, r.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(host_set_report_obj, 2, 3, host_set_report);
+
 // char(key, modifiers=0) -> str or None: what a key types on a US layout.
 static mp_obj_t host_char(size_t n_args, const mp_obj_t *args) {
     mp_int_t key = mp_obj_get_int(args[0]);
@@ -837,6 +959,16 @@ static void host_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         m_del(uint8_t, b, HOST_DESCRIPTOR_MAX);
         return;
     }
+    if (attr == MP_QSTR_ids) {
+        uint16_t vendor, product, version;
+        if (btc_hid_host_ids(&vendor, &product, &version)) {
+            mp_obj_t t[3] = {MP_OBJ_NEW_SMALL_INT(vendor), MP_OBJ_NEW_SMALL_INT(product), MP_OBJ_NEW_SMALL_INT(version)};
+            dest[0] = mp_obj_new_tuple(3, t);
+        } else {
+            dest[0] = mp_const_none;
+        }
+        return;
+    }
     dest[1] = MP_OBJ_SENTINEL;
 }
 
@@ -846,6 +978,11 @@ static const mp_rom_map_elem_t host_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&host_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_send), MP_ROM_PTR(&host_send_obj) },
     { MP_ROM_QSTR(MP_QSTR_decode), MP_ROM_PTR(&host_decode_obj) },
+    { MP_ROM_QSTR(MP_QSTR_get_report), MP_ROM_PTR(&host_get_report_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_report), MP_ROM_PTR(&host_set_report_obj) },
+    { MP_ROM_QSTR(MP_QSTR_INPUT), MP_ROM_INT(BTC_HID_INPUT) },
+    { MP_ROM_QSTR(MP_QSTR_OUTPUT), MP_ROM_INT(BTC_HID_OUTPUT) },
+    { MP_ROM_QSTR(MP_QSTR_FEATURE), MP_ROM_INT(BTC_HID_FEATURE) },
     { MP_ROM_QSTR(MP_QSTR_char), MP_ROM_PTR(&host_char_obj) },
     { MP_ROM_QSTR(MP_QSTR_changes), MP_ROM_PTR(&hid_changes_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&hid_stats_obj) },
