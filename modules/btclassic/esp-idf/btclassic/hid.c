@@ -23,6 +23,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "nvs.h"
 
 #include "btc_bluedroid.h"
 
@@ -131,6 +132,37 @@ static size_t queue_get(uint8_t *dst, size_t size) {
     return len < size ? len : size;
 }
 
+// The last peer of each role, kept in NVS so connect() can call it back
+// after a reset: Bluedroid doesn't keep the device role's host itself.
+#define NVS_NAMESPACE "btclassic"
+
+static const char *nvs_key(void) {
+    return h.host ? "hid_device" : "hid_host";
+}
+
+static void remember_last(const uint8_t *addr) {
+    nvs_handle_t n;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &n) == ESP_OK) {
+        nvs_set_blob(n, nvs_key(), addr, 6);
+        nvs_commit(n);
+        nvs_close(n);
+    }
+}
+
+static void recall_last(void) {
+    nvs_handle_t n;
+    uint8_t a[6];
+    size_t len = sizeof(a);
+    if (have_last || nvs_open(NVS_NAMESPACE, NVS_READONLY, &n) != ESP_OK) {
+        return;
+    }
+    if (nvs_get_blob(n, nvs_key(), a, &len) == ESP_OK && len == 6) {
+        memcpy(last, a, 6);
+        have_last = true;
+    }
+    nvs_close(n);
+}
+
 static void link_up(const uint8_t *addr) {
     BTC_LOCK();
     memcpy(h.peer, addr, 6);
@@ -141,6 +173,7 @@ static void link_up(const uint8_t *addr) {
     h.in_flight = false;
     h.changes |= BTC_CHANGED_CONNECTION;
     BTC_UNLOCK();
+    remember_last(addr);
     ESP_LOGI(TAG, "hid: %02x:%02x:%02x:%02x:%02x:%02x connected", addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
 }
 
@@ -421,6 +454,8 @@ int btc_hid_device_start(const uint8_t *desc, size_t len, uint8_t subclass, cons
     memcpy(descriptor, desc, len);
     descriptor_len = len;
     memset(&h, 0, sizeof(h));
+    have_last = false;
+    recall_last();
     h.has_ids = descriptor_has_ids(desc, len);
     strncpy(service_name, name && *name ? name : "Keyboard", sizeof(service_name) - 1);
     service_name[sizeof(service_name) - 1] = 0;
@@ -661,6 +696,8 @@ int btc_hid_host_start(void) {
     }
     memset(&h, 0, sizeof(h));
     h.host = true;
+    have_last = false;
+    recall_last();
     h.started = true;
     esp_err_t err = esp_bt_hid_host_register_callback(hidh_cb);
     if (err == ESP_OK) {

@@ -22,6 +22,7 @@
 #include <string.h>
 
 #include "py/mperrno.h"
+#include "py/mphal.h"
 #include "py/obj.h"
 #include "py/objstr.h"
 #include "py/runtime.h"
@@ -411,7 +412,12 @@ static bool dev_queue(const uint8_t *r, size_t n) {
 // connect(addr=None): call a host, or the last one.
 static mp_obj_t dev_connect(size_t n_args, const mp_obj_t *args) {
     hid_check(false);
-    return hid_done(btc_hid_device_connect(n_args > 1 ? addr_or_none(args[1]) : NULL));
+    const uint8_t *addr = n_args > 1 ? addr_or_none(args[1]) : NULL;
+    int err = btc_hid_device_connect(addr);
+    if (err == BTC_ERR_ARG && !addr) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: no host to call back yet; pass its address"));
+    }
+    return hid_done(err);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(dev_connect_obj, 1, 2, dev_connect);
 
@@ -468,14 +474,29 @@ static mp_obj_t dev_keyboard(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(dev_keyboard_obj, 1, dev_keyboard);
 
-// type(text) -> characters queued: each one pressed and released, on a US
-// layout. Waits for room while a host is connected.
-static mp_obj_t dev_type(mp_obj_t self_in, mp_obj_t text_in) {
-    (void)self_in;
+// type(text, *, delay=30) -> characters queued: each one pressed and
+// released, on a US layout, delay ms apart. Some apps lose keys that come
+// faster than a person types: Notepad on Windows 11 lost a few in a hundred
+// at 20 ms and none at 30, though Windows itself got every one at full
+// speed. delay=0 sends at the link's pace. Waits for room while a host
+// is connected.
+static mp_obj_t dev_type(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_self, ARG_text, ARG_delay };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_self, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_text, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_delay, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 30} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
     hid_check(false);
     need(HAS_KEYBOARD);
+    mp_int_t delay = args[ARG_delay].u_int;
+    if (delay < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("delay is 0 or more"));
+    }
     size_t len;
-    const uint8_t *s = (const uint8_t *)mp_obj_str_get_data(text_in, &len);
+    const uint8_t *s = (const uint8_t *)mp_obj_str_get_data(args[ARG_text].u_obj, &len);
     for (size_t i = 0; i < len; i++) {
         if (!char_key(s[i])) {
             mp_raise_ValueError(MP_ERROR_TEXT("a character with no key on a US keyboard"));
@@ -488,10 +509,18 @@ static mp_obj_t dev_type(mp_obj_t self_in, mp_obj_t text_in) {
         if (!send_keys(k & 0x80 ? MOD_SHIFT : 0, &key, 1) || !send_keys(0, NULL, 0)) {
             break;
         }
+        if (delay && done + 1 < len) {
+            // mp_event_wait_ms() returns early on any event: wait out the rest.
+            mp_uint_t start = mp_hal_ticks_ms();
+            mp_uint_t waited;
+            while ((waited = mp_hal_ticks_ms() - start) < (mp_uint_t)delay) {
+                mp_event_wait_ms(delay - waited);
+            }
+        }
     }
     return MP_OBJ_NEW_SMALL_INT(done);
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(dev_type_obj, dev_type);
+static MP_DEFINE_CONST_FUN_OBJ_KW(dev_type_obj, 2, dev_type);
 
 // mouse(x=0, y=0, *, buttons=None, wheel=0) -> bool: move by x, y (any
 // size, sent in steps of 127 at most), turn the wheel, and set the buttons
@@ -661,7 +690,12 @@ static mp_obj_t host_connect(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
     hid_check(true);
-    return hid_done(btc_hid_host_connect(addr_or_none(args[ARG_addr].u_obj), args[ARG_boot].u_bool));
+    const uint8_t *addr = addr_or_none(args[ARG_addr].u_obj);
+    int err = btc_hid_host_connect(addr, args[ARG_boot].u_bool);
+    if (err == BTC_ERR_ARG && !addr) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: no device to call back yet; pass its address"));
+    }
+    return hid_done(err);
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(host_connect_obj, 1, host_connect);
 

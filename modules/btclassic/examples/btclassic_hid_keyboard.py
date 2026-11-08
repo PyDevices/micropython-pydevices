@@ -5,9 +5,9 @@
 
 The board becomes a Bluetooth keyboard and mouse. Pair your computer with
 the board, click into a text editor, and the board types a line each time
-it connects, then nudges the mouse pointer in a small square. It prints
-the keyboard LEDs (Caps Lock and Num Lock) whenever your computer changes
-them.
+it connects, then nudges the mouse pointer in a small square. After the
+first pairing it calls your computer back when it starts. It prints the
+keyboard LEDs (Caps Lock and Num Lock) whenever your computer changes them.
 
 Needs: a classic ESP32 board with firmware built with the btclassic module.
 
@@ -15,7 +15,8 @@ Run it:
 
     mpftp run btclassic_hid_keyboard.py
 
-Tested on: not yet run.
+Tested on: Adafruit QT Py ESP32 Pico, MicroPython v1.30.0-preview with
+btclassic, paired with a Windows 11 PC typing into Notepad.
 """
 
 import time
@@ -35,6 +36,12 @@ network.WLAN(network.STA_IF).active(False)
 bt = btclassic.Bluetooth()
 hid = btclassic.HIDDevice(bt, btclassic.HIDDevice.COMBO)
 print("Pair with %s and click into a text editor." % network.hostname())
+
+# Call back the computer it last typed into, if there is one.
+try:
+    hid.connect()
+except OSError:
+    pass
 
 leds = 0
 while True:
