@@ -743,14 +743,15 @@ class HIDDevice:
     def send(self, report: bytes) -> bool:
         """Queue an input report, report ID first when the descriptor has
         IDs, at most 64 bytes. Never waits: returns False when the queue
-        is full, so wait for `HID` and send again. Reports queued with no
-        host go out when one connects."""
+        is full, so wait for `HID` and send again, and False with no host
+        connected, so nothing is typed into a window long after."""
     def keyboard(self, keys: tuple[int, ...] | list[int] = (), modifiers: int = 0) -> bool:
         """Hold these keys now, up to six HID key codes (4 is A, 0x28 Enter,
         0x4f to 0x52 the arrows), with these modifiers (bit 0 left Ctrl, 1
         left Shift, 2 left Alt, 3 left GUI, 4 to 7 the right ones).
-        `keyboard()` releases everything. While a host is connected, waits
-        for room; returns False if the queue is full with no host."""
+        `keyboard()` releases everything. Waits for room while a host is
+        connected; returns False with no host connected. mouse(),
+        gamepad() and consumer() do the same."""
     def type(self, text: str, *, delay: int = 30) -> int:
         """Type text on a US layout: each character pressed and released,
         delay milliseconds apart. Letters, digits, punctuation, space,
@@ -758,7 +759,8 @@ class HIDDevice:
         before a key is sent. Some apps lose keys that come faster than a
         person types (Notepad on Windows 11 does at 20 ms); delay=0
         sends as fast as the link takes them. Waits for room while a host
-        is connected, and returns how many characters were queued."""
+        is connected, and returns how many characters were queued: fewer
+        than the text's length if the host leaves."""
     def mouse(self, x: int = 0, y: int = 0, *, buttons: int | None = None, wheel: int = 0) -> bool:
         """Move by x, y (right and down; any size, sent in steps of 127),
         turn the wheel (positive up), and set the buttons (bit 0 left, 1

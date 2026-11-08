@@ -523,10 +523,10 @@ int btc_hid_device_send(const uint8_t *report, size_t len) {
         return BTC_ERR_ARG;
     }
     BTC_LOCK();
-    bool ok = queue_put(report, len);
+    bool ok = h.connected && queue_put(report, len);
     BTC_UNLOCK();
     if (!ok) {
-        return 0;   // full: try again after the queue drains
+        return 0;   // full: try again after the queue drains; or no host
     }
     device_kick();
     return 1;

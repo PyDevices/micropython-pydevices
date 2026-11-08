@@ -397,6 +397,9 @@ static void need(uint8_t what) {
 // the queue stayed full: no host to drain it.
 static bool dev_queue(const uint8_t *r, size_t n) {
     for (;;) {
+        if (!hid_connected()) {
+            return false;
+        }
         int got = btc_hid_device_send(r, n);
         hid_done(got);
         if (got > 0) {
@@ -421,7 +424,8 @@ static mp_obj_t dev_connect(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(dev_connect_obj, 1, 2, dev_connect);
 
-// send(report) -> bool: queued, or False when the queue is full.
+// send(report) -> bool: queued, or False when the queue is full or no
+// host is connected.
 static mp_obj_t dev_send(mp_obj_t self_in, mp_obj_t report_in) {
     (void)self_in;
     hid_check(false);
@@ -429,6 +433,9 @@ static mp_obj_t dev_send(mp_obj_t self_in, mp_obj_t report_in) {
     mp_get_buffer_raise(report_in, &r, MP_BUFFER_READ);
     if (r.len == 0 || r.len > MAX_REPORT) {
         mp_raise_ValueError(MP_ERROR_TEXT("a report is 1 to 64 bytes"));
+    }
+    if (!hid_connected()) {
+        return mp_const_false;
     }
     int n = btc_hid_device_send(r.buf, r.len);
     hid_done(n);
