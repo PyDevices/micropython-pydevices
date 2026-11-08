@@ -147,7 +147,8 @@ static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
                 if (s.want_stream) {
                     start_stream();
                 }
-                mark(BTC_CHANGED_CONNECTION | BTC_CHANGED_PEER);
+                // The stream's rate reads as 0 until now; say it's there.
+                mark(BTC_CHANGED_CONNECTION | BTC_CHANGED_FORMAT | BTC_CHANGED_PEER);
             } else if (state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
                 BTC_LOCK();
                 s.connected = false;
@@ -156,7 +157,7 @@ static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
                 s.text[BTC_SOURCE_PEER_NAME][0] = 0;
                 BTC_UNLOCK();
                 btc_ring_restart(&s.ring);
-                mark(BTC_CHANGED_CONNECTION | BTC_CHANGED_STREAM | BTC_CHANGED_PEER);
+                mark(BTC_CHANGED_CONNECTION | BTC_CHANGED_STREAM | BTC_CHANGED_FORMAT | BTC_CHANGED_PEER);
             }
             break;
         }

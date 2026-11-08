@@ -13,7 +13,9 @@ Run it:
 
     mpftp run btclassic_serial_echo.py
 
-Tested on: not yet run.
+Tested on: Adafruit QT Py ESP32 Pico with the Audio BFF, MicroPython
+1.30.0-preview, talking to a Windows 11 PC over its
+Bluetooth COM port.
 """
 
 import select

@@ -15,7 +15,9 @@ Run it:
 
     mpftp run btclassic_source_tone.py
 
-Tested on: not yet run.
+Tested on: Adafruit QT Py ESP32 Pico with the Audio BFF, MicroPython
+1.30.0-preview, playing to a Windows 11 PC as the
+receiver.
 """
 
 import math
@@ -66,6 +68,7 @@ for i in range(period * 20):
     block[2 * i] = sample & 0xFF
     block[2 * i + 1] = (sample >> 8) & 0xFF
 
+receiver = ""
 while True:
     # Write the tone. While the stream runs, write() waits for room, so the
     # receiver sets the pace; before then it returns at once.
@@ -76,8 +79,12 @@ while True:
     # Report the link as it changes.
     changed = source.changes()
     if changed & btclassic.CONNECTION:
-        print("Connected to", source.peer_name if source.connected else "nothing")
-    if changed & btclassic.FORMAT:
+        print("Connected" if source.connected else "Not connected")
+    if changed & btclassic.PEER and source.peer_name != receiver:
+        receiver = source.peer_name
+        if receiver:
+            print("The receiver is", receiver)
+    if changed & btclassic.FORMAT and source.sample_rate:
         print("Streaming at", source.sample_rate, "Hz")
 
     # Print each key pressed on the receiver.
