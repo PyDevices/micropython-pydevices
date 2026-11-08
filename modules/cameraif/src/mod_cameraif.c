@@ -48,6 +48,7 @@
 #include "esp_cam_ctlr_csi.h"
 #include "esp_cam_sensor.h"
 #include "esp_cam_sensor_detect.h"
+#include "esp_cam_sensor_xclk.h"
 #include "sensor_table.h"
 #include "sensor_tuning.h"
 #include "hal/isp_ll.h"
@@ -204,6 +205,7 @@ typedef struct {
     // back (the OV5647's can't read any): one per row of cameraif_ctls.
     int32_t ctl_last[24];
     uint32_t ctl_known;
+    esp_cam_sensor_xclk_handle_t xclk;  // the sensor's clock, when xclk= named a pin
 } cameraif_obj_t;
 
 // One camera, mirrored in BSS.
@@ -482,6 +484,13 @@ static void cameraif_teardown(void) {
         c->i2c = NULL;
         c->owns_i2c = false;
     }
+    // The clock goes after the sensor: turning its stream off above is an
+    // SCCB write, and a sensor with no clock doesn't answer one.
+    if (c->xclk) {
+        esp_cam_sensor_xclk_stop(c->xclk);
+        esp_cam_sensor_xclk_free(c->xclk);
+        c->xclk = NULL;
+    }
     if (c->ldo) {
         esp_ldo_release_channel(c->ldo);
         c->ldo = NULL;
@@ -497,6 +506,50 @@ static void cameraif_teardown(void) {
         vSemaphoreDelete(c->frame_ready);
         c->frame_ready = NULL;
     }
+}
+
+// Start the sensor's clock on `pin`. The esp_cam_sensor drivers take
+// xclk_pin in their config but generate nothing (their clock macros are
+// empty), so a sensor without its own oscillator never answers on SCCB
+// unless the host drives it. The clock router comes first: it is what
+// Espressif's own boards use, and it divides 480 MHz exactly. LEDC covers a
+// frequency the router can't make, on the last timer and channel, the ones
+// machine.PWM reaches for last.
+static esp_err_t cameraif_xclk_start(cameraif_obj_t *c, int pin, uint32_t hz) {
+    esp_err_t err = ESP_ERR_NOT_SUPPORTED;
+    #if CONFIG_CAMERA_XCLK_USE_ESP_CLOCK_ROUTER
+    if (esp_cam_sensor_xclk_allocate(ESP_CAM_SENSOR_XCLK_ESP_CLOCK_ROUTER, &c->xclk) == ESP_OK) {
+        esp_cam_sensor_xclk_config_t cfg = {
+            .esp_clock_router_cfg = { .xclk_pin = pin, .xclk_freq_hz = hz },
+        };
+        err = esp_cam_sensor_xclk_start(c->xclk, &cfg);
+        if (err == ESP_OK) {
+            return ESP_OK;
+        }
+        esp_cam_sensor_xclk_free(c->xclk);
+        c->xclk = NULL;
+    }
+    #endif
+    #if CONFIG_CAMERA_XCLK_USE_LEDC
+    if (esp_cam_sensor_xclk_allocate(ESP_CAM_SENSOR_XCLK_LEDC, &c->xclk) == ESP_OK) {
+        esp_cam_sensor_xclk_config_t cfg = {
+            .ledc_cfg = {
+                .timer = LEDC_TIMER_MAX - 1,
+                .clk_cfg = LEDC_AUTO_CLK,
+                .channel = LEDC_CHANNEL_MAX - 1,
+                .xclk_freq_hz = hz,
+                .xclk_pin = pin,
+            },
+        };
+        err = esp_cam_sensor_xclk_start(c->xclk, &cfg);
+        if (err == ESP_OK) {
+            return ESP_OK;
+        }
+        esp_cam_sensor_xclk_free(c->xclk);
+        c->xclk = NULL;
+    }
+    #endif
+    return err;
 }
 
 #if defined(CIRCUITPY)
@@ -1293,10 +1346,20 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
     // kept, which is why the sdkconfig must enable both CONFIG_CAMERA_<chip>
     // and its AUTO_DETECT option -- without them the array is empty and
     // every camera reports absent, a wiring-shaped error with a build cause.
+    if (args[ARG_xclk].u_int >= 0) {
+        if (args[ARG_xclk_hz].u_int <= 0
+            || cameraif_xclk_start(c, args[ARG_xclk].u_int, args[ARG_xclk_hz].u_int) != ESP_OK) {
+            cameraif_teardown();
+            mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT(
+                "can't drive a %d Hz sensor clock on GPIO %d"),
+                (int)args[ARG_xclk_hz].u_int, (int)args[ARG_xclk].u_int);
+        }
+        mp_hal_delay_ms(2);     // a few hundred cycles before the reset pulse
+    }
     esp_cam_sensor_config_t sensor_cfg = {
         .reset_pin = args[ARG_reset].u_int,
         .pwdn_pin = args[ARG_pwdn].u_int,
-        .xclk_pin = args[ARG_xclk].u_int,
+        .xclk_pin = -1,         // cameraif drives it, above; no driver should
         .xclk_freq_hz = args[ARG_xclk_hz].u_int,
     };
     // sensor= describes the camera in data (see sensor_table.c): open it at

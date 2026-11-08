@@ -138,8 +138,8 @@ time — the P4 has one CSI controller — and constructing a second one raises.
 | `ldo_mv` | `2500` | LDO voltage, millivolts |
 | `reset` | `-1` | Sensor reset pin, `-1` for none |
 | `pwdn` | `-1` | Sensor power-down pin, `-1` for none |
-| `xclk` | `-1` | Pin to generate the sensor's clock on, `-1` if the board has an oscillator |
-| `xclk_hz` | `24000000` | Frequency for that clock |
+| `xclk` | `-1` | The pin cameraif drives the sensor's clock on, `-1` when the camera module carries its own oscillator. The OV5647 modules do; the ESP32-P4-EYE's OV2710 doesn't, and needs `xclk=11` |
+| `xclk_hz` | `24000000` | Frequency for that clock. The P4's clock router makes any that divides 480 MHz exactly; anything else falls back to LEDC on its last timer and channel |
 | `format` | `None` | Sensor format by name, by index, or by size as `(width, height)`; `None` picks the driver's default |
 | `pixel_format` | `None` | What `take()` returns: a `PixelFormat` (`RGB565`, the default, `GRAYSCALE` or `JPEG`). Or `"rgb888"`, for 24-bit frames from `frame()` and `capture()` |
 | `frame_size` | `None` | The size `take()` returns, a `FrameSize`; `None` is the sensor's own ([below](#written-for-espcamera)) |
