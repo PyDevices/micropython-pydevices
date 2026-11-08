@@ -28,7 +28,8 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
         ${BTCLASSIC_IDF}/hid.c
         ${BTCLASSIC_IDF}/pbap.c
         ${BTCLASSIC_IDF}/hfp_ag.c
-        ${BTCLASSIC_IDF}/map.c)
+        ${BTCLASSIC_IDF}/map.c
+        ${BTCLASSIC_IDF}/sdp_shared.c)
     target_include_directories(usermod_btclassic INTERFACE ${BTCLASSIC_IDF}/include ${BTCLASSIC_IDF})
     # The source's track metadata for a remote, through link-time hooks into
     # Bluedroid (avrcp_tg.c); off where they aren't known to fit.

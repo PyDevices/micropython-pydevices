@@ -704,7 +704,7 @@ static void open_instance(void) {
 // ---- SDP: the phone's message services, and the record for ours ----
 
 static void sdp_cb(esp_sdp_cb_event_t event, esp_sdp_cb_param_t *param) {
-    if (event == ESP_SDP_SEARCH_COMP_EVT) {
+    if (event == ESP_SDP_SEARCH_COMP_EVT && m.searching) {
         int n = 0;
         if (param->search.status == ESP_SDP_SUCCESS) {
             for (int i = 0; i < param->search.record_count && n < MSG_INSTANCES; i++) {
@@ -732,7 +732,8 @@ static void sdp_cb(esp_sdp_cb_event_t event, esp_sdp_cb_param_t *param) {
             BTC_UNLOCK();
             bta_sys_sendmsg(c);
         }
-    } else if (event == ESP_SDP_CREATE_RECORD_COMP_EVT) {
+    } else if (event == ESP_SDP_CREATE_RECORD_COMP_EVT && m.record_pending) {
+        // SDP is shared: a completion is ours only while ours is pending.
         BTC_LOCK();
         m.record_pending = false;
         if (param->create_record.status == ESP_SDP_SUCCESS) {
@@ -1036,9 +1037,8 @@ int btc_msg_start(size_t max_bytes) {
     if (m.events == NULL) {
         return BTC_ERR_NOMEM;
     }
-    esp_sdp_register_callback(sdp_cb);
-    esp_err_t err = esp_sdp_init();
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+    esp_err_t err = btc_sdp_open(sdp_cb);    // shared with HIDDevice
+    if (err != ESP_OK) {
         heap_caps_free(m.events);
         m.events = NULL;
         ESP_LOGW(TAG, "messages: SDP didn't start: %s", esp_err_to_name(err));
@@ -1077,7 +1077,7 @@ void btc_msg_stop(void) {
     }
     m.started = false;
     vTaskDelay(pdMS_TO_TICKS(50));
-    esp_sdp_deinit();
+    btc_sdp_close(sdp_cb);
     btc_msg_release();
     heap_caps_free(m.events);
     m.events = NULL;

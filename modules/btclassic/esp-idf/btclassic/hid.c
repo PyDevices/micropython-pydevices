@@ -110,33 +110,18 @@ static uint16_t dev_ids[3];
 static bool dev_ids_set;
 #if HAS_DEVICE_ID
 static volatile int8_t sdp_state;   // 0 off, 1 starting, 2 on, -1 failed
+static int dip_record;
 
+// SDP is shared with Messages (sdp_shared.c), so this sees its events too:
+// a record completion is ours only while ours is pending.
 static void sdp_cb(esp_sdp_cb_event_t event, esp_sdp_cb_param_t *param) {
-    switch (event) {
-        case ESP_SDP_INIT_EVT:
-            if (param->init.status == ESP_SDP_SUCCESS) {
-                esp_bluetooth_sdp_record_t rec = {0};
-                rec.dip.hdr.type = ESP_SDP_TYPE_DIP_SERVER;
-                rec.dip.vendor = dev_ids[0];
-                rec.dip.vendor_id_source = ESP_SDP_VENDOR_ID_SRC_USB;
-                rec.dip.product = dev_ids[1];
-                rec.dip.version = dev_ids[2];
-                rec.dip.primary_record = true;
-                if (esp_sdp_create_record(&rec) != ESP_OK) {
-                    sdp_state = -1;
-                }
-            } else {
-                sdp_state = -1;
-            }
-            break;
-        case ESP_SDP_CREATE_RECORD_COMP_EVT:
-            sdp_state = param->create_record.status == ESP_SDP_SUCCESS ? 2 : -1;
-            break;
-        case ESP_SDP_DEINIT_EVT:
-            sdp_state = 0;
-            break;
-        default:
-            break;
+    if (event == ESP_SDP_CREATE_RECORD_COMP_EVT && sdp_state == 1) {
+        if (param->create_record.status == ESP_SDP_SUCCESS) {
+            dip_record = param->create_record.record_handle;
+            sdp_state = 2;
+        } else {
+            sdp_state = -1;
+        }
     }
 }
 
@@ -145,9 +130,20 @@ static void device_id_start(void) {
         return;
     }
     sdp_state = 1;
-    if (esp_sdp_register_callback(sdp_cb) != ESP_OK || esp_sdp_init() != ESP_OK) {
+    if (btc_sdp_open(sdp_cb) != ESP_OK) {
         sdp_state = -1;
+        ESP_LOGW(TAG, "hid: SDP didn't start for the Device ID record");
         return;
+    }
+    esp_bluetooth_sdp_record_t rec = {0};
+    rec.dip.hdr.type = ESP_SDP_TYPE_DIP_SERVER;
+    rec.dip.vendor = dev_ids[0];
+    rec.dip.vendor_id_source = ESP_SDP_VENDOR_ID_SRC_USB;
+    rec.dip.product = dev_ids[1];
+    rec.dip.version = dev_ids[2];
+    rec.dip.primary_record = true;
+    if (esp_sdp_create_record(&rec) != ESP_OK) {
+        sdp_state = -1;
     }
     for (int i = 0; i < 50 && sdp_state == 1; i++) {
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -161,11 +157,11 @@ static void device_id_stop(void) {
     if (sdp_state == 0) {
         return;
     }
-    if (esp_sdp_deinit() == ESP_OK) {
-        for (int i = 0; i < 50 && sdp_state != 0; i++) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-        }
+    if (dip_record) {
+        esp_sdp_remove_record(dip_record);
+        dip_record = 0;
     }
+    btc_sdp_close(sdp_cb);
     sdp_state = 0;
 }
 #else

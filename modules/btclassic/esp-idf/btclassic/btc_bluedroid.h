@@ -190,3 +190,12 @@ void btc_source_tg_track(btc_tg_track_t *out);
 void btc_tg_metadata_reset(void);
 void btc_tg_metadata_changed(uint8_t event_id);
 #endif
+
+// Bluedroid's SDP API, shared (sdp_shared.c): open it with your callback,
+// which then sees every SDP event, and close it when done; it stops when the
+// last user closes. Open waits until SDP is running.
+#if CONFIG_BT_SDP_COMMON_ENABLED
+#include "esp_sdp_api.h"
+esp_err_t btc_sdp_open(esp_sdp_cb_t cb);
+void btc_sdp_close(esp_sdp_cb_t cb);
+#endif
