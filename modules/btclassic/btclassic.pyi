@@ -179,7 +179,8 @@ class Bluetooth:
         are kept in flash and survive a reset."""
     def unpair(self, addr: bytes | None = None) -> None:
         """Forget a paired device, or every one with no argument. The
-        device has to pair again before it can connect."""
+        device has to pair again before it can connect. An address the
+        board isn't paired with is left alone, without an error."""
     def changes(self) -> int:
         """The bits (`PAIRED`, `FOUND`) for what changed since the last
         call, which clears them."""

@@ -689,7 +689,7 @@ int btc_radio_unpair(const uint8_t *addr) {
     } else {
         int i = key_find(addr);
         if (i < 0) {
-            return BTC_ERR_ARG;
+            return BTC_OK;  // not paired: nothing to do, as on the ESP32
         }
         if (active) {
             gap_drop_link_key_for_bd_addr(store.keys[i].addr);
