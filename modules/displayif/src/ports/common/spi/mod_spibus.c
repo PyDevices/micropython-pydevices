@@ -12,6 +12,17 @@
 #include "displayif/mp_helpers.h"
 #include "displayif/soft_reset.h"
 
+#if defined(ESP_PLATFORM)
+#include "esp_heap_caps.h"
+#include "esp_memory_utils.h"
+// One internal DMA-capable buffer per bus, the size of one ESP32 SPI transfer.
+// Data in PSRAM or not word-aligned is copied through it, because otherwise the
+// SPI driver allocates a bounce buffer of this size for every transfer, two at
+// a time, and with little internal RAM left (Classic Bluetooth in a call) that
+// allocation fails mid-flush.
+#define SPIBUS_DMA_CHUNK 4092
+#endif
+
 #define DC_CMD 0
 #define DC_DATA 1
 #define CS_ACTIVE 0
@@ -39,6 +50,9 @@ typedef struct _spibus_obj_t {
     bool has_spi_pins;
     bool soft; // machine.SoftSPI (bitbang) — do not reinit every send
     bool deinited;
+    #if defined(ESP_PLATFORM)
+    uint8_t *dma_buf; // heap_caps memory, not GC: freed on deinit
+    #endif
 } spibus_obj_t;
 
 static const mp_obj_type_t spibus_type;
@@ -53,6 +67,10 @@ static void spibus_deinit_internal(spibus_obj_t *self) {
     }
     // Release ESP-IDF SPI host while the Python SPI object is still alive.
     displayif_obj_call_method0(self->spi, MP_QSTR_deinit);
+    #if defined(ESP_PLATFORM)
+    heap_caps_free(self->dma_buf);
+    self->dma_buf = NULL;
+    #endif
     self->deinited = true;
     if (s_active == self) {
         s_active = NULL;
@@ -181,6 +199,9 @@ static mp_obj_t spibus_make(const mp_obj_type_t *type, size_t n_args, size_t n_k
     mp_printf(&mp_plat_print, "SPIBus loading...\n");
 
     spibus_obj_t *self = mp_obj_malloc(spibus_obj_t, type);
+    #if defined(ESP_PLATFORM)
+    self->dma_buf = NULL;
+    #endif
 
     mp_obj_t machine_mod = mp_import_name(MP_QSTR_machine, DISPLAYIF_EMPTY_DICT, MP_OBJ_NULL);
     mp_obj_t pin_cls = mp_load_attr(machine_mod, MP_QSTR_Pin);
@@ -326,6 +347,36 @@ static void spibus_write_9bit(spibus_obj_t *self, uint8_t dc, const uint8_t *dat
     }
 }
 
+#if defined(ESP_PLATFORM)
+// Send data the SPI driver would have to copy (outside DMA-capable RAM, or with
+// an address or length that isn't word-aligned) through self->dma_buf. A
+// remainder of 1 to 3 bytes goes as its own short write, which the driver
+// sends from the transaction itself. Returns false to send `buf` directly.
+static bool spibus_write_bounced(spibus_obj_t *self, const uint8_t *buf, size_t len) {
+    if (esp_ptr_dma_capable(buf) && (((uintptr_t)buf | len) & 3) == 0) {
+        return false;
+    }
+    if (self->dma_buf == NULL) {
+        self->dma_buf = heap_caps_malloc(SPIBUS_DMA_CHUNK, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+        if (self->dma_buf == NULL) {
+            return false;
+        }
+    }
+    while (len) {
+        size_t n = len > SPIBUS_DMA_CHUNK ? SPIBUS_DMA_CHUNK : len;
+        if (n >= 4) {
+            n &= ~(size_t)3;
+        }
+        memcpy(self->dma_buf, buf, n);
+        displayif_obj_call_method1(self->spi, MP_QSTR_write,
+            mp_obj_new_bytearray_by_ref(n, self->dma_buf));
+        buf += n;
+        len -= n;
+    }
+    return true;
+}
+#endif
+
 static mp_obj_t spibus_send(size_t n_args, const mp_obj_t *args) {
     spibus_obj_t *self = MP_OBJ_TO_PTR(args[0]);
     if (self->deinited) {
@@ -365,6 +416,11 @@ static mp_obj_t spibus_send(size_t n_args, const mp_obj_t *args) {
             if (mp_get_buffer(data, &bufinfo, MP_BUFFER_READ)) {
                 if (bufinfo.len > 0) {
                     displayif_pin_set(self->dc, DC_DATA);
+                    #if defined(ESP_PLATFORM)
+                    if (!self->soft && spibus_write_bounced(self, bufinfo.buf, bufinfo.len)) {
+                        // sent
+                    } else
+                    #endif
                     displayif_obj_call_method1(self->spi, MP_QSTR_write, data);
                 }
             }

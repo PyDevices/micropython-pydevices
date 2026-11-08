@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 00:00:00 -0500
+Subject: [PATCH] esp32/machine_hw_spi: Raise when a transfer can't be queued.
+
+machine_hw_spi_transfer() ignores what spi_device_queue_trans() returns and
+then waits with portMAX_DELAY for the transaction's result. When the queue
+call fails, nothing was queued, so that wait never ends and the interpreter
+hangs with no error.
+
+It fails when the driver can't allocate a DMA bounce buffer: a buffer in
+PSRAM, or one that isn't word-aligned, is copied into internal DMA-capable
+RAM, up to 4092 bytes per transaction and two transactions in flight. On a
+classic ESP32 with SPIRAM and Classic Bluetooth in a hands-free call, a
+display flush from a PSRAM framebuffer hung the interpreter in
+spi_device_get_trans_result() in 5 calls of 5, with 3 KB of internal DMA RAM
+left, largest block 2.9 KB.
+
+Check the result: on failure collect the transaction still in flight, give
+the bus back and raise OSError (ENOMEM for an allocation failure), so the
+caller can retry or free memory. Check spi_device_transmit()'s result in the
+short-transfer path too.
+
+diff --git a/ports/esp32/machine_hw_spi.c b/ports/esp32/machine_hw_spi.c
+index f2b47a0..77e73ca 100644
+--- a/ports/esp32/machine_hw_spi.c
++++ b/ports/esp32/machine_hw_spi.c
+@@ -343,7 +343,10 @@ static void machine_hw_spi_transfer(mp_obj_base_t *self_in, size_t len, const ui
+ 
+         transaction.flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA;
+         transaction.length = bits_to_send;
+-        spi_device_transmit(self->spi, &transaction);
++        esp_err_t err = spi_device_transmit(self->spi, &transaction);
++        if (err != ESP_OK) {
++            check_esp_err(err);
++        }
+ 
+         if (dest != NULL) {
+             memcpy(dest, &transaction.rx_data, len);
+@@ -372,7 +375,20 @@ static void machine_hw_spi_transfer(mp_obj_base_t *self_in, size_t len, const ui
+                 transaction->rx_buffer = dest + offset;
+             }
+ 
+-            spi_device_queue_trans(self->spi, transaction, portMAX_DELAY);
++            esp_err_t err = spi_device_queue_trans(self->spi, transaction, portMAX_DELAY);
++            if (err != ESP_OK) {
++                // Nothing was queued (with a buffer outside DMA-capable RAM, the
++                // driver could not allocate its bounce buffer), so there is no
++                // result to wait for: collect the one in flight, give the bus
++                // back and raise, instead of waiting forever below.
++                if (offset > 0) {
++                    MP_THREAD_GIL_EXIT();
++                    spi_device_get_trans_result(self->spi, &result, portMAX_DELAY);
++                    MP_THREAD_GIL_ENTER();
++                }
++                spi_device_release_bus(self->spi);
++                check_esp_err(err);
++            }
+             bits_remaining -= transaction->length;
+ 
+             if (offset > 0) {
+-- 
+2.43.0
