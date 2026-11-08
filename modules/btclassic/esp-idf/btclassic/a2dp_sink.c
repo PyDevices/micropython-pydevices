@@ -39,6 +39,8 @@ static int16_t *s_ring_buf;
 // first calls until its own link times out.
 static volatile bool s_calling_back;
 static int s_tries;
+// The program dropped the sender itself: don't call it back.
+static volatile bool s_dropped;
 
 #define CALL_BACK_TRIES 12
 #define CALL_BACK_US 6000000        // apart, longer than a page times out: 72 s in all
@@ -168,6 +170,7 @@ static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
             if (state == ESP_A2D_CONNECTION_STATE_CONNECTED) {
                 uint8_t *a = param->conn_stat.remote_bda;
                 s_calling_back = false;
+                s_dropped = false;
                 BTC_LOCK();
                 memcpy(s.peer, a, sizeof(btc_addr_t));
                 s.connected = true;
@@ -180,6 +183,7 @@ static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
                 btc_radio_hold_hidden(true);
                 btc_sink_mark(BTC_CHANGED_CONNECTION | BTC_CHANGED_PEER);
             } else if (state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
+                bool was = s.connected;
                 BTC_LOCK();
                 s.connected = false;
                 s.streaming = false;
@@ -190,6 +194,14 @@ static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
                 btc_ring_restart(&s.ring);
                 btc_radio_hold_hidden(false);
                 btc_sink_mark(BTC_CHANGED_CONNECTION | BTC_CHANGED_STREAM | BTC_CHANGED_PEER);
+                // The link dropped (the sender went out of range, or its
+                // Bluetooth went off): call it back for a minute, so it finds
+                // the board when it returns, as a speaker does.
+                if (was && s.reconnect && !s_dropped && s_retry) {
+                    s_tries = 0;
+                    s_calling_back = true;
+                    esp_timer_start_once(s_retry, CALL_BACK_US);
+                }
             }
             break;
         }
@@ -281,6 +293,7 @@ int btc_sink_start(size_t ring_frames, bool reconnect) {
     s.rssi_delta = BTC_UNKNOWN;
     s.reconnect = reconnect;
     s_calling_back = false;
+    s_dropped = false;
     s_tries = 0;
     btc_avrcp_reset();
     s.started = true;
@@ -321,6 +334,7 @@ void btc_sink_stop(void) {
         return;
     }
     s_calling_back = false;
+    s_dropped = true;
     if (s_poll) {
         esp_timer_stop(s_poll);
         esp_timer_delete(s_poll);
@@ -442,5 +456,7 @@ int btc_sink_disconnect(void) {
     }
     btc_addr_t peer;
     bool connected = btc_sink_peer(peer);
+    s_dropped = true;
+    s_calling_back = false;
     return connected ? btc_err(esp_a2d_sink_disconnect(peer)) : BTC_OK;
 }

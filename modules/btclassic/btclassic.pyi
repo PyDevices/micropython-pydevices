@@ -162,7 +162,10 @@ class AudioSink:
             speaker. The other half absorbs reads that come late: a program
             that redraws a screen between reads wants 1000.
         reconnect: call the last sender back, if it is still paired, as a
-            speaker does when it's switched on.
+            speaker does: when the sink starts, and whenever the link drops
+            (the sender went out of range, or its Bluetooth went off),
+            every few seconds for about a minute. `disconnect` doesn't
+            call back.
     """
 
     connected: bool
@@ -294,7 +297,8 @@ class AudioSink:
         """Call a paired sender, or the last one with no argument. The link
         comes up later; watch for `CONNECTION`."""
     def disconnect(self) -> None:
-        """Drop the sender. The board is discoverable again afterwards."""
+        """Drop the sender, without calling it back. The board is
+        discoverable again afterwards."""
     def deinit(self) -> None:
         """Drop the sender and stop the sink. The radio stays on, and a new
         `AudioSink` starts the sink again. Until then the methods raise
