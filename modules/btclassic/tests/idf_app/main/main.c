@@ -98,6 +98,21 @@ void app_main(void) {
     btc_source_disconnect();
     btc_source_started();
     btc_source_stop();
+
+    btc_spp_start("Serial Port", 4096);
+    btc_spp_connect(NULL, 0);
+    btc_spp_any();
+    uint8_t bytes[16];
+    btc_spp_read(bytes, sizeof(bytes));
+    btc_spp_write(bytes, sizeof(bytes));
+    btc_spp_write_room();
+    btc_spp_changes();
+    btc_spp_status_t spp;
+    btc_spp_status(&spp);
+    btc_spp_connected();
+    btc_spp_disconnect();
+    btc_spp_started();
+    btc_spp_stop();
     btc_radio_unpair(NULL);
     btc_radio_active();
     btc_radio_stop();

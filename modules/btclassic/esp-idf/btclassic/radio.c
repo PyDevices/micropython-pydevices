@@ -197,6 +197,7 @@ void btc_radio_stop(void) {
     btc_hf_stop();
     btc_sink_stop();
     btc_source_stop();
+    btc_spp_stop();
     btc_inquiry_stop();
     r.on = false;
     esp_bluedroid_disable();

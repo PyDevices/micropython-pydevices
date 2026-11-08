@@ -17,6 +17,9 @@ with `config`. Each profile is an object of its own that takes the radio:
 - `AudioSource` sends audio to headphones, a speaker or a car stereo (A2DP
   source), takes their play, pause, skip and volume keys, and tells them the
   title and artist to show (AVRCP target).
+- `Serial` is a serial port over Bluetooth (SPP), a stream like
+  `machine.UART`, for a PC's Bluetooth COM port, a phone's terminal app or
+  another board.
 
 A board is a sink or a source, one at a time: `deinit()` the one before
 making the other.
@@ -42,8 +45,8 @@ them.
 # -- changes() bits ---------------------------------------------------------
 
 CONNECTION: int
-"""`AudioSink.changes` and `HandsFree.changes` bit: the profile's link came
-up or went down."""
+"""`AudioSink.changes`, `AudioSource.changes`, `HandsFree.changes` and `Serial.changes`
+bit: the link came up or went down."""
 STREAM: int
 """`AudioSink.changes` bit: audio started or stopped flowing."""
 FORMAT: int
@@ -76,6 +79,8 @@ PAIRED: int
 """`Bluetooth.changes` bit: a device paired, or a pairing was removed."""
 FOUND: int
 """`Bluetooth.changes` bit: an inquiry found a device, or finished."""
+SERIAL: int
+"""`Serial.changes` bit: bytes arrived."""
 REMOTE: int
 """`AudioSource.changes` bit: the receiver pressed a key; read it with
 `AudioSource.key`."""
@@ -586,5 +591,71 @@ class AudioSource:
         """Drop the receiver and stop the source. The radio stays on, and an
         `AudioSink` can start now."""
     def __enter__(self) -> AudioSource: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
+
+class Serial:
+    """A serial port over Bluetooth (SPP), as a stream: `read`, `readinto`,
+    `readline` and `write` work as on `machine.UART`, and `select.poll`
+    takes it.
+
+    Making it serves a port other devices can connect to: a computer pairs
+    with the board and gets a Bluetooth COM port, or a phone's serial
+    terminal app connects. `connect` calls another device's port instead.
+    One link at a time.
+
+    There is one serial port. A second `Serial` takes over the running one,
+    link and all; its `name` and `rxbuf` then change nothing.
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+        name: the service name other devices list, "Serial Port" by
+            default.
+        rxbuf: bytes held for `read`, 256 to 65536. Bytes that arrive with
+            it full are dropped and counted in `stats`.
+        timeout: how long `read` waits for its first byte, in ms.
+    """
+
+    connected: bool
+    """A device is connected."""
+    listening: bool
+    """The port is up for others to connect to."""
+    peer: bytes | None
+    """The connected device's address, or None."""
+    channel: int | None
+    """The RFCOMM channel the port listens on, which a device connecting
+    by channel needs, or None before it's up."""
+    timeout: int
+    """How long `read` waits for its first byte, in ms. Settable."""
+
+    def __init__(self, bt: Bluetooth, *, name: str = "Serial Port", rxbuf: int = 4096, timeout: int = 0) -> None: ...
+    def read(self, nbytes: int = -1) -> bytes | None:
+        """What has arrived, up to `nbytes`, or None when nothing came
+        within `timeout`."""
+    def readinto(self, buf: bytearray | memoryview, nbytes: int = -1) -> int | None: ...
+    def readline(self) -> bytes | None: ...
+    def write(self, buf: bytes | bytearray | memoryview) -> int:
+        """Queue `buf` to send. Waits while the link is up until all of it is
+        queued, so the link's pace sets yours.
+
+        Raises:
+            OSError: no device is connected.
+        """
+    def any(self) -> int:
+        """How many bytes are waiting to be read."""
+    def changes(self) -> int:
+        """The bits (`CONNECTION`, `SERIAL`) for what changed since the last
+        call, which clears them."""
+    def connect(self, addr: bytes, channel: int = 0) -> None:
+        """Call another device's serial port. With channel 0 the port is
+        looked up on the device first. The link comes up later; watch for
+        `CONNECTION`."""
+    def disconnect(self) -> None: ...
+    def stats(self) -> dict[str, int]:
+        """Counters: rx_bytes, tx_bytes, and rx_dropped (bytes that found
+        the receive buffer full)."""
+    def deinit(self) -> None:
+        """Drop the link and stop serving the port. The radio stays on."""
+    def __enter__(self) -> Serial: ...
     def __exit__(self, *args: object) -> None:
         """`deinit`."""

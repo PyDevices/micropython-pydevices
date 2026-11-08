@@ -974,6 +974,8 @@ MP_DEFINE_CONST_OBJ_TYPE(
 
 // AudioSource, in mod_btclassic_source.c.
 extern const mp_obj_type_t btc_source_type;
+// Serial, in mod_btclassic_serial.c.
+extern const mp_obj_type_t btc_serial_type;
 
 // =========================================================================
 // the module
@@ -985,6 +987,7 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_AudioSink), MP_ROM_PTR(&btc_sink_type) },
     { MP_ROM_QSTR(MP_QSTR_HandsFree), MP_ROM_PTR(&btc_hf_type) },
     { MP_ROM_QSTR(MP_QSTR_AudioSource), MP_ROM_PTR(&btc_source_type) },
+    { MP_ROM_QSTR(MP_QSTR_Serial), MP_ROM_PTR(&btc_serial_type) },
     { MP_ROM_QSTR(MP_QSTR_CONNECTION), MP_ROM_INT(BTC_CHANGED_CONNECTION) },
     { MP_ROM_QSTR(MP_QSTR_STREAM), MP_ROM_INT(BTC_CHANGED_STREAM) },
     { MP_ROM_QSTR(MP_QSTR_FORMAT), MP_ROM_INT(BTC_CHANGED_FORMAT) },
@@ -1000,6 +1003,7 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_PAIRED), MP_ROM_INT(BTC_CHANGED_PAIRED) },
     { MP_ROM_QSTR(MP_QSTR_REMOTE), MP_ROM_INT(BTC_CHANGED_REMOTE) },
     { MP_ROM_QSTR(MP_QSTR_FOUND), MP_ROM_INT(BTC_CHANGED_FOUND) },
+    { MP_ROM_QSTR(MP_QSTR_SERIAL), MP_ROM_INT(BTC_CHANGED_SERIAL) },
     // AVRCP pass-through key codes: AudioSink.key() sends them, and
     // AudioSource.key() reports the remote's.
     { MP_ROM_QSTR(MP_QSTR_KEY_PLAY), MP_ROM_INT(0x44) },

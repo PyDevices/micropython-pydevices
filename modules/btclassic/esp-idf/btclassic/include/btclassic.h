@@ -56,6 +56,7 @@ extern "C" {
 #define BTC_CHANGED_PAIRED     (1u << 12)   // radio: a device paired or was unpaired
 #define BTC_CHANGED_REMOTE     (1u << 13)   // source: the remote pressed or released a key
 #define BTC_CHANGED_FOUND      (1u << 14)   // radio: an inquiry found a device, or ended
+#define BTC_CHANGED_SERIAL     (1u << 15)   // spp: bytes arrived
 
 typedef uint8_t btc_addr_t[6];  // most significant byte first
 
@@ -352,6 +353,39 @@ int btc_source_set_track(const char *title, const char *artist, const char *albu
 // position in milliseconds, or BTC_UNKNOWN to keep counting from the last
 // one while playing.
 int btc_source_set_play_status(int status, int64_t position_ms);
+
+// ---- serial port (SPP) ----------------------------------------------------
+//
+// A serial port over RFCOMM, one link at a time. Starting it serves a port
+// others can connect to (a PC's Bluetooth COM port, a phone's terminal app);
+// btc_spp_connect() calls another device's. Bytes arrive in a receive ring
+// of `rx_bytes`, more than which are dropped and counted, and leave through
+// a send ring. Changes: BTC_CHANGED_CONNECTION, BTC_CHANGED_SERIAL.
+
+typedef struct {
+    bool connected;
+    bool listening;         // the server is up for others to connect to
+    btc_addr_t peer;
+    uint8_t channel;        // the server's RFCOMM channel, 0 before it's up
+    uint16_t mtu;           // 0 when the stack doesn't say
+    uint32_t rx_bytes;
+    uint32_t tx_bytes;
+    uint32_t rx_dropped;    // bytes that found the receive ring full
+} btc_spp_status_t;
+
+int btc_spp_start(const char *service_name, size_t rx_bytes);
+void btc_spp_stop(void);
+bool btc_spp_started(void);
+bool btc_spp_connected(void);
+// channel 0 finds the device's serial port by SDP.
+int btc_spp_connect(const uint8_t *addr, int channel);
+int btc_spp_disconnect(void);
+size_t btc_spp_any(void);                       // bytes waiting to be read
+size_t btc_spp_read(uint8_t *dst, size_t size); // never waits
+size_t btc_spp_write(const uint8_t *src, size_t size);  // what fits; never waits
+size_t btc_spp_write_room(void);
+uint32_t btc_spp_changes(void);
+void btc_spp_status(btc_spp_status_t *out);
 
 #ifdef __cplusplus
 }
