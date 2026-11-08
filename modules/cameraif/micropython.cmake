@@ -15,6 +15,7 @@ add_library(usermod_cameraif INTERFACE)
 target_sources(usermod_cameraif INTERFACE
     ${CAMERAIF_SRC_DIR}/mod_cameraif.c
     ${CAMERAIF_SRC_DIR}/sensor_table.c
+    ${CAMERAIF_SRC_DIR}/sensor_tuning.c
 )
 
 target_include_directories(usermod_cameraif INTERFACE

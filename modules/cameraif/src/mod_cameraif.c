@@ -49,6 +49,7 @@
 #include "esp_cam_sensor.h"
 #include "esp_cam_sensor_detect.h"
 #include "sensor_table.h"
+#include "sensor_tuning.h"
 #include "hal/isp_ll.h"
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
@@ -165,6 +166,21 @@ typedef struct {
     const esp_cam_sensor_format_t *fmt; // the mode streaming, for the Bayer order after a flip
     bool bayer_fixed;           // bayer= was given: flips leave it alone
     bool wbg;                   // white balance in the ISP's gain block (revision 3), not the matrix
+    // Colour matrices by colour temperature, and where white falls at each:
+    // the camera reads the light's temperature off its white balance and
+    // blends the two nearest matrices into ccm_set. Empty: one matrix for
+    // all light.
+    cameraif_ct_ccm_t ccm_table[CAMERAIF_CT_MAX];
+    uint8_t n_ccm;
+    cameraif_ct_white_t white[CAMERAIF_CT_MAX];
+    uint8_t n_white;
+    float ct;                   // the light's colour temperature in kelvin; 0 before the first estimate
+    // The ISP's colour block (contrast, saturation, brightness, hue), in its
+    // own units. Off until something sets it: color_set says these are
+    // wanted, color_on that the hardware has them.
+    bool color_set, color_on;
+    uint8_t color_contrast, color_saturation;
+    int16_t color_brightness, color_hue;
     // Auto-exposure, for sensors with none of their own: the ISP measures
     // brightness after gamma, the ISR keeps the latest mean, and each frame
     // wait moves exposure, then gain, toward the target.
@@ -421,6 +437,10 @@ static void cameraif_teardown(void) {
         c->ae = NULL;
     }
     if (c->isp) {
+        if (c->color_on) {
+            esp_isp_color_disable(c->isp);  // off before the processor goes, as the gain block is
+            c->color_on = false;
+        }
         if (c->wbg) {
             esp_isp_wbg_disable(c->isp);    // its enable bit outlives the processor
             c->wbg = false;
@@ -547,17 +567,10 @@ static bool cameraif_isp_input_for(int sensor_format, isp_color_t *out) {
 // --- constructor ---------------------------------------------------------
 
 // A raw sensor's colours need two corrections the ISP leaves off: a colour
-// matrix (the photosites' filters overlap, so its colour comes out pale and
-// green-leaning) and a gamma curve (it counts light linearly, so mid-tones look
-// dark). Both are per sensor; these are Espressif's tuning for the OV5647
-// (esp_cam_sensor's ov5647_default.json). Another sensor keeps an identity
-// matrix and the same gamma.
+// matrix and a gamma curve. Both are per sensor, from sensor_tuning.c; a
+// sensor it doesn't know keeps an identity matrix and the default gamma.
 static const float cameraif_ccm_identity[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
-static const float cameraif_ccm_ov5647[9] = {
-    2.0f, -0.5459f, -0.4541f,
-    -0.4751f, 1.7696f, -0.2945f,
-    -0.2002f, -0.7998f, 2.0f,
-};
+#define CAMERAIF_GAMMA_DEFAULT (0.72f)
 // The exponent, settable from Python per sensor.
 static float cameraif_gamma = 0.72f;
 #define CAMERAIF_GAMMA (cameraif_gamma)
@@ -586,9 +599,66 @@ static uint32_t cameraif_gamma_curve(uint32_t x) {
 
 static void cameraif_gamma_start(cameraif_obj_t *c);
 
+// The light's colour temperature, from the white balance: white seen through
+// the current gains is (1/gain_r, 1/gain_b) in the sensor's red and blue over
+// green. Its nearest point on the line through the tuning's white points
+// gives the temperature, interpolated along that segment. Without white
+// points, a matrix table is read at 5000 K, about daylight.
+static float cameraif_ct_estimate(const cameraif_obj_t *c) {
+    const cameraif_ct_white_t *w = c->white;
+    if (c->n_white == 0) {
+        return 5000.0f;
+    }
+    if (c->n_white == 1 || c->gain_r <= 0.0f || c->gain_b <= 0.0f) {
+        return w[0].ct;
+    }
+    const float pr = 1.0f / c->gain_r, pb = 1.0f / c->gain_b;
+    float best = -1.0f, ct = w[0].ct;
+    for (int i = 0; i + 1 < c->n_white; i++) {
+        const float dx = w[i + 1].rg - w[i].rg, dy = w[i + 1].bg - w[i].bg;
+        const float len2 = dx * dx + dy * dy;
+        float t = len2 > 0.0f ? ((pr - w[i].rg) * dx + (pb - w[i].bg) * dy) / len2 : 0.0f;
+        t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+        const float ex = w[i].rg + t * dx - pr, ey = w[i].bg + t * dy - pb;
+        const float d = ex * ex + ey * ey;
+        if (best < 0.0f || d < best) {
+            best = d;
+            ct = w[i].ct + t * (w[i + 1].ct - w[i].ct);
+        }
+    }
+    return ct;
+}
+
+// With a matrix table, the matrix for the light now: the two entries either
+// side of its colour temperature, blended linearly, into ccm_set.
+static void cameraif_ccm_follow_ct(cameraif_obj_t *c) {
+    if (c->n_ccm == 0) {
+        return;
+    }
+    const cameraif_ct_ccm_t *t = c->ccm_table;
+    const int n = c->n_ccm;
+    const float ct = cameraif_ct_estimate(c);
+    c->ct = ct;
+    int i = 0;
+    float f = 0.0f;
+    if (ct >= t[n - 1].ct) {
+        i = n - 1;
+    } else if (ct > t[0].ct) {
+        while (i + 1 < n && t[i + 1].ct <= ct) {
+            i++;
+        }
+        f = (ct - t[i].ct) / (t[i + 1].ct - t[i].ct);
+    }
+    for (int k = 0; k < 9; k++) {
+        c->ccm_set[k] = f > 0.0f ? t[i].m[k] + f * (t[i + 1].m[k] - t[i].m[k]) : t[i].m[k];
+    }
+    c->ccm = c->ccm_set;
+}
+
 // The colour matrix with the white balance folded in: the gains scale the
 // sensor's red and blue before its matrix mixes them.
 static void cameraif_ccm_apply(cameraif_obj_t *c) {
+    cameraif_ccm_follow_ct(c);
     const float *m = c->ccm ? c->ccm : cameraif_ccm_identity;
     // Applied at once: on revision 3 a change otherwise waits for the next
     // frame start, and a second change before then is refused.
@@ -837,6 +907,219 @@ static void cameraif_ae_start(cameraif_obj_t *c) {
     esp_isp_ae_controller_start_continuous_statistics(c->ae);
 }
 
+// The ISP's colour block, set to what the camera holds and enabled the first
+// time. It works after gamma, on the picture you see: contrast and saturation
+// are 1.7 fixed point (128 leaves the picture as it is), brightness is added
+// (-128..127), hue turns the colours round the wheel (0..360 degrees).
+static esp_err_t cameraif_color_apply(cameraif_obj_t *c) {
+    // Applied at once, as the matrix is: otherwise a change waits for the
+    // next frame start and a second change before then is refused.
+    esp_isp_color_config_t cfg = {
+        .color_contrast = { .val = c->color_contrast },
+        .color_saturation = { .val = c->color_saturation },
+        .color_hue = (uint32_t)c->color_hue,
+        .color_brightness = c->color_brightness,
+        .flags = { .update_once_configured = 1 },
+    };
+    esp_err_t err = esp_isp_color_configure(c->isp, &cfg);
+    if (err == ESP_OK && !c->color_on) {
+        err = esp_isp_color_enable(c->isp);
+        c->color_on = err == ESP_OK;
+    }
+    return err;
+}
+
+// Store one colour setting, if given, checked against the block's range.
+static void cameraif_color_take(mp_obj_t v, qstr name, int lo, int hi, void *dst, bool wide) {
+    if (v == MP_OBJ_NULL || v == mp_const_none) {
+        return;
+    }
+    mp_int_t n = mp_obj_get_int(v);
+    if (n < lo || n > hi) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("%q is %d..%d"), name, lo, hi);
+    }
+    if (wide) {
+        *(int16_t *)dst = (int16_t)n;
+    } else {
+        *(uint8_t *)dst = (uint8_t)n;
+    }
+}
+
+// The four colour settings, any of them given (MP_OBJ_NULL or None: left as
+// they are). All four are checked before any is stored. True when one was.
+static bool cameraif_color_from(cameraif_obj_t *c, mp_obj_t con, mp_obj_t sat, mp_obj_t bri, mp_obj_t hue) {
+    uint8_t ct = c->color_contrast, st = c->color_saturation;
+    int16_t br = c->color_brightness, hu = c->color_hue;
+    cameraif_color_take(con, MP_QSTR_contrast, 0, 255, &ct, false);
+    cameraif_color_take(sat, MP_QSTR_saturation, 0, 255, &st, false);
+    cameraif_color_take(bri, MP_QSTR_brightness, -128, 127, &br, true);
+    cameraif_color_take(hue, MP_QSTR_hue, 0, 360, &hu, true);
+    c->color_contrast = ct;
+    c->color_saturation = st;
+    c->color_brightness = br;
+    c->color_hue = hu;
+    #define CAMERAIF_GIVEN(v) ((v) != MP_OBJ_NULL && (v) != mp_const_none)
+    return CAMERAIF_GIVEN(con) || CAMERAIF_GIVEN(sat) || CAMERAIF_GIVEN(bri) || CAMERAIF_GIVEN(hue);
+    #undef CAMERAIF_GIVEN
+}
+
+static mp_obj_t cameraif_color_dict(const cameraif_obj_t *c) {
+    mp_obj_t d = mp_obj_new_dict(4);
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_contrast), MP_OBJ_NEW_SMALL_INT(c->color_contrast));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_saturation), MP_OBJ_NEW_SMALL_INT(c->color_saturation));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_brightness), MP_OBJ_NEW_SMALL_INT(c->color_brightness));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_hue), MP_OBJ_NEW_SMALL_INT(c->color_hue));
+    return d;
+}
+
+// The built-in tuning for this sensor, into the camera. Returns its gamma.
+static float cameraif_tuning_load(cameraif_obj_t *c, const cameraif_tuning_t *t) {
+    c->ccm = NULL;
+    c->n_ccm = c->n_white = 0;
+    if (t == NULL) {
+        return CAMERAIF_GAMMA_DEFAULT;
+    }
+    c->ccm = t->ccm;
+    if (t->ccm_table != NULL) {
+        c->n_ccm = t->n_ccm > CAMERAIF_CT_MAX ? CAMERAIF_CT_MAX : t->n_ccm;
+        memcpy(c->ccm_table, t->ccm_table, c->n_ccm * sizeof(c->ccm_table[0]));
+    }
+    if (t->white != NULL) {
+        c->n_white = t->n_white > CAMERAIF_CT_MAX ? CAMERAIF_CT_MAX : t->n_white;
+        memcpy(c->white, t->white, c->n_white * sizeof(c->white[0]));
+    }
+    if (t->contrast >= 0 || t->saturation >= 0) {
+        if (t->contrast >= 0) {
+            c->color_contrast = (uint8_t)t->contrast;
+        }
+        if (t->saturation >= 0) {
+            c->color_saturation = (uint8_t)t->saturation;
+        }
+        c->color_set = true;
+    }
+    return t->gamma;
+}
+
+// A colour-temperature table from Python: rows of (kelvin, ...), ascending.
+// Returns the row count; each row's numbers after the temperature go to vals.
+static int cameraif_ct_rows(mp_obj_t in, qstr key, size_t n_vals, float *out, size_t stride) {
+    size_t n;
+    mp_obj_t *rows;
+    mp_obj_get_array(in, &n, &rows);
+    if (n == 0 || n > CAMERAIF_CT_MAX) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("%q takes 1 to %d rows"), key, CAMERAIF_CT_MAX);
+    }
+    float last = -1.0f;
+    for (size_t i = 0; i < n; i++) {
+        size_t m;
+        mp_obj_t *row;
+        mp_obj_get_array(rows[i], &m, &row);
+        float *o = out + i * stride;
+        if (n_vals == 9 && m == 2) {
+            // (kelvin, matrix)
+            o[0] = mp_obj_get_float(row[0]);
+            size_t k;
+            mp_obj_t *mat;
+            mp_obj_get_array(row[1], &k, &mat);
+            if (k != 9) {
+                mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("%q: each matrix is nine numbers"), key);
+            }
+            for (size_t j = 0; j < 9; j++) {
+                o[1 + j] = mp_obj_get_float(mat[j]);
+            }
+        } else if (m == 1 + n_vals) {
+            for (size_t j = 0; j < m; j++) {
+                o[j] = mp_obj_get_float(row[j]);
+            }
+        } else {
+            mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("%q: a row is (kelvin, %s)"), key,
+                n_vals == 9 ? "matrix" : "red/green, blue/green");
+        }
+        if (o[0] <= last) {
+            mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("%q: temperatures must rise"), key);
+        }
+        last = o[0];
+    }
+    return (int)n;
+}
+
+// Tuning from a dict's keys: a described sensor's, tuning='s, or the
+// keywords of tuning(). The matrices, tables and colour go into the camera
+// (not the hardware); gamma, black_level and auto_exposure come back to the
+// caller, which applies them in its own order. Raises on a malformed value,
+// before any of the rest is stored.
+static void cameraif_tune_from(cameraif_obj_t *c, mp_map_t *m, mp_obj_t *gamma, mp_obj_t *black, mp_obj_t *ae) {
+    mp_map_elem_t *e;
+    float mat[9];
+    bool have_ccm = false;
+    static cameraif_ct_ccm_t ccm_rows[CAMERAIF_CT_MAX];
+    static cameraif_ct_white_t white_rows[CAMERAIF_CT_MAX];
+    int n_ccm = -1, n_white = -1;       // -1: not given; 0: given as None
+    if ((e = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_black_level), MP_MAP_LOOKUP)) && black) {
+        *black = e->value;
+    }
+    if ((e = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_gamma), MP_MAP_LOOKUP)) && gamma) {
+        *gamma = e->value;
+    }
+    if ((e = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_auto_exposure), MP_MAP_LOOKUP)) && ae) {
+        *ae = e->value;
+    }
+    if ((e = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_ccm), MP_MAP_LOOKUP)) && e->value != mp_const_none) {
+        size_t n;
+        mp_obj_t *items;
+        mp_obj_get_array(e->value, &n, &items);
+        if (n != 9) {
+            mp_raise_ValueError(MP_ERROR_TEXT("ccm takes nine numbers, row by row"));
+        }
+        for (int i = 0; i < 9; i++) {
+            mat[i] = mp_obj_get_float(items[i]);
+        }
+        have_ccm = true;
+    }
+    if ((e = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_ccm_table), MP_MAP_LOOKUP))) {
+        n_ccm = e->value == mp_const_none ? 0
+            : cameraif_ct_rows(e->value, MP_QSTR_ccm_table, 9, &ccm_rows[0].ct, sizeof(ccm_rows[0]) / sizeof(float));
+    }
+    if ((e = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_awb_table), MP_MAP_LOOKUP))) {
+        n_white = e->value == mp_const_none ? 0
+            : cameraif_ct_rows(e->value, MP_QSTR_awb_table, 2, &white_rows[0].ct, sizeof(white_rows[0]) / sizeof(float));
+        for (int i = 0; i < n_white; i++) {
+            if (white_rows[i].rg <= 0.0f || white_rows[i].bg <= 0.0f) {
+                mp_raise_ValueError(MP_ERROR_TEXT("awb_table: red/green and blue/green are above 0"));
+            }
+        }
+    }
+    // The colour last, checked and stored in one step once the rest has passed.
+    mp_obj_t col[4] = { MP_OBJ_NULL, MP_OBJ_NULL, MP_OBJ_NULL, MP_OBJ_NULL };
+    if ((e = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_color), MP_MAP_LOOKUP)) && e->value != mp_const_none) {
+        static const qstr names[4] = { MP_QSTR_contrast, MP_QSTR_saturation, MP_QSTR_brightness, MP_QSTR_hue };
+        mp_map_t *cm = mp_obj_dict_get_map(e->value);
+        for (int i = 0; i < 4; i++) {
+            mp_map_elem_t *k = mp_map_lookup(cm, MP_OBJ_NEW_QSTR(names[i]), MP_MAP_LOOKUP);
+            col[i] = k ? k->value : MP_OBJ_NULL;
+        }
+        if (cameraif_color_from(c, col[0], col[1], col[2], col[3])) {
+            c->color_set = true;
+        }
+    }
+
+    // All checked: store it. A single matrix pins it; a table, given too or
+    // alone, takes over from it.
+    if (have_ccm) {
+        memcpy(c->ccm_set, mat, sizeof(mat));
+        c->ccm = c->ccm_set;
+        c->n_ccm = 0;
+    }
+    if (n_ccm >= 0) {
+        memcpy(c->ccm_table, ccm_rows, n_ccm * sizeof(ccm_rows[0]));
+        c->n_ccm = n_ccm;
+    }
+    if (n_white >= 0) {
+        memcpy(c->white, white_rows, n_white * sizeof(white_rows[0]));
+        c->n_white = n_white;
+    }
+}
+
 static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
     size_t n_kw, const mp_obj_t *all_args) {
     enum {
@@ -845,7 +1128,7 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
         ARG_format, ARG_pixel_format, ARG_raw, ARG_lane_mbps,
         ARG_exposure, ARG_gain, ARG_flip, ARG_mirror, ARG_test_pattern,
         ARG_bayer, ARG_awb, ARG_auto_exposure, ARG_black_level, ARG_sensor,
-        ARG_frame_size, ARG_jpeg_quality,
+        ARG_frame_size, ARG_jpeg_quality, ARG_tuning,
     };
     static const mp_arg_t allowed[] = {
         // Board wiring. sda/scl are required: a camera module cannot guess
@@ -888,6 +1171,8 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
         // espcamera's: what take() returns. None is the sensor's own size.
         { MP_QSTR_frame_size,   MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
         { MP_QSTR_jpeg_quality, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 80} },
+        // The colour tuning, over the sensor's own: tuning()'s keys.
+        { MP_QSTR_tuning,       MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed),
@@ -907,6 +1192,9 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
     if (quality < 1 || quality > 100) {
         mp_raise_ValueError(MP_ERROR_TEXT("jpeg_quality is 1..100"));
     }
+    if (args[ARG_tuning].u_obj != mp_const_none && !mp_obj_is_dict_or_ordereddict(args[ARG_tuning].u_obj)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("tuning is a dict"));
+    }
 
     // Idempotent: tear down whatever a previous camera left before building
     // a new one, rather than refusing. Refusing makes the module unusable
@@ -920,6 +1208,7 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
     c->take_fmt = take_fmt;
     c->take_size = take_size;
     c->quality = quality;
+    c->color_contrast = c->color_saturation = 128;  // the colour block's "unchanged"
 
     esp_ldo_channel_config_t ldo_cfg = {
         .chan_id = args[ARG_ldo_chan].u_int,
@@ -1089,6 +1378,24 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
                 MP_ERROR_TEXT("format index out of range (0-%d)"), (int)formats.count - 1);
         }
         chosen = &formats.format_array[i];
+    } else if (mp_obj_is_type(args[ARG_format].u_obj, &mp_type_tuple)
+               || mp_obj_is_type(args[ARG_format].u_obj, &mp_type_list)) {
+        // (width, height): the first mode of that size.
+        mp_obj_t *wh;
+        mp_obj_get_array_fixed_n(args[ARG_format].u_obj, 2, &wh);
+        const mp_int_t want_w = mp_obj_get_int(wh[0]), want_h = mp_obj_get_int(wh[1]);
+        const esp_cam_sensor_format_t *found = NULL;
+        for (uint32_t i = 0; i < formats.count && found == NULL; i++) {
+            if (formats.format_array[i].width == want_w && formats.format_array[i].height == want_h) {
+                found = &formats.format_array[i];
+            }
+        }
+        if (found == NULL) {
+            cameraif_teardown();
+            mp_raise_msg_varg(&mp_type_ValueError,
+                MP_ERROR_TEXT("sensor has no %dx%d format; ask formats()"), (int)want_w, (int)want_h);
+        }
+        chosen = found;
     } else if (args[ARG_format].u_obj != mp_const_none) {
         const char *want = mp_obj_str_get_str(args[ARG_format].u_obj);
         const esp_cam_sensor_format_t *found = NULL;
@@ -1254,32 +1561,28 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
         }
         esp_isp_enable(c->isp);
         c->awb_on = args[ARG_awb].u_bool;
-        c->ccm = c->sensor->id.pid == CAMERAIF_OV5647_PID ? cameraif_ccm_ov5647 : NULL;
-        // A described sensor brings its own tuning; the arguments win.
+        // The sensor's built-in tuning (sensor_tuning.c), then a described
+        // sensor's own, then tuning=; the arguments win over all three.
+        const float builtin_gamma = cameraif_tuning_load(c, cameraif_tuning_for(c->sensor->id.pid));
         mp_obj_t tune_black = mp_const_none, tune_gamma = mp_const_none, tune_ae = mp_const_none;
-        if (table_desc != mp_const_none) {
-            mp_map_t *tm = mp_obj_dict_get_map(table_desc);
-            mp_map_elem_t *e;
-            if ((e = mp_map_lookup(tm, MP_OBJ_NEW_QSTR(MP_QSTR_black_level), MP_MAP_LOOKUP))) {
-                tune_black = e->value;
+        nlr_buf_t nlr;
+        if (nlr_push(&nlr) == 0) {
+            if (table_desc != mp_const_none) {
+                cameraif_tune_from(c, mp_obj_dict_get_map(table_desc), &tune_gamma, &tune_black, &tune_ae);
             }
-            if ((e = mp_map_lookup(tm, MP_OBJ_NEW_QSTR(MP_QSTR_gamma), MP_MAP_LOOKUP))) {
-                tune_gamma = e->value;
+            if (args[ARG_tuning].u_obj != mp_const_none) {
+                cameraif_tune_from(c, mp_obj_dict_get_map(args[ARG_tuning].u_obj), &tune_gamma, &tune_black, &tune_ae);
             }
-            if ((e = mp_map_lookup(tm, MP_OBJ_NEW_QSTR(MP_QSTR_auto_exposure), MP_MAP_LOOKUP))) {
-                tune_ae = e->value;
-            }
-            if ((e = mp_map_lookup(tm, MP_OBJ_NEW_QSTR(MP_QSTR_ccm), MP_MAP_LOOKUP)) && e->value != mp_const_none) {
-                size_t n;
-                mp_obj_t *items;
-                mp_obj_get_array(e->value, &n, &items);
-                if (n == 9) {
-                    for (int i = 0; i < 9; i++) {
-                        c->ccm_set[i] = mp_obj_get_float(items[i]);
-                    }
-                    c->ccm = c->ccm_set;
+            if (tune_gamma != mp_const_none) {
+                const float g = mp_obj_get_float(tune_gamma);
+                if (g < 0.2f || g > 2.0f) {
+                    mp_raise_ValueError(MP_ERROR_TEXT("gamma is between 0.2 and 2"));
                 }
             }
+            nlr_pop();
+        } else {
+            cameraif_teardown();    // the sensor, the CSI and the ISP are already ours
+            nlr_jump(nlr.ret_val);
         }
         if (args[ARG_black_level].u_obj != mp_const_none) {
             tune_black = args[ARG_black_level].u_obj;
@@ -1298,10 +1601,13 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
         c->ae_skip = 0;
         c->gamma_on = false;
         // A new camera starts from its own default, not the last one's.
-        cameraif_gamma = tune_gamma != mp_const_none ? mp_obj_get_float(tune_gamma) : 0.72f;
+        cameraif_gamma = tune_gamma != mp_const_none ? mp_obj_get_float(tune_gamma) : builtin_gamma;
         cameraif_gamma_start(c);
         cameraif_awb_start(c);
         cameraif_ae_start(c);
+        if (c->color_set) {
+            cameraif_color_apply(c);    // a plainer picture if it fails, not a broken camera
+        }
     }
 
     // esp_cam_ctlr_start() asks on_get_new_trans for the first buffer itself,
@@ -1924,7 +2230,8 @@ static mp_obj_t cameraif_test_pattern(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(cameraif_test_pattern_obj, 1, 2,
     cameraif_test_pattern);
 
-// capture_scaled(dst, pic_w, pic_h, *, x, y, w, h, rotate, mirror, timeout)
+// capture_scaled(dst, pic_w, pic_h, *, x, y, w, h, rotate, mirror, timeout,
+//                src_rect, swap)
 //
 // Scale the next frame into a rectangle of a destination picture, using the
 // P4's Pixel Processing Accelerator. Nothing here touches a pixel with the
@@ -1942,7 +2249,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(cameraif_test_pattern_obj, 1, 2,
 static mp_obj_t cameraif_capture_scaled(size_t n_args, const mp_obj_t *pos,
     mp_map_t *kw) {
     enum { ARG_dst, ARG_pic_w, ARG_pic_h, ARG_x, ARG_y, ARG_w, ARG_h,
-           ARG_rotate, ARG_mirror, ARG_timeout };
+           ARG_rotate, ARG_mirror, ARG_timeout, ARG_src_rect, ARG_swap };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_dst,     MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_pic_w,   MP_ARG_REQUIRED | MP_ARG_INT, {.u_int = 0} },
@@ -1954,6 +2261,11 @@ static mp_obj_t cameraif_capture_scaled(size_t n_args, const mp_obj_t *pos,
         { MP_QSTR_rotate,  MP_ARG_KW_ONLY | MP_ARG_INT,  {.u_int = 0} },
         { MP_QSTR_mirror,  MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
         { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT,  {.u_int = 1000} },
+        // The block of the frame to scale, (x, y, w, h); None is all of it.
+        { MP_QSTR_src_rect, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        // Byte-swap each pixel on the way, for a panel that takes RGB565
+        // big-endian (most SPI panels), in the same pass.
+        { MP_QSTR_swap,     MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
     };
     mp_arg_val_t a[MP_ARRAY_SIZE(allowed)];
     cameraif_obj_t *c = MP_OBJ_TO_PTR(pos[0]);
@@ -1965,6 +2277,21 @@ static mp_obj_t cameraif_capture_scaled(size_t n_args, const mp_obj_t *pos,
     if (c->bytes_per_px != 2) {
         mp_raise_msg(&mp_type_OSError,
             MP_ERROR_TEXT("capture_scaled needs an RGB565 camera"));
+    }
+    // A crop of the frame, so digital zoom is the same one hardware pass:
+    // the PPA reads only that block and scales it to fill the destination.
+    mp_int_t sx = 0, sy = 0, sw = c->width, sh = c->height;
+    if (a[ARG_src_rect].u_obj != mp_const_none) {
+        mp_obj_t *r;
+        mp_obj_get_array_fixed_n(a[ARG_src_rect].u_obj, 4, &r);
+        sx = mp_obj_get_int(r[0]);
+        sy = mp_obj_get_int(r[1]);
+        sw = mp_obj_get_int(r[2]);
+        sh = mp_obj_get_int(r[3]);
+        if (sx < 0 || sy < 0 || sw <= 0 || sh <= 0 || sx + sw > c->width || sy + sh > c->height) {
+            mp_raise_msg_varg(&mp_type_ValueError,
+                MP_ERROR_TEXT("src_rect must lie inside the %dx%d frame"), c->width, c->height);
+        }
     }
 
     mp_buffer_info_t dst;
@@ -1999,14 +2326,16 @@ static mp_obj_t cameraif_capture_scaled(size_t n_args, const mp_obj_t *pos,
     if (rot % 90) {
         mp_raise_ValueError(MP_ERROR_TEXT("rotate must be 0, 90, 180 or 270"));
     }
-    // ppa: scale the whole frame to fill the block, rotated counter-clockwise
-    // (the PPA's direction) after scaling, then mirrored
+    // ppa: scale the frame (or its src_rect) to fill the block, rotated
+    // counter-clockwise (the PPA's direction) after scaling, then mirrored
     ppa_mod_srm_t op = {
         .src = c->frame, .src_w = c->width, .src_h = c->height, .src_fmt = CAMERAIF_PPA_RGB565,
+        .sx = (uint32_t)sx, .sy = (uint32_t)sy, .sw = (uint32_t)sw, .sh = (uint32_t)sh,
         .dst = dst.buf, .dst_len = dst.len, .dst_w = pic_w, .dst_h = pic_h, .dst_fmt = CAMERAIF_PPA_RGB565,
         .x = x, .y = y, .w = w, .h = h,
         .rotate = ((rot / 90) % 4 + 4) % 4 * 90,
         .mirror_x = a[ARG_mirror].u_bool,
+        .swap = a[ARG_swap].u_bool,
         .approx = true,     // the PPA's nearest sixteenth, as before: a preview stays in hardware
     };
     const char *why = ppa_mod_srm(pc, &op);
@@ -2128,6 +2457,7 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(cameraif_auto_exposure_obj, 1, cameraif_auto_e
 // ccm(matrix=None) -> tuple: the sensor's colour matrix, nine numbers row by
 // row (red out = m0*R + m1*G + m2*B, and so on). White balance scales its red
 // and blue columns on top. Each row should sum to about 1, or greys tint.
+// Setting one pins it: a matrix table stops following the light.
 static mp_obj_t cameraif_ccm(size_t n_args, const mp_obj_t *args) {
     cameraif_obj_t *c = &cameraif_singleton;
     if (n_args >= 2 && args[1] != mp_const_none) {
@@ -2141,6 +2471,7 @@ static mp_obj_t cameraif_ccm(size_t n_args, const mp_obj_t *args) {
             c->ccm_set[i] = mp_obj_get_float(items[i]);
         }
         c->ccm = c->ccm_set;
+        c->n_ccm = 0;
         if (c->isp) {
             cameraif_ccm_apply(c);
         }
@@ -2205,6 +2536,155 @@ static mp_obj_t cameraif_wb_gains(size_t n_args, const mp_obj_t *args) {
     return mp_obj_new_tuple(2, items);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(cameraif_wb_gains_obj, 1, 3, cameraif_wb_gains);
+
+// color(contrast=None, saturation=None, brightness=None, hue=None) -> dict
+//
+// The ISP's colour block, after gamma: what a picture-settings menu moves.
+// Sets any of the four given, in the block's own units, and returns all four.
+// The block is off until the first setting (or the sensor's tuning) turns it
+// on; reading alone leaves it off.
+static mp_obj_t cameraif_color(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
+    enum { ARG_contrast, ARG_saturation, ARG_brightness, ARG_hue };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_contrast,   MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_saturation, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_brightness, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_hue,        MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+    };
+    mp_arg_val_t a[MP_ARRAY_SIZE(allowed)];
+    cameraif_obj_t *c = MP_OBJ_TO_PTR(pos[0]);
+    mp_arg_parse_all(n_args - 1, pos + 1, kw, MP_ARRAY_SIZE(allowed), allowed, a);
+    if (!c->open) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("camera is deinited"));
+    }
+    const bool any = a[ARG_contrast].u_obj != mp_const_none || a[ARG_saturation].u_obj != mp_const_none
+        || a[ARG_brightness].u_obj != mp_const_none || a[ARG_hue].u_obj != mp_const_none;
+    if (any && !c->isp) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("no ISP (raw camera)"));
+    }
+    if (cameraif_color_from(c, a[ARG_contrast].u_obj, a[ARG_saturation].u_obj,
+            a[ARG_brightness].u_obj, a[ARG_hue].u_obj)) {
+        c->color_set = true;
+        esp_err_t err = cameraif_color_apply(c);
+        if (err != ESP_OK) {
+            mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("ISP colour block refused it (%s)"), esp_err_to_name(err));
+        }
+    }
+    return cameraif_color_dict(c);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(cameraif_color_obj, 1, cameraif_color);
+
+// tuning(**keys) -> dict
+//
+// The colour tuning, read or changed on a running camera: gamma,
+// black_level, ccm, ccm_table, awb_table and color, the same keys tuning=
+// takes when the camera opens. What it returns can be passed back as it is,
+// so a program can save the tuning, try another and restore the first.
+static mp_obj_t cameraif_tuning(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
+    (void)n_args;
+    cameraif_obj_t *c = MP_OBJ_TO_PTR(pos[0]);
+    if (!c->open) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("camera is deinited"));
+    }
+    static const qstr keys[] = {
+        MP_QSTR_gamma, MP_QSTR_black_level, MP_QSTR_ccm, MP_QSTR_ccm_table, MP_QSTR_awb_table, MP_QSTR_color,
+    };
+    if (kw && kw->used) {
+        for (size_t k = 0; k < kw->alloc; k++) {
+            if (!mp_map_slot_is_filled(kw, k)) {
+                continue;
+            }
+            qstr q = mp_obj_str_get_qstr(kw->table[k].key);
+            size_t i = 0;
+            while (i < MP_ARRAY_SIZE(keys) && keys[i] != q) {
+                i++;
+            }
+            if (i == MP_ARRAY_SIZE(keys)) {
+                mp_raise_msg_varg(&mp_type_TypeError, MP_ERROR_TEXT("unexpected keyword argument '%q'"), q);
+            }
+        }
+        if (!c->isp) {
+            mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("no ISP (raw camera)"));
+        }
+        // Gamma and black level checked first, stored after the rest passes.
+        float gv = cameraif_gamma;
+        int bv = cameraif_black;
+        mp_map_elem_t *e = mp_map_lookup(kw, MP_OBJ_NEW_QSTR(MP_QSTR_gamma), MP_MAP_LOOKUP);
+        if (e && e->value != mp_const_none) {
+            gv = mp_obj_get_float(e->value);
+            if (gv < 0.2f || gv > 2.0f) {
+                mp_raise_ValueError(MP_ERROR_TEXT("gamma is between 0.2 and 2"));
+            }
+        }
+        e = mp_map_lookup(kw, MP_OBJ_NEW_QSTR(MP_QSTR_black_level), MP_MAP_LOOKUP);
+        if (e && e->value != mp_const_none) {
+            bv = mp_obj_get_int(e->value);
+            bv = bv < 0 ? 0 : (bv > 128 ? 128 : bv);
+        }
+        const bool color_was = c->color_set;
+        const uint8_t con = c->color_contrast, sat = c->color_saturation;
+        const int16_t bri = c->color_brightness, hue = c->color_hue;
+        cameraif_tune_from(c, kw, NULL, NULL, NULL);
+        cameraif_gamma = gv;
+        cameraif_black = (uint8_t)bv;
+        cameraif_gamma_start(c);
+        cameraif_ccm_apply(c);
+        if (c->color_set && (!color_was || con != c->color_contrast || sat != c->color_saturation
+                             || bri != c->color_brightness || hue != c->color_hue)) {
+            cameraif_color_apply(c);
+        }
+    }
+
+    mp_obj_t d = mp_obj_new_dict(6);
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_gamma), mp_obj_new_float(cameraif_gamma));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_black_level), MP_OBJ_NEW_SMALL_INT(cameraif_black));
+    const float *m = c->ccm ? c->ccm : cameraif_ccm_identity;
+    mp_obj_t mat[9];
+    for (int i = 0; i < 9; i++) {
+        mat[i] = mp_obj_new_float(m[i]);
+    }
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_ccm), mp_obj_new_tuple(9, mat));
+    mp_obj_t table = mp_const_none;
+    if (c->n_ccm) {
+        table = mp_obj_new_list(0, NULL);
+        for (int r = 0; r < c->n_ccm; r++) {
+            for (int i = 0; i < 9; i++) {
+                mat[i] = mp_obj_new_float(c->ccm_table[r].m[i]);
+            }
+            mp_obj_t row[2] = { mp_obj_new_int((mp_int_t)c->ccm_table[r].ct), mp_obj_new_tuple(9, mat) };
+            mp_obj_list_append(table, mp_obj_new_tuple(2, row));
+        }
+    }
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_ccm_table), table);
+    table = mp_const_none;
+    if (c->n_white) {
+        table = mp_obj_new_list(0, NULL);
+        for (int r = 0; r < c->n_white; r++) {
+            mp_obj_t row[3] = {
+                mp_obj_new_int((mp_int_t)c->white[r].ct),
+                mp_obj_new_float(c->white[r].rg),
+                mp_obj_new_float(c->white[r].bg),
+            };
+            mp_obj_list_append(table, mp_obj_new_tuple(3, row));
+        }
+    }
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_awb_table), table);
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_color), c->color_set ? cameraif_color_dict(c) : mp_const_none);
+    return d;
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(cameraif_tuning_obj, 1, cameraif_tuning);
+
+// color_temp() -> int | None: the light's colour temperature in kelvin, as
+// read off the white balance to pick the colour matrix. None without a
+// matrix table, where nothing reads it.
+static mp_obj_t cameraif_color_temp(mp_obj_t self_in) {
+    cameraif_obj_t *c = MP_OBJ_TO_PTR(self_in);
+    if (!c->n_ccm || c->ct <= 0.0f) {
+        return mp_const_none;
+    }
+    return MP_OBJ_NEW_SMALL_INT((mp_int_t)(c->ct + 0.5f));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(cameraif_color_temp_obj, cameraif_color_temp);
 
 // --- espcamera's shape ---------------------------------------------------
 //
@@ -2645,6 +3125,9 @@ static const mp_rom_map_elem_t cameraif_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_black_level), MP_ROM_PTR(&cameraif_black_level_obj) },
     { MP_ROM_QSTR(MP_QSTR_ccm), MP_ROM_PTR(&cameraif_ccm_obj) },
     { MP_ROM_QSTR(MP_QSTR_gamma), MP_ROM_PTR(&cameraif_gamma_obj) },
+    { MP_ROM_QSTR(MP_QSTR_color), MP_ROM_PTR(&cameraif_color_obj) },
+    { MP_ROM_QSTR(MP_QSTR_tuning), MP_ROM_PTR(&cameraif_tuning_obj) },
+    { MP_ROM_QSTR(MP_QSTR_color_temp), MP_ROM_PTR(&cameraif_color_temp_obj) },
     { MP_ROM_QSTR(MP_QSTR_formats), MP_ROM_PTR(&cameraif_formats_obj) },
     { MP_ROM_QSTR(MP_QSTR_capture_scaled), MP_ROM_PTR(&cameraif_capture_scaled_obj) },
     { MP_ROM_QSTR(MP_QSTR_controls), MP_ROM_PTR(&cameraif_controls_obj) },

@@ -140,7 +140,7 @@ time — the P4 has one CSI controller — and constructing a second one raises.
 | `pwdn` | `-1` | Sensor power-down pin, `-1` for none |
 | `xclk` | `-1` | Pin to generate the sensor's clock on, `-1` if the board has an oscillator |
 | `xclk_hz` | `24000000` | Frequency for that clock |
-| `format` | `None` | Sensor format by name or index; `None` picks the driver's default |
+| `format` | `None` | Sensor format by name, by index, or by size as `(width, height)`; `None` picks the driver's default |
 | `pixel_format` | `None` | What `take()` returns: a `PixelFormat` (`RGB565`, the default, `GRAYSCALE` or `JPEG`). Or `"rgb888"`, for 24-bit frames from `frame()` and `capture()` |
 | `frame_size` | `None` | The size `take()` returns, a `FrameSize`; `None` is the sensor's own ([below](#written-for-espcamera)) |
 | `jpeg_quality` | `80` | `take()`'s JPEG quality, 1-100, higher is better |
@@ -155,6 +155,7 @@ time — the P4 has one CSI controller — and constructing a second one raises.
 | `sensor` | `None` | A sensor described in Python, used instead of probing ([below](#a-camera-described-in-python)) |
 | `auto_exposure` | `None` | Steer exposure and gain to a brightness target, measured after gamma. On unless `False`; on a sensor with its own auto-exposure (the OV5647) it steers that loop's target |
 | `black_level` | `None` | What the sensor reads with no light, in 8-bit steps, taken off before gamma |
+| `tuning` | `None` | Colour tuning over the sensor's own, as a dict with `tuning()`'s keys ([below](#colour-tuning-per-sensor)) |
 
 Board facts are arguments rather than build-time constants on purpose: the
 same firmware image should drive a camera on any board that has one, and a
@@ -206,7 +207,7 @@ With a buffer, fills it and returns the byte count — the zero-allocation form
 for a loop. With no buffer, returns a fresh `bytes`, for a one-shot still
 where making the caller size 1.28 MB first is a poor introduction.
 
-**`capture_scaled(dst, pic_w, pic_h, *, x=0, y=0, w=None, h=None, rotate=0, mirror=False, timeout=1000)`**
+**`capture_scaled(dst, pic_w, pic_h, *, x=0, y=0, w=None, h=None, rotate=0, mirror=False, src_rect=None, swap=False, timeout=1000)`**
 
 Scale the frame into a rectangle of a destination picture, using the P4's
 Pixel Processing Accelerator through
@@ -227,6 +228,18 @@ preview hands this its scanout buffer and gets camera to glass in one
 hardware operation. `rotate` takes 0, 90, 180 or 270 and `mirror` flips in x,
 both free in the same pass. Returns the `(width, height)` written, or `None`
 if no frame arrived.
+
+`src_rect=(x, y, w, h)` takes only that block of the frame and scales it to
+fill the destination block, so digital zoom is the same single pass. On a
+1920x1080 frame going to a 240x240 panel, 2x is the middle 540x540:
+
+```python
+cam.capture_scaled(fb, 240, 240, src_rect=(690, 270, 540, 540))
+```
+
+`swap=True` byte-swaps each pixel on the way, for a panel that takes RGB565
+big-endian, as most SPI panels do. Without either, the call behaves as it
+always has.
 
 `dst` should be cache-line aligned, since the PPA writes it by DMA. A panel
 framebuffer already is. A misaligned buffer still gets the right picture, but
@@ -307,13 +320,47 @@ is there for when you do mean the sensor's own numbers.
 | `black_level(level=None)` | The black taken off each channel before gamma, allowing for white balance and the colour matrix |
 | `ccm(matrix=None)` | The colour matrix, nine numbers row by row. On a P4 before revision 3 white balance scales its red and blue columns, so a highlight the sensor clips can take a tint; from revision 3 white balance runs in the ISP's own gain block, ahead of the clip |
 | `gamma(exponent=None)` | The tone curve's exponent; below 1 lifts the mid-tones |
+| `color(contrast=None, saturation=None, brightness=None, hue=None)` | The ISP's colour block, after gamma: sets any given, returns all four as a dict ([below](#picture-settings-the-isps-colour-block)) |
+| `tuning(**keys)` | The sensor's colour tuning as a dict; keywords change it ([below](#colour-tuning-per-sensor)) |
+| `color_temp()` | The light's colour temperature in kelvin, as read to pick a colour matrix; `None` without a matrix table |
 
 **Colour comes from the ISP, set up per sensor.** A raw sensor needs a colour
 matrix (its filters overlap, so its colour is pale and green-leaning), a gamma
 curve (it counts light linearly) and a white balance. The camera applies all
 three: the matrix and gamma from the sensor's tuning (Espressif's, for the
-OV5647; an identity matrix for a sensor without one), and the white balance
+OV5647 and the OV2710; an identity matrix for a sensor without one, see
+[Colour tuning per sensor](#colour-tuning-per-sensor)), and the white balance
 from the ISP's own statistics while `awb` is on.
+
+#### Picture settings: the ISP's colour block
+
+`color()` is what a camera's picture-settings menu moves. It drives the
+ESP32-P4 ISP's colour unit, which works on every sensor, on the picture after
+gamma, in the unit's own ranges:
+
+| Keyword | Range | Unchanged |
+|---|---|---|
+| `contrast` | 0 to 255 | 128 |
+| `saturation` | 0 to 255; 0 is grey | 128 |
+| `brightness` | -128 to 127, added | 0 |
+| `hue` | 0 to 360 degrees round the colour wheel | 0 |
+
+```python
+>>> cam.color(saturation=180, brightness=10)
+{'contrast': 128, 'saturation': 180, 'brightness': 10, 'hue': 0}
+>>> cam.color()                       # read, change nothing
+```
+
+Contrast and saturation are fixed-point gains, so 255 is just under double.
+The unit stays off until something sets it, either a call like the one above
+or a sensor tuning that starts it (the OV2710's does). A value out of range
+raises `ValueError` and changes nothing.
+
+The `brightness`, `contrast` and `saturation` properties (from espcamera) are
+something else: they reach registers inside the sensor, through its driver,
+and only on a sensor whose driver has them, which `controls()` says. Neither
+the OV5647's driver nor the OV2710's has any of the three. `color()` needs
+nothing from the driver, and its numbers mean the same on every sensor.
 
 **Flipping moves the colour order, and the camera follows it.** Either flip
 moves the sensor's 2×2 colour cell, so the ISP's Bayer order changes with it,
@@ -388,6 +435,70 @@ best-effort basis, and a soft reset (Ctrl-D) tears the camera down before the
 heap is wiped — so an interrupted session leaves the CSI controller, the ISP,
 the LDO and the sensor's stream all stopped, not half-running into memory
 that no longer exists.
+
+## Colour tuning per sensor
+
+The colour matrix, the gamma curve and the colour block's starting point are
+measured per sensor, so the camera picks them by the sensor's product ID when
+it opens. Two sensors have tuning built in, from Espressif's own:
+
+| Sensor | Colour matrix | Gamma | Colour block |
+|---|---|---|---|
+| OV5647 | one matrix | 0.72 | off |
+| OV2710 | 13 matrices by colour temperature, 2314 K to 7847 K | 0.53 | contrast 130, saturation 128 |
+
+Any other sensor opens with an identity matrix and a gamma of 0.72.
+
+A matrix measured under one light is a little wrong under another. With a
+table, the camera reads the light's colour temperature off its white balance
+(where white falls between the sensor's measured white points) and blends the
+two matrices either side of it, every time the white balance moves.
+`color_temp()` says what it read.
+
+`tuning()` returns the lot as a dict, and takes any of the same keys back on a
+running camera. `Camera(tuning=...)` takes them at open, over the sensor's
+own. What `tuning()` returns can be passed back unchanged, so trying another
+tuning and returning to the first is two lines:
+
+```python
+saved = cam.tuning()
+cam.tuning(ccm=(1, 0, 0, 0, 1, 0, 0, 0, 1), ccm_table=None, gamma=1.0)
+cam.tuning(**saved)
+```
+
+| Key | Meaning |
+|---|---|
+| `gamma` | The tone curve's exponent, 0.2 to 2 |
+| `black_level` | What the sensor reads with no light, 0 to 128 |
+| `ccm` | One colour matrix, nine numbers row by row. Setting it stops a table following the light |
+| `ccm_table` | `[(kelvin, matrix), ...]`, temperatures rising, up to 16 rows; `None` stops following the light |
+| `awb_table` | `[(kelvin, red/green, blue/green), ...]`: where white falls on the raw sensor at each temperature, up to 16 rows |
+| `color` | The colour block's settings, as `color()` takes them; `None` when it is off |
+
+A camera described in Python ([below](#a-camera-described-in-python)) can
+carry the same keys in its description.
+
+### What the OV2710's tuning leaves out
+
+The OV2710's values come from the tuning file Espressif ships for the
+ESP32-P4-EYE (`ov2710_custom.json` in esp-dev-kits'
+`examples/esp32-p4-eye/factory_demo`). The camera maps its colour matrices,
+its white points and its contrast and saturation. The rest of that file has
+no counterpart here:
+
+- **Gamma by scene brightness.** The file steps the exponent from 0.51 in a
+  dark scene to 0.56 in a bright one; the camera uses its middle step, 0.53,
+  throughout.
+- **The dark-scene matrix.** Below a set brightness the file switches to an
+  identity matrix; the camera keeps blending.
+- **Sharpening and denoising.** The ISP's sharpen and bilateral-filter units
+  aren't driven, and the OV2710's driver has neither as a control.
+- **Auto-exposure.** Its metering weights belong to Espressif's
+  image-processing library. The OV2710 exposes itself, and its driver offers
+  no exposure or gain control for the camera's own loop to steer.
+- **Steps by gain.** The file changes denoising, demosaicing, sharpening and
+  contrast as the sensor's gain rises; the camera keeps the lowest-gain
+  contrast throughout.
 
 ## Written for espcamera
 
@@ -467,8 +578,8 @@ two buffers and `take()` always returns the newest frame, so they read back as
 `GrabMode.LATEST` and `2`.
 
 What stays this module's own: the constructor, `frame()`, `capture()`,
-`capture_jpeg()`, `capture_scaled()`, `capture_yuy2()`, `controls()` and the
-ISP's tuning. Those names keep working as they did.
+`capture_jpeg()`, `capture_scaled()`, `capture_yuy2()`, `controls()`,
+`color()` and the ISP's tuning. Those names keep working as they did.
 
 ## Examples
 
@@ -481,6 +592,9 @@ ISP's tuning. Those names keep working as they did.
 | [`camera_send_simpletest.py`](examples/camera_send_simpletest.py) | A JPEG on request to another board's screen or a computer, over TCP |
 | [`camera_still.py`](examples/camera_still.py) | Live view, BOOT button takes the picture. The one that feels like a camera |
 | [`camera_controls.py`](examples/camera_controls.py) | Discovering what a sensor supports, then sweeping it on screen |
+| [`camera_color.py`](examples/camera_color.py) | `color()`: contrast, saturation, brightness and hue on the live picture |
+| [`camera_tuning.py`](examples/camera_tuning.py) | `tuning()`: the sensor's colour tuning against none, then restored |
+| [`camera_zoom.py`](examples/camera_zoom.py) | Digital zoom from 1x to 4x with `capture_scaled(src_rect=)` |
 | [`camera_frame.py`](examples/camera_frame.py) | Zero-copy `frame()` loop with `stats()` |
 | [`camera_transform.py`](examples/camera_transform.py) | `capture_scaled` with rotate, mirror, and a cropped inset |
 | [`camera_formats.py`](examples/camera_formats.py) | List `formats()`, then construct `Camera(...)` with a named format |
@@ -617,7 +731,7 @@ cam = cameraif.Camera(7, 8, i2c=1, reset=21, sensor=SENSOR)
 | `exposure`, `gain` | `(register, bytes, minimum, maximum, default)`; a maximum of `-n` is the mode's `vts` less `n`, a default of `None` the maximum |
 | `flip` | `(register, vertical bits, horizontal bits)` |
 | `test_pattern` | `(register, bytes, on value, off value)` |
-| `auto_exposure`, `black_level`, `gamma`, `ccm` | The camera's tuning; arguments to `Camera()` override it |
+| `auto_exposure`, `black_level`, `gamma`, `ccm`, `ccm_table`, `awb_table`, `color` | The camera's tuning ([above](#colour-tuning-per-sensor)); `tuning=` and the other arguments to `Camera()` override it |
 
 Everything except `name`, `reg_bits`, the controls and the tuning is
 required, and a missing or malformed key raises a `ValueError` naming it.
