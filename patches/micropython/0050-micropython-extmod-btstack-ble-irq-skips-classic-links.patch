@@ -4,27 +4,30 @@ Date: Sun, 8 Nov 2026 00:00:00 -0500
 Subject: [PATCH] extmod/btstack: Keep Bluetooth Classic links out of BLE's IRQ.
 
 With ENABLE_CLASSIC in the BTstack config, HCI reports encryption changes
-and disconnections for Classic ACL links too, and the BLE layer passed them
+and disconnections for Classic ACL and SCO links too, and the BLE layer passed them
 to the BLE IRQ as if they were BLE connections. When the stack was brought
 up by Classic code with no BLE object made, the IRQ dispatch then read the
 handler through a NULL MP_STATE_VM(bluetooth) and raised "'int' object isn't
 callable"; with a BLE object, its IRQ saw connections that weren't its own.
 
-Skip both events for connections whose address type is BD_ADDR_TYPE_ACL.
+Skip both events for connections whose address type is BD_ADDR_TYPE_ACL
+or BD_ADDR_TYPE_SCO, and disconnections for a handle with no connection
+behind it (gap_disconnect() of a link already gone).
 Builds without ENABLE_CLASSIC are unchanged.
 
 diff --git a/extmod/btstack/modbluetooth_btstack.c b/extmod/btstack/modbluetooth_btstack.c
 --- a/extmod/btstack/modbluetooth_btstack.c
 +++ b/extmod/btstack/modbluetooth_btstack.c
-@@ -193,6 +193,17 @@ static bool controller_static_addr_available = false;
+@@ -193,6 +193,18 @@ static bool controller_static_addr_available = false;
  static const uint8_t read_static_address_command_complete_prefix[] = { 0x0e, 0x1b, 0x01, 0x09, 0xfc };
  #endif
  
 +// True for a BLE link. With Bluetooth Classic enabled in the BTstack config,
-+// HCI also reports Classic links, which the BLE IRQ must not see.
++// HCI also reports Classic links, which the BLE IRQ must not see, and a
++// disconnection for a handle with no connection left is not taken as BLE's.
 +static bool is_le_connection(const hci_connection_t *conn) {
 +    #ifdef ENABLE_CLASSIC
-+    return conn->address_type != BD_ADDR_TYPE_ACL;
++    return conn != NULL && conn->address_type != BD_ADDR_TYPE_ACL && conn->address_type != BD_ADDR_TYPE_SCO;
 +    #else
 +    (void)conn;
 +    return true;
@@ -34,7 +37,7 @@ diff --git a/extmod/btstack/modbluetooth_btstack.c b/extmod/btstack/modbluetooth
  static void btstack_packet_handler_generic(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
      (void)channel;
      (void)size;
-@@ -294,6 +305,10 @@ static void btstack_packet_handler_generic(uint8_t packet_type, uint16_t channel
+@@ -294,6 +306,10 @@ static void btstack_packet_handler_generic(uint8_t packet_type, uint16_t channel
          }
  
          hci_connection_t *hci_con = hci_connection_for_handle(conn_handle);
@@ -45,11 +48,11 @@ diff --git a/extmod/btstack/modbluetooth_btstack.c b/extmod/btstack/modbluetooth
          sm_connection_t *desc = &hci_con->sm_connection;
          mp_bluetooth_gatts_on_encryption_update(conn_handle,
              desc->sm_connection_encrypted,
-@@ -305,6 +320,10 @@ static void btstack_packet_handler_generic(uint8_t packet_type, uint16_t channel
+@@ -305,6 +321,10 @@ static void btstack_packet_handler_generic(uint8_t packet_type, uint16_t channel
          DEBUG_printf("  --> hci disconnect complete\n");
          uint16_t conn_handle = hci_event_disconnection_complete_get_connection_handle(packet);
          const hci_connection_t *conn = hci_connection_for_handle(conn_handle);
-+        if (conn != NULL && !is_le_connection(conn)) {
++        if (!is_le_connection(conn)) {
 +            // A Bluetooth Classic link, when a config enables Classic: not BLE's.
 +            return;
 +        }
