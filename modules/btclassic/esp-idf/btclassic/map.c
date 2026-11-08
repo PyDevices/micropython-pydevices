@@ -28,6 +28,7 @@
 #include "freertos/task.h"
 
 #include "esp_heap_caps.h"
+#include "esp_idf_version.h"
 #include "esp_log.h"
 
 #include "btc_bluedroid.h"
@@ -217,6 +218,18 @@ static void finish(int result) {
         m.pending = NULL;
     }
     mark(BTC_CHANGED_MESSAGES);
+}
+
+// The length of an OBEX header's value, after its 3-byte head. ESP-IDF 6
+// bounds the header by the packet's end; 5.5 trusts it.
+static size_t hdr_value_len(BT_HDR *pkt, uint8_t *h) {
+    #if ESP_IDF_VERSION_MAJOR >= 6
+    uint16_t n = OBEX_GetHeaderLength(h, (uint8_t *)(pkt + 1) + pkt->offset + pkt->len);
+    #else
+    (void)pkt;
+    uint16_t n = OBEX_GetHeaderLength(h);
+    #endif
+    return n > 3 ? n - 3 : 0;
 }
 
 // ---- the reply ----
@@ -544,9 +557,9 @@ static void on_response(cb_msg_t *c) {
         } else {
             while ((h = OBEX_GetNextHeader(pkt, &info)) != NULL) {
                 if (*h == OBEX_HEADER_ID_BODY || *h == OBEX_HEADER_ID_END_OF_BODY) {
-                    gather(h + 3, OBEX_GetHeaderLength(h) - 3);
+                    gather(h + 3, hdr_value_len(pkt, h));
                 } else if (*h == OBEX_HEADER_ID_APP_PARAM) {
-                    reply_params(h + 3, OBEX_GetHeaderLength(h) - 3);
+                    reply_params(h + 3, hdr_value_len(pkt, h));
                 }
             }
             if (rc == OBEX_RESPONSE_CODE_OK) {
@@ -564,7 +577,7 @@ static void on_response(cb_msg_t *c) {
             while ((h = OBEX_GetNextHeader(pkt, &info)) != NULL) {
                 if (*h == OBEX_HEADER_ID_NAME) {
                     BTC_LOCK();
-                    name_from_utf16(h + 3, OBEX_GetHeaderLength(h) - 3, m.pushed, sizeof(m.pushed));
+                    name_from_utf16(h + 3, hdr_value_len(pkt, h), m.pushed, sizeof(m.pushed));
                     BTC_UNLOCK();
                 }
             }
@@ -850,7 +863,7 @@ static void on_server(cb_msg_t *c) {
             if (op == OBEX_OPCODE_CONNECT) {
                 bool ours = false;
                 while ((h = OBEX_GetNextHeader(pkt, &info)) != NULL) {
-                    if (*h == OBEX_HEADER_ID_TARGET && OBEX_GetHeaderLength(h) == 19 && memcmp(h + 3, mns_target, 16) == 0) {
+                    if (*h == OBEX_HEADER_ID_TARGET && hdr_value_len(pkt, h) == 16 && memcmp(h + 3, mns_target, 16) == 0) {
                         ours = true;
                     }
                 }
@@ -862,7 +875,7 @@ static void on_server(cb_msg_t *c) {
                 }
                 while ((h = OBEX_GetNextHeader(pkt, &info)) != NULL) {
                     if ((*h == OBEX_HEADER_ID_BODY || *h == OBEX_HEADER_ID_END_OF_BODY) && m.ev_buf) {
-                        size_t n = OBEX_GetHeaderLength(h) - 3;
+                        size_t n = hdr_value_len(pkt, h);
                         if (m.ev_len + n > MSG_EVENT_MAX) {
                             n = MSG_EVENT_MAX - m.ev_len;
                         }
