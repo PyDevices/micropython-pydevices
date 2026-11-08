@@ -79,6 +79,12 @@ place of NimBLE. ESP-IDF runs one Bluetooth host, so a firmware with
 btclassic has no `bluetooth` (BLE) module. A board with PSRAM is the
 comfortable fit: the Bluetooth stack's buffers go there.
 
+Pairings live in the board's NVS partition, and the last sender with them.
+Writing a whole `firmware.bin` at 0x1000 rewrites that partition, so every
+device has to pair again (forget the board on the phone first). To update a
+board whose partition table hasn't changed, write only the app,
+`micropython.bin`, at 0x10000: pairings and files stay.
+
 ## How it's built
 
 [`esp-idf/btclassic`](esp-idf/btclassic) is the C that does the work, with

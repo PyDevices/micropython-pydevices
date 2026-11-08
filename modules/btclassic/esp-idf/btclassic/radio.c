@@ -118,12 +118,10 @@ static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
                 ESP_LOGW(TAG, "pairing failed: %d", param->auth_cmpl.stat);
             }
             break;
-        #if CONFIG_BT_SSP_ENABLED
         case ESP_BT_GAP_CFM_REQ_EVT:
             // A board has no screen to compare numbers on: accept.
             esp_bt_gap_ssp_confirm_reply(param->cfm_req.bda, true);
             break;
-        #endif
         case ESP_BT_GAP_REMOVE_BOND_DEV_COMPLETE_EVT:
             mark(BTC_CHANGED_PAIRED);
             break;
@@ -172,10 +170,9 @@ int btc_radio_start(void) {
     }
     esp_bt_gap_set_device_name(r.name[0] ? r.name : "ESP32");
     esp_bt_gap_register_callback(gap_cb);
-    #if CONFIG_BT_SSP_ENABLED
+    // Secure Simple Pairing with no display or keyboard: "just works".
     esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_NONE;
     esp_bt_gap_set_security_param(ESP_BT_SP_IOCAP_MODE, &iocap, sizeof(iocap));
-    #endif
     // Legacy pairing, for devices without SSP.
     apply_pin();
     r.on = true;
