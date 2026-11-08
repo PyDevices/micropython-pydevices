@@ -49,6 +49,8 @@ per profile that takes it.
 | `Bluetooth()` | The radio. `active()` turns it on and off; `config()` reads and sets `name`, `discoverable`, `connectable`, `pin` and `mac`; `paired()` and `unpair()` manage pairings. |
 | `AudioSink(bt)` | Receives audio (A2DP sink) and talks to the sender's player (AVRCP): `readinto()`, the track, `cover`, `position`, `play()`, `next()`, `seek()`, the `volume` shared with the sender's slider, and more. |
 | `HandsFree(bt)` | Follows a phone (HFP hands-free): `battery`, `signal`, `operator`, the `call` and its `caller`, `answer()`, `hangup()`, `dial()`, and the call's audio through its own `readinto()` and `write()`. |
+| `AudioSource(bt)` | Sends audio to headphones, a speaker or a car stereo (A2DP source) and acts as their remote's target (AVRCP): `write()`, the receiver's keys through `key()`, the `volume`, and the `track()` and `status` its display shows. `Bluetooth.inquiry()` and `found()` find the receiver. |
+| `Serial(bt)` | A serial port (SPP), as a stream like `machine.UART`: a computer gets a Bluetooth COM port to the board, or `connect()` calls another device's port. |
 
 Nothing calls back into Python. Each object's state is properties, and its
 `changes()` returns a bit for each kind of state that changed since you last
@@ -57,6 +59,10 @@ asked, so a program polls it as often as it redraws. A profile closes with
 
 Everything keeps running across a soft reset: making the objects again picks
 up the running ones, links and all.
+
+A board is a sink or a source, one at a time: both are in the firmware, but
+the Bluetooth stack runs one A2DP role at once. `deinit()` the `AudioSink`
+before making an `AudioSource`, and the other way round.
 
 When `AudioSink` connects to a phone, `HandsFree` follows it there. The
 phone decides when a call's audio comes to the board: for a call while the
@@ -100,6 +106,39 @@ ordinary user C module, so a stock MicroPython esp32 build takes it with
 in the board's `SDKCONFIG_DEFAULTS` turns Bluedroid, A2DP, AVRCP cover art and
 HFP on, and `micropython.cmake` turns the `bluetooth` module off itself.
 `build_mp.py` does the first for you.
+
+## Sending audio
+
+```python
+import btclassic
+
+bt = btclassic.Bluetooth()
+bt.inquiry(10240)                           # headphones in pairing mode
+# ... wait for bt.found(), pick an address ...
+source = btclassic.AudioSource(bt, rate=16000, channels=1)
+source.connect(address)
+source.track("Test tone", "btclassic")      # what the receiver shows
+while True:
+    source.write(tone)                      # waits while the stream runs
+```
+
+`write()` takes 16-bit PCM at the `rate` and `channels` you choose, and the
+source converts it to the stream's: 44.1 kHz stereo SBC, the one format
+every A2DP receiver takes. While the stream runs, `write()` waits for room,
+so the receiver's pace sets your program's.
+[`examples/btclassic_source_tone.py`](examples/btclassic_source_tone.py)
+plays a tone and prints the receiver's keys.
+
+The receiver's display gets the title, artist, album, play status and
+position through AVRCP. ESP-IDF's Bluetooth stack has no public call for
+that, so btclassic answers those requests itself, at link time, on the
+ESP-IDF versions it was checked against (5.5 and 6.1). On any other, the
+source still plays; `link()["metadata"]` says whether this firmware sends
+it. Builds can turn it off with `-DBTCLASSIC_TG_METADATA=OFF`.
+
+C code can feed the source without Python: `btc_source_write()` in
+[`btclassic.h`](esp-idf/btclassic/include/btclassic.h) takes PCM from any
+one task, at any rate, and returns how much it took.
 
 The same folder is also an ESP-IDF component of its own. CI builds it in a
 plain ESP-IDF 6.1 app for the ESP32-S31, which has Bluetooth Classic too, so

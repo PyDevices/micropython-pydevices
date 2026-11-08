@@ -251,6 +251,42 @@ static mp_obj_t bluetooth_unpair(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(bluetooth_unpair_obj, 1, 2, bluetooth_unpair);
 
+// inquiry(duration_ms=10240): look for discoverable devices, forgetting the
+// last results; 0 stops one running.
+static mp_obj_t bluetooth_inquiry(size_t n_args, const mp_obj_t *args) {
+    mp_int_t ms = n_args > 1 ? mp_obj_get_int(args[1]) : 10240;
+    if (ms != 0 && (ms < 1280 || ms > 61440)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("duration_ms must be 1280 to 61440, or 0 to stop"));
+    }
+    return done(btc_radio_inquiry((uint32_t)ms));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(bluetooth_inquiry_obj, 1, 2, bluetooth_inquiry);
+
+static mp_obj_t bluetooth_inquiring(mp_obj_t self_in) {
+    return mp_obj_new_bool(btc_radio_inquiring());
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(bluetooth_inquiring_obj, bluetooth_inquiring);
+
+// found() -> [(addr, name, cod, rssi), ...]
+static mp_obj_t bluetooth_found(mp_obj_t self_in) {
+    btc_found_t *found = m_new(btc_found_t, BTC_FOUND_MAX);
+    int n = btc_radio_found(found, BTC_FOUND_MAX);
+    mp_obj_t list = mp_obj_new_list(0, NULL);
+    for (int i = 0; i < n && i < BTC_FOUND_MAX; i++) {
+        btc_found_t *f = &found[i];
+        mp_obj_t t[4] = {
+            mp_obj_new_bytes(f->addr, 6),
+            text_obj(f->name, strlen(f->name)),
+            mp_obj_new_int_from_uint(f->cod),
+            f->rssi == BTC_UNKNOWN ? mp_const_none : mp_obj_new_int(f->rssi),
+        };
+        mp_obj_list_append(list, mp_obj_new_tuple(4, t));
+    }
+    m_del(btc_found_t, found, BTC_FOUND_MAX);
+    return list;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(bluetooth_found_obj, bluetooth_found);
+
 static mp_obj_t bluetooth_changes(mp_obj_t self_in) {
     return MP_OBJ_NEW_SMALL_INT(btc_radio_changes());
 }
@@ -262,6 +298,9 @@ static const mp_rom_map_elem_t bluetooth_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_paired), MP_ROM_PTR(&bluetooth_paired_obj) },
     { MP_ROM_QSTR(MP_QSTR_unpair), MP_ROM_PTR(&bluetooth_unpair_obj) },
     { MP_ROM_QSTR(MP_QSTR_changes), MP_ROM_PTR(&bluetooth_changes_obj) },
+    { MP_ROM_QSTR(MP_QSTR_inquiry), MP_ROM_PTR(&bluetooth_inquiry_obj) },
+    { MP_ROM_QSTR(MP_QSTR_inquiring), MP_ROM_PTR(&bluetooth_inquiring_obj) },
+    { MP_ROM_QSTR(MP_QSTR_found), MP_ROM_PTR(&bluetooth_found_obj) },
 };
 static MP_DEFINE_CONST_DICT(bluetooth_locals, bluetooth_locals_table);
 
@@ -337,6 +376,10 @@ static mp_obj_t sink_make_new(const mp_obj_type_t *type, size_t n_args, size_t n
     check_radio_arg(args[ARG_bt].u_obj);
     // One sink: a second AudioSink takes over the running one, link and all.
     if (!btc_sink_started()) {
+        if (btc_source_started()) {
+            mp_raise_msg(&mp_type_OSError,
+                MP_ERROR_TEXT("btclassic: an AudioSource is running; deinit() it first (one A2DP role at a time)"));
+        }
         mp_int_t ms = args[ARG_buffer_ms].u_int;
         if (ms < 50 || ms > 5000) {
             mp_raise_ValueError(MP_ERROR_TEXT("buffer_ms must be 50 to 5000"));
@@ -929,6 +972,11 @@ MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &hf_locals
     );
 
+// AudioSource, in mod_btclassic_source.c.
+extern const mp_obj_type_t btc_source_type;
+// Serial, in mod_btclassic_serial.c.
+extern const mp_obj_type_t btc_serial_type;
+
 // =========================================================================
 // the module
 // =========================================================================
@@ -938,6 +986,8 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_Bluetooth), MP_ROM_PTR(&btc_bluetooth_type) },
     { MP_ROM_QSTR(MP_QSTR_AudioSink), MP_ROM_PTR(&btc_sink_type) },
     { MP_ROM_QSTR(MP_QSTR_HandsFree), MP_ROM_PTR(&btc_hf_type) },
+    { MP_ROM_QSTR(MP_QSTR_AudioSource), MP_ROM_PTR(&btc_source_type) },
+    { MP_ROM_QSTR(MP_QSTR_Serial), MP_ROM_PTR(&btc_serial_type) },
     { MP_ROM_QSTR(MP_QSTR_CONNECTION), MP_ROM_INT(BTC_CHANGED_CONNECTION) },
     { MP_ROM_QSTR(MP_QSTR_STREAM), MP_ROM_INT(BTC_CHANGED_STREAM) },
     { MP_ROM_QSTR(MP_QSTR_FORMAT), MP_ROM_INT(BTC_CHANGED_FORMAT) },
@@ -951,7 +1001,16 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_CALL), MP_ROM_INT(BTC_CHANGED_CALL) },
     { MP_ROM_QSTR(MP_QSTR_AUDIO), MP_ROM_INT(BTC_CHANGED_AUDIO) },
     { MP_ROM_QSTR(MP_QSTR_PAIRED), MP_ROM_INT(BTC_CHANGED_PAIRED) },
-    // AVRCP pass-through key codes for AudioSink.key(), beyond the named methods.
+    { MP_ROM_QSTR(MP_QSTR_REMOTE), MP_ROM_INT(BTC_CHANGED_REMOTE) },
+    { MP_ROM_QSTR(MP_QSTR_FOUND), MP_ROM_INT(BTC_CHANGED_FOUND) },
+    { MP_ROM_QSTR(MP_QSTR_SERIAL), MP_ROM_INT(BTC_CHANGED_SERIAL) },
+    // AVRCP pass-through key codes: AudioSink.key() sends them, and
+    // AudioSource.key() reports the remote's.
+    { MP_ROM_QSTR(MP_QSTR_KEY_PLAY), MP_ROM_INT(0x44) },
+    { MP_ROM_QSTR(MP_QSTR_KEY_STOP), MP_ROM_INT(0x45) },
+    { MP_ROM_QSTR(MP_QSTR_KEY_PAUSE), MP_ROM_INT(0x46) },
+    { MP_ROM_QSTR(MP_QSTR_KEY_NEXT), MP_ROM_INT(0x4b) },
+    { MP_ROM_QSTR(MP_QSTR_KEY_PREVIOUS), MP_ROM_INT(0x4c) },
     { MP_ROM_QSTR(MP_QSTR_KEY_VOLUME_UP), MP_ROM_INT(0x41) },
     { MP_ROM_QSTR(MP_QSTR_KEY_VOLUME_DOWN), MP_ROM_INT(0x42) },
     { MP_ROM_QSTR(MP_QSTR_KEY_MUTE), MP_ROM_INT(0x43) },
