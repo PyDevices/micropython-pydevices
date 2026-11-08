@@ -138,11 +138,13 @@ MP_REGISTER_ROOT_POINTER(struct _mp_bluetooth_bluedroid_root_pointers_t *bluetoo
 #define DB() (MP_STATE_PORT(bluetooth_bluedroid_root_pointers)->gatts_db)
 
 // Wait for a callback to set *flag, letting other MicroPython threads (and
-// a callback that needs the GIL) run meanwhile.
+// a callback that needs the GIL) run meanwhile. The wait counts ticks, not
+// loops: at 100 Hz a 5 ms delay is zero ticks and returns at once.
 static int wait_for(volatile int8_t *flag) {
-    for (int i = 0; i < WAIT_MS / 5 && *flag == 0; i++) {
+    TickType_t start = xTaskGetTickCount();
+    while (*flag == 0 && xTaskGetTickCount() - start < pdMS_TO_TICKS(WAIT_MS)) {
         MP_THREAD_GIL_EXIT();
-        vTaskDelay(pdMS_TO_TICKS(5));
+        vTaskDelay(1);
         MP_THREAD_GIL_ENTER();
     }
     return *flag > 0 ? 0 : (*flag == 0 ? MP_ETIMEDOUT : MP_EIO);
@@ -248,12 +250,12 @@ static bool db_store(uint16_t handle, const uint8_t *value, size_t len) {
     if (MP_STATE_PORT(bluetooth_bluedroid_root_pointers)) {
         mp_bluetooth_gatts_db_entry_t *e = mp_bluetooth_gatts_db_lookup(DB(), handle);
         if (e) {
+            // As upstream does: a value longer than the buffer is cut to
+            // fit, not refused.
             size_t start = e->append ? e->data_len : 0;
-            if (start + len <= e->data_alloc) {
-                memcpy(e->data + start, value, len);
-                e->data_len = start + len;
-                ok = true;
-            }
+            e->data_len = MIN(e->data_alloc, start + len);
+            memcpy(e->data + start, value, e->data_len - start);
+            ok = true;
         }
     }
     MICROPY_PY_BLUETOOTH_EXIT
@@ -414,7 +416,7 @@ static void on_write(struct gatts_write_evt_param *wr) {
     } else if (wr->offset != 0) {
         status = ESP_GATT_INVALID_OFFSET;
     } else if (!db_store(wr->handle, wr->value, wr->len)) {
-        status = ESP_GATT_INVALID_ATTR_LEN;
+        status = ESP_GATT_INVALID_HANDLE;
     }
     if (wr->need_rsp) {
         respond(wr->conn_id, wr->trans_id, wr->handle, status, NULL, 0, 0);
@@ -497,7 +499,7 @@ static void gatts_cb(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble
             uint16_t handle = b.prep_handle;
             if (param->exec_write.exec_write_flag == ESP_GATT_PREP_WRITE_EXEC && handle) {
                 if (!db_store(handle, b.prep, b.prep_len)) {
-                    status = ESP_GATT_INVALID_ATTR_LEN;
+                    status = ESP_GATT_INVALID_HANDLE;
                 }
             }
             b.prep_handle = 0;
