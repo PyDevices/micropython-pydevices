@@ -21,6 +21,7 @@
 #define QUEUE_BYTES 512         // reports waiting, each with a length byte
 #define MAX_REPORT 64
 #define HOST_DESCRIPTOR_MAX 512
+#define LAST_INPUTS 4           // input reports kept to answer GET_REPORT
 
 #define MINOR_KEYBOARD 0x40       // the minor device class: 0x40 keyboard, 0x80 mouse, 0x08 gamepad
 
@@ -41,6 +42,10 @@ static struct {
     queue_t q;              // device: reports to send; host: reports received
     uint8_t output[MAX_REPORT + 1];     // device: the last report the host set
     uint8_t output_len;
+    struct {
+        uint8_t len;
+        uint8_t report[MAX_REPORT];
+    } last_input[LAST_INPUTS];
 } h;
 
 // The last peer, for connect() with none; kept across stop and start.
@@ -50,6 +55,8 @@ static btc_addr_t last;
 static uint8_t sdp_hid[400];
 #define SDP_HID_OVERHEAD 160     // the record around the descriptor, name included
 static uint8_t *descriptor;     // device: the program's, copied to the heap
+static uint16_t descriptor_len;
+static bool has_ids;            // device: the descriptor has report IDs
 static uint8_t host_descriptors[HOST_DESCRIPTOR_MAX];
 
 // ---- the queue: length-prefixed reports ----
@@ -104,6 +111,68 @@ static void link_down(void) {
 
 // ---- device ----
 
+static bool ids_on_link(void) {
+    return has_ids || (h.connected && hid_device_in_boot_protocol_mode(h.cid));
+}
+
+// Keep the last input report of each ID, to answer the host's GET_REPORT.
+static void keep_input(const uint8_t *report, size_t n) {
+    bool ids = ids_on_link();
+    int slot = -1;
+    for (int i = 0; i < LAST_INPUTS; i++) {
+        if (h.last_input[i].len && (!ids || h.last_input[i].report[0] == report[0])) {
+            slot = i;
+            break;
+        }
+        if (slot < 0 && h.last_input[i].len == 0) {
+            slot = i;
+        }
+    }
+    if (slot >= 0) {
+        h.last_input[slot].len = (uint8_t)n;
+        memcpy(h.last_input[slot].report, report, n);
+    }
+}
+
+// The host asks for a report: the last input report with that ID, or the
+// last output report, without the ID (BTstack adds it). BTstack wants the
+// size the descriptor (or the boot protocol) gives, so pad or cut to it.
+static int on_get_report(uint16_t cid, hid_report_type_t type, uint16_t report_id, int *out_size, uint8_t *out) {
+    bool ids = ids_on_link();
+    const uint8_t *r = NULL;
+    size_t n = 0;
+    if (type == HID_REPORT_TYPE_INPUT) {
+        for (int i = 0; i < LAST_INPUTS; i++) {
+            if (h.last_input[i].len && (!ids || h.last_input[i].report[0] == report_id)) {
+                r = h.last_input[i].report;
+                n = h.last_input[i].len;
+                break;
+            }
+        }
+    } else if (type == HID_REPORT_TYPE_OUTPUT && h.output_len && (!ids || h.output[0] == report_id)) {
+        r = h.output;
+        n = h.output_len;
+    }
+    if (r && ids) {
+        r++;
+        n--;
+    }
+    int want;
+    if (hid_device_in_boot_protocol_mode(cid)) {
+        want = report_id == HID_BOOT_MODE_KEYBOARD_ID ? 8 : report_id == HID_BOOT_MODE_MOUSE_ID ? 3 : 0;
+    } else {
+        want = btstack_hid_get_report_size_for_id(report_id, type, descriptor_len, descriptor);
+    }
+    if (r == NULL || n == 0 || want <= 0 || want > MAX_REPORT) {
+        *out_size = 0;      // refused: unsupported request
+        return 1;
+    }
+    memset(out, 0, want);
+    memcpy(out, r, n < (size_t)want ? n : (size_t)want);
+    *out_size = want;
+    return 1;
+}
+
 static void on_device(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
     (void)channel;
     (void)size;
@@ -128,7 +197,13 @@ static void on_device(uint8_t packet_type, uint16_t channel, uint8_t *packet, ui
         case HID_SUBEVENT_CAN_SEND_NOW: {
             uint8_t msg[MAX_REPORT + 1];
             size_t n = queue_get(msg + 1, MAX_REPORT);
+            if (n && hid_device_in_boot_protocol_mode(h.cid) && has_ids
+                && msg[1] != HID_BOOT_MODE_KEYBOARD_ID && msg[1] != HID_BOOT_MODE_MOUSE_ID) {
+                n = 0;      // the boot protocol has only the keyboard and the mouse
+                h.dropped++;
+            }
             if (n) {
+                keep_input(msg + 1, n);
                 msg[0] = 0xa1;     // DATA, Input
                 hid_device_send_interrupt_message(h.cid, msg, (uint16_t)(n + 1));
                 h.sent++;
@@ -163,9 +238,20 @@ static void on_set_report(uint16_t cid, hid_report_type_t type, int len, uint8_t
     h.changes |= BTC_CHANGED_HID;
 }
 
+// An output report on the interrupt channel. BTstack hands it over without
+// its ID (SET_REPORT keeps it), so put the ID back.
 static void on_report_data(uint16_t cid, hid_report_type_t type, uint16_t report_id, int len, uint8_t *report) {
-    (void)report_id;
-    on_set_report(cid, type, len, report);
+    if (report_id == 0) {
+        on_set_report(cid, type, len, report);
+        return;
+    }
+    uint8_t r[MAX_REPORT];
+    if (len > MAX_REPORT - 1) {
+        len = MAX_REPORT - 1;
+    }
+    r[0] = (uint8_t)report_id;
+    memcpy(r + 1, report, len);
+    on_set_report(cid, type, len + 1, r);
 }
 
 static void ignore(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
@@ -188,6 +274,8 @@ int btc_hid_device_start(const uint8_t *desc, size_t len, uint8_t subclass, cons
         return BTC_ERR_NOMEM;
     }
     memcpy(descriptor, desc, len);
+    descriptor_len = (uint16_t)len;
+    has_ids = btstack_hid_report_id_declared(descriptor_len, descriptor);
     memset(&h, 0, sizeof(h));
 
     hid_sdp_record_t params = {
@@ -205,6 +293,7 @@ int btc_hid_device_start(const uint8_t *desc, size_t len, uint8_t subclass, cons
     hid_device_register_packet_handler(&on_device);
     hid_device_register_set_report_callback(&on_set_report);
     hid_device_register_report_data_callback(&on_report_data);
+    hid_device_register_report_request_callback(&on_get_report);
     // Peripheral, and what kind, unless audio runs too: see radio.c.
     btc_radio_profile(BTC_PROFILE_HID_DEVICE, true, subclass ? subclass : MINOR_KEYBOARD);
     h.started = true;
