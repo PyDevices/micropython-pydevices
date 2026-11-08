@@ -90,6 +90,7 @@ enum {
     EV_API_DISCONNECT,
     EV_API_REQUEST,
     EV_API_NOTIFY_SERVER,
+    EV_API_NOTIFY_STOP,
     EV_GOEP_OPENED,
     EV_GOEP_CLOSED,
     EV_GOEP_RESPONSE,
@@ -948,6 +949,22 @@ static void on_notify_server(void) {
     }
 }
 
+// Close the notification link, the server and its channel.
+static void on_notify_stop(void) {
+    if (m.mns_conn) {
+        OBEX_RemoveConn(m.mns_conn);
+        m.mns_conn = 0;
+    }
+    if (m.obex_server) {
+        OBEX_DeregisterServer(m.obex_server);
+        m.obex_server = 0;
+    }
+    if (m.scn) {
+        BTM_FreeSCN(m.scn);
+        m.scn = 0;
+    }
+}
+
 // ---- Bluedroid's task ----
 
 static BOOLEAN task_handler(BT_HDR *msg) {
@@ -976,6 +993,9 @@ static BOOLEAN task_handler(BT_HDR *msg) {
             break;
         case EV_API_NOTIFY_SERVER:
             on_notify_server();
+            break;
+        case EV_API_NOTIFY_STOP:
+            on_notify_stop();
             break;
         case EV_GOEP_OPENED:
             on_opened((cb_msg_t *)msg);
@@ -1041,9 +1061,20 @@ void btc_msg_stop(void) {
     }
     if (m.mns_record) {
         esp_sdp_remove_record(m.mns_record);
+        m.mns_record = 0;
     }
-    // The server goes on Bluedroid's task's terms: deregister and free there
-    // is not offered, so the server stays bound until the radio stops.
+    if (m.obex_server || m.mns_conn) {
+        // Unbound on Bluedroid's task, which owns them; a second Messages
+        // would otherwise find no server slot left.
+        BT_HDR *c = osi_malloc(sizeof(*c));
+        if (c) {
+            c->event = EV_API_NOTIFY_STOP;
+            bta_sys_sendmsg(c);
+            for (int i = 0; i < 50 && (m.obex_server || m.mns_conn); i++) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+        }
+    }
     m.started = false;
     vTaskDelay(pdMS_TO_TICKS(50));
     esp_sdp_deinit();

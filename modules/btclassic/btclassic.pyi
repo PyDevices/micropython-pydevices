@@ -1123,6 +1123,9 @@ class Messages:
     """The last reply was longer than `max_bytes` and was cut."""
     notifying: bool
     """The phone agreed to report changes."""
+    notify_connected: bool
+    """The phone's link for reports is open. A phone that agrees to
+    report changes opens it a moment later."""
     events: int
     """Reports waiting for `event()`."""
 

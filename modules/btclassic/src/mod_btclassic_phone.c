@@ -1757,6 +1757,9 @@ static void msg_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR_notifying:
             dest[0] = mp_obj_new_bool(st.notifying);
             return;
+        case MP_QSTR_notify_connected:
+            dest[0] = mp_obj_new_bool(st.notify_connected);
+            return;
         case MP_QSTR_events:
             dest[0] = MP_OBJ_NEW_SMALL_INT(st.events);
             return;
