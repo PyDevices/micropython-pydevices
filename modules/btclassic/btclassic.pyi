@@ -735,8 +735,10 @@ class HIDDevice:
     """The keyboard's LEDs as the host set them: bit 0 Num Lock, 1 Caps
     Lock, 2 Scroll Lock. 0 without a keyboard report."""
     def connect(self, addr: bytes | None = None) -> None:
-        """Call a host that has paired with the board, or the last one. A
-        paired host can also connect by itself; watch for `CONNECTION`."""
+        """Call a host that has paired with the board, or with no address
+        the last one it was connected to, remembered across resets (OSError
+        if there is none). A paired host can also connect by itself; watch
+        for `CONNECTION`."""
     def disconnect(self) -> None: ...
     def send(self, report: bytes) -> bool:
         """Queue an input report, report ID first when the descriptor has
@@ -749,12 +751,14 @@ class HIDDevice:
         left Shift, 2 left Alt, 3 left GUI, 4 to 7 the right ones).
         `keyboard()` releases everything. While a host is connected, waits
         for room; returns False if the queue is full with no host."""
-    def type(self, text: str) -> int:
-        """Type text on a US layout: each character pressed and released.
-        Letters, digits, punctuation, space, newline, tab, backspace and
-        escape; anything else raises ValueError before a key is sent.
-        Waits for room while a host is connected, and returns how many
-        characters were queued."""
+    def type(self, text: str, *, delay: int = 30) -> int:
+        """Type text on a US layout: each character pressed and released,
+        delay milliseconds apart. Letters, digits, punctuation, space,
+        newline, tab, backspace and escape; anything else raises ValueError
+        before a key is sent. Some apps lose keys that come faster than a
+        person types (Notepad on Windows 11 does at 20 ms); delay=0
+        sends as fast as the link takes them. Waits for room while a host
+        is connected, and returns how many characters were queued."""
     def mouse(self, x: int = 0, y: int = 0, *, buttons: int | None = None, wheel: int = 0) -> bool:
         """Move by x, y (right and down; any size, sent in steps of 127),
         turn the wheel (positive up), and set the buttons (bit 0 left, 1
@@ -813,7 +817,8 @@ class HIDHost:
     descriptor: bytes | None
     """The device's HID report descriptor, once connected."""
     def connect(self, addr: bytes | None = None, *, boot: bool = False) -> None:
-        """Call a device, or the last one. boot asks for the boot protocol,
+        """Call a device, or with no address the last one it was connected
+        to, remembered across resets. boot asks for the boot protocol,
         which every keyboard and mouse has and needs no descriptor to read;
         gamepads have none. Connected, it switches protocol."""
     def disconnect(self) -> None: ...
