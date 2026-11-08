@@ -27,12 +27,16 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
         ${BTCLASSIC_IDF}/spp.c
         ${BTCLASSIC_IDF}/hid.c
         ${BTCLASSIC_IDF}/pbap.c
-        ${BTCLASSIC_IDF}/hfp_ag.c)
+        ${BTCLASSIC_IDF}/hfp_ag.c
+        ${BTCLASSIC_IDF}/map.c)
     target_include_directories(usermod_btclassic INTERFACE ${BTCLASSIC_IDF}/include ${BTCLASSIC_IDF})
     # The source's track metadata for a remote, through link-time hooks into
     # Bluedroid (avrcp_tg.c); off where they aren't known to fit.
     include(${BTCLASSIC_IDF}/avrcp_tg.cmake)
     btclassic_avrcp_tg(usermod_btclassic ${BTCLASSIC_IDF}/avrcp_tg.c)
+    # The message client, on Bluedroid's OBEX internals (map.c).
+    include(${BTCLASSIC_IDF}/map.cmake)
+    btclassic_map(usermod_btclassic ${BTCLASSIC_IDF}/map.c)
     target_link_libraries(usermod INTERFACE usermod_btclassic)
     list(APPEND MICROPY_DEF_BOARD MICROPY_PY_BLUETOOTH=0)
     # Through MICROPY_DEF_BOARD, so the qstr scan sees the HID entries too.

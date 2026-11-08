@@ -99,6 +99,10 @@ PHONEBOOK: int
 REQUEST: int
 """`AudioGateway.changes` bit: the headset dialed a number (read `dialed`)
 or sent a keypad digit (read `dtmf()`)."""
+MESSAGES: int
+"""`Messages.changes` bit: a request finished, whether or not it worked."""
+NOTIFY: int
+"""`Messages.changes` bit: the phone reported a change; read `event()`."""
 
 HID_KEYBOARD: int
 """`HIDDevice` subclass: a keyboard."""
@@ -1067,5 +1071,126 @@ class AudioGateway:
     def deinit(self) -> None:
         """Drop the headset and stop the gateway. The radio stays on."""
     def __enter__(self) -> AudioGateway: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
+
+
+class Messages:
+    """A phone's text messages (MAP client): read, mark, delete, send, and
+    hear about new ones.
+
+    `connect` finds the phone's message service and opens it; the phone
+    asks its owner the first time, so allow access to messages on the
+    phone. Each request then waits for the whole reply.
+
+    Folders are named under the phone's message root: "inbox", "outbox",
+    "sent", "deleted" and "draft". A name with a "/" in it is a full
+    path, "telecom/msg/inbox".
+
+    A listing is a list of dicts, one per message, with the phone's own
+    fields as strings: "handle" (what `get`, `mark_read` and `delete`
+    take), "subject", "datetime" ("20261108T091500"), "sender_name",
+    "sender_addressing", "recipient_addressing", "type" ("SMS_GSM",
+    "MMS", "EMAIL"), "size", "read" ("yes" or "no") and more.
+
+    One message service at a time; a second `Messages` takes over the
+    running one.
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+        max_bytes: the largest reply kept, 1024 or more. A longer reply
+            stops there and sets `truncated`. Kept in PSRAM when the
+            board has it.
+    """
+
+    connected: bool
+    """The message service is open."""
+    peer: bytes | None
+    """The phone's address, or None."""
+    instance: int | None
+    """The phone's ID for the open message service, or None."""
+    features: int
+    """The phone's MAP feature bits."""
+    types: list[str]
+    """What the open service carries: "email", "sms_gsm", "sms_cdma",
+    "mms", "im"."""
+    new_message: bool | None
+    """The phone's new-message flag from the last listing, or None."""
+    time: str | None
+    """The phone's clock at the last listing, "20261108T101500+0000", or
+    None."""
+    truncated: bool
+    """The last reply was longer than `max_bytes` and was cut."""
+    notifying: bool
+    """The phone agreed to report changes."""
+    events: int
+    """Reports waiting for `event()`."""
+
+    def __init__(self, bt: Bluetooth, *, max_bytes: int = 262144) -> None: ...
+    def connect(self, addr: bytes | None = None, *, instance: int | None = None,
+                timeout: int = 30000) -> None:
+        """Open the message service of the phone at `addr`; None picks the
+        phone `HandsFree` or `AudioSink` is connected to, then the first
+        paired device. `instance` picks one of several services by its ID;
+        None takes the first with texts. Waits up to `timeout` ms for the
+        link; 0 returns at once, and `changes` reports `CONNECTION`.
+
+        Raises:
+            OSError: the phone has no message service, refused, or the
+                wait timed out.
+        """
+    def disconnect(self) -> None: ...
+    def folders(self, folder: str | None = None, *, timeout: int = 30000) -> list[str]:
+        """The names of the folders in `folder`, the message root when
+        None."""
+    def list(self, folder: str = "inbox", *, offset: int = 0, count: int | None = None,
+             unread: bool | None = None, sms_only: bool = False, subject_length: int = 0,
+             timeout: int = 30000) -> list[dict]:
+        """The folder's messages from `offset`, `count` of them or all,
+        newest first. `unread` True keeps only unread ones, False only read
+        ones. `subject_length` asks for up to that many characters of each
+        message's start as "subject" (1 to 255; 0 lets the phone choose)."""
+    def size(self, folder: str = "inbox", *, unread: bool | None = None, sms_only: bool = False,
+             timeout: int = 30000) -> int | None:
+        """How many messages the folder holds, without listing them."""
+    def get(self, handle: str, *, raw: bool = False, attachments: bool = False,
+            timeout: int = 30000) -> dict | bytes:
+        """One message as a dict: "status" ("READ" or "UNREAD"), "type",
+        "folder", "sender" (a record as `PhoneBook` gives, or None),
+        "recipients" (records) and "text". With `raw`, the bMessage as the
+        phone sent it. Reading a message may mark it read on the phone."""
+    def mark_read(self, handle: str, read: bool = True) -> None: ...
+    def delete(self, handle: str, deleted: bool = True) -> None:
+        """Move the message to the phone's deleted folder, or back out of
+        it with `deleted=False`."""
+    def send(self, number: str, text: str, *, folder: str = "outbox",
+             timeout: int = 30000) -> str | None:
+        """Send a text message to `number` and return the phone's handle
+        for it. In "outbox" the phone sends it at once; in "draft" it keeps
+        it there unsent."""
+    def push(self, bmessage: bytes, *, folder: str = "outbox", retry: bool = True,
+             timeout: int = 30000) -> str | None:
+        """Hand the phone a whole bMessage, for what `send` can't say.
+        Returns the phone's handle for it."""
+    def update_inbox(self) -> None:
+        """Ask the phone to fetch new mail now (email services only)."""
+    def notify(self, on: bool = True) -> None:
+        """Ask the phone to report changes as they happen. `changes`
+        reports `NOTIFY` for each, and `event()` reads them."""
+    def event(self) -> dict | None:
+        """The oldest waiting report from the phone, or None. A dict of its
+        fields as strings: "type" ("NewMessage", "MessageDeleted",
+        "MessageShift", "ReadStatusChanged", "SendingSuccess",
+        "DeliverySuccess" and more), "handle", "folder", "msg_type", and
+        on newer phones "sender_name" and "subject"."""
+    @staticmethod
+    def parse(data: bytes) -> dict:
+        """A bMessage from anywhere, as `get` returns it."""
+    def changes(self) -> int:
+        """What changed since the last call: `CONNECTION`, `MESSAGES`,
+        `NOTIFY`."""
+    def deinit(self) -> None:
+        """Close the service and stop. The radio stays on."""
+    def __enter__(self) -> Messages: ...
     def __exit__(self, *args: object) -> None:
         """`deinit`."""
