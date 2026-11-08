@@ -29,3 +29,9 @@ CONFIG_BTDM_CTRL_BR_EDR_MAX_SYNC_CONN=1
 
 # Serial port (SPP over RFCOMM).
 CONFIG_BT_SPP_ENABLED=y
+
+# HID: the board as a keyboard, mouse or gamepad, or the host of one. One
+# role runs at a time; each takes the two HID L2CAP channels while it does.
+CONFIG_BT_HID_ENABLED=y
+CONFIG_BT_HID_HOST_ENABLED=y
+CONFIG_BT_HID_DEVICE_ENABLED=y

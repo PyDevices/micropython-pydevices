@@ -57,6 +57,7 @@ extern "C" {
 #define BTC_CHANGED_REMOTE     (1u << 13)   // source: the remote pressed or released a key
 #define BTC_CHANGED_FOUND      (1u << 14)   // radio: an inquiry found a device, or ended
 #define BTC_CHANGED_SERIAL     (1u << 15)   // spp: bytes arrived
+#define BTC_CHANGED_HID        (1u << 16)   // hid: a report came, the host set one, or room to send
 
 typedef uint8_t btc_addr_t[6];  // most significant byte first
 
@@ -386,6 +387,45 @@ size_t btc_spp_write(const uint8_t *src, size_t size);  // what fits; never wait
 size_t btc_spp_write_room(void);
 uint32_t btc_spp_changes(void);
 void btc_spp_status(btc_spp_status_t *out);
+
+// ---- HID: the board as a keyboard, mouse or gamepad, or the host of one ---
+//
+// One role at a time: both take the same two L2CAP channels. Reports go in
+// and out as the descriptor lays them out, report ID first when the
+// descriptor has IDs; the backend adds and strips the HID transaction header.
+// Changes: BTC_CHANGED_CONNECTION, BTC_CHANGED_HID.
+
+typedef struct {
+    bool started;
+    bool host;              // the role
+    bool connected;
+    btc_addr_t peer;
+    bool boot;              // the link runs the boot protocol
+    uint32_t sent, received, dropped;
+    uint32_t queued;        // bytes waiting in the report queue
+} btc_hid_status_t;
+
+// `subclass` is the minor device class: 0x40 keyboard, 0x80 mouse, 0xc0
+// both, 0x08 gamepad. `boot`: the descriptor's first reports follow the
+// boot protocol's keyboard (ID 1) or mouse (ID 2) layout.
+int btc_hid_device_start(const uint8_t *descriptor, size_t len, uint8_t subclass, const char *name, bool boot);
+int btc_hid_device_connect(const uint8_t *addr);      // NULL: the last host
+// Queue one input report; 1 if queued, 0 if the queue is full.
+int btc_hid_device_send(const uint8_t *report, size_t len);
+// The last output report the host set (a keyboard's LEDs), ID first.
+size_t btc_hid_device_output(uint8_t *dst, size_t size);
+int btc_hid_host_start(void);
+int btc_hid_host_connect(const uint8_t *addr, bool boot);
+// The next input report, oldest first; 0 with none.
+size_t btc_hid_host_read(uint8_t *dst, size_t size);
+// Send an output report: `report_id` 0 when the descriptor has none.
+int btc_hid_host_send(uint8_t report_id, const uint8_t *data, size_t len);
+// The connected device's report descriptor; 0 before it is known.
+size_t btc_hid_host_descriptor(uint8_t *dst, size_t size);
+int btc_hid_disconnect(void);
+void btc_hid_stop(void);
+void btc_hid_status(btc_hid_status_t *out);
+uint32_t btc_hid_changes(void);
 
 #ifdef __cplusplus
 }

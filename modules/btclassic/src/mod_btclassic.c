@@ -977,6 +977,12 @@ extern const mp_obj_type_t btc_source_type;
 // Serial, in mod_btclassic_serial.c.
 extern const mp_obj_type_t btc_serial_type;
 
+// HIDDevice and HIDHost, in mod_btclassic_hid.c, where the backend has HID.
+#if BTC_HAS_HID
+extern const mp_obj_type_t btc_hid_device_type;
+extern const mp_obj_type_t btc_hid_host_type;
+#endif
+
 // =========================================================================
 // the module
 // =========================================================================
@@ -988,6 +994,15 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_HandsFree), MP_ROM_PTR(&btc_hf_type) },
     { MP_ROM_QSTR(MP_QSTR_AudioSource), MP_ROM_PTR(&btc_source_type) },
     { MP_ROM_QSTR(MP_QSTR_Serial), MP_ROM_PTR(&btc_serial_type) },
+    #if BTC_HAS_HID
+    { MP_ROM_QSTR(MP_QSTR_HIDDevice), MP_ROM_PTR(&btc_hid_device_type) },
+    { MP_ROM_QSTR(MP_QSTR_HIDHost), MP_ROM_PTR(&btc_hid_host_type) },
+    { MP_ROM_QSTR(MP_QSTR_HID), MP_ROM_INT(BTC_CHANGED_HID) },
+    // HIDDevice subclasses: what kind of device the host sees.
+    { MP_ROM_QSTR(MP_QSTR_HID_KEYBOARD), MP_ROM_INT(0x40) },
+    { MP_ROM_QSTR(MP_QSTR_HID_MOUSE), MP_ROM_INT(0x80) },
+    { MP_ROM_QSTR(MP_QSTR_HID_GAMEPAD), MP_ROM_INT(0x08) },
+    #endif
     { MP_ROM_QSTR(MP_QSTR_CONNECTION), MP_ROM_INT(BTC_CHANGED_CONNECTION) },
     { MP_ROM_QSTR(MP_QSTR_STREAM), MP_ROM_INT(BTC_CHANGED_STREAM) },
     { MP_ROM_QSTR(MP_QSTR_FORMAT), MP_ROM_INT(BTC_CHANGED_FORMAT) },

@@ -10,7 +10,7 @@
 set(srcs)
 if(CONFIG_BT_CLASSIC_ENABLED AND CONFIG_BT_A2DP_ENABLE)
     list(APPEND srcs "radio.c" "a2dp_sink.c" "avrcp_ct.c" "hfp_hf.c" "ring.c"
-                     "a2dp_source.c" "avrcp_tg.c" "inquiry.c" "spp.c")
+                     "a2dp_source.c" "avrcp_tg.c" "inquiry.c" "spp.c" "hid.c")
 endif()
 idf_component_register(SRCS ${srcs}
                        INCLUDE_DIRS "include"

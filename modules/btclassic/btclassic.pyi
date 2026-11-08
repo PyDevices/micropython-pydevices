@@ -20,6 +20,8 @@ with `config`. Each profile is an object of its own that takes the radio:
 - `Serial` is a serial port over Bluetooth (SPP), a stream like
   `machine.UART`, for a PC's Bluetooth COM port, a phone's terminal app or
   another board.
+- `HIDDevice` makes the board a keyboard, mouse or gamepad for a PC or
+  phone, and `HIDHost` reads one: keys, moves and buttons, as reports.
 
 A board is a sink or a source, one at a time: `deinit()` the one before
 making the other.
@@ -45,8 +47,9 @@ them.
 # -- changes() bits ---------------------------------------------------------
 
 CONNECTION: int
-"""`AudioSink.changes`, `AudioSource.changes`, `HandsFree.changes` and `Serial.changes`
-bit: the link came up or went down."""
+"""`AudioSink.changes`, `AudioSource.changes`, `HandsFree.changes`,
+`Serial.changes`, `HIDDevice.changes` and `HIDHost.changes` bit: the link
+came up or went down."""
 STREAM: int
 """`AudioSink.changes` bit: audio started or stopped flowing."""
 FORMAT: int
@@ -84,6 +87,17 @@ SERIAL: int
 REMOTE: int
 """`AudioSource.changes` bit: the receiver pressed a key; read it with
 `AudioSource.key`."""
+HID: int
+"""`HIDDevice.changes` and `HIDHost.changes` bit: a report came, the host
+set an output report (a keyboard's LEDs), the protocol changed, or there's
+room to send again."""
+
+HID_KEYBOARD: int
+"""`HIDDevice` subclass: a keyboard."""
+HID_MOUSE: int
+"""`HIDDevice` subclass: a mouse or other pointer."""
+HID_GAMEPAD: int
+"""`HIDDevice` subclass: a gamepad."""
 
 # -- AVRCP key codes -----------------------------------------------------------
 
@@ -657,5 +671,181 @@ class Serial:
     def deinit(self) -> None:
         """Drop the link and stop serving the port. The radio stays on."""
     def __enter__(self) -> Serial: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
+
+
+class HIDDevice:
+    """The board as a Bluetooth keyboard, mouse or gamepad.
+
+    A PC or phone pairs with the board and reads the reports you send. The
+    four descriptors here cover the usual devices, and the helpers build
+    their reports for you; any other HID report descriptor works with
+    `send`. One HID role runs at a time: deinit an `HIDHost` first.
+
+    ```python
+    kb = btclassic.HIDDevice(bt)                # a keyboard
+    # pair it from the PC, then:
+    kb.type("Hello from the board\n")
+    ```
+
+    The descriptors put each kind of report under a fixed report ID, the
+    keyboard and mouse in the boot protocol's layouts, so a PC's firmware
+    setup can use them too:
+
+    - ID 1, keyboard: modifiers, 0, six key codes; output: the LEDs.
+    - ID 2, mouse: buttons, x, y, wheel.
+    - ID 3, consumer: one 16-bit media key usage.
+    - ID 4, gamepad: 16 buttons, hat, x, y, z, rz.
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+        descriptor: the HID report descriptor: `KEYBOARD` (the default,
+            with media keys), `MOUSE`, `COMBO` (keyboard, mouse and media
+            keys), `GAMEPAD`, or your own bytes.
+        subclass: what the host sees, `HID_KEYBOARD`, `HID_MOUSE`,
+            `HID_GAMEPAD`, or `HID_KEYBOARD | HID_MOUSE` for both. None
+            works it out from the descriptor.
+        name: the service's name, shown by some hosts. None names it after
+            the kind of device.
+        boot: the descriptor's keyboard and mouse reports follow the boot
+            protocol's layouts. None: True for this class's descriptors
+            that have them, False for your own.
+    """
+    KEYBOARD: bytes
+    """A keyboard with media keys: report IDs 1 and 3."""
+    MOUSE: bytes
+    """A five-button mouse with a wheel: report ID 2."""
+    COMBO: bytes
+    """A keyboard, mouse and media keys in one device: IDs 1, 2 and 3."""
+    GAMEPAD: bytes
+    """A gamepad with 16 buttons, a hat and four axes: report ID 4."""
+    def __init__(self, bt: Bluetooth, descriptor: bytes = ..., *, subclass: int | None = None,
+                 name: str | None = None, boot: bool | None = None) -> None: ...
+    connected: bool
+    """A host is connected."""
+    peer: bytes | None
+    """The host's address while connected."""
+    boot: bool
+    """The host chose the boot protocol."""
+    output: bytes
+    """The last output report the host set, report ID first when the
+    descriptor has IDs."""
+    leds: int
+    """The keyboard's LEDs as the host set them: bit 0 Num Lock, 1 Caps
+    Lock, 2 Scroll Lock. 0 without a keyboard report."""
+    def connect(self, addr: bytes | None = None) -> None:
+        """Call a host that has paired with the board, or the last one. A
+        paired host can also connect by itself; watch for `CONNECTION`."""
+    def disconnect(self) -> None: ...
+    def send(self, report: bytes) -> bool:
+        """Queue an input report, report ID first when the descriptor has
+        IDs, at most 64 bytes. Never waits: returns False when the queue
+        is full, so wait for `HID` and send again. Reports queued with no
+        host go out when one connects."""
+    def keyboard(self, keys: tuple[int, ...] | list[int] = (), modifiers: int = 0) -> bool:
+        """Hold these keys now, up to six HID key codes (4 is A, 0x28 Enter,
+        0x4f to 0x52 the arrows), with these modifiers (bit 0 left Ctrl, 1
+        left Shift, 2 left Alt, 3 left GUI, 4 to 7 the right ones).
+        `keyboard()` releases everything. While a host is connected, waits
+        for room; returns False if the queue is full with no host."""
+    def type(self, text: str) -> int:
+        """Type text on a US layout: each character pressed and released.
+        Letters, digits, punctuation, space, newline, tab, backspace and
+        escape; anything else raises ValueError before a key is sent.
+        Waits for room while a host is connected, and returns how many
+        characters were queued."""
+    def mouse(self, x: int = 0, y: int = 0, *, buttons: int | None = None, wheel: int = 0) -> bool:
+        """Move by x, y (right and down; any size, sent in steps of 127),
+        turn the wheel (positive up), and set the buttons (bit 0 left, 1
+        right, 2 middle), or keep them as they are with None. A click is
+        `mouse(buttons=1)` then `mouse(buttons=0)`."""
+    def gamepad(self, buttons: int = 0, *, x: int = 0, y: int = 0, z: int = 0, rz: int = 0,
+                hat: int | None = None) -> bool:
+        """Send the whole pad's state: buttons 1 to 16 as bits 0 to 15,
+        the sticks from -127 to 127, and the hat from 0 (up) to 7
+        clockwise, or None when centred."""
+    def consumer(self, usage: int) -> bool:
+        """Press and release a media key by its HID Consumer usage: 0xcd
+        play/pause, 0xb5 next, 0xb6 previous, 0xe9 volume up, 0xea volume
+        down, 0xe2 mute."""
+    def changes(self) -> int:
+        """What changed since the last call: `CONNECTION` and `HID` bits."""
+    def stats(self) -> dict:
+        """sent (reports), received, dropped (the stack refused one), and
+        queued (bytes waiting)."""
+    def deinit(self) -> None:
+        """Drop the host and stop the device. The radio stays on."""
+    def __enter__(self) -> HIDDevice: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
+
+
+class HIDHost:
+    """The board as the host of a Bluetooth keyboard, mouse or gamepad.
+
+    Put the device in pairing mode, find it with `Bluetooth.inquiry`, and
+    `connect` to its address; after that it reconnects by itself when it
+    wakes. Read its input reports with `read`. One HID role runs at a time:
+    deinit an `HIDDevice` first.
+
+    ```python
+    host = btclassic.HIDHost(bt)
+    host.connect(address, boot=True)            # a keyboard, simply
+    while True:
+        report = host.read()
+        if report:
+            kind, *rest = host.decode(report) or ("other",)
+            if kind == "keyboard":
+                modifiers, keys = rest
+                print("".join(host.char(k, modifiers) or "" for k in keys))
+    ```
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+    """
+    def __init__(self, bt: Bluetooth) -> None: ...
+    connected: bool
+    peer: bytes | None
+    boot: bool
+    """The device runs the boot protocol: its keyboard and mouse reports
+    have the fixed boot layouts (ID 1 and 2), which `decode` reads."""
+    descriptor: bytes | None
+    """The device's HID report descriptor, once connected."""
+    def connect(self, addr: bytes | None = None, *, boot: bool = False) -> None:
+        """Call a device, or the last one. boot asks for the boot protocol,
+        which every keyboard and mouse has and needs no descriptor to read;
+        gamepads have none. Connected, it switches protocol."""
+    def disconnect(self) -> None: ...
+    def read(self) -> bytes | None:
+        """The next input report, oldest first, report ID first when the
+        descriptor has IDs or the link runs the boot protocol; None with
+        none waiting."""
+    def send(self, report: bytes) -> None:
+        """Send an output report, report ID first when the descriptor has
+        IDs or the link runs the boot protocol: a keyboard's Caps Lock LED
+        is `bytes((1, 2))`."""
+    def decode(self, report: bytes) -> tuple | None:
+        """Take a report apart, when its layout is known: in the boot
+        protocol, or from a device whose descriptor is one of `HIDDevice`'s.
+        None otherwise; read the descriptor and the bytes yourself.
+
+        - ("keyboard", modifiers, (key, ...)): the keys held.
+        - ("mouse", buttons, x, y, wheel)
+        - ("consumer", usage): 0 when the key is released.
+        - ("gamepad", buttons, hat, x, y, z, rz): hat None when centred.
+        """
+    @staticmethod
+    def char(key: int, modifiers: int = 0) -> str | None:
+        """What a key code types on a US layout, Shift in the modifiers
+        honoured; None for keys that type nothing."""
+    def changes(self) -> int:
+        """What changed since the last call: `CONNECTION` and `HID` bits."""
+    def stats(self) -> dict:
+        """sent (output reports), received (input reports), dropped (the
+        queue was full, or a send failed), and queued (bytes waiting)."""
+    def deinit(self) -> None:
+        """Drop the device and stop the host. The radio stays on."""
+    def __enter__(self) -> HIDHost: ...
     def __exit__(self, *args: object) -> None:
         """`deinit`."""
