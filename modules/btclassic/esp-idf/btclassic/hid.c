@@ -30,6 +30,12 @@
 #if CONFIG_BT_HID_DEVICE_ENABLED
 #include "esp_hidd_api.h"
 #endif
+#if CONFIG_BT_HID_DEVICE_ENABLED && CONFIG_BT_SDP_COMMON_ENABLED
+#include "esp_sdp_api.h"
+#define HAS_DEVICE_ID 1
+#else
+#define HAS_DEVICE_ID 0
+#endif
 #if CONFIG_BT_HID_HOST_ENABLED
 #include "esp_hidh_api.h"
 #endif
@@ -42,6 +48,7 @@ static const char *TAG = "btclassic";
 #define MAX_REPORT 64
 #define HOST_DESCRIPTOR_MAX 884 // BTHH_MAX_DSC_LEN
 #define LAST_INPUTS 4           // input reports kept to answer GET_REPORT
+#define FEATURES 4              // feature reports, by ID
 #define CONGESTED 8             // HID_ERR_CONGESTED, from Bluedroid's hiddefs.h
 #define RETRY_US 5000
 #define GOT_MAX 128              // a GET_REPORT answer, ID first
@@ -74,6 +81,10 @@ static struct {
         uint8_t len;        // 0: unused
         uint8_t report[MAX_REPORT];
     } last_input[LAST_INPUTS];
+    struct {
+        uint8_t len;        // 0: unused
+        uint8_t report[MAX_REPORT + 1];     // ID first when there are IDs
+    } feature[FEATURES];
 
     // host
     bool want_boot;
@@ -92,6 +103,77 @@ static btc_addr_t last;
 // Device: the descriptor and the service record's texts, held while the
 // role runs.
 static uint8_t *descriptor;
+
+// The Device ID record: what a host reads to know which product it has
+// (and map a gamepad's buttons). Kept across stop and start.
+static uint16_t dev_ids[3];
+static bool dev_ids_set;
+#if HAS_DEVICE_ID
+static volatile int8_t sdp_state;   // 0 off, 1 starting, 2 on, -1 failed
+
+static void sdp_cb(esp_sdp_cb_event_t event, esp_sdp_cb_param_t *param) {
+    switch (event) {
+        case ESP_SDP_INIT_EVT:
+            if (param->init.status == ESP_SDP_SUCCESS) {
+                esp_bluetooth_sdp_record_t rec = {0};
+                rec.dip.hdr.type = ESP_SDP_TYPE_DIP_SERVER;
+                rec.dip.vendor = dev_ids[0];
+                rec.dip.vendor_id_source = ESP_SDP_VENDOR_ID_SRC_USB;
+                rec.dip.product = dev_ids[1];
+                rec.dip.version = dev_ids[2];
+                rec.dip.primary_record = true;
+                if (esp_sdp_create_record(&rec) != ESP_OK) {
+                    sdp_state = -1;
+                }
+            } else {
+                sdp_state = -1;
+            }
+            break;
+        case ESP_SDP_CREATE_RECORD_COMP_EVT:
+            sdp_state = param->create_record.status == ESP_SDP_SUCCESS ? 2 : -1;
+            break;
+        case ESP_SDP_DEINIT_EVT:
+            sdp_state = 0;
+            break;
+        default:
+            break;
+    }
+}
+
+static void device_id_start(void) {
+    if (!dev_ids_set || sdp_state != 0) {
+        return;
+    }
+    sdp_state = 1;
+    if (esp_sdp_register_callback(sdp_cb) != ESP_OK || esp_sdp_init() != ESP_OK) {
+        sdp_state = -1;
+        return;
+    }
+    for (int i = 0; i < 50 && sdp_state == 1; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (sdp_state != 2) {
+        ESP_LOGW(TAG, "hid: the Device ID record didn't go in");
+    }
+}
+
+static void device_id_stop(void) {
+    if (sdp_state == 0) {
+        return;
+    }
+    if (esp_sdp_deinit() == ESP_OK) {
+        for (int i = 0; i < 50 && sdp_state != 0; i++) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
+    sdp_state = 0;
+}
+#else
+static void device_id_start(void) {
+}
+static void device_id_stop(void) {
+}
+#endif
 static size_t descriptor_len;
 static char service_name[64];
 static esp_timer_handle_t retry_timer;
@@ -288,8 +370,43 @@ static void retry_cb(void *arg) {
     device_kick();
 }
 
-// The host asks for a report: the last input report with that ID, or the
-// last output report.
+// The feature report kept under an ID (any, without IDs), or with `make`
+// a free slot for it; -1 for none. Under the lock.
+static int feature_slot(uint8_t id, bool make) {
+    bool ids = h.has_ids || h.boot;
+    int free_slot = -1;
+    for (int i = 0; i < FEATURES; i++) {
+        if (h.feature[i].len && (!ids || h.feature[i].report[0] == id)) {
+            return i;
+        }
+        if (free_slot < 0 && h.feature[i].len == 0) {
+            free_slot = i;
+        }
+    }
+    return make ? free_slot : -1;
+}
+
+// Keep a feature report, ID first when there are IDs.
+static bool feature_put(uint8_t id, const uint8_t *data, size_t len) {
+    bool ids = h.has_ids || h.boot;
+    if (len > MAX_REPORT) {
+        return false;
+    }
+    int i = feature_slot(id, true);
+    if (i < 0) {
+        return false;
+    }
+    size_t n = 0;
+    if (ids) {
+        h.feature[i].report[n++] = id;
+    }
+    memcpy(h.feature[i].report + n, data, len);
+    h.feature[i].len = (uint8_t)(n + len);
+    return true;
+}
+
+// The host asks for a report: the last input report with that ID, the
+// last output report, or the feature report set for it.
 static void answer_get_report(esp_hidd_report_type_t type, uint8_t id) {
     uint8_t r[MAX_REPORT + 1];
     size_t n = 0;
@@ -306,6 +423,12 @@ static void answer_get_report(esp_hidd_report_type_t type, uint8_t id) {
     } else if (type == ESP_HIDD_REPORT_TYPE_OUTPUT && h.output_len && (!ids || h.output[0] == id)) {
         n = h.output_len;
         memcpy(r, h.output, n);
+    } else if (type == ESP_HIDD_REPORT_TYPE_FEATURE) {
+        int i = feature_slot(id, false);
+        if (i >= 0) {
+            n = h.feature[i].len;
+            memcpy(r, h.feature[i].report, n);
+        }
     }
     BTC_UNLOCK();
     if (n == 0 || (ids && n < 2)) {
@@ -422,6 +545,15 @@ static void hidd_cb(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param) {
             if (param->set_report.report_type == ESP_HIDD_REPORT_TYPE_OUTPUT) {
                 store_output(param->set_report.report_id, param->set_report.data, param->set_report.len);
                 esp_bt_hid_device_report_error(ESP_HID_PAR_HANDSHAKE_RSP_SUCCESS);
+            } else if (param->set_report.report_type == ESP_HIDD_REPORT_TYPE_FEATURE) {
+                BTC_LOCK();
+                bool ok = feature_put(param->set_report.report_id, param->set_report.data, param->set_report.len);
+                if (ok) {
+                    h.changes |= BTC_CHANGED_HID;
+                }
+                BTC_UNLOCK();
+                esp_bt_hid_device_report_error(ok ? ESP_HID_PAR_HANDSHAKE_RSP_SUCCESS
+                    : ESP_HID_PAR_HANDSHAKE_RSP_ERR_INVALID_REP_ID);
             } else {
                 esp_bt_hid_device_report_error(ESP_HID_PAR_HANDSHAKE_RSP_ERR_UNSUPPORTED_REQ);
             }
@@ -497,6 +629,7 @@ int btc_hid_device_start(const uint8_t *desc, size_t len, uint8_t subclass, cons
     // A computer shows the icon and offers the device by its Class of
     // Device: Peripheral, and what kind, unless audio runs too.
     btc_radio_profile(BTC_PROFILE_HID_DEVICE, true, subclass);
+    device_id_start();
     return BTC_OK;
 }
 
@@ -543,7 +676,42 @@ size_t btc_hid_device_output(uint8_t *dst, size_t size) {
     return n;
 }
 
+int btc_hid_device_set_feature(const uint8_t *report, size_t len) {
+    if (!h.started || h.host) {
+        return BTC_ERR_STATE;
+    }
+    BTC_LOCK();
+    bool ids = h.has_ids || h.boot;
+    bool ok = len > (ids ? 1u : 0u) && (ids ? feature_put(report[0], report + 1, len - 1) : feature_put(0, report, len));
+    BTC_UNLOCK();
+    return ok ? BTC_OK : BTC_ERR_ARG;
+}
+
+size_t btc_hid_device_feature(uint8_t report_id, uint8_t *dst, size_t size) {
+    BTC_LOCK();
+    int i = feature_slot(report_id, false);
+    size_t n = 0;
+    if (i >= 0) {
+        n = h.feature[i].len < size ? h.feature[i].len : size;
+        memcpy(dst, h.feature[i].report, n);
+    }
+    BTC_UNLOCK();
+    return n;
+}
+
+int btc_hid_device_set_ids(uint16_t vendor, uint16_t product, uint16_t version) {
+    if (h.started && !h.host) {
+        return BTC_ERR_STATE;   // the record goes in as the device starts
+    }
+    dev_ids[0] = vendor;
+    dev_ids[1] = product;
+    dev_ids[2] = version;
+    dev_ids_set = vendor || product || version;
+    return HAS_DEVICE_ID || !dev_ids_set ? BTC_OK : BTC_ERR_UNSUPPORTED;
+}
+
 static void device_stop(void) {
+    device_id_stop();
     if (h.connected) {
         esp_bt_hid_device_disconnect();
         for (int i = 0; i < 50 && h.connected; i++) {
@@ -584,6 +752,15 @@ int btc_hid_device_send(const uint8_t *report, size_t len) {
 }
 size_t btc_hid_device_output(uint8_t *dst, size_t size) {
     return 0;
+}
+int btc_hid_device_set_feature(const uint8_t *report, size_t len) {
+    return BTC_ERR_UNSUPPORTED;
+}
+size_t btc_hid_device_feature(uint8_t report_id, uint8_t *dst, size_t size) {
+    return 0;
+}
+int btc_hid_device_set_ids(uint16_t vendor, uint16_t product, uint16_t version) {
+    return BTC_ERR_UNSUPPORTED;
 }
 static void device_stop(void) {
 }
@@ -995,6 +1172,15 @@ int btc_hid_device_send(const uint8_t *report, size_t len) {
 }
 size_t btc_hid_device_output(uint8_t *dst, size_t size) {
     return 0;
+}
+int btc_hid_device_set_feature(const uint8_t *report, size_t len) {
+    return BTC_ERR_UNSUPPORTED;
+}
+size_t btc_hid_device_feature(uint8_t report_id, uint8_t *dst, size_t size) {
+    return 0;
+}
+int btc_hid_device_set_ids(uint16_t vendor, uint16_t product, uint16_t version) {
+    return BTC_ERR_UNSUPPORTED;
 }
 int btc_hid_host_start(void) {
     return BTC_ERR_UNSUPPORTED;

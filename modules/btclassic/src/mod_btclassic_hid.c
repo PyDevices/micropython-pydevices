@@ -324,17 +324,34 @@ static uint8_t mouse_buttons;
 
 // HIDDevice(bt, descriptor=HIDDevice.KEYBOARD, *, subclass=None, name=None, boot=None)
 static mp_obj_t dev_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
-    enum { ARG_bt, ARG_descriptor, ARG_subclass, ARG_name, ARG_boot };
+    enum { ARG_bt, ARG_descriptor, ARG_subclass, ARG_name, ARG_boot, ARG_ids };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_bt, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
         { MP_QSTR_descriptor, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_PTR(&desc_keyboard_obj)} },
         { MP_QSTR_subclass, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
         { MP_QSTR_name, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
         { MP_QSTR_boot, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_ids, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed), allowed, args);
     check_bt(args[ARG_bt].u_obj);
+    uint16_t dev_ids[3] = {0, 0, 0};
+    if (args[ARG_ids].u_obj != mp_const_none) {
+        size_t n;
+        mp_obj_t *items;
+        mp_obj_get_array(args[ARG_ids].u_obj, &n, &items);
+        if (n < 2 || n > 3) {
+            mp_raise_ValueError(MP_ERROR_TEXT("ids is (vendor, product) or (vendor, product, version)"));
+        }
+        for (size_t i = 0; i < n; i++) {
+            mp_int_t v = mp_obj_get_int(items[i]);
+            if (v < 0 || v > 0xffff) {
+                mp_raise_ValueError(MP_ERROR_TEXT("each ID is 0 to 0xffff"));
+            }
+            dev_ids[i] = (uint16_t)v;
+        }
+    }
     btc_hid_status_t st;
     btc_hid_status(&st);
     if (st.started && st.host) {
@@ -381,6 +398,11 @@ static mp_obj_t dev_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
     if (st.started) {
         // A new HIDDevice takes over: the descriptor may have changed.
         btc_hid_stop();
+    }
+    // No IDs clears any earlier record; a port without the record is fine then.
+    int ids_err = btc_hid_device_set_ids(dev_ids[0], dev_ids[1], dev_ids[2]);
+    if (args[ARG_ids].u_obj != mp_const_none) {
+        hid_done(ids_err);
     }
     hid_done(btc_hid_device_start(desc.buf, desc.len, subclass, name, boot));
     dev_has = which >= 0 ? ours[which].has : 0;
@@ -613,6 +635,29 @@ static mp_obj_t dev_consumer(mp_obj_t self_in, mp_obj_t usage_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(dev_consumer_obj, dev_consumer);
 
+// set_feature(report): a feature report the host can read, ID first when
+// the descriptor has IDs. The host may set it too: feature() reads it.
+static mp_obj_t dev_set_feature(mp_obj_t self_in, mp_obj_t report_in) {
+    (void)self_in;
+    hid_check(false);
+    mp_buffer_info_t r;
+    mp_get_buffer_raise(report_in, &r, MP_BUFFER_READ);
+    if (r.len == 0 || r.len > MAX_REPORT + 1) {
+        mp_raise_ValueError(MP_ERROR_TEXT("a feature report is 1 to 64 bytes after its ID"));
+    }
+    return hid_done(btc_hid_device_set_feature(r.buf, r.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(dev_set_feature_obj, dev_set_feature);
+
+// feature(report_id=0) -> bytes or None: a feature report as it stands.
+static mp_obj_t dev_feature(size_t n_args, const mp_obj_t *args) {
+    mp_int_t id = n_args > 1 ? mp_obj_get_int(args[1]) : 0;
+    uint8_t buf[MAX_REPORT + 1];
+    size_t n = id >= 0 && id <= 255 ? btc_hid_device_feature((uint8_t)id, buf, sizeof(buf)) : 0;
+    return n ? mp_obj_new_bytes(buf, n) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(dev_feature_obj, 1, 2, dev_feature);
+
 static void dev_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     (void)self_in;
     if (dest[0] != MP_OBJ_NULL) {
@@ -645,6 +690,8 @@ static const mp_rom_map_elem_t dev_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_mouse), MP_ROM_PTR(&dev_mouse_obj) },
     { MP_ROM_QSTR(MP_QSTR_gamepad), MP_ROM_PTR(&dev_gamepad_obj) },
     { MP_ROM_QSTR(MP_QSTR_consumer), MP_ROM_PTR(&dev_consumer_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_feature), MP_ROM_PTR(&dev_set_feature_obj) },
+    { MP_ROM_QSTR(MP_QSTR_feature), MP_ROM_PTR(&dev_feature_obj) },
     { MP_ROM_QSTR(MP_QSTR_changes), MP_ROM_PTR(&hid_changes_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&hid_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&hid_deinit_obj) },

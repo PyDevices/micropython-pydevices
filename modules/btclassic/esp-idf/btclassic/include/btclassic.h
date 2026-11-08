@@ -425,6 +425,14 @@ int btc_hid_device_connect(const uint8_t *addr);      // NULL: the last host
 int btc_hid_device_send(const uint8_t *report, size_t len);
 // The last output report the host set (a keyboard's LEDs), ID first.
 size_t btc_hid_device_output(uint8_t *dst, size_t size);
+// A feature report the host can read with GET_REPORT, ID first when the
+// descriptor has IDs; the host may set it too. Up to 4 IDs.
+int btc_hid_device_set_feature(const uint8_t *report, size_t len);
+// A feature report as it stands now, ID first; 0 for none.
+size_t btc_hid_device_feature(uint8_t report_id, uint8_t *dst, size_t size);
+// The Device ID record a host reads to know the product: a USB vendor ID,
+// product ID and version, put in as the device starts. All 0 for none.
+int btc_hid_device_set_ids(uint16_t vendor, uint16_t product, uint16_t version);
 int btc_hid_host_start(void);
 int btc_hid_host_connect(const uint8_t *addr, bool boot);
 // The next input report, oldest first; 0 with none.

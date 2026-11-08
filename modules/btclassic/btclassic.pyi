@@ -725,6 +725,10 @@ class HIDDevice:
         boot: the descriptor's keyboard and mouse reports follow the boot
             protocol's layouts. None: True for this class's descriptors
             that have them, False for your own.
+        ids: (vendor, product) or (vendor, product, version), published
+            in a Device ID record so a host can tell which product this
+            is, as it does a USB device by its IDs. The vendor is a USB
+            vendor ID. None publishes no record.
     """
     KEYBOARD: bytes
     """A keyboard with media keys: report IDs 1 and 3."""
@@ -735,7 +739,8 @@ class HIDDevice:
     GAMEPAD: bytes
     """A gamepad with 16 buttons, a hat and four axes: report ID 4."""
     def __init__(self, bt: Bluetooth, descriptor: bytes = ..., *, subclass: int | None = None,
-                 name: str | None = None, boot: bool | None = None) -> None: ...
+                 name: str | None = None, boot: bool | None = None,
+                 ids: tuple[int, ...] | None = None) -> None: ...
     connected: bool
     """A host is connected."""
     peer: bytes | None
@@ -789,6 +794,14 @@ class HIDDevice:
         """Press and release a media key by its HID Consumer usage: 0xcd
         play/pause, 0xb5 next, 0xb6 previous, 0xe9 volume up, 0xea volume
         down, 0xe2 mute."""
+    def set_feature(self, report: bytes) -> None:
+        """Give a feature report its value, report ID first when the
+        descriptor has IDs: a setting the host reads when it asks, such as
+        a firmware version or a sensitivity. Up to four IDs. The host can
+        set one too; that raises `HID`, and `feature` reads it."""
+    def feature(self, report_id: int = 0) -> bytes | None:
+        """A feature report as it stands, ID first when it has one, or None
+        if neither you nor the host has set it."""
     def changes(self) -> int:
         """What changed since the last call: `CONNECTION` and `HID` bits."""
     def stats(self) -> dict:
