@@ -30,6 +30,24 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
     # Bluedroid (avrcp_tg.c); off where they aren't known to fit.
     include(${BTCLASSIC_IDF}/avrcp_tg.cmake)
     btclassic_avrcp_tg(usermod_btclassic ${BTCLASSIC_IDF}/avrcp_tg.c)
+
+    # With audiodsp in the build, AudioSink and HandsFree are also sources the
+    # audio pump pulls in C. It's found the way audioif finds it: among the
+    # build's modules, then beside this one.
+    foreach(_btc_mod ${USER_C_MODULES})
+        if(NOT IS_DIRECTORY ${_btc_mod})
+            get_filename_component(_btc_mod ${_btc_mod} DIRECTORY)
+        endif()
+        if(EXISTS ${_btc_mod}/src/audiocore/__init__.h)
+            set(BTCLASSIC_AUDIODSP_DIR ${_btc_mod})
+            break()
+        endif()
+    endforeach()
+    if(BTCLASSIC_AUDIODSP_DIR)
+        target_include_directories(usermod_btclassic INTERFACE ${BTCLASSIC_AUDIODSP_DIR}/src)
+        target_compile_definitions(usermod_btclassic INTERFACE BTCLASSIC_AUDIOSAMPLE=1)
+        message(STATUS "btclassic: sources for audiodsp at ${BTCLASSIC_AUDIODSP_DIR}")
+    endif()
     target_link_libraries(usermod INTERFACE usermod_btclassic)
     list(APPEND MICROPY_DEF_BOARD MICROPY_PY_BLUETOOTH=0)
     # Through MICROPY_DEF_BOARD, so the qstr scan sees the HID entries too.
