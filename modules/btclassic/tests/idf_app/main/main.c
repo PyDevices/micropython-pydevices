@@ -74,6 +74,30 @@ void app_main(void) {
     btc_sink_disconnect();
     btc_sink_started();
     btc_sink_stop();
+
+    // The source, after the sink: one A2DP role at a time.
+    btc_radio_inquiry(5120);
+    btc_radio_inquiring();
+    btc_found_t found[BTC_FOUND_MAX];
+    btc_radio_found(found, BTC_FOUND_MAX);
+    btc_radio_inquiry(0);
+    btc_source_start(4096);
+    btc_source_connect(NULL);
+    btc_source_stream(true);
+    btc_source_write(mic, 16, 48000, 1);
+    btc_source_changes();
+    btc_source_status_t src;
+    btc_source_status(&src);
+    btc_source_stats(&stats);
+    btc_source_text(BTC_SOURCE_TITLE, text, sizeof(text));
+    btc_source_set_volume(64);
+    btc_source_key();
+    btc_source_set_track("title", "artist", "album", "genre", 1, 10, 180000);
+    btc_source_set_play_status(1, 0);
+    btc_source_stream(false);
+    btc_source_disconnect();
+    btc_source_started();
+    btc_source_stop();
     btc_radio_unpair(NULL);
     btc_radio_active();
     btc_radio_stop();

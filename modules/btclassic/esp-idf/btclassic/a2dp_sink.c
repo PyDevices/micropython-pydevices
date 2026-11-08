@@ -231,7 +231,8 @@ static void poll(void *arg) {
 // ---- start and stop ----
 
 int btc_sink_start(size_t ring_frames, bool reconnect) {
-    if (s.started || !btc_radio_active()) {
+    // Bluedroid runs one A2DP role at a time.
+    if (s.started || !btc_radio_active() || btc_source_started()) {
         return BTC_ERR_STATE;
     }
     if (ring_frames < MIN_RING_FRAMES) {

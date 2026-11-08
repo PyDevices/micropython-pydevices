@@ -14,6 +14,12 @@ with `config`. Each profile is an object of its own that takes the radio:
 - `HandsFree` follows the phone itself (HFP hands-free unit): battery,
   signal, carrier and calls, which it can answer, end and dial, with the
   call's audio both ways.
+- `AudioSource` sends audio to headphones, a speaker or a car stereo (A2DP
+  source), takes their play, pause, skip and volume keys, and tells them the
+  title and artist to show (AVRCP target).
+
+A board is a sink or a source, one at a time: `deinit()` the one before
+making the other.
 
 Audio is a stream: `AudioSink.readinto` and `HandsFree.readinto` fill a
 buffer with 16-bit PCM and never wait, and `HandsFree.write` takes the
@@ -68,9 +74,21 @@ AUDIO: int
 says its rate while it's up."""
 PAIRED: int
 """`Bluetooth.changes` bit: a device paired, or a pairing was removed."""
+FOUND: int
+"""`Bluetooth.changes` bit: an inquiry found a device, or finished."""
+REMOTE: int
+"""`AudioSource.changes` bit: the receiver pressed a key; read it with
+`AudioSource.key`."""
 
-# -- AudioSink.key codes -----------------------------------------------------
+# -- AVRCP key codes -----------------------------------------------------------
 
+KEY_PLAY: int
+"""Key code for play: `AudioSink.key` sends it, `AudioSource.key` reports
+it."""
+KEY_STOP: int
+KEY_PAUSE: int
+KEY_NEXT: int
+KEY_PREVIOUS: int
 KEY_VOLUME_UP: int
 """`AudioSink.key` code for the sender's volume up key."""
 KEY_VOLUME_DOWN: int
@@ -135,8 +153,29 @@ class Bluetooth:
         """Forget a paired device, or every one with no argument. The
         device has to pair again before it can connect."""
     def changes(self) -> int:
-        """The bits (`PAIRED`) for what changed since the last call, which
-        clears them."""
+        """The bits (`PAIRED`, `FOUND`) for what changed since the last
+        call, which clears them."""
+    def inquiry(self, duration_ms: int = 10240) -> None:
+        """Look for devices that can be found, for headphones or a speaker
+        to send to. Results so far are forgotten; `found` lists the new ones
+        as they answer, and `FOUND` is set for each and when it ends.
+
+        Args:
+            duration_ms: how long to look, 1280 to 61440, in steps of 1280.
+                0 stops an inquiry that's running.
+
+        Raises:
+            OSError: the radio is off.
+        """
+    def inquiring(self) -> bool:
+        """An inquiry is running."""
+    def found(self) -> list[tuple[bytes, str, int, int | None]]:
+        """What the last inquiry found, up to 20 devices: (address, name,
+        class of device, RSSI in dBm). The name is "" when the device didn't
+        send one with its answer, and the RSSI None when the controller
+        didn't measure it. Class of device bits 8 to 12 are the major class:
+        4 is audio and video, which headphones, speakers and car stereos
+        report."""
 
 class AudioSink:
     """Receive audio from a phone or computer, as a speaker does, and drive
@@ -411,5 +450,129 @@ class HandsFree:
         """Drop the link and stop the hands-free unit. The radio stays on,
         and a new `HandsFree` starts it again."""
     def __enter__(self) -> HandsFree: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
+
+class AudioSource:
+    """Send audio to headphones, a speaker or a car stereo, as a phone does.
+
+    Through A2DP your program's PCM goes to the receiver, coded as SBC by
+    the Bluetooth stack. Through AVRCP the receiver's play, pause, skip and
+    volume keys come back to your program, and its display gets the title,
+    artist and album you set, the play status, and the position.
+
+    `write` takes 16-bit PCM at `rate` and `channels`, which you choose.
+    The stream itself runs at `sample_rate`, 44100 Hz stereo on ESP-IDF 5,
+    and the source converts between them, so a 16 kHz mono tone plays as
+    it is. Writing as fast as you can is fine: while the stream runs,
+    `write` waits for room, and the receiver's pace sets yours.
+
+    There is one source, and a board runs a source or an `AudioSink`, not
+    both: making one while the other runs raises OSError. A second
+    `AudioSource` takes over the running one.
+
+    SBC is the only codec. AAC needs ESP-IDF 6.1, and isn't offered yet.
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+        rate: the rate of what you `write`, 8000 to 48000 Hz.
+        channels: what you `write`, 1 or 2.
+        buffer_ms: how much audio to hold ahead of the stream, 50 to 5000.
+            More rides out longer gaps between writes; the receiver hears
+            it later.
+    """
+
+    connected: bool
+    """A receiver is connected."""
+    streaming: bool
+    """Audio is flowing to the receiver."""
+    sample_rate: int
+    """The stream's rate in Hz, or 0 before it is agreed."""
+    rate: int
+    """The rate of what you `write`. Settable."""
+    channels: int
+    """1 or 2: what you `write`. Settable."""
+    volume: int
+    """0 to 127. With a receiver that takes absolute volume, which most
+    headphones and car stereos do, this moves its own volume and follows
+    its buttons; with one that doesn't, the source scales the audio.
+    Settable."""
+    status: str | None
+    """The play status the receiver shows: "stopped", "playing" or
+    "paused". Set it when your program starts or stops playing."""
+    position: int | None
+    """Where playback is in the track, in milliseconds. It counts on by
+    itself while `status` is "playing". Setting it moves it, after a seek
+    say."""
+    title: str
+    """The title set with `track`, or ""."""
+    artist: str
+    peer: bytes | None
+    """The receiver's address, or None with none connected."""
+    peer_name: str
+    """The receiver's device name, or "" before it is known."""
+
+    def __init__(self, bt: Bluetooth, *, rate: int = 44100, channels: int = 2, buffer_ms: int = 500) -> None: ...
+    def write(self, buf: bytes | bytearray | memoryview) -> int:
+        """Send 16-bit PCM at `rate` and `channels`.
+
+        While the stream runs, waits until all of `buf` is taken. Otherwise
+        takes what fits and returns at once, so audio written before the
+        stream starts plays first when it does.
+
+        Returns:
+            How many bytes were taken.
+        """
+    def changes(self) -> int:
+        """The bits (`CONNECTION`, `STREAM`, `FORMAT`, `VOLUME`, `PEER`,
+        `REMOTE`) for what changed since the last call, which clears
+        them."""
+    def key(self) -> tuple[int, bool] | None:
+        """The receiver's next key, oldest first: (code, pressed), with
+        codes such as `KEY_PLAY`, `KEY_PAUSE` and `KEY_NEXT`, pressed True
+        when it went down and False when it came up. None when there are
+        none. The source holds the last 16."""
+    def track(self, title: str | None = None, artist: str | None = None, album: str | None = None,
+              genre: str | None = None, *, number: int | None = None, count: int | None = None,
+              duration: int | None = None) -> None:
+        """Tell the receiver what's playing. A new title is a new track: the
+        receiver hears of it, and `position` goes back to 0. None leaves a
+        field as it is.
+
+        Args:
+            number: the track's place on its album, from 1.
+            count: how many tracks the album has.
+            duration: the track's length in milliseconds.
+        """
+    def stats(self) -> dict[str, int]:
+        """Counters for the buffer, in frames: buffered, capacity,
+        received (written), underruns (the stream found it empty and sent
+        silence), overruns, dropped and repeated."""
+    def link(self) -> dict:
+        """The connection, as a dict.
+
+        Returns:
+            address (bytes or None) and name: the receiver's. codec
+            ("SBC"), sample_rate, channels, channel_mode, bitpool_min and
+            bitpool_max: the stream as agreed. delay_ms: the delay the
+            receiver reported, for moving video to match. avrcp: the remote
+            control is connected. absolute_volume: the receiver takes
+            `volume` itself. metadata: this firmware can send the track to
+            the receiver's display.
+        """
+    def connect(self, addr: bytes | None = None) -> None:
+        """Connect to a receiver, or the last one with no argument. Pairing
+        happens then if it's needed. The link comes up later; watch for
+        `CONNECTION`. The stream starts by itself once it does."""
+    def disconnect(self) -> None: ...
+    def start(self) -> None:
+        """Start the stream again after `suspend`."""
+    def suspend(self) -> None:
+        """Pause the stream, keeping the link: the receiver may go quiet or
+        let another device play."""
+    def deinit(self) -> None:
+        """Drop the receiver and stop the source. The radio stays on, and an
+        `AudioSink` can start now."""
+    def __enter__(self) -> AudioSource: ...
     def __exit__(self, *args: object) -> None:
         """`deinit`."""
