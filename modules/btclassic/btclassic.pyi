@@ -1257,7 +1257,9 @@ class Messages:
         "folder", "sender" (a record as `PhoneBook` gives, or None),
         "recipients" (records) and "text". With `raw`, the bMessage as the
         phone sent it. Reading a message may mark it read on the phone."""
-    def mark_read(self, handle: str, read: bool = True) -> None: ...
+    def mark_read(self, handle: str, read: bool = True) -> None:
+        """Mark a received message read or unread. Android refuses this
+        for messages in "draft", "sent" and "outbox"."""
     def delete(self, handle: str, deleted: bool = True) -> None:
         """Move the message to the phone's deleted folder, or back out of
         it with `deleted=False`."""
@@ -1274,7 +1276,9 @@ class Messages:
         """Ask the phone to fetch new mail now (email services only)."""
     def notify(self, on: bool = True) -> None:
         """Ask the phone to report changes as they happen. `changes`
-        reports `NOTIFY` for each, and `event()` reads them."""
+        reports `NOTIFY` for each, and `event()` reads them. Some phones
+        accept the request and never report: `notify_connected` says
+        whether the phone opened its link for reports."""
     def event(self) -> dict | None:
         """The oldest waiting report from the phone, or None. A dict of its
         fields as strings: "type" ("NewMessage", "MessageDeleted",
