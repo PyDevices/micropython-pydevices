@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 
 #include "esp_bt.h"
+#include "esp_timer.h"
 #include "esp_bt_main.h"
 #include "esp_gap_bt_api.h"
 #include "esp_log.h"
@@ -34,6 +35,9 @@ static struct {
     char name[BT_NAME_MAX + 1];
     char pin[BT_PIN_MAX + 1];
     uint32_t changes;
+    uint32_t profiles;  // BTC_PROFILE_* bits of the profiles running
+    uint8_t hid_subclass;
+    uint32_t class_set; // the class asked for in the settings, or 0
 } r = {
     .discoverable = true,
     .connectable = true,
@@ -148,6 +152,100 @@ static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
     }
 }
 
+// ---- Class of Device ----
+
+// Each Bluedroid profile writes the Class of Device as it starts and stops,
+// and the last one wins: a speaker that also runs a keyboard could show as
+// a keyboard, or lose its Audio bit when Serial starts. So the class is
+// worked out here from every profile running, and written a little after
+// the profiles' own writes have landed.
+
+#define CLASS_DELAY_US 300000
+
+static esp_timer_handle_t class_timer;
+
+static uint32_t auto_class(void) {
+    uint32_t p = r.profiles;
+    uint32_t service = 0, major, minor;
+    if (p & BTC_PROFILE_SINK) {
+        service |= ESP_BT_COD_SRVC_AUDIO | ESP_BT_COD_SRVC_RENDERING;
+    }
+    if (p & BTC_PROFILE_SOURCE) {
+        service |= ESP_BT_COD_SRVC_AUDIO | ESP_BT_COD_SRVC_CAPTURING;
+    }
+    if (p & BTC_PROFILE_HF) {
+        service |= ESP_BT_COD_SRVC_AUDIO | ESP_BT_COD_SRVC_TELEPHONY;
+    }
+    if (p & (BTC_PROFILE_SINK | BTC_PROFILE_SOURCE | BTC_PROFILE_HF)) {
+        // Audio/Video, even with a keyboard: a computer offers audio by it.
+        major = ESP_BT_COD_MAJOR_DEV_AV;
+        minor = (p & BTC_PROFILE_HF) ? 0x02      // hands-free
+            : (p & BTC_PROFILE_SINK) ? 0x05      // loudspeaker
+            : 0x00;                              // unclassified
+    } else if (p & BTC_PROFILE_HID_DEVICE) {
+        major = ESP_BT_COD_MAJOR_DEV_PERIPHERAL;
+        minor = r.hid_subclass >> 2;
+    } else {
+        major = ESP_BT_COD_MAJOR_DEV_UNCATEGORIZED;
+        minor = 0;
+    }
+    return service << ESP_BT_COD_SRVC_BIT_OFFSET
+           | major << ESP_BT_COD_MAJOR_DEV_BIT_OFFSET
+           | minor << ESP_BT_COD_MINOR_DEV_BIT_OFFSET;
+}
+
+uint32_t btc_radio_class(void) {
+    return r.class_set ? r.class_set : auto_class();
+}
+
+static void apply_class(void *arg) {
+    (void)arg;
+    if (!r.on) {
+        return;
+    }
+    uint32_t c = btc_radio_class();
+    esp_bt_cod_t cod = {0};
+    cod.minor = (c & ESP_BT_COD_MINOR_DEV_BIT_MASK) >> ESP_BT_COD_MINOR_DEV_BIT_OFFSET;
+    cod.major = (c & ESP_BT_COD_MAJOR_DEV_BIT_MASK) >> ESP_BT_COD_MAJOR_DEV_BIT_OFFSET;
+    cod.service = (c & ESP_BT_COD_SRVC_BIT_MASK) >> ESP_BT_COD_SRVC_BIT_OFFSET;
+    esp_bt_gap_set_cod(cod, ESP_BT_INIT_COD);
+}
+
+static void schedule_class(void) {
+    if (!r.on) {
+        return;
+    }
+    if (class_timer == NULL) {
+        const esp_timer_create_args_t args = {.callback = apply_class, .name = "btclassic_cod"};
+        if (esp_timer_create(&args, &class_timer) != ESP_OK) {
+            return;
+        }
+    }
+    esp_timer_stop(class_timer);
+    esp_timer_start_once(class_timer, CLASS_DELAY_US);
+}
+
+void btc_radio_profile(uint32_t profile, bool running, uint8_t hid_subclass) {
+    if (running) {
+        r.profiles |= profile;
+        if (profile & BTC_PROFILE_HID_DEVICE) {
+            r.hid_subclass = hid_subclass;
+        }
+    } else {
+        r.profiles &= ~profile;
+    }
+    schedule_class();
+}
+
+int btc_radio_set_class(uint32_t cod) {
+    if (cod > 0xffffff || (cod & 3)) {
+        return BTC_ERR_ARG;
+    }
+    r.class_set = cod;
+    schedule_class();
+    return BTC_OK;
+}
+
 // ---- on and off ----
 
 int btc_radio_start(void) {
@@ -187,6 +285,7 @@ int btc_radio_start(void) {
     r.on = true;
     r.hidden = false;
     apply_scan_mode();
+    schedule_class();
     return BTC_OK;
 }
 
@@ -200,6 +299,11 @@ void btc_radio_stop(void) {
     btc_spp_stop();
     btc_hid_stop();
     btc_inquiry_stop();
+    if (class_timer) {
+        esp_timer_stop(class_timer);
+        esp_timer_delete(class_timer);
+        class_timer = NULL;
+    }
     r.on = false;
     esp_bluedroid_disable();
     esp_bluedroid_deinit();

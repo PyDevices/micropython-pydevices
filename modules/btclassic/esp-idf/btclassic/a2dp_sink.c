@@ -309,6 +309,7 @@ int btc_sink_start(size_t ring_frames, bool reconnect) {
     // Visible again as the settings say, now the sink's services are there:
     // the order Bluedroid's own examples use.
     btc_radio_hold_hidden(false);
+    btc_radio_profile(BTC_PROFILE_SINK, true, 0);
 
     const esp_timer_create_args_t targs = {.callback = poll, .name = "btclassic"};
     if (esp_timer_create(&targs, &s_poll) == ESP_OK) {
@@ -342,6 +343,7 @@ void btc_sink_stop(void) {
     esp_a2d_sink_deinit();
     btc_avrcp_stop();
     btc_radio_hold_hidden(false);
+    btc_radio_profile(BTC_PROFILE_SINK, false, 0);
     // Bluedroid's task may still be finishing a callback that writes the ring.
     vTaskDelay(pdMS_TO_TICKS(50));
     btc_ring_init(&s.ring, NULL, 0, 2);

@@ -190,6 +190,8 @@ static mp_obj_t bluetooth_config(size_t n_args, const mp_obj_t *args, mp_map_t *
                 return mp_obj_new_bool(discoverable);
             case MP_QSTR_connectable:
                 return mp_obj_new_bool(connectable);
+            case MP_QSTR_device_class:
+                return mp_obj_new_int_from_uint(btc_radio_class());
             case MP_QSTR_mac: {
                 btc_addr_t mac;
                 done(btc_radio_mac(mac));
@@ -221,6 +223,9 @@ static mp_obj_t bluetooth_config(size_t n_args, const mp_obj_t *args, mp_map_t *
                 break;
             case MP_QSTR_connectable:
                 btc_radio_set_visibility(discoverable, mp_obj_is_true(value));
+                break;
+            case MP_QSTR_device_class:
+                done(btc_radio_set_class(value == mp_const_none ? 0 : mp_obj_get_int(value)));
                 break;
             default:
                 mp_raise_ValueError(MP_ERROR_TEXT("unknown config param"));

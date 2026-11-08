@@ -83,13 +83,11 @@ static struct {
 static bool have_last;
 static btc_addr_t last;
 
-// Device: the descriptor, the service record's texts and the Class of
-// Device the radio had before, held while the role runs.
+// Device: the descriptor and the service record's texts, held while the
+// role runs.
 static uint8_t *descriptor;
 static size_t descriptor_len;
 static char service_name[64];
-static esp_bt_cod_t saved_cod;
-static bool cod_saved;
 static esp_timer_handle_t retry_timer;
 
 // Host: the device's descriptor, from SDP.
@@ -471,14 +469,6 @@ int btc_hid_device_start(const uint8_t *desc, size_t len, uint8_t subclass, cons
         .desc_list_len = (int)len,
     };
 
-    // A PC shows the icon and offers the device by its Class of Device:
-    // Peripheral, and what kind. Put the radio's own back on stop.
-    cod_saved = esp_bt_gap_get_cod(&saved_cod) == ESP_OK;
-    esp_bt_cod_t mine = {0};
-    mine.major = ESP_BT_COD_MAJOR_DEV_PERIPHERAL;
-    mine.minor = subclass >> 2;
-    esp_bt_gap_set_cod(mine, ESP_BT_SET_COD_MAJOR_MINOR);
-
     h.host = false;
     h.started = true;
     esp_err_t err = esp_bt_hid_device_register_callback(hidd_cb);
@@ -494,6 +484,9 @@ int btc_hid_device_start(const uint8_t *desc, size_t len, uint8_t subclass, cons
         btc_hid_stop();
         return err != ESP_OK ? btc_err(err) : BTC_ERR_FAIL;
     }
+    // A computer shows the icon and offers the device by its Class of
+    // Device: Peripheral, and what kind, unless audio runs too.
+    btc_radio_profile(BTC_PROFILE_HID_DEVICE, true, subclass);
     return BTC_OK;
 }
 
@@ -562,10 +555,7 @@ static void device_stop(void) {
             vTaskDelay(pdMS_TO_TICKS(10));
         }
     }
-    if (cod_saved) {
-        esp_bt_gap_set_cod(saved_cod, ESP_BT_SET_COD_MAJOR_MINOR);
-        cod_saved = false;
-    }
+    btc_radio_profile(BTC_PROFILE_HID_DEVICE, false, 0);
     free(descriptor);
     descriptor = NULL;
     descriptor_len = 0;

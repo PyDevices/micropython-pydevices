@@ -89,6 +89,12 @@ void btc_radio_visibility(bool *discoverable, bool *connectable);
 int btc_radio_set_pin(const char *pin);         // 1 to 16 characters
 size_t btc_radio_pin(char *dst, size_t size);
 int btc_radio_mac(btc_addr_t mac);              // BTC_ERR_STATE while off
+// The Class of Device, as 24 bits. 0 (the default) lets the profiles running
+// decide: Audio/Video with any audio profile, Peripheral for a HID device
+// alone, with a service bit for each audio profile. Anything else is used
+// as it is, whatever runs.
+int btc_radio_set_class(uint32_t cod);
+uint32_t btc_radio_class(void);                 // the class in use
 
 // The paired devices: copies up to `max` addresses and returns how many
 // there are (which may be more than `max`), or a negative BTC_ERR_*.
