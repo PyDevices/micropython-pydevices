@@ -2,7 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
-// btaudio: A2DP sink and AVRCP on Bluedroid. See include/btaudio.h.
+// btaudio: A2DP sink, AVRCP (cover art included) and HFP hands-free on
+// Bluedroid. See include/btaudio.h.
 //
 // Bluedroid calls every callback here from its own task. The audio callback
 // is the only writer of the ring and btaudio_read() its only reader, so the
@@ -25,7 +26,22 @@
 #include "esp_gap_bt_api.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nvs.h"
+#include "sdkconfig.h"
+
+#if CONFIG_BT_HFP_CLIENT_ENABLE
+#include "esp_hf_client_api.h"
+#define BTAUDIO_HFP 1
+#else
+#define BTAUDIO_HFP 0
+#endif
+
+#if CONFIG_BT_AVRCP_CT_COVER_ART_ENABLED
+#define BTAUDIO_COVER 1
+#else
+#define BTAUDIO_COVER 0
+#endif
 
 #include "btaudio.h"
 
@@ -35,6 +51,10 @@ static const char *TAG = "btaudio";
 #define DEFAULT_RING_FRAMES 24576   // about 0.56 s at 44.1 kHz
 #define MIN_RING_FRAMES 2048
 #define DEFAULT_VOLUME 100
+#define POLL_US 1000000             // play status and signal, once a second
+#define COVER_MAX (256 * 1024)      // a thumbnail is a few tens of KB
+#define HANDLE_LEN 7                // AVRCP image handles are 7 digits
+#define AVRCP_UNKNOWN_MS 0xffffffffu
 
 typedef struct {
     // The ring: stereo frames, written by the A2DP data callback only and
@@ -52,7 +72,6 @@ typedef struct {
     // Shared between callbacks and callers, under s_lock.
     bool connected;
     bool streaming;
-    bool playing;
     uint8_t channels;
     uint32_t sample_rate;
     uint8_t volume;
@@ -64,11 +83,48 @@ typedef struct {
     uint8_t tl;                // AVRCP transaction label
     esp_bd_addr_t peer;
     char text[BTAUDIO_TEXT_COUNT][TEXT_MAX];
+
+    // AVRCP
+    bool avrc_connected;
+    int play_status;
+    int track_number, track_count;
+    int64_t duration_ms;
+    int64_t pos_ms;            // last reported position
+    int64_t pos_at_us;         // when it was reported
+    int battery;
+    uint32_t avrcp_features;
+    uint16_t avrcp_tg_flags;
+
+    // Cover art: the image handle the metadata named, the one we fetched,
+    // and the JPEG assembled from the data events.
+    bool cover_connected;
+    bool cover_getting;
+    uint8_t cover_handle[HANDLE_LEN];
+    bool cover_has_handle;
+    uint8_t cover_fetched[HANDLE_LEN];
+    uint8_t *cover;            // the finished image, under s_lock
+    size_t cover_len;
+    uint8_t *cover_build;      // being assembled, Bluedroid's task only
+    size_t cover_build_len;
+
+    // Link
+    int rssi_delta;
+    uint8_t sbc_channel_mode, sbc_block_length, sbc_subbands, sbc_allocation;
+    uint8_t sbc_min_bitpool, sbc_max_bitpool;
+    uint16_t delay_ms;
+
+    // HFP
+    bool hf_connected;
+    int service, signal, roaming, phone_battery;
+    int ind_call, ind_setup, held;
+    bool waiting, ringing, voice, in_band_ring;
+    int speaker_gain, mic_gain;
 } btaudio_state_t;
 
 static btaudio_state_t s;
 static bool s_started;
 static bool s_reconnect;
+static esp_timer_handle_t s_poll;
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -96,13 +152,108 @@ static void set_text(btaudio_text_t which, const uint8_t *src, size_t len) {
     portEXIT_CRITICAL(&s_lock);
 }
 
-static void clear_track(void) {
+static void set_cstr(btaudio_text_t which, const char *src) {
+    set_text(which, (const uint8_t *)(src ? src : ""), src ? strlen(src) : 0);
+}
+
+// A decimal attribute (track number, count, playing time), or UNKNOWN.
+static int64_t parse_number(const uint8_t *src, int len) {
+    int64_t v = 0;
+    if (len <= 0) {
+        return BTAUDIO_UNKNOWN;
+    }
+    for (int i = 0; i < len; i++) {
+        if (src[i] < '0' || src[i] > '9') {
+            return BTAUDIO_UNKNOWN;
+        }
+        v = v * 10 + (src[i] - '0');
+    }
+    return v;
+}
+
+static void set_position(uint32_t ms) {
     portENTER_CRITICAL(&s_lock);
-    s.text[BTAUDIO_TEXT_TITLE][0] = 0;
-    s.text[BTAUDIO_TEXT_ARTIST][0] = 0;
-    s.text[BTAUDIO_TEXT_ALBUM][0] = 0;
+    s.pos_ms = ms == AVRCP_UNKNOWN_MS ? BTAUDIO_UNKNOWN : (int64_t)ms;
+    s.pos_at_us = esp_timer_get_time();
     portEXIT_CRITICAL(&s_lock);
 }
+
+// ---- cover art ----
+
+static void cover_set(uint8_t *jpeg, size_t len) {
+    portENTER_CRITICAL(&s_lock);
+    uint8_t *old = s.cover;
+    s.cover = jpeg;
+    s.cover_len = jpeg ? len : 0;
+    portEXIT_CRITICAL(&s_lock);
+    free(old);
+    mark(BTAUDIO_CHANGED_COVER);
+}
+
+static void cover_clear(void) {
+    portENTER_CRITICAL(&s_lock);
+    bool had = s.cover != NULL;
+    portEXIT_CRITICAL(&s_lock);
+    if (had) {
+        cover_set(NULL, 0);
+    }
+}
+
+#if BTAUDIO_COVER
+// Fetch the thumbnail for the handle the metadata named, one at a time and
+// once per image: senders give each image its own handle.
+static void cover_fetch(void) {
+    if (!s.cover_connected || s.cover_getting || !s.cover_has_handle) {
+        return;
+    }
+    if (memcmp(s.cover_handle, s.cover_fetched, HANDLE_LEN) == 0) {
+        return;
+    }
+    memcpy(s.cover_fetched, s.cover_handle, HANDLE_LEN);
+    free(s.cover_build);
+    s.cover_build = NULL;
+    s.cover_build_len = 0;
+    if (esp_avrc_ct_cover_art_get_linked_thumbnail(s.cover_fetched) == ESP_OK) {
+        s.cover_getting = true;
+    }
+}
+
+static void cover_data(const esp_avrc_ct_cb_param_t *param) {
+    s.cover_getting = !param->cover_art_data.final;
+    if (param->cover_art_data.status != ESP_BT_STATUS_SUCCESS) {
+        free(s.cover_build);
+        s.cover_build = NULL;
+        s.cover_build_len = 0;
+        s.cover_getting = false;
+        cover_fetch();
+        return;
+    }
+    size_t add = param->cover_art_data.data_len;
+    if (add && s.cover_build_len + add <= COVER_MAX) {
+        uint8_t *grown = heap_caps_realloc(s.cover_build, s.cover_build_len + add, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (grown == NULL) {
+            grown = realloc(s.cover_build, s.cover_build_len + add);
+        }
+        if (grown != NULL) {
+            memcpy(grown + s.cover_build_len, param->cover_art_data.p_data, add);
+            s.cover_build = grown;
+            s.cover_build_len += add;
+        }
+    }
+    if (param->cover_art_data.final) {
+        uint8_t *jpeg = s.cover_build;
+        size_t len = s.cover_build_len;
+        s.cover_build = NULL;
+        s.cover_build_len = 0;
+        if (jpeg && len) {
+            cover_set(jpeg, len);
+        } else {
+            free(jpeg);
+        }
+        cover_fetch();     // a newer track may have named another image
+    }
+}
+#endif
 
 // ---- AVRCP controller: what the sender is playing, and its transport ----
 
@@ -112,14 +263,53 @@ static bool peer_supports(uint8_t event_id) {
 }
 
 static void request_metadata(void) {
-    esp_avrc_ct_send_metadata_cmd(next_tl(),
-        ESP_AVRC_MD_ATTR_TITLE | ESP_AVRC_MD_ATTR_ARTIST | ESP_AVRC_MD_ATTR_ALBUM);
+    uint8_t mask = ESP_AVRC_MD_ATTR_TITLE | ESP_AVRC_MD_ATTR_ARTIST | ESP_AVRC_MD_ATTR_ALBUM
+        | ESP_AVRC_MD_ATTR_TRACK_NUM | ESP_AVRC_MD_ATTR_NUM_TRACKS | ESP_AVRC_MD_ATTR_GENRE
+        | ESP_AVRC_MD_ATTR_PLAYING_TIME;
+    #if BTAUDIO_COVER
+    mask |= ESP_AVRC_MD_ATTR_COVER_ART;
+    #endif
+    esp_avrc_ct_send_metadata_cmd(next_tl(), mask);
 }
 
 // AVRCP notifications fire once: each is registered again after it fires.
 static void register_notification(uint8_t event_id) {
     if (peer_supports(event_id)) {
-        esp_avrc_ct_send_register_notification_cmd(next_tl(), event_id, 0);
+        // The position notification takes its interval, in seconds.
+        uint32_t param = event_id == ESP_AVRC_RN_PLAY_POS_CHANGED ? 1 : 0;
+        esp_avrc_ct_send_register_notification_cmd(next_tl(), event_id, param);
+    }
+}
+
+static void clear_track(void) {
+    portENTER_CRITICAL(&s_lock);
+    s.text[BTAUDIO_TEXT_TITLE][0] = 0;
+    s.text[BTAUDIO_TEXT_ARTIST][0] = 0;
+    s.text[BTAUDIO_TEXT_ALBUM][0] = 0;
+    s.text[BTAUDIO_TEXT_GENRE][0] = 0;
+    s.track_number = BTAUDIO_UNKNOWN;
+    s.track_count = BTAUDIO_UNKNOWN;
+    s.duration_ms = BTAUDIO_UNKNOWN;
+    s.pos_ms = BTAUDIO_UNKNOWN;
+    s.cover_has_handle = false;
+    portEXIT_CRITICAL(&s_lock);
+}
+
+static void set_play_status(int status) {
+    portENTER_CRITICAL(&s_lock);
+    bool changed = s.play_status != status;
+    // Freeze the position where it is when playback stops moving it.
+    if (changed && s.play_status == BTAUDIO_PLAY_PLAYING && s.pos_ms >= 0) {
+        int64_t now = esp_timer_get_time();
+        s.pos_ms += (now - s.pos_at_us) / 1000;
+        s.pos_at_us = now;
+    } else if (changed && status == BTAUDIO_PLAY_PLAYING) {
+        s.pos_at_us = esp_timer_get_time();
+    }
+    s.play_status = status;
+    portEXIT_CRITICAL(&s_lock);
+    if (changed) {
+        mark(BTAUDIO_CHANGED_PLAYING);
     }
 }
 
@@ -127,15 +317,38 @@ static void avrc_ct_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_t *par
     switch (event) {
         case ESP_AVRC_CT_CONNECTION_STATE_EVT:
             if (param->conn_stat.connected) {
+                portENTER_CRITICAL(&s_lock);
+                s.avrc_connected = true;
+                portEXIT_CRITICAL(&s_lock);
                 esp_avrc_ct_send_get_rn_capabilities_cmd(next_tl());
             } else {
                 portENTER_CRITICAL(&s_lock);
+                s.avrc_connected = false;
                 s.peer_events = 0;
-                s.playing = false;
+                s.play_status = BTAUDIO_UNKNOWN;
+                s.battery = BTAUDIO_UNKNOWN;
+                s.avrcp_features = 0;
+                s.avrcp_tg_flags = 0;
+                s.cover_connected = false;
+                s.cover_getting = false;
+                memset(s.cover_fetched, 0, HANDLE_LEN);
                 portEXIT_CRITICAL(&s_lock);
                 clear_track();
-                mark(BTAUDIO_CHANGED_TRACK | BTAUDIO_CHANGED_PLAYING);
+                cover_clear();
+                mark(BTAUDIO_CHANGED_TRACK | BTAUDIO_CHANGED_PLAYING | BTAUDIO_CHANGED_PEER);
             }
+            break;
+        case ESP_AVRC_CT_REMOTE_FEATURES_EVT:
+            portENTER_CRITICAL(&s_lock);
+            s.avrcp_features = param->rmt_feats.feat_mask;
+            s.avrcp_tg_flags = param->rmt_feats.tg_feat_flag;
+            portEXIT_CRITICAL(&s_lock);
+            mark(BTAUDIO_CHANGED_PEER);
+            #if BTAUDIO_COVER
+            if ((param->rmt_feats.tg_feat_flag & ESP_AVRC_FEAT_FLAG_TG_COVER_ART) && !s.cover_connected) {
+                esp_avrc_ct_cover_art_connect(ESP_AVRC_CA_MTU_MAX);
+            }
+            #endif
             break;
         case ESP_AVRC_CT_GET_RN_CAPABILITIES_RSP_EVT:
             portENTER_CRITICAL(&s_lock);
@@ -143,50 +356,131 @@ static void avrc_ct_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_t *par
             portEXIT_CRITICAL(&s_lock);
             register_notification(ESP_AVRC_RN_TRACK_CHANGE);
             register_notification(ESP_AVRC_RN_PLAY_STATUS_CHANGE);
+            register_notification(ESP_AVRC_RN_PLAY_POS_CHANGED);
+            register_notification(ESP_AVRC_RN_BATTERY_STATUS_CHANGE);
+            register_notification(ESP_AVRC_RN_TRACK_REACHED_END);
+            register_notification(ESP_AVRC_RN_TRACK_REACHED_START);
             request_metadata();
+            esp_avrc_ct_send_get_play_status_cmd(next_tl());
             break;
         case ESP_AVRC_CT_METADATA_RSP_EVT: {
             // attr_text is only valid during this call.
-            btaudio_text_t which;
+            const uint8_t *text = param->meta_rsp.attr_text;
+            int len = param->meta_rsp.attr_length;
             switch (param->meta_rsp.attr_id) {
                 case ESP_AVRC_MD_ATTR_TITLE:
-                    which = BTAUDIO_TEXT_TITLE;
+                    set_text(BTAUDIO_TEXT_TITLE, text, len);
                     break;
                 case ESP_AVRC_MD_ATTR_ARTIST:
-                    which = BTAUDIO_TEXT_ARTIST;
+                    set_text(BTAUDIO_TEXT_ARTIST, text, len);
                     break;
                 case ESP_AVRC_MD_ATTR_ALBUM:
-                    which = BTAUDIO_TEXT_ALBUM;
+                    set_text(BTAUDIO_TEXT_ALBUM, text, len);
+                    break;
+                case ESP_AVRC_MD_ATTR_GENRE:
+                    set_text(BTAUDIO_TEXT_GENRE, text, len);
+                    break;
+                case ESP_AVRC_MD_ATTR_TRACK_NUM: {
+                    int64_t v = parse_number(text, len);
+                    portENTER_CRITICAL(&s_lock);
+                    s.track_number = v > 0 ? (int)v : BTAUDIO_UNKNOWN;
+                    portEXIT_CRITICAL(&s_lock);
+                    break;
+                }
+                case ESP_AVRC_MD_ATTR_NUM_TRACKS: {
+                    int64_t v = parse_number(text, len);
+                    portENTER_CRITICAL(&s_lock);
+                    s.track_count = v > 0 ? (int)v : BTAUDIO_UNKNOWN;
+                    portEXIT_CRITICAL(&s_lock);
+                    break;
+                }
+                case ESP_AVRC_MD_ATTR_PLAYING_TIME: {
+                    int64_t v = parse_number(text, len);
+                    portENTER_CRITICAL(&s_lock);
+                    s.duration_ms = v > 0 ? v : BTAUDIO_UNKNOWN;
+                    portEXIT_CRITICAL(&s_lock);
+                    break;
+                }
+                #if BTAUDIO_COVER
+                case ESP_AVRC_MD_ATTR_COVER_ART:
+                    if (len == HANDLE_LEN) {
+                        memcpy(s.cover_handle, text, HANDLE_LEN);
+                        s.cover_has_handle = true;
+                        cover_fetch();
+                    } else {
+                        // The track has no image.
+                        s.cover_has_handle = false;
+                        memset(s.cover_fetched, 0, HANDLE_LEN);
+                        cover_clear();
+                    }
+                    return;
+                #endif
+                default:
+                    return;
+            }
+            mark(BTAUDIO_CHANGED_TRACK);
+            break;
+        }
+        case ESP_AVRC_CT_PLAY_STATUS_RSP_EVT: {
+            uint32_t length = param->play_status_rsp.song_length;
+            portENTER_CRITICAL(&s_lock);
+            if (length != AVRCP_UNKNOWN_MS && length != 0) {
+                s.duration_ms = length;
+            }
+            portEXIT_CRITICAL(&s_lock);
+            set_position(param->play_status_rsp.song_position);
+            set_play_status(param->play_status_rsp.play_status);
+            mark(BTAUDIO_CHANGED_POSITION);
+            break;
+        }
+        case ESP_AVRC_CT_CHANGE_NOTIFY_EVT: {
+            uint8_t id = param->change_ntf.event_id;
+            switch (id) {
+                case ESP_AVRC_RN_TRACK_CHANGE:
+                    clear_track();
+                    mark(BTAUDIO_CHANGED_TRACK);
+                    request_metadata();
+                    esp_avrc_ct_send_get_play_status_cmd(next_tl());
+                    break;
+                case ESP_AVRC_RN_PLAY_STATUS_CHANGE:
+                    set_play_status(param->change_ntf.event_parameter.playback);
+                    esp_avrc_ct_send_get_play_status_cmd(next_tl());
+                    break;
+                case ESP_AVRC_RN_PLAY_POS_CHANGED:
+                    set_position(param->change_ntf.event_parameter.play_pos);
+                    mark(BTAUDIO_CHANGED_POSITION);
+                    break;
+                case ESP_AVRC_RN_BATTERY_STATUS_CHANGE:
+                    portENTER_CRITICAL(&s_lock);
+                    s.battery = param->change_ntf.event_parameter.batt;
+                    portEXIT_CRITICAL(&s_lock);
+                    mark(BTAUDIO_CHANGED_PEER);
+                    break;
+                case ESP_AVRC_RN_TRACK_REACHED_END:
+                case ESP_AVRC_RN_TRACK_REACHED_START:
+                    esp_avrc_ct_send_get_play_status_cmd(next_tl());
                     break;
                 default:
                     return;
             }
-            set_text(which, param->meta_rsp.attr_text, param->meta_rsp.attr_length);
-            mark(BTAUDIO_CHANGED_TRACK);
+            register_notification(id);
             break;
         }
-        case ESP_AVRC_CT_CHANGE_NOTIFY_EVT:
-            switch (param->change_ntf.event_id) {
-                case ESP_AVRC_RN_TRACK_CHANGE:
-                    request_metadata();
-                    register_notification(ESP_AVRC_RN_TRACK_CHANGE);
-                    break;
-                case ESP_AVRC_RN_PLAY_STATUS_CHANGE: {
-                    bool playing = param->change_ntf.event_parameter.playback == ESP_AVRC_PLAYBACK_PLAYING;
-                    portENTER_CRITICAL(&s_lock);
-                    bool changed = s.playing != playing;
-                    s.playing = playing;
-                    portEXIT_CRITICAL(&s_lock);
-                    if (changed) {
-                        mark(BTAUDIO_CHANGED_PLAYING);
-                    }
-                    register_notification(ESP_AVRC_RN_PLAY_STATUS_CHANGE);
-                    break;
-                }
-                default:
-                    break;
+        #if BTAUDIO_COVER
+        case ESP_AVRC_CT_COVER_ART_STATE_EVT:
+            s.cover_connected = param->cover_art_state.state == ESP_AVRC_COVER_ART_CONNECTED;
+            s.cover_getting = false;
+            mark(BTAUDIO_CHANGED_PEER);
+            if (s.cover_connected) {
+                // Ask again: the handle may have come before the channel.
+                memset(s.cover_fetched, 0, HANDLE_LEN);
+                esp_avrc_ct_send_metadata_cmd(next_tl(), ESP_AVRC_MD_ATTR_COVER_ART);
             }
             break;
+        case ESP_AVRC_CT_COVER_ART_DATA_EVT:
+            cover_data(param);
+            break;
+        #endif
         default:
             break;
     }
@@ -216,6 +510,146 @@ static void avrc_tg_cb(esp_avrc_tg_cb_event_t event, esp_avrc_tg_cb_param_t *par
             break;
     }
 }
+
+// ---- HFP hands-free: the phone's indicators and calls ----
+
+#if BTAUDIO_HFP
+static void reset_phone(void) {
+    portENTER_CRITICAL(&s_lock);
+    s.hf_connected = false;
+    s.service = s.signal = s.roaming = s.phone_battery = BTAUDIO_UNKNOWN;
+    s.ind_call = s.ind_setup = s.held = 0;
+    s.waiting = s.ringing = s.voice = s.in_band_ring = false;
+    s.speaker_gain = s.mic_gain = BTAUDIO_UNKNOWN;
+    s.text[BTAUDIO_TEXT_OPERATOR][0] = 0;
+    s.text[BTAUDIO_TEXT_SUBSCRIBER][0] = 0;
+    portEXIT_CRITICAL(&s_lock);
+}
+
+static void set_phone(int *field, int value) {
+    portENTER_CRITICAL(&s_lock);
+    bool changed = *field != value;
+    *field = value;
+    portEXIT_CRITICAL(&s_lock);
+    if (changed) {
+        mark(BTAUDIO_CHANGED_PHONE);
+    }
+}
+
+// A call indicator moved: ask for the call list, which carries the number.
+static void call_changed(void) {
+    portENTER_CRITICAL(&s_lock);
+    if (s.ind_call == 0 && s.ind_setup == 0) {
+        s.ringing = false;
+        s.waiting = false;
+        s.held = 0;
+    }
+    portEXIT_CRITICAL(&s_lock);
+    mark(BTAUDIO_CHANGED_CALL);
+    esp_hf_client_query_current_calls();
+}
+
+static void hf_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *param) {
+    switch (event) {
+        case ESP_HF_CLIENT_CONNECTION_STATE_EVT:
+            if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_SLC_CONNECTED) {
+                portENTER_CRITICAL(&s_lock);
+                s.hf_connected = true;
+                portEXIT_CRITICAL(&s_lock);
+                esp_hf_client_query_current_operator_name();
+                esp_hf_client_retrieve_subscriber_info();
+                esp_hf_client_query_current_calls();
+                mark(BTAUDIO_CHANGED_PHONE);
+            } else if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED) {
+                reset_phone();
+                mark(BTAUDIO_CHANGED_PHONE | BTAUDIO_CHANGED_CALL);
+            }
+            break;
+        case ESP_HF_CLIENT_AUDIO_STATE_EVT:
+            // No call audio here: hand the call straight back to the phone.
+            if (param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED
+                || param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC) {
+                esp_hf_client_disconnect_audio(param->audio_stat.remote_bda);
+            }
+            break;
+        case ESP_HF_CLIENT_BVRA_EVT:
+            portENTER_CRITICAL(&s_lock);
+            s.voice = param->bvra.value == ESP_HF_VR_STATE_ENABLED;
+            portEXIT_CRITICAL(&s_lock);
+            mark(BTAUDIO_CHANGED_PHONE);
+            break;
+        case ESP_HF_CLIENT_CIND_CALL_EVT:
+            s.ind_call = param->call.status;
+            call_changed();
+            break;
+        case ESP_HF_CLIENT_CIND_CALL_SETUP_EVT:
+            s.ind_setup = param->call_setup.status;
+            call_changed();
+            break;
+        case ESP_HF_CLIENT_CIND_CALL_HELD_EVT:
+            s.held = param->call_held.status;
+            call_changed();
+            break;
+        case ESP_HF_CLIENT_CIND_SERVICE_AVAILABILITY_EVT:
+            set_phone(&s.service, param->service_availability.status);
+            break;
+        case ESP_HF_CLIENT_CIND_SIGNAL_STRENGTH_EVT:
+            set_phone(&s.signal, param->signal_strength.value);
+            break;
+        case ESP_HF_CLIENT_CIND_ROAMING_STATUS_EVT:
+            set_phone(&s.roaming, param->roaming.status);
+            break;
+        case ESP_HF_CLIENT_CIND_BATTERY_LEVEL_EVT:
+            set_phone(&s.phone_battery, param->battery_level.value);
+            break;
+        case ESP_HF_CLIENT_COPS_CURRENT_OPERATOR_EVT:
+            set_cstr(BTAUDIO_TEXT_OPERATOR, param->cops.name);
+            mark(BTAUDIO_CHANGED_PHONE);
+            break;
+        case ESP_HF_CLIENT_CLIP_EVT:
+            set_cstr(BTAUDIO_TEXT_CALLER, param->clip.number);
+            mark(BTAUDIO_CHANGED_CALL);
+            break;
+        case ESP_HF_CLIENT_CCWA_EVT:
+            portENTER_CRITICAL(&s_lock);
+            s.waiting = true;
+            portEXIT_CRITICAL(&s_lock);
+            mark(BTAUDIO_CHANGED_CALL);
+            break;
+        case ESP_HF_CLIENT_CLCC_EVT:
+            if (param->clcc.number && param->clcc.number[0]) {
+                set_cstr(BTAUDIO_TEXT_CALLER, param->clcc.number);
+                mark(BTAUDIO_CHANGED_CALL);
+            }
+            break;
+        case ESP_HF_CLIENT_VOLUME_CONTROL_EVT:
+            if (param->volume_control.type == ESP_HF_VOLUME_CONTROL_TARGET_SPK) {
+                set_phone(&s.speaker_gain, param->volume_control.volume);
+            } else {
+                set_phone(&s.mic_gain, param->volume_control.volume);
+            }
+            break;
+        case ESP_HF_CLIENT_CNUM_EVT:
+            set_cstr(BTAUDIO_TEXT_SUBSCRIBER, param->cnum.number);
+            mark(BTAUDIO_CHANGED_PHONE);
+            break;
+        case ESP_HF_CLIENT_BSIR_EVT:
+            portENTER_CRITICAL(&s_lock);
+            s.in_band_ring = param->bsir.state == ESP_HF_CLIENT_IN_BAND_RINGTONE_PROVIDED;
+            portEXIT_CRITICAL(&s_lock);
+            mark(BTAUDIO_CHANGED_PHONE);
+            break;
+        case ESP_HF_CLIENT_RING_IND_EVT:
+            portENTER_CRITICAL(&s_lock);
+            s.ringing = true;
+            portEXIT_CRITICAL(&s_lock);
+            mark(BTAUDIO_CHANGED_CALL);
+            break;
+        default:
+            break;
+    }
+}
+#endif
 
 // ---- the last sender, kept in NVS so a restart can call it back ----
 
@@ -277,7 +711,7 @@ static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
         case ESP_A2D_CONNECTION_STATE_EVT: {
             esp_a2d_connection_state_t state = param->conn_stat.state;
             if (state == ESP_A2D_CONNECTION_STATE_CONNECTED) {
-                const uint8_t *a = param->conn_stat.remote_bda;
+                uint8_t *a = param->conn_stat.remote_bda;
                 char peer[18];
                 snprintf(peer, sizeof(peer), "%02x:%02x:%02x:%02x:%02x:%02x", a[0], a[1], a[2], a[3], a[4], a[5]);
                 set_text(BTAUDIO_TEXT_PEER, (const uint8_t *)peer, strlen(peer));
@@ -286,19 +720,28 @@ static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
                 s.connected = true;
                 portEXIT_CRITICAL(&s_lock);
                 save_last_sender(a);
+                esp_bt_gap_read_remote_name(a);
+                #if BTAUDIO_HFP
+                // A phone also takes calls: follow it as a hands-free unit.
+                if (!s.hf_connected) {
+                    esp_hf_client_connect(a);
+                }
+                #endif
                 // One sender at a time: hide until it leaves.
                 esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
-                mark(BTAUDIO_CHANGED_CONNECTION);
+                mark(BTAUDIO_CHANGED_CONNECTION | BTAUDIO_CHANGED_PEER);
             } else if (state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
                 portENTER_CRITICAL(&s_lock);
                 s.connected = false;
                 s.streaming = false;
                 s.volume_notify = false;
+                s.rssi_delta = BTAUDIO_UNKNOWN;
+                s.text[BTAUDIO_TEXT_PEER_NAME][0] = 0;
                 portEXIT_CRITICAL(&s_lock);
                 set_text(BTAUDIO_TEXT_PEER, (const uint8_t *)"", 0);
                 s.reset = true;
                 esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
-                mark(BTAUDIO_CHANGED_CONNECTION | BTAUDIO_CHANGED_STREAM);
+                mark(BTAUDIO_CHANGED_CONNECTION | BTAUDIO_CHANGED_STREAM | BTAUDIO_CHANGED_PEER);
             }
             break;
         }
@@ -326,12 +769,24 @@ static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
                 rate = 48000;
             }
             uint8_t channels = (mcc->cie.sbc_info.ch_mode & ESP_A2D_SBC_CIE_CH_MODE_MONO) ? 1 : 2;
+            // The delay to the speaker is the half of the ring that fills
+            // before playback starts; tell the sender, which may use it to
+            // keep video in step.
+            uint32_t delay_ms = (s.capacity / 2) * 1000u / rate;
             portENTER_CRITICAL(&s_lock);
             s.sample_rate = rate;
             s.channels = channels;
+            s.sbc_channel_mode = mcc->cie.sbc_info.ch_mode;
+            s.sbc_block_length = mcc->cie.sbc_info.block_len;
+            s.sbc_subbands = mcc->cie.sbc_info.num_subbands;
+            s.sbc_allocation = mcc->cie.sbc_info.alloc_mthd;
+            s.sbc_min_bitpool = mcc->cie.sbc_info.min_bitpool;
+            s.sbc_max_bitpool = mcc->cie.sbc_info.max_bitpool;
+            s.delay_ms = delay_ms;
             portEXIT_CRITICAL(&s_lock);
+            esp_a2d_sink_set_delay_value((uint16_t)(delay_ms * 10));
             s.reset = true;
-            mark(BTAUDIO_CHANGED_FORMAT);
+            mark(BTAUDIO_CHANGED_FORMAT | BTAUDIO_CHANGED_PEER);
             ESP_LOGI(TAG, "stream: SBC, %u Hz, %u channel(s)", (unsigned)rate, channels);
             break;
         }
@@ -383,7 +838,7 @@ static void a2d_data_cb(const uint8_t *buf, uint32_t len) {
     portEXIT_CRITICAL(&s_lock);
 }
 
-// ---- GAP: pairing with no PIN to type ----
+// ---- GAP: pairing with no PIN to type, the sender's name and signal ----
 
 static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
     switch (event) {
@@ -400,9 +855,33 @@ static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
             esp_bt_gap_ssp_confirm_reply(param->cfm_req.bda, true);
             break;
 #endif
+        case ESP_BT_GAP_READ_REMOTE_NAME_EVT:
+            if (param->read_rmt_name.stat == ESP_BT_STATUS_SUCCESS) {
+                set_cstr(BTAUDIO_TEXT_PEER_NAME, (const char *)param->read_rmt_name.rmt_name);
+                mark(BTAUDIO_CHANGED_PEER);
+            }
+            break;
+        case ESP_BT_GAP_READ_RSSI_DELTA_EVT:
+            if (param->read_rssi_delta.stat == ESP_BT_STATUS_SUCCESS) {
+                portENTER_CRITICAL(&s_lock);
+                bool changed = s.rssi_delta != param->read_rssi_delta.rssi_delta;
+                s.rssi_delta = param->read_rssi_delta.rssi_delta;
+                portEXIT_CRITICAL(&s_lock);
+                if (changed) {
+                    mark(BTAUDIO_CHANGED_PEER);
+                }
+            }
+            break;
         default:
             break;
     }
+}
+
+// ---- the poll: position and signal, which senders don't all push ----
+
+static void poll(void *arg) {
+    (void)arg;
+    btaudio_refresh();
 }
 
 // ---- start and stop ----
@@ -421,6 +900,13 @@ esp_err_t btaudio_start(const char *name, size_t ring_frames, bool reconnect) {
     s.capacity = ring_frames;
     s.volume = DEFAULT_VOLUME;
     s.channels = 2;
+    s.play_status = BTAUDIO_UNKNOWN;
+    s.track_number = s.track_count = BTAUDIO_UNKNOWN;
+    s.duration_ms = s.pos_ms = BTAUDIO_UNKNOWN;
+    s.battery = BTAUDIO_UNKNOWN;
+    s.rssi_delta = BTAUDIO_UNKNOWN;
+    s.service = s.signal = s.roaming = s.phone_battery = BTAUDIO_UNKNOWN;
+    s.speaker_gain = s.mic_gain = BTAUDIO_UNKNOWN;
     s_reconnect = reconnect;
     size_t bytes = ring_frames * 2 * sizeof(int16_t);
     s.ring = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -482,6 +968,18 @@ esp_err_t btaudio_start(const char *name, size_t ring_frames, bool reconnect) {
         ESP_LOGE(TAG, "A2DP sink didn't start: %s", esp_err_to_name(err));
     }
 
+#if BTAUDIO_HFP
+    esp_hf_client_register_callback(hf_cb);
+    if (esp_hf_client_init() != ESP_OK) {
+        ESP_LOGW(TAG, "hands-free didn't start");
+    }
+#endif
+
+    const esp_timer_create_args_t targs = {.callback = poll, .name = "btaudio"};
+    if (esp_timer_create(&targs, &s_poll) == ESP_OK) {
+        esp_timer_start_periodic(s_poll, POLL_US);
+    }
+
     esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
     s_started = true;
     return err;
@@ -492,6 +990,14 @@ void btaudio_stop(void) {
         return;
     }
     s_started = false;
+    if (s_poll) {
+        esp_timer_stop(s_poll);
+        esp_timer_delete(s_poll);
+        s_poll = NULL;
+    }
+#if BTAUDIO_HFP
+    esp_hf_client_deinit();
+#endif
     esp_a2d_sink_deinit();
     esp_avrc_tg_deinit();
     esp_avrc_ct_deinit();
@@ -504,6 +1010,11 @@ void btaudio_stop(void) {
     heap_caps_free(s.ring);
     s.ring = NULL;
     s.capacity = 0;
+    free(s.cover_build);
+    s.cover_build = NULL;
+    free(s.cover);
+    s.cover = NULL;
+    s.cover_len = 0;
 }
 
 bool btaudio_started(void) {
@@ -596,12 +1107,29 @@ uint32_t btaudio_changes(void) {
     return c;
 }
 
+static int call_state(void) {
+    if (s.ind_setup == 1) {
+        return BTAUDIO_CALL_INCOMING;
+    }
+    if (s.ind_setup == 2) {
+        return BTAUDIO_CALL_DIALING;
+    }
+    if (s.ind_setup == 3) {
+        return BTAUDIO_CALL_ALERTING;
+    }
+    if (s.ind_call) {
+        return s.held == 2 ? BTAUDIO_CALL_HELD : BTAUDIO_CALL_ACTIVE;
+    }
+    return BTAUDIO_CALL_IDLE;
+}
+
 void btaudio_status(btaudio_status_t *out) {
     uint32_t buffered = __atomic_load_n(&s.write_pos, __ATOMIC_ACQUIRE) - s.read_pos;
+    int64_t now = esp_timer_get_time();
     portENTER_CRITICAL(&s_lock);
     out->connected = s.connected;
     out->streaming = s.streaming;
-    out->playing = s.playing;
+    out->playing = s.play_status == BTAUDIO_PLAY_PLAYING;
     out->sample_rate = s.sample_rate;
     out->volume = s.volume;
     out->buffered = buffered;
@@ -611,6 +1139,47 @@ void btaudio_status(btaudio_status_t *out) {
     out->dropped = s.dropped;
     out->repeated = s.repeated;
     out->received = s.received;
+
+    out->play_status = s.play_status;
+    out->track_number = s.track_number;
+    out->track_count = s.track_count;
+    out->duration_ms = s.duration_ms;
+    int64_t pos = s.pos_ms;
+    if (pos >= 0 && s.play_status == BTAUDIO_PLAY_PLAYING) {
+        pos += (now - s.pos_at_us) / 1000;
+        if (s.duration_ms > 0 && pos > s.duration_ms) {
+            pos = s.duration_ms;
+        }
+    }
+    out->position_ms = pos;
+    out->battery = s.battery;
+    out->avrcp_features = s.avrcp_features;
+    out->avrcp_tg_flags = s.avrcp_tg_flags;
+    out->cover_art = s.cover_connected;
+
+    out->rssi_delta = s.connected ? s.rssi_delta : BTAUDIO_UNKNOWN;
+    out->channels = s.channels;
+    out->sbc_channel_mode = s.sbc_channel_mode;
+    out->sbc_block_length = s.sbc_block_length;
+    out->sbc_subbands = s.sbc_subbands;
+    out->sbc_allocation = s.sbc_allocation;
+    out->sbc_min_bitpool = s.sbc_min_bitpool;
+    out->sbc_max_bitpool = s.sbc_max_bitpool;
+    out->delay_ms = s.delay_ms;
+
+    out->hf_connected = s.hf_connected;
+    out->service = s.service;
+    out->signal = s.signal;
+    out->roaming = s.roaming;
+    out->phone_battery = s.phone_battery;
+    out->call = call_state();
+    out->held = s.held;
+    out->waiting = s.waiting;
+    out->ringing = s.ringing;
+    out->voice = s.voice;
+    out->in_band_ring = s.in_band_ring;
+    out->speaker_gain = s.speaker_gain;
+    out->mic_gain = s.mic_gain;
     portEXIT_CRITICAL(&s_lock);
 }
 
@@ -625,6 +1194,41 @@ size_t btaudio_text(btaudio_text_t which, char *dst, size_t size) {
     return strlen(dst);
 }
 
+size_t btaudio_cover_size(void) {
+    portENTER_CRITICAL(&s_lock);
+    size_t n = s.cover_len;
+    portEXIT_CRITICAL(&s_lock);
+    return n;
+}
+
+size_t btaudio_cover(uint8_t *dst, size_t size) {
+    // Copy outside the lock (it's tens of KB): take the image away, copy,
+    // and put it back unless a newer one arrived meanwhile.
+    portENTER_CRITICAL(&s_lock);
+    uint8_t *img = s.cover;
+    size_t len = s.cover_len;
+    s.cover = NULL;
+    portEXIT_CRITICAL(&s_lock);
+    if (img == NULL) {
+        return 0;
+    }
+    size_t n = len <= size ? len : 0;
+    if (n) {
+        memcpy(dst, img, n);
+    }
+    portENTER_CRITICAL(&s_lock);
+    bool newer = s.cover != NULL;
+    if (!newer) {
+        s.cover = img;
+    }
+    portEXIT_CRITICAL(&s_lock);
+    if (newer) {
+        free(img);
+        return 0;
+    }
+    return n;
+}
+
 void btaudio_levels(uint16_t *left, uint16_t *right) {
     portENTER_CRITICAL(&s_lock);
     *left = s.peak_l;
@@ -632,6 +1236,20 @@ void btaudio_levels(uint16_t *left, uint16_t *right) {
     s.peak_l = 0;
     s.peak_r = 0;
     portEXIT_CRITICAL(&s_lock);
+}
+
+esp_err_t btaudio_key(uint8_t key, int state) {
+    if (!s_started) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t err = ESP_OK;
+    if (state == 0 || state == 2) {
+        err = esp_avrc_ct_send_passthrough_cmd(next_tl(), key, ESP_AVRC_PT_CMD_STATE_PRESSED);
+    }
+    if (err == ESP_OK && (state == 1 || state == 2)) {
+        err = esp_avrc_ct_send_passthrough_cmd(next_tl(), key, ESP_AVRC_PT_CMD_STATE_RELEASED);
+    }
+    return err;
 }
 
 esp_err_t btaudio_command(btaudio_cmd_t cmd) {
@@ -642,15 +1260,36 @@ esp_err_t btaudio_command(btaudio_cmd_t cmd) {
         [BTAUDIO_CMD_PREVIOUS] = ESP_AVRC_PT_CMD_BACKWARD,
         [BTAUDIO_CMD_STOP] = ESP_AVRC_PT_CMD_STOP,
     };
-    if (!s_started || (unsigned)cmd >= sizeof(keys)) {
+    if ((unsigned)cmd >= sizeof(keys)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return btaudio_key(keys[cmd], 2);
+}
+
+esp_err_t btaudio_set_player(uint8_t attr, uint8_t value) {
+    if (!s_started) {
         return ESP_ERR_INVALID_STATE;
     }
-    // A button is a press and a release.
-    esp_err_t err = esp_avrc_ct_send_passthrough_cmd(next_tl(), keys[cmd], ESP_AVRC_PT_CMD_STATE_PRESSED);
-    if (err == ESP_OK) {
-        err = esp_avrc_ct_send_passthrough_cmd(next_tl(), keys[cmd], ESP_AVRC_PT_CMD_STATE_RELEASED);
+    return esp_avrc_ct_send_set_player_value_cmd(next_tl(), attr, value);
+}
+
+esp_err_t btaudio_refresh(void) {
+    if (!s_started) {
+        return ESP_ERR_INVALID_STATE;
     }
-    return err;
+    portENTER_CRITICAL(&s_lock);
+    bool avrc = s.avrc_connected;
+    bool a2dp = s.connected;
+    esp_bd_addr_t peer;
+    memcpy(peer, s.peer, sizeof(peer));
+    portEXIT_CRITICAL(&s_lock);
+    if (avrc) {
+        esp_avrc_ct_send_get_play_status_cmd(next_tl());
+    }
+    if (a2dp) {
+        esp_bt_gap_read_rssi_delta(peer);
+    }
+    return ESP_OK;
 }
 
 void btaudio_set_volume(uint8_t volume) {
@@ -677,5 +1316,69 @@ esp_err_t btaudio_disconnect(void) {
     bool connected = s.connected;
     memcpy(peer, s.peer, sizeof(peer));
     portEXIT_CRITICAL(&s_lock);
+    #if BTAUDIO_HFP
+    if (s.hf_connected) {
+        esp_hf_client_disconnect(peer);
+    }
+    #endif
     return connected ? esp_a2d_sink_disconnect(peer) : ESP_OK;
 }
+
+// ---- HFP calls ----
+
+#if BTAUDIO_HFP
+static esp_err_t hf_ready(void) {
+    return s_started && s.hf_connected ? ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
+esp_err_t btaudio_answer(void) {
+    esp_err_t err = hf_ready();
+    return err == ESP_OK ? esp_hf_client_answer_call() : err;
+}
+
+esp_err_t btaudio_hangup(void) {
+    esp_err_t err = hf_ready();
+    return err == ESP_OK ? esp_hf_client_reject_call() : err;
+}
+
+esp_err_t btaudio_dial(const char *number) {
+    esp_err_t err = hf_ready();
+    return err == ESP_OK ? esp_hf_client_dial(number) : err;
+}
+
+esp_err_t btaudio_voice(bool on) {
+    esp_err_t err = hf_ready();
+    if (err != ESP_OK) {
+        return err;
+    }
+    return on ? esp_hf_client_start_voice_recognition() : esp_hf_client_stop_voice_recognition();
+}
+
+esp_err_t btaudio_dtmf(char digit) {
+    esp_err_t err = hf_ready();
+    return err == ESP_OK ? esp_hf_client_send_dtmf(digit) : err;
+}
+#else
+esp_err_t btaudio_answer(void) {
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t btaudio_hangup(void) {
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t btaudio_dial(const char *number) {
+    (void)number;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t btaudio_voice(bool on) {
+    (void)on;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t btaudio_dtmf(char digit) {
+    (void)digit;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+#endif
