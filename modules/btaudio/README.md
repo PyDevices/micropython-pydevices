@@ -5,7 +5,8 @@ phone or computer lists the board under its hostname, pairs with it without a
 PIN, and plays to it. Your program reads the decoded audio into any PCM output,
 shows everything the phone says about what's playing, cover art included, and
 drives the player. It also follows the phone itself: battery, signal, carrier
-and calls, which it can answer and end.
+and calls, which it can answer and end, with the call's audio heard on the
+board and its microphone sent back.
 
 ```python
 import board_peripherals
@@ -92,8 +93,15 @@ the player to change mode; many ignore it, and none can be read back.
 battery, the codec and its settings, and the delay reported to the sender.
 `phone()` returns the phone's side over the hands-free link: battery,
 signal, carrier, roaming, and the call's state and number. `answer()`,
-`hangup()`, `dial()`, `voice()` and `dtmf()` act on calls, whose audio stays
-on the phone.
+`hangup()`, `dial()`, `voice()` and `dtmf()` act on calls.
+
+While a call's audio is up, `call_audio` is True, `FORMAT` changes and
+`sample_rate` becomes the call's (8000, or 16000 for wideband). `readinto()`
+then returns the phone's voice instead of music, so a player hears calls
+without a line of its own, once it reopens its output at the new rate.
+`write(buf)` sends the microphone back, 16-bit mono at that rate. A call
+keeps 200 ms in the buffer rather than half of `buffer_ms`, so the
+conversation doesn't lag.
 
 The type stub, [`btaudio.pyi`](btaudio.pyi), has the same in full.
 
@@ -101,7 +109,8 @@ The type stub, [`btaudio.pyi`](btaudio.pyi), has the same in full.
 
 [`esp-idf/btaudio`](esp-idf/btaudio) is the C that does the work, with no
 MicroPython in it: A2DP sink, AVRCP with cover art, the HFP hands-free
-client and the buffer, on the public Bluedroid API. [`src/mod_btaudio.c`](src/mod_btaudio.c) wraps it, and
+client with call audio over HCI (Bluedroid codes CVSD and mSBC) and the
+buffer, on the public Bluedroid API. [`src/mod_btaudio.c`](src/mod_btaudio.c) wraps it, and
 [`micropython.cmake`](micropython.cmake) compiles both as an ordinary user C
 module, so a stock MicroPython esp32 build takes it with `USER_C_MODULES`.
 Two settings go with it: [`sdkconfig.esp32`](sdkconfig.esp32) in the board's

@@ -10,8 +10,9 @@ about the track, cover art included, its play status and position, and you
 drive its transport, volume and player settings. Through HFP you follow the
 phone itself: its battery, signal, carrier and calls. Classic ESP32 only.
 
-Calls are answered and ended from the board, but their audio stays on the
-phone: the board hands the call's audio link straight back.
+A call's audio comes to the board too. While it's up, `Receiver.readinto`
+returns the phone's voice instead of music, at the call's rate, and
+`Receiver.write` sends the board's microphone back.
 """
 
 CONNECTION: int
@@ -19,7 +20,8 @@ CONNECTION: int
 STREAM: int
 """`Receiver.changes` bit: audio started or stopped flowing."""
 FORMAT: int
-"""`Receiver.changes` bit: the stream's sample rate is known or changed."""
+"""`Receiver.changes` bit: the stream's sample rate is known or changed, or a
+call's audio came or went."""
 TRACK: int
 """`Receiver.changes` bit: the track's metadata changed: title, artist,
 album, genre, number, count or duration."""
@@ -75,6 +77,10 @@ class Receiver:
     """Audio is flowing from the sender."""
     playing: bool
     """The sender says it is playing."""
+    call_audio: bool
+    """A call's audio is up: `readinto` returns the phone's voice at
+    `sample_rate` (8000, or 16000 for wideband), and `write` sends the
+    microphone. A phone's video or voice-chat app opens it too."""
     status: str | None
     """The sender's play status: "stopped", "playing", "paused",
     "seeking forward", "seeking back" or "error"."""
@@ -113,6 +119,15 @@ class Receiver:
 
         Returns:
             How many frames came from the stream.
+        """
+    def write(self, buf: bytes | bytearray | memoryview) -> int:
+        """Send microphone audio to the phone during a call: 16-bit mono at
+        `sample_rate`. Up to half a second queues; it goes out once 120 ms
+        has, and silence goes out until then.
+
+        Returns:
+            How many bytes were taken: fewer when the queue is full, 0 with
+            no call audio up.
         """
     def changes(self) -> int:
         """The bits (`CONNECTION`, `TRACK` ...) for what changed since the
@@ -186,7 +201,7 @@ class Receiver:
             mic_gain: 0 to 15.
         """
     def answer(self) -> None:
-        """Answer the incoming call. Its audio stays on the phone."""
+        """Answer the incoming call."""
     def hangup(self) -> None:
         """End the active call, or reject the incoming one."""
     def dial(self, number: str | None = None) -> None:

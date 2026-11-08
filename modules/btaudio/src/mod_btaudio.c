@@ -6,9 +6,9 @@
 // computer pairs with the board and plays; Python reads the decoded audio
 // into any PCM output, everything the sender says about the track (cover art
 // included), its play status and position, and the phone's own battery,
-// signal, carrier and calls; and drives the player and the calls. The work
-// is the btaudio ESP-IDF component in ../esp-idf/btaudio; this file only
-// wraps it.
+// signal, carrier and calls, with the call's audio both ways; and drives the
+// player and the calls. The work is the btaudio ESP-IDF component in
+// ../esp-idf/btaudio; this file only wraps it.
 
 #include <string.h>
 
@@ -182,6 +182,16 @@ static mp_obj_t btaudio_readinto(mp_obj_t self_in, mp_obj_t buf_in) {
     return MP_OBJ_NEW_SMALL_INT(n);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(btaudio_readinto_obj, btaudio_readinto);
+
+// write(buf) -> bytes taken: the microphone, to the phone during a call
+static mp_obj_t btaudio_write(mp_obj_t self_in, mp_obj_t buf_in) {
+    btaudio_check();
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_READ);
+    size_t n = btaudio_write_mic((const int16_t *)buf.buf, buf.len / 2);
+    return MP_OBJ_NEW_SMALL_INT(n * 2);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(btaudio_write_obj, btaudio_write);
 
 static mp_obj_t btaudio_changes_meth(mp_obj_t self_in) {
     return MP_OBJ_NEW_SMALL_INT(btaudio_changes());
@@ -443,7 +453,7 @@ static mp_obj_t btaudio_cover_obj(void) {
     return mp_const_none;
 }
 
-// Properties: connected, streaming, playing, status, sample_rate, volume
+// Properties: connected, streaming, playing, call_audio, status, sample_rate, volume
 // (settable), title, artist, album, genre, track_number, track_count,
 // duration, position, cover, peer, peer_name.
 static void btaudio_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
@@ -451,6 +461,9 @@ static void btaudio_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         btaudio_status_t st;
         btaudio_status(&st);
         switch (attr) {
+            case MP_QSTR_call_audio:
+                dest[0] = mp_obj_new_bool(st.call_audio);
+                return;
             case MP_QSTR_connected:
                 dest[0] = mp_obj_new_bool(st.connected);
                 return;
@@ -518,6 +531,7 @@ static void btaudio_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
 
 static const mp_rom_map_elem_t btaudio_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_readinto), MP_ROM_PTR(&btaudio_readinto_obj) },
+    { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&btaudio_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_changes), MP_ROM_PTR(&btaudio_changes_obj) },
     { MP_ROM_QSTR(MP_QSTR_levels), MP_ROM_PTR(&btaudio_levels_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&btaudio_stats_obj) },

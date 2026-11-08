@@ -31,6 +31,8 @@ void app_main(void) {
     btaudio_dial(NULL);
     btaudio_voice(false);
     btaudio_dtmf('1');
+    int16_t mic[32] = {0};
+    btaudio_write_mic(mic, 32);
     btaudio_set_volume(64);
     btaudio_disconnect();
     btaudio_started();

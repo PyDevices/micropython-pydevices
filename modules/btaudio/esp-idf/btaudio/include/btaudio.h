@@ -4,11 +4,16 @@
 
 // btaudio: receive Bluetooth audio (A2DP sink), talk to the sending phone or
 // computer about what it plays (AVRCP, cover art included), and follow the
-// phone itself (HFP hands-free: battery, signal, carrier and calls). Plain
+// phone itself (HFP hands-free: battery, signal, carrier, and calls with
+// their audio both ways). Plain
 // ESP-IDF, no MicroPython: the binding in ../../src wraps it, and the same
 // component builds on any chip with Bluetooth Classic and either IDF 5.5 or
 // 6.x. Cover art and HFP build only when the project's sdkconfig turns them
 // on (BT_AVRCP_CT_COVER_ART_ENABLED, BT_HFP_CLIENT_ENABLE).
+//
+// During a call, the phone's voice takes the same ring at the call's rate
+// (8 kHz, or 16 kHz for wideband), widened to stereo, and the music is
+// dropped; btaudio_write_mic() sends the microphone back.
 //
 // Audio arrives decoded, as 16-bit stereo PCM, into a ring buffer;
 // btaudio_read() takes it out at the rate of whatever plays it. The two
@@ -33,7 +38,7 @@ extern "C" {
 // Bits returned by btaudio_changes(): what changed since the last call.
 #define BTAUDIO_CHANGED_CONNECTION (1u << 0)
 #define BTAUDIO_CHANGED_STREAM     (1u << 1)
-#define BTAUDIO_CHANGED_FORMAT     (1u << 2)
+#define BTAUDIO_CHANGED_FORMAT     (1u << 2)    // the rate, or a call's audio came or went
 #define BTAUDIO_CHANGED_TRACK      (1u << 3)    // any track metadata
 #define BTAUDIO_CHANGED_PLAYING    (1u << 4)    // play status
 #define BTAUDIO_CHANGED_VOLUME     (1u << 5)
@@ -135,8 +140,9 @@ typedef struct {
     bool ringing;           // the phone sent RING
     bool voice;             // voice recognition is on
     bool in_band_ring;      // the phone sends its ringtone over the link
-    int speaker_gain;       // 0..15, as the phone sets it
+    int speaker_gain;       // 0..15, as the phone sets it; a call plays at this
     int mic_gain;           // 0..15
+    bool call_audio;        // a call's audio is in the ring, at sample_rate
 } btaudio_status_t;
 
 // Start Bluetooth and become discoverable as `name`. `ring_frames` sizes
@@ -201,13 +207,18 @@ esp_err_t btaudio_disconnect(void);
 // HFP: answer or end/reject a call, dial (NULL redials the last number),
 // voice recognition on or off, and a DTMF digit. ESP_ERR_INVALID_STATE
 // without a hands-free link, ESP_ERR_NOT_SUPPORTED in a build without HFP.
-// Call audio isn't carried: a call the phone hands to the board is handed
-// straight back, so it stays on the phone.
 esp_err_t btaudio_answer(void);
 esp_err_t btaudio_hangup(void);
 esp_err_t btaudio_dial(const char *number);
 esp_err_t btaudio_voice(bool on);
 esp_err_t btaudio_dtmf(char digit);
+
+// During a call, queue microphone audio for the phone: 16-bit mono at the
+// status's sample_rate. Returns the frames taken, fewer when the queue
+// (half a second) is full, 0 without a call's audio or in a build without
+// it. It goes out once 120 ms is queued, and silence goes out meanwhile.
+// A call's audio holds 200 ms in the ring, not half of `ring_frames`.
+size_t btaudio_write_mic(const int16_t *pcm, size_t frames);
 
 #ifdef __cplusplus
 }

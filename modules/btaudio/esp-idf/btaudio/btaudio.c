@@ -37,6 +37,15 @@
 #define BTAUDIO_HFP 0
 #endif
 
+// Call audio over HCI, with Bluedroid's own CVSD and mSBC codecs: the PCM
+// callbacks hand over 16-bit mono at 8 or 16 kHz.
+#if BTAUDIO_HFP && CONFIG_BT_HFP_AUDIO_DATA_PATH_HCI && !CONFIG_BT_HFP_USE_EXTERNAL_CODEC
+#include "esp_hf_client_legacy_api.h"
+#define BTAUDIO_CALL_AUDIO 1
+#else
+#define BTAUDIO_CALL_AUDIO 0
+#endif
+
 #if CONFIG_BT_AVRCP_CT_COVER_ART_ENABLED
 #define BTAUDIO_COVER 1
 #else
@@ -55,6 +64,9 @@ static const char *TAG = "btaudio";
 #define COVER_MAX (256 * 1024)      // a thumbnail is a few tens of KB
 #define HANDLE_LEN 7                // AVRCP image handles are 7 digits
 #define AVRCP_UNKNOWN_MS 0xffffffffu
+#define MIC_FRAMES 8192             // the microphone's ring: 0.5 s at 16 kHz
+#define MIC_START_MS 120            // queued before the microphone goes out
+#define CALL_RING_MS 400            // of the ring a call uses: it holds half
 
 typedef struct {
     // The ring: stereo frames, written by the A2DP data callback only and
@@ -64,6 +76,9 @@ typedef struct {
     uint32_t capacity;
     volatile uint32_t write_pos;
     volatile uint32_t read_pos;
+    // How much of the ring is in use: all of it for music, CALL_RING_MS of
+    // it for a call.
+    uint32_t limit;
     // Set by the callbacks, acted on by the reader: start over from empty.
     volatile bool reset;
     // The reader's own state: false while it refills to half before playing.
@@ -113,6 +128,17 @@ typedef struct {
     uint8_t sbc_min_bitpool, sbc_max_bitpool;
     uint16_t delay_ms;
 
+    // Call audio: while a call's audio link is up the phone's voice comes
+    // into the ring above, mono widened, at the call's rate, and A2DP's is
+    // dropped. The microphone goes out of `mic`, written by callers and read
+    // by Bluedroid's task.
+    bool sco;
+    uint32_t a2dp_rate;
+    uint8_t a2dp_channels;
+    int16_t *mic;
+    volatile uint32_t mic_w, mic_r;
+    bool mic_running;
+
     // HFP
     bool hf_connected;
     int service, signal, roaming, phone_battery;
@@ -127,6 +153,8 @@ static bool s_reconnect;
 static esp_timer_handle_t s_poll;
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static void ring_write(const int16_t *in, uint32_t frames, uint8_t channels);
 
 static void mark(uint32_t bits) {
     portENTER_CRITICAL(&s_lock);
@@ -549,6 +577,76 @@ static void call_changed(void) {
     esp_hf_client_query_current_calls();
 }
 
+#if BTAUDIO_CALL_AUDIO
+// The phone's voice: 16-bit mono at the call's rate. Each packet in is also
+// the cue to send one out, so the microphone keeps the phone's pace.
+static void sco_in(const uint8_t *buf, uint32_t len) {
+    ring_write((const int16_t *)buf, len / 2, 1);
+    esp_hf_client_outgoing_data_ready();
+}
+
+// The microphone, as much as Bluedroid asks for. It waits until a little is
+// queued, and sends silence while there's too little, so the phone hears
+// whole stretches rather than every gap in the writer.
+static uint32_t sco_out(uint8_t *buf, uint32_t len) {
+    int16_t *out = (int16_t *)buf;
+    uint32_t want = len / 2;
+    uint32_t r = s.mic_r;
+    uint32_t avail = __atomic_load_n(&s.mic_w, __ATOMIC_ACQUIRE) - r;
+    uint32_t n = 0;
+    if (!s.mic_running && avail >= s.sample_rate * MIC_START_MS / 1000) {
+        s.mic_running = true;
+    }
+    if (s.mic_running) {
+        n = avail < want ? avail : want;
+        for (uint32_t i = 0; i < n; i++) {
+            out[i] = s.mic[(r + i) % MIC_FRAMES];
+        }
+        __atomic_store_n(&s.mic_r, r + n, __ATOMIC_RELEASE);
+        if (n < want) {
+            s.mic_running = false;
+        }
+    }
+    memset(&out[n], 0, (want - n) * 2);
+    return want * 2;
+}
+
+static void call_audio_start(uint32_t rate) {
+    // A conversation can't wait as long as music does: a short stretch of
+    // the ring, enough to ride out a reader that comes late.
+    uint32_t limit = rate * CALL_RING_MS / 1000;
+    if (limit > s.capacity) {
+        limit = s.capacity;
+    }
+    portENTER_CRITICAL(&s_lock);
+    s.sco = true;
+    s.sample_rate = rate;
+    s.channels = 1;
+    s.limit = limit;
+    portEXIT_CRITICAL(&s_lock);
+    __atomic_store_n(&s.mic_r, __atomic_load_n(&s.mic_w, __ATOMIC_ACQUIRE), __ATOMIC_RELEASE);
+    s.mic_running = false;
+    s.reset = true;
+    esp_hf_client_register_data_callback(sco_in, sco_out);
+    mark(BTAUDIO_CHANGED_FORMAT | BTAUDIO_CHANGED_CALL);
+    ESP_LOGI(TAG, "call audio: %u Hz", (unsigned)rate);
+}
+
+static void call_audio_stop(void) {
+    if (!s.sco) {
+        return;
+    }
+    portENTER_CRITICAL(&s_lock);
+    s.sco = false;
+    s.sample_rate = s.a2dp_rate;
+    s.channels = s.a2dp_channels ? s.a2dp_channels : 2;
+    s.limit = s.capacity;
+    portEXIT_CRITICAL(&s_lock);
+    s.reset = true;
+    mark(BTAUDIO_CHANGED_FORMAT | BTAUDIO_CHANGED_CALL);
+}
+#endif
+
 static void hf_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *param) {
     switch (event) {
         case ESP_HF_CLIENT_CONNECTION_STATE_EVT:
@@ -561,16 +659,29 @@ static void hf_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *para
                 esp_hf_client_query_current_calls();
                 mark(BTAUDIO_CHANGED_PHONE);
             } else if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED) {
+                #if BTAUDIO_CALL_AUDIO
+                call_audio_stop();
+                #endif
                 reset_phone();
                 mark(BTAUDIO_CHANGED_PHONE | BTAUDIO_CHANGED_CALL);
             }
             break;
         case ESP_HF_CLIENT_AUDIO_STATE_EVT:
-            // No call audio here: hand the call straight back to the phone.
+            #if BTAUDIO_CALL_AUDIO
+            if (param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED) {
+                call_audio_start(8000);     // CVSD
+            } else if (param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC) {
+                call_audio_start(16000);    // mSBC, wideband
+            } else if (param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_DISCONNECTED) {
+                call_audio_stop();
+            }
+            #else
+            // No call audio in this build: hand the call back to the phone.
             if (param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED
                 || param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC) {
                 esp_hf_client_disconnect_audio(param->audio_stat.remote_bda);
             }
+            #endif
             break;
         case ESP_HF_CLIENT_BVRA_EVT:
             portENTER_CRITICAL(&s_lock);
@@ -774,8 +885,12 @@ static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
             // keep video in step.
             uint32_t delay_ms = (s.capacity / 2) * 1000u / rate;
             portENTER_CRITICAL(&s_lock);
-            s.sample_rate = rate;
-            s.channels = channels;
+            s.a2dp_rate = rate;
+            s.a2dp_channels = channels;
+            if (!s.sco) {
+                s.sample_rate = rate;
+                s.channels = channels;
+            }
             s.sbc_channel_mode = mcc->cie.sbc_info.ch_mode;
             s.sbc_block_length = mcc->cie.sbc_info.block_len;
             s.sbc_subbands = mcc->cie.sbc_info.num_subbands;
@@ -799,14 +914,12 @@ static inline uint16_t mag(int16_t v) {
     return v < 0 ? (uint16_t)(v == INT16_MIN ? 32767 : -v) : (uint16_t)v;
 }
 
-// Decoded PCM, 16-bit, interleaved when stereo. Mono is widened to stereo
-// here, so the ring and every reader see one shape.
-static void a2d_data_cb(const uint8_t *buf, uint32_t len) {
-    const int16_t *in = (const int16_t *)buf;
-    uint8_t channels = s.channels ? s.channels : 2;
-    uint32_t frames = len / (2u * channels);
+// 16-bit PCM, interleaved when stereo, into the ring. Mono is widened to
+// stereo here, so the ring and every reader see one shape.
+static void ring_write(const int16_t *in, uint32_t frames, uint8_t channels) {
     uint32_t wp = s.write_pos;
-    uint32_t space = s.capacity - (wp - s.read_pos);
+    uint32_t used = wp - s.read_pos;
+    uint32_t space = used < s.limit ? s.limit - used : 0;
     uint32_t n = frames < space ? frames : space;
     uint16_t pl = 0, pr = 0;
     for (uint32_t i = 0; i < n; i++) {
@@ -836,6 +949,15 @@ static void a2d_data_cb(const uint8_t *buf, uint32_t len) {
         s.overruns++;
     }
     portEXIT_CRITICAL(&s_lock);
+}
+
+// Decoded A2DP audio. Dropped while a call has the speaker.
+static void a2d_data_cb(const uint8_t *buf, uint32_t len) {
+    if (s.sco) {
+        return;
+    }
+    uint8_t channels = s.channels ? s.channels : 2;
+    ring_write((const int16_t *)buf, len / (2u * channels), channels);
 }
 
 // ---- GAP: pairing with no PIN to type, the sender's name and signal ----
@@ -898,6 +1020,7 @@ esp_err_t btaudio_start(const char *name, size_t ring_frames, bool reconnect) {
     }
     memset(&s, 0, sizeof(s));
     s.capacity = ring_frames;
+    s.limit = ring_frames;
     s.volume = DEFAULT_VOLUME;
     s.channels = 2;
     s.play_status = BTAUDIO_UNKNOWN;
@@ -916,6 +1039,14 @@ esp_err_t btaudio_start(const char *name, size_t ring_frames, bool reconnect) {
     if (s.ring == NULL) {
         return ESP_ERR_NO_MEM;
     }
+    #if BTAUDIO_CALL_AUDIO
+    s.mic = heap_caps_malloc(MIC_FRAMES * sizeof(int16_t), MALLOC_CAP_8BIT);
+    if (s.mic == NULL) {
+        heap_caps_free(s.ring);
+        s.ring = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+    #endif
 
     esp_err_t err = ESP_OK;
     if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE) {
@@ -1010,6 +1141,8 @@ void btaudio_stop(void) {
     heap_caps_free(s.ring);
     s.ring = NULL;
     s.capacity = 0;
+    heap_caps_free(s.mic);
+    s.mic = NULL;
     free(s.cover_build);
     s.cover_build = NULL;
     free(s.cover);
@@ -1035,8 +1168,8 @@ size_t btaudio_read(int16_t *dst, size_t frames) {
     }
     uint32_t rp = s.read_pos;
     uint32_t avail = __atomic_load_n(&s.write_pos, __ATOMIC_ACQUIRE) - rp;
-    uint32_t target = s.capacity / 2;
-    uint32_t slack = s.capacity / 8;
+    uint32_t target = s.limit / 2;
+    uint32_t slack = s.limit / 8;
 
     if (!s.running) {
         if (avail < target) {
@@ -1060,8 +1193,12 @@ size_t btaudio_read(int16_t *dst, size_t frames) {
     size_t from_ring = take <= avail ? take : avail;
 
     portENTER_CRITICAL(&s_lock);
-    int32_t gain = (int32_t)s.volume * s.volume;    // 0..16129, about a dB taper
+    int32_t level = s.volume;
+    if (s.sco && s.speaker_gain >= 0) {
+        level = s.speaker_gain * 127 / 15;  // a call follows the phone's call volume
+    }
     portEXIT_CRITICAL(&s_lock);
+    int32_t gain = level * level;    // 0..16129, about a dB taper
 
     size_t out = 0;
     for (size_t i = 0; i < from_ring && out < frames; i++) {
@@ -1180,6 +1317,7 @@ void btaudio_status(btaudio_status_t *out) {
     out->in_band_ring = s.in_band_ring;
     out->speaker_gain = s.speaker_gain;
     out->mic_gain = s.mic_gain;
+    out->call_audio = s.sco;
     portEXIT_CRITICAL(&s_lock);
 }
 
@@ -1382,3 +1520,26 @@ esp_err_t btaudio_dtmf(char digit) {
     return ESP_ERR_NOT_SUPPORTED;
 }
 #endif
+
+// ---- the microphone, during a call ----
+
+size_t btaudio_write_mic(const int16_t *pcm, size_t frames) {
+    #if BTAUDIO_CALL_AUDIO
+    if (!s_started || !s.sco || s.mic == NULL) {
+        return 0;
+    }
+    uint32_t w = s.mic_w;
+    uint32_t used = w - __atomic_load_n(&s.mic_r, __ATOMIC_ACQUIRE);
+    uint32_t space = MIC_FRAMES - used;
+    size_t n = frames < space ? frames : space;
+    for (size_t i = 0; i < n; i++) {
+        s.mic[(w + i) % MIC_FRAMES] = pcm[i];
+    }
+    __atomic_store_n(&s.mic_w, w + (uint32_t)n, __ATOMIC_RELEASE);
+    return n;
+    #else
+    (void)pcm;
+    (void)frames;
+    return 0;
+    #endif
+}
