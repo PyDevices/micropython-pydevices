@@ -80,10 +80,10 @@ Wi-Fi and Bluetooth share the ESP32's one radio. With Wi-Fi connected, audio
 arrives slower than it plays and in bursts, so the speaker runs dry; turn
 Wi-Fi off while listening, as the examples do.
 
-Classic ESP32 only for now: it's the chip in this family with Bluetooth
-Classic and MicroPython support. The module is opt-in (`--modules btclassic`,
-or `--modules all,btclassic`) because it turns ESP-IDF's Bluedroid on in
-place of NimBLE. ESP-IDF runs one Bluetooth host, so a firmware with
+On ESP32, it's the classic ESP32: the chip in that family with Bluetooth
+Classic and MicroPython support. The Pico W and Pico 2 W are covered below.
+The module is opt-in (`--modules btclassic`, or `--modules all,btclassic`)
+because it turns ESP-IDF's Bluedroid on in place of NimBLE. ESP-IDF runs one Bluetooth host, so a firmware with
 btclassic has no `bluetooth` (BLE) module. A board with PSRAM is the
 comfortable fit: the Bluetooth stack's buffers go there.
 
@@ -92,6 +92,31 @@ Writing a whole `firmware.bin` at 0x1000 rewrites that partition, so every
 device has to pair again (forget the board on the phone first). To update a
 board whose partition table hasn't changed, write only the app,
 `micropython.bin`, at 0x10000: pairings and files stay.
+
+## On the Pico W and Pico 2 W
+
+The rp2 port builds btclassic on BTstack, the Bluetooth host its `bluetooth`
+module already uses, so a Pico firmware keeps BLE alongside Classic. Classic
+adds this much to a firmware, measured against the same board built without
+it:
+
+| Board | Flash | Static RAM |
+|---|---|---|
+| Pico 2 W (`RPI_PICO2_W`) | +140 KB, 1037 KB in all (66% of 1.5 MB) | +41 KB, 106 KB of 512 KB |
+| Pico W (`RPI_PICO_W`) | +144 KB, 1062 KB in all (86% of 1.2 MB) | +41 KB, 108 KB of 256 KB |
+
+The big buffers come from the Python heap when you open a profile, not from
+static RAM, and go back when you close it:
+
+| Opened | Heap |
+|---|---|
+| `AudioSink` or `AudioSource` | 48 KB at 250 ms, 96 KB at 500 ms |
+| `HandsFree` | 32 KB |
+| Serial port (SPP) | 6 KB |
+
+`buffer_ms` defaults to 500 on a board with PSRAM and 250 otherwise. Both
+boards fit any one profile; on a Pico W, a sink and hands-free open together
+leave little heap for anything else.
 
 ## How it's built
 
