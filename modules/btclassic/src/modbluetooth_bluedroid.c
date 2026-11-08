@@ -1372,33 +1372,30 @@ static bool uuid_eq(const esp_bt_uuid_t *e, const mp_obj_bluetooth_uuid_t *u) {
     return e->len == u->type && memcmp(&e->uuid, u->data, u->type) == 0;
 }
 
-#define DB_CHUNK 24
-
-// Walk the attributes Bluedroid found from start to end, a chunk at a
-// time, calling fn on each. Runs on the MicroPython thread.
+// Walk the attributes Bluedroid found from start to end, calling fn on
+// each. Runs on the MicroPython thread.
 typedef void (*db_fn_t)(uint16_t conn, const esp_gattc_db_elem_t *e, void *ctx);
 
 static int db_walk(uint16_t conn, uint16_t start, uint16_t end, db_fn_t fn, void *ctx) {
-    esp_gattc_db_elem_t *db = m_new(esp_gattc_db_elem_t, DB_CHUNK);
-    while (start <= end && start != 0) {
-        uint16_t n = DB_CHUNK;
-        esp_gatt_status_t st = esp_ble_gattc_get_db(b.gattc_if, conn, start, end, db, &n);
-        if (st != ESP_GATT_OK || n == 0) {
-            break;
-        }
-        uint16_t last = start;
-        for (uint16_t i = 0; i < n; i++) {
-            fn(conn, &db[i], ctx);
-            if (db[i].attribute_handle > last) {
-                last = db[i].attribute_handle;
+    // Bluedroid's get_db returns only the services that start inside the
+    // range asked for, so a range that starts mid-service (a descriptor
+    // search after a characteristic) comes back empty. Take the whole cache
+    // and keep the handles in range here.
+    uint16_t count = 0;
+    if (esp_ble_gattc_get_attr_count(b.gattc_if, conn, ESP_GATT_DB_ALL, 1, 0xffff,
+        ESP_GATT_INVALID_HANDLE, &count) != ESP_GATT_OK || count == 0) {
+        return 0;
+    }
+    esp_gattc_db_elem_t *db = m_new(esp_gattc_db_elem_t, count);
+    uint16_t n = count;
+    if (esp_ble_gattc_get_db(b.gattc_if, conn, 1, 0xffff, db, &n) == ESP_GATT_OK) {
+        for (uint16_t i = 0; i < n && i < count; i++) {
+            if (db[i].attribute_handle >= start && db[i].attribute_handle <= end) {
+                fn(conn, &db[i], ctx);
             }
         }
-        if (n < DB_CHUNK || last == 0xffff) {
-            break;
-        }
-        start = last + 1;
     }
-    m_del(esp_gattc_db_elem_t, db, DB_CHUNK);
+    m_del(esp_gattc_db_elem_t, db, count);
     return 0;
 }
 
