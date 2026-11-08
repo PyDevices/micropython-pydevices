@@ -15,8 +15,8 @@
 // Bluedroid's task: a write longer than the value's buffer is refused (set
 // a larger one with gatts_set_buffer).
 //
-// Peripheral and central, the GATT server and client, scanning, and the
-// four address modes are here. Pairing is not yet.
+// Peripheral and central, the GATT server and client, scanning, the four
+// address modes, and pairing and bonding are all here.
 //
 // A connection's handle is Bluedroid's connection ID, which is the same
 // number for the GATT server and the GATT client on one link, so one handle
@@ -114,11 +114,16 @@ static struct {
     uint8_t connecting_type;
     esp_timer_handle_t scan_timer;
     esp_timer_handle_t conn_timer;
+    // Pairing settings, applied whenever BLE starts.
+    bool bonding;
+    bool mitm;
+    bool le_secure;
+    uint8_t io;
     // One prepared (long) write at a time.
     uint16_t prep_handle;
     uint16_t prep_len;
     uint8_t prep[512];
-} b = {.mtu = DEFAULT_MTU, .own_type = BLE_ADDR_TYPE_PUBLIC};
+} b = {.mtu = DEFAULT_MTU, .own_type = BLE_ADDR_TYPE_PUBLIC, .io = ESP_IO_CAP_NONE};
 
 // Bluedroid's own cancel for a pending connection: ESP-IDF's API has none.
 // It posts a message to Bluedroid's task, as the API calls do.
@@ -184,6 +189,27 @@ static conn_t *conn_add(uint16_t conn_id, const uint8_t *bda, uint8_t addr_type)
     }
     return NULL;
 }
+
+#if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
+// The handle for a peer the Security Manager names. A peer on a private
+// address can be named by its identity instead; with one link, it's that.
+static uint16_t conn_of(const uint8_t *bda) {
+    conn_t *c = conn_by_bda(bda);
+    if (!c) {
+        int n = 0;
+        for (int i = 0; i < MAX_CONN; i++) {
+            if (b.conn[i].used) {
+                c = &b.conn[i];
+                n++;
+            }
+        }
+        if (n != 1) {
+            return 0xffff;
+        }
+    }
+    return c->conn_id;
+}
+#endif
 
 static cccd_t *cccd_by_handle(uint16_t handle) {
     for (size_t i = 0; i < b.n_cccd; i++) {
@@ -283,6 +309,32 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) 
                 b.scanning = false;
                 mp_bluetooth_gap_on_scan_complete();
             }
+            break;
+        }
+        #endif
+        #if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
+        case ESP_GAP_BLE_SEC_REQ_EVT:
+            // A central asks us to secure the link: agree, and pairing
+            // follows with our settings.
+            esp_ble_gap_security_rsp(param->ble_security.ble_req.bd_addr, true);
+            break;
+        case ESP_GAP_BLE_PASSKEY_NOTIF_EVT:
+            mp_bluetooth_gap_on_passkey_action(conn_of(param->ble_security.key_notif.bd_addr),
+                MP_BLUETOOTH_PASSKEY_ACTION_DISPLAY, param->ble_security.key_notif.passkey);
+            break;
+        case ESP_GAP_BLE_PASSKEY_REQ_EVT:
+            mp_bluetooth_gap_on_passkey_action(conn_of(param->ble_security.ble_req.bd_addr),
+                MP_BLUETOOTH_PASSKEY_ACTION_INPUT, 0);
+            break;
+        case ESP_GAP_BLE_NC_REQ_EVT:
+            mp_bluetooth_gap_on_passkey_action(conn_of(param->ble_security.key_notif.bd_addr),
+                MP_BLUETOOTH_PASSKEY_ACTION_NUMERIC_COMPARISON, param->ble_security.key_notif.passkey);
+            break;
+        case ESP_GAP_BLE_AUTH_CMPL_EVT: {
+            esp_ble_auth_cmpl_t *a = &param->ble_security.auth_cmpl;
+            bool ok = a->success;
+            mp_bluetooth_gatts_on_encryption_update(conn_of(a->bd_addr), ok,
+                ok && (a->auth_mode & ESP_LE_AUTH_REQ_MITM), ok && (a->auth_mode & ESP_LE_AUTH_BOND), ok ? 16 : 0);
             break;
         }
         #endif
@@ -601,6 +653,10 @@ static void connect_timeout(void *arg) {
 }
 #endif
 
+#if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
+static void security_apply(void);
+#endif
+
 static int timers_make(void) {
     #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
     if (!b.scan_timer) {
@@ -664,6 +720,9 @@ int mp_bluetooth_init(void) {
         esp_ble_gap_set_device_name(b.name);
     }
     b.active = true;
+    #if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
+    security_apply();
+    #endif
     // Back to the public address each time, as upstream does.
     b.addr_mode = MP_BLUETOOTH_ADDRESS_MODE_PUBLIC;
     b.own_type = BLE_ADDR_TYPE_PUBLIC;
@@ -1483,5 +1542,85 @@ int mp_bluetooth_gattc_exchange_mtu(uint16_t conn_handle) {
 }
 
 #endif // MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+
+#if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
+
+// ---- pairing and bonding ----
+//
+// Bluedroid runs the Security Manager and keeps the bonds in NVS itself,
+// so _IRQ_GET_SECRET and _IRQ_SET_SECRET aren't raised: bonds survive a
+// reset without Python storing them.
+
+static void security_apply(void) {
+    if (!b.active) {
+        return;
+    }
+    uint8_t req = (b.bonding ? ESP_LE_AUTH_BOND : 0) | (b.mitm ? ESP_LE_AUTH_REQ_MITM : 0) | (b.le_secure ? ESP_LE_AUTH_REQ_SC_ONLY : 0);
+    uint8_t io = b.io;
+    uint8_t keys = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
+    uint8_t only = b.le_secure ? ESP_BLE_ONLY_ACCEPT_SPECIFIED_AUTH_ENABLE : ESP_BLE_ONLY_ACCEPT_SPECIFIED_AUTH_DISABLE;
+    esp_ble_gap_set_security_param(ESP_BLE_SM_AUTHEN_REQ_MODE, &req, 1);
+    esp_ble_gap_set_security_param(ESP_BLE_SM_IOCAP_MODE, &io, 1);
+    esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY, &keys, 1);
+    esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &keys, 1);
+    esp_ble_gap_set_security_param(ESP_BLE_SM_ONLY_ACCEPT_SPECIFIED_SEC_AUTH, &only, 1);
+}
+
+void mp_bluetooth_set_bonding(bool enabled) {
+    b.bonding = enabled;
+    security_apply();
+}
+
+void mp_bluetooth_set_mitm_protection(bool enabled) {
+    b.mitm = enabled;
+    security_apply();
+}
+
+void mp_bluetooth_set_le_secure(bool enabled) {
+    b.le_secure = enabled;
+    security_apply();
+}
+
+void mp_bluetooth_set_io_capability(uint8_t capability) {
+    // Upstream's numbers are the Security Manager's, as Bluedroid's are.
+    b.io = capability;
+    security_apply();
+}
+
+int mp_bluetooth_gap_pair(uint16_t conn_handle) {
+    if (!b.active) {
+        return MP_ENODEV;
+    }
+    conn_t *c = conn_find(conn_handle);
+    if (!c) {
+        return MP_ENOTCONN;
+    }
+    // As central this starts pairing; as peripheral it asks the central to.
+    esp_ble_sec_act_t act = b.mitm ? ESP_BLE_SEC_ENCRYPT_MITM : ESP_BLE_SEC_ENCRYPT;
+    return esp_ble_set_encryption(c->bda, act) == ESP_OK ? 0 : MP_EIO;
+}
+
+int mp_bluetooth_gap_passkey(uint16_t conn_handle, uint8_t action, mp_int_t passkey) {
+    if (!b.active) {
+        return MP_ENODEV;
+    }
+    conn_t *c = conn_find(conn_handle);
+    if (!c) {
+        return MP_ENOTCONN;
+    }
+    switch (action) {
+        case MP_BLUETOOTH_PASSKEY_ACTION_INPUT:
+            return esp_ble_passkey_reply(c->bda, true, passkey) == ESP_OK ? 0 : MP_EIO;
+        case MP_BLUETOOTH_PASSKEY_ACTION_NUMERIC_COMPARISON:
+            return esp_ble_confirm_reply(c->bda, passkey != 0) == ESP_OK ? 0 : MP_EIO;
+        case MP_BLUETOOTH_PASSKEY_ACTION_DISPLAY:
+            // Nothing to send: the peer types the number we showed.
+            return 0;
+        default:
+            return MP_EINVAL;
+    }
+}
+
+#endif // MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
 
 #endif // MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_BLUEDROID
