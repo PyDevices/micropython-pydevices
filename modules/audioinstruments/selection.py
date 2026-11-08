@@ -16,8 +16,8 @@ instruments. Run it to put the same selection on a board's filesystem:
 
 ``--source`` is the package folder (the one holding ``__init__.py``), by
 default the copy a build assembled under ``deps/``. With ``--mpy-cross``,
-the files come out compiled, and ``--march`` sets the architecture
-(``xtensawin`` for an ESP32 or ESP32-S3, the default).
+the files come out compiled. The package has no native code, so the ``.mpy``
+files suit any board.
 """
 
 import argparse
@@ -51,15 +51,67 @@ def _dotted(root: str, path: str) -> str:
     return rel[: -len(".__init__")] if rel.endswith("__init__") else ("" if rel == "__init__" else rel)
 
 
-def _imports(root: str, path: str) -> set[str]:
-    """Every ``audioinstruments`` submodule *path* imports, anywhere in it."""
+def _lazy_tables(root: str) -> dict[str, str]:
+    """Class name -> submodule, from every package's lazy-import table.
+
+    A package that loads its classes on first use keeps a ``_LAZY`` dict
+    (name -> submodule path) or a ``_REGISTRY`` of (class, stored name,
+    path); code then reaches a class by name, which no import statement shows.
+    """
+    found = {}
+    for folder, _subs, names in os.walk(root):
+        if "__init__.py" not in names:
+            continue
+        path = os.path.join(folder, "__init__.py")
+        pkg = _dotted(root, path)
+        with open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read(), path)
+        for node in tree.body:
+            if not (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)):
+                continue
+            try:
+                value = ast.literal_eval(node.value)
+            except ValueError:
+                continue
+            pairs = []
+            if node.targets[0].id == "_LAZY" and isinstance(value, dict):
+                pairs = list(value.items())
+            elif node.targets[0].id == "_REGISTRY" and isinstance(value, tuple):
+                pairs = [(key, entry[-1]) for entry in value for key in entry[:-1]]
+            for key, sub in pairs:
+                found[key] = (pkg + "." if pkg else "") + sub
+    return found
+
+
+def _imports(root: str, path: str, lazy: dict[str, str]) -> set[str]:
+    """Every ``audioinstruments`` submodule *path* imports, anywhere in it,
+    including a class it reaches by name through a lazy table."""
     here = _dotted(root, path)
     is_pkg = path.endswith("__init__.py")
     pkg = here if is_pkg else here.rpartition(".")[0]
     found = set()
     with open(path, encoding="utf-8") as f:
         tree = ast.parse(f.read(), path)
+    # A module-level table or export list names classes for every instrument
+    # without using one; the named instruments' own modules are seeded instead.
+    listing = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and isinstance(node.value, (ast.Dict, ast.Tuple, ast.List, ast.Set)):
+            listing.update(id(n) for n in ast.walk(node.value))
     for node in ast.walk(tree):
+        word = None
+        if id(node) in listing:
+            pass
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            word = node.value
+        elif isinstance(node, ast.Name):
+            word = node.id
+        elif isinstance(node, ast.Attribute):
+            word = node.attr
+        elif isinstance(node, ast.alias):
+            word = node.name
+        if word in lazy:
+            found.add(lazy[word])
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name == PACKAGE or alias.name.startswith(PACKAGE + "."):
@@ -100,6 +152,7 @@ def files(root: str, names: list[str]) -> list[str]:
     unknown = [n for n in names if n not in every]
     if unknown:
         raise ValueError(f"not instruments of audioinstruments: {', '.join(unknown)} (they are {', '.join(sorted(every))})")
+    lazy = _lazy_tables(root)
     todo = list(ALWAYS)
     for name in names:
         todo += [name, "_rack.instruments." + name, "_rack.modules." + name, "_rack." + name]
@@ -113,7 +166,7 @@ def files(root: str, names: list[str]) -> list[str]:
         # A module's parent packages run first.
         parts = dotted.split(".")
         todo += [".".join(parts[:i]) for i in range(1, len(parts))] + [""]
-        todo += _imports(root, path)
+        todo += _imports(root, path, lazy)
     return sorted(os.path.relpath(p, root) for p in seen.values())
 
 
@@ -157,7 +210,6 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--out", required=True, help="folder to write audioinstruments/ into")
     ap.add_argument("--source", default=DEFAULT_SOURCE, help="the audioinstruments package folder")
     ap.add_argument("--mpy-cross", help="compile each file with this mpy-cross and keep only the .mpy")
-    ap.add_argument("--march", default="xtensawin", help="mpy-cross -march (default xtensawin)")
     args = ap.parse_args(argv)
     root = os.path.abspath(args.source)
     if not os.path.isfile(os.path.join(root, "_names.py")):
@@ -168,7 +220,7 @@ def main(argv: list[str]) -> int:
     for path in written:
         if args.mpy_cross:
             mpy = path[: -len(".py")] + ".mpy"
-            subprocess.run([args.mpy_cross, "-O3", f"-march={args.march}", "-o", mpy, path], check=True)
+            subprocess.run([args.mpy_cross, "-O3", "-o", mpy, path], check=True)
             os.remove(path)
             path = mpy
         total += os.path.getsize(path)
