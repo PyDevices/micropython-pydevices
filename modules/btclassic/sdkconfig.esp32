@@ -1,4 +1,4 @@
-# btaudio: Bluedroid with Classic, A2DP sink and AVRCP, in place of the
+# btclassic: Bluedroid with Classic, A2DP sink, AVRCP and HFP, in place of the
 # NimBLE host MicroPython's BLE module uses. The controller runs BR/EDR only.
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=n

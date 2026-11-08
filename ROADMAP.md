@@ -60,12 +60,17 @@ picotts, speech on the board:
   the P4 WIFI6 DEV-KIT (whose app slot is now 6 MB so it fits); the P4 panels
   aren't built or run yet.
 
-Bluetooth audio:
+Bluetooth Classic:
 
-- **btaudio on the ESP32-S31.** The S31 has Bluetooth Classic too, and
-  btaudio's C already builds for it on ESP-IDF 6.1; the module follows once
+- **btclassic on the ESP32-S31.** The S31 has Bluetooth Classic too, and
+  btclassic's C already builds for it on ESP-IDF 6.1; the module follows once
   MicroPython builds for the chip.
-- **btaudio alongside Wi-Fi.** Today Wi-Fi has to be off while it plays.
+- **btclassic on the Pico W and Pico 2 W,** on the BTstack host MicroPython's
+  rp2 port already carries, behind the same API.
+- **More profiles.** Sending audio (A2DP source), being a remote's target,
+  the phone side of hands-free, serial (SPP), keyboards and gamepads (HID),
+  and the phone's contacts and messages.
+- **btclassic alongside Wi-Fi.** Today Wi-Fi has to be off while it plays.
 
 Every module, the same kit:
 
