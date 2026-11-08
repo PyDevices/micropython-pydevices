@@ -1233,6 +1233,19 @@ def esp32_autosize(log_text, build, port_dir, dest):
         cursor += num(r[4])
     after = rows[idx + 1:]
     moved = (", ".join(f"'{r[0]}'" for r in after) + " moved to follow it. ") if after else ""
+    # A table that names its filesystem gives it a size, and growing the app
+    # pushes that partition past the end of the flash. The filesystem is the
+    # part that can shrink: cut the last data partition to what is left.
+    flash_bytes = int(flash.group(1)) * 1024 * 1024 if flash else 0
+    if after and flash_bytes and cursor > flash_bytes:
+        last = after[-1]
+        if last[1] == "data" and last[2] in ("fat", "littlefs", "spiffs"):
+            room = flash_bytes - num(last[3])
+            if room < 0x10000:
+                die(f"autosize: the app grew to {hex(size)} and leaves no room for '{last[0]}' in {flash.group(1)} MB")
+            last[4] = hex(room)
+            cursor = flash_bytes
+            moved += f"'{last[0]}' cut to {hex(room)} to fit the flash. "
     if any(r[1] == "data" and r[2] in ("fat", "littlefs", "spiffs") for r in after):
         fs = ["# The filesystem's partition moved with them."]
     else:
