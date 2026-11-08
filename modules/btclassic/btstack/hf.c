@@ -283,9 +283,23 @@ static void on_hfp(uint8_t packet_type, uint16_t channel, uint8_t *event, uint16
             hfp_hf_query_operator_selection(acl);
             hfp_hf_activate_calling_line_notification(acl);
             hfp_hf_activate_call_waiting_notification(acl);
+            #ifdef ENABLE_HFP_DECLINE_SCO
+            // Android's audio policy for this headset (AT+ANDROID, Android 14 and
+            // later): don't make it the active device, don't move a call's audio
+            // to it and don't ring in band. Without it, an app that asks for the
+            // headset's audio makes the phone open a virtual call and try the
+            // declined link again several times a second. Other phones answer
+            // ERROR, which changes nothing.
+            if (hfp_hf_send_at_command(acl, "AT+ANDROID=SINKAUDIOPOLICY,2,2,2\r") != ERROR_CODE_SUCCESS) {
+                btc_log("hfp audio policy not sent");
+            }
+            #endif
             changed |= BTC_CHANGED_CONNECTION;
             break;
         }
+        case HFP_SUBEVENT_CUSTOM_AT_MESSAGE_SENT:
+            btc_log("hfp audio policy status 0x%02x", hfp_subevent_custom_at_message_sent_get_status(event));
+            break;
         case HFP_SUBEVENT_SERVICE_LEVEL_CONNECTION_RELEASED:
             btc_log("hfp released");
             acl = HCI_CON_HANDLE_INVALID;
@@ -399,12 +413,21 @@ int btc_hf_start(uint32_t ms, uint8_t channels) {
     btc_ring_init(&ring, ring_buf, MAX_RING_FRAMES, 1);
 
     btc_rfcomm_init_once();
-    static const uint8_t codecs[] = { HFP_CODEC_CVSD, HFP_CODEC_MSBC };
     static const uint16_t indicators[] = { 1, 2 };     // enhanced safety, battery level
-    uint32_t features = (1 << HFP_HFSF_ESCO_S4) | (1 << HFP_HFSF_CLI_PRESENTATION_CAPABILITY)
-        | (1 << HFP_HFSF_HF_INDICATORS) | (1 << HFP_HFSF_CODEC_NEGOTIATION)
-        | (1 << HFP_HFSF_ENHANCED_CALL_STATUS) | (1 << HFP_HFSF_VOICE_RECOGNITION_FUNCTION)
+    uint32_t features = (1 << HFP_HFSF_CLI_PRESENTATION_CAPABILITY)
+        | (1 << HFP_HFSF_HF_INDICATORS) | (1 << HFP_HFSF_ENHANCED_CALL_STATUS)
+        | (1 << HFP_HFSF_VOICE_RECOGNITION_FUNCTION)
         | (1 << HFP_HFSF_REMOTE_VOLUME_CONTROL) | (1 << HFP_HFSF_THREE_WAY_CALLING);
+    #ifdef ENABLE_HFP_DECLINE_SCO
+    // No call audio: offer no eSCO settings, no codec negotiation and no
+    // wideband speech, so a phone has nothing more to try than plain CVSD.
+    static const uint8_t codecs[] = { HFP_CODEC_CVSD };
+    const int wideband = 0;
+    #else
+    static const uint8_t codecs[] = { HFP_CODEC_CVSD, HFP_CODEC_MSBC };
+    const int wideband = 1;
+    features |= (1 << HFP_HFSF_ESCO_S4) | (1 << HFP_HFSF_CODEC_NEGOTIATION);
+    #endif
     // Every start: it registers the RFCOMM service stop took away, and its
     // HCI handler only once. Never hfp_hf_deinit(): it zeroes that handler's
     // registration without taking it off HCI's list, and the next HCI event
@@ -416,7 +439,7 @@ int btc_hf_start(uint32_t ms, uint8_t channels) {
     hfp_hf_register_packet_handler(on_hfp);
     memset(sdp_hf, 0, sizeof(sdp_hf));
     hfp_hf_create_sdp_record(sdp_hf, sdp_create_service_record_handle(), HF_RFCOMM_CHANNEL,
-        "Hands-Free", features & 0x1f, 1);
+        "Hands-Free", features & 0x1f, wideband);
     sdp_register_service(sdp_hf);
 
     hci_cb.callback = on_hci;
