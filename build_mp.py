@@ -694,7 +694,36 @@ def record(dirs, library=None):
             changes = hashlib.sha1(diff).hexdigest()[:12]
         rows[name] = {"path": str(real), "revision": rev, "commit": commit, "dirty": dirty,
                                 "changes": changes}
+        off = off_pin(name, real, commit)
+        if off:
+            rows[name]["lock"] = off
     return rows
+
+
+def off_pin(name, real, commit):
+    """How a module checkout stands against its modules.lock pin when it isn't
+    at it (and a line saying so), else None. In the workspace a sibling
+    checkout wins over the pin, so one left behind builds old code into an
+    image named for the current commit; this line is how you find out."""
+    pins = {row[0]: row[2] for row in read_lock("modules.lock") if len(row) > 2}
+    pin = pins.get(name)
+    if not pin or not commit or commit == pin:
+        return None
+
+    def git_ok(*a):
+        return subprocess.run(["git", "-C", str(real), *a], capture_output=True).returncode == 0
+
+    if not git_ok("cat-file", "-e", pin + "^{commit}"):
+        where = "not at (the pin isn't fetched here)"
+    elif git_ok("merge-base", "--is-ancestor", pin, commit):
+        where = "ahead of"
+    elif git_ok("merge-base", "--is-ancestor", commit, pin):
+        where = "behind"
+    else:
+        where = "beside"
+    say(f"{name}: building {real} at {commit[:12]}, {where} modules.lock's {pin[:12]}"
+        + ("; git -C " + str(real) + " pull to catch up" if where == "behind" else ""))
+    return f"{where} {pin[:12]}"
 
 
 def modules_moved(had, now):
