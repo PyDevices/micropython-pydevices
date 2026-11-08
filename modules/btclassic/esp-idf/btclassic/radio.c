@@ -111,6 +111,7 @@ static void apply_pin(void) {
 static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
     switch (event) {
         case ESP_BT_GAP_AUTH_CMPL_EVT:
+            btc_sink_on_auth(param->auth_cmpl.bda);
             if (param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS) {
                 ESP_LOGI(TAG, "paired with %s", param->auth_cmpl.device_name);
                 mark(BTC_CHANGED_PAIRED);

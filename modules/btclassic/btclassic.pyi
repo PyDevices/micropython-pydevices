@@ -164,8 +164,9 @@ class AudioSink:
         reconnect: call the last sender back, if it is still paired, as a
             speaker does: when the sink starts, and whenever the link drops
             (the sender went out of range, or its Bluetooth went off),
-            every few seconds for about a minute. `disconnect` doesn't
-            call back.
+            every few seconds for about a minute. It stops early when the
+            sender has forgotten the board, so the sender can pair again.
+            `disconnect` doesn't call back.
     """
 
     connected: bool

@@ -156,6 +156,22 @@ static void retry(void *arg) {
     reconnect_last_sender();
 }
 
+// A call back to a sender that still has the board's key reconnects without
+// pairing. One that pairs instead has forgotten the board: it takes the new
+// key and then refuses the audio link, so calling again only gets in the way
+// of pairing it afresh.
+void btc_sink_on_auth(const uint8_t *bda) {
+    btc_addr_t last;
+    if (s_calling_back && !s.connected && load_last_sender(last)
+        && memcmp(last, bda, sizeof(last)) == 0) {
+        s_calling_back = false;
+        if (s_retry) {
+            esp_timer_stop(s_retry);
+        }
+        ESP_LOGI(TAG, "the last sender has forgotten the board: not calling it back");
+    }
+}
+
 // ---- A2DP: the link, the stream's format, and the audio ----
 
 static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {

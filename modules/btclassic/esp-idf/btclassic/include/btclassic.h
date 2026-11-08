@@ -147,7 +147,8 @@ typedef struct {
 // Start the sink (the radio must be on). `ring_frames` sizes the buffer in
 // stereo frames. With `reconnect`, call back the last sender if it is still
 // paired, at start and whenever its link drops (not by
-// btc_sink_disconnect()), every few seconds for about a minute.
+// btc_sink_disconnect()), every few seconds for about a minute, or until
+// a call turns out the sender has forgotten the board.
 // BTC_ERR_STATE if already started or the radio is off.
 int btc_sink_start(size_t ring_frames, bool reconnect);
 void btc_sink_stop(void);

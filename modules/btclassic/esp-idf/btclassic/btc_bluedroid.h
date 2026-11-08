@@ -111,6 +111,7 @@ void btc_sink_mark(uint32_t bits);
 // The GAP callback hands these on to the sink.
 void btc_sink_on_remote_name(const uint8_t *bda, const char *name);
 void btc_sink_on_rssi_delta(const uint8_t *bda, int delta);
+void btc_sink_on_auth(const uint8_t *bda);
 
 // avrcp_ct.c: AVRCP controller and target, started before A2DP.
 void btc_avrcp_start(void);
