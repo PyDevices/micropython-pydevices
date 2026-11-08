@@ -117,16 +117,25 @@ void app_main(void) {
     btc_spp_stop();
 
     static const uint8_t mouse[] = {0x05, 0x01, 0x09, 0x02, 0xa1, 0x01, 0xc0};
+    btc_hid_device_set_ids(0x1209, 0x0001, 0x0100);
     btc_hid_device_start(mouse, sizeof(mouse), 0x80, "Mouse", true);
     btc_hid_device_connect(NULL);
     btc_hid_device_send(bytes, 4);
     btc_hid_device_output(bytes, sizeof(bytes));
+    btc_hid_device_set_feature(bytes, 2);
+    btc_hid_device_feature(0, bytes, sizeof(bytes));
     btc_hid_stop();
     btc_hid_host_start();
     btc_hid_host_connect(NULL, true);
     btc_hid_host_read(bytes, sizeof(bytes));
     btc_hid_host_send(1, bytes, 1);
     btc_hid_host_descriptor(bytes, sizeof(bytes));
+    uint16_t vendor, product, version;
+    btc_hid_host_ids(&vendor, &product, &version);
+    btc_hid_host_get_report(BTC_HID_FEATURE, 0);
+    btc_hid_host_got_report(bytes, sizeof(bytes));
+    btc_hid_host_set_report(BTC_HID_FEATURE, bytes, 1);
+    btc_hid_host_set_done();
     btc_hid_status_t hid;
     btc_hid_status(&hid);
     btc_hid_changes();
