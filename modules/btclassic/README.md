@@ -118,6 +118,12 @@ static RAM, and go back when you close it:
 boards fit any one profile; on a Pico W, a sink and hands-free open together
 leave little heap for anything else.
 
+`HandsFree` on a Pico follows calls, dials, answers and hangs up, but the
+call's audio stays on the phone and `HandsFree.audio` stays False. The
+CYW43439's Bluetooth firmware never completes the audio link a call needs
+([raspberrypi/pico-sdk#1461](https://github.com/raspberrypi/pico-sdk/issues/1461)),
+and the phone then drops the board altogether, so the board declines it.
+
 ## How it's built
 
 [`esp-idf/btclassic`](esp-idf/btclassic) is the C that does the work, with

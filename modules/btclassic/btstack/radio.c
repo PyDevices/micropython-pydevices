@@ -502,6 +502,15 @@ static void sync_host(void) {
     }
 }
 
+#ifdef ENABLE_HFP_DECLINE_SCO
+// Takes ACL links only: SCO and eSCO requests are declined, so a call's audio
+// stays on the phone and the link to it holds.
+static int acl_only(bd_addr_t addr, hci_link_type_t link_type) {
+    (void)addr;
+    return link_type == HCI_LINK_TYPE_ACL;
+}
+#endif
+
 int btc_radio_start(void) {
     sync_host();
     if (active) {
@@ -517,6 +526,9 @@ int btc_radio_start(void) {
     hci_set_link_key_db(&key_db);
     hci_cb.callback = &hci_handler;
     hci_add_event_handler(&hci_cb);
+    #ifdef ENABLE_HFP_DECLINE_SCO
+    gap_register_classic_connection_filter(acl_only);
+    #endif
 
     gap_set_local_name(radio_name);
     gap_set_class_of_device(btc_radio_class());

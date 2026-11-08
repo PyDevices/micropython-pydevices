@@ -29,6 +29,9 @@
 #define ENABLE_L2CAP_ENHANCED_RETRANSMISSION_MODE
 #define ENABLE_GOEP_L2CAP
 #define ENABLE_HFP_WIDE_BAND_SPEECH
+// The CYW43439 firmware never completes a SCO link and the phone's link
+// drops (raspberrypi/pico-sdk#1461): decline call audio instead.
+#define ENABLE_HFP_DECLINE_SCO
 #define ENABLE_AVRCP_COVER_ART
 
 // Buffers. An A2DP media packet from a phone is up to about 1 KB.
