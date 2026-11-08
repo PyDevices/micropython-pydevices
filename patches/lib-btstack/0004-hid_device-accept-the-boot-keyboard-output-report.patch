@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 00:00:00 -0500
+Subject: [PATCH] hid_device: accept the boot keyboard's one-byte output report
+
+In the boot protocol a keyboard's output report is one byte, its LEDs, but
+the size check asked every keyboard report for at least eight bytes, so a
+host's Caps Lock or Num Lock in boot protocol was dropped on the interrupt
+channel and refused on SET_REPORT. Input reports still need eight. Upstream
+master has the same check.
+
+diff --git a/src/classic/hid_device.c b/src/classic/hid_device.c
+--- a/src/classic/hid_device.c
++++ b/src/classic/hid_device.c
+@@ -343,7 +343,8 @@
+     if (hid_device_in_boot_protocol_mode(cid)){
+         switch (report_id){
+             case HID_BOOT_MODE_KEYBOARD_ID:
+-                if (report_size < 8) return 0;
++                // the boot keyboard's output report is one byte, its LEDs
++                if (report_size < ((report_type == HID_REPORT_TYPE_OUTPUT) ? 1 : 8)) return 0;
+                 break;
+             case HID_BOOT_MODE_MOUSE_ID:
+                 if (report_size < 1) return 0;
+-- 
+2.43.0
