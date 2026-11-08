@@ -125,8 +125,10 @@ Wi-Fi off while listening, as the examples do.
 On ESP32, it's the classic ESP32: the chip in that family with Bluetooth
 Classic and MicroPython support. The Pico W and Pico 2 W are covered below.
 The module is opt-in (`--modules btclassic`, or `--modules all,btclassic`)
-because it turns ESP-IDF's Bluedroid on in place of NimBLE. ESP-IDF runs one Bluetooth host, so a firmware with
-btclassic has no `bluetooth` (BLE) module. A board with PSRAM is the
+because it turns ESP-IDF's Bluedroid on in place of NimBLE. ESP-IDF runs one
+Bluetooth host, so MicroPython's `bluetooth` (BLE) module runs on Bluedroid
+too, beside Classic in the same firmware, with a few differences
+([BLE on Bluedroid](#ble-on-bluedroid)). A board with PSRAM is the
 comfortable fit: the Bluetooth stack's buffers go there.
 
 Pairings live in the board's NVS partition, and the last sender with them.
@@ -183,8 +185,23 @@ the two profiles audiosamples when audiodsp is in the build.
 ordinary user C module, so a stock MicroPython esp32 build takes it with
 `USER_C_MODULES`. Two settings go with it: [`sdkconfig.esp32`](sdkconfig.esp32)
 in the board's `SDKCONFIG_DEFAULTS` turns Bluedroid, A2DP, AVRCP cover art, HID and
-HFP on, and `micropython.cmake` turns the `bluetooth` module off itself.
-`build_mp.py` does the first for you.
+HFP on, and `micropython.cmake` puts the `bluetooth` module on Bluedroid
+([`src/modbluetooth_bluedroid.c`](src/modbluetooth_bluedroid.c)), with two
+small MicroPython patches in [`patches/`](patches). `build_mp.py` does the
+first for you.
+
+## BLE on Bluedroid
+
+`import bluetooth` works as upstream documents it: advertising, scanning,
+both roles, the GATT server and client, and pairing. Where it differs:
+
+- `_IRQ_GATTS_READ_REQUEST` can't refuse a read. Events reach Python through
+  the scheduler, never on the Bluetooth task, which also decodes audio.
+- Bonds live in NVS, kept by Bluedroid, so `_IRQ_GET_SECRET` and
+  `_IRQ_SET_SECRET` never fire.
+- The client hears notifications from characteristics it discovered (up to
+  16 per peer), or whose CCCD it wrote.
+- The device name is one name, shared with Classic.
 
 ## Sending audio
 
