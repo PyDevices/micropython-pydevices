@@ -541,6 +541,28 @@ static mp_obj_t sink_cover(void) {
     return mp_const_none;
 }
 
+// cover_into(buf) -> bytes: the cover copied into a buffer the program keeps,
+// so a new cover makes no garbage.
+static mp_obj_t sink_cover_into(mp_obj_t self_in, mp_obj_t buf_in) {
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(buf_in, &buf, MP_BUFFER_WRITE);
+    for (int tries = 0; tries < 3; tries++) {
+        size_t size = btc_sink_cover_size();
+        if (size == 0) {
+            return MP_OBJ_NEW_SMALL_INT(0);
+        }
+        if (size > buf.len) {
+            mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("the cover is %u bytes"), (unsigned)size);
+        }
+        size_t n = btc_sink_cover((uint8_t *)buf.buf, buf.len);
+        if (n) {
+            return MP_OBJ_NEW_SMALL_INT(n);
+        }
+    }
+    return MP_OBJ_NEW_SMALL_INT(0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sink_cover_into_obj, sink_cover_into);
+
 static void sink_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     if (dest[0] == MP_OBJ_NULL) {
         btc_sink_status_t st;
@@ -591,6 +613,9 @@ static void sink_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             case MP_QSTR_cover:
                 dest[0] = sink_cover();
                 return;
+            case MP_QSTR_cover_size:
+                dest[0] = MP_OBJ_NEW_SMALL_INT(btc_sink_cover_size());
+                return;
             case MP_QSTR_peer:
                 dest[0] = addr_obj(st.connected, st.peer);
                 return;
@@ -626,6 +651,7 @@ static const mp_rom_map_elem_t sink_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_setting), MP_ROM_PTR(&sink_setting_obj) },
     { MP_ROM_QSTR(MP_QSTR_refresh), MP_ROM_PTR(&sink_refresh_obj) },
     { MP_ROM_QSTR(MP_QSTR_link), MP_ROM_PTR(&sink_link_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cover_into), MP_ROM_PTR(&sink_cover_into_obj) },
     { MP_ROM_QSTR(MP_QSTR_connect), MP_ROM_PTR(&sink_connect_obj) },
     { MP_ROM_QSTR(MP_QSTR_disconnect), MP_ROM_PTR(&sink_disconnect_obj) },
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&sink_deinit_obj) },

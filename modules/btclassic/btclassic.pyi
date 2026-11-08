@@ -198,6 +198,8 @@ class AudioSink:
     """The track's cover art as a JPEG, 200 by 200 pixels, or None while it
     is on its way or when the sender has none. Each read copies the bytes,
     so read it once after each `COVER` change."""
+    cover_size: int
+    """The cover's length in bytes, 0 with none."""
     peer: bytes | None
     """The sender's address, or None with none connected."""
     peer_name: str
@@ -219,6 +221,16 @@ class AudioSink:
 
         Raises:
             ValueError: `buf` doesn't hold whole frames.
+        """
+    def cover_into(self, buf: bytearray | memoryview) -> int:
+        """Copy the cover's JPEG into `buf`, a buffer you keep, so each new
+        cover makes no garbage. Thumbnails are a few tens of KB.
+
+        Returns:
+            Its length in bytes, or 0 with no cover.
+
+        Raises:
+            ValueError: `buf` is smaller than the cover (`cover_size`).
         """
     def changes(self) -> int:
         """The bits (`CONNECTION`, `TRACK` ...) for what changed since the
