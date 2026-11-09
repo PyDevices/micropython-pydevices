@@ -648,9 +648,17 @@ static mp_obj_t pb_connect(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(pb_connect_obj, 1, pb_connect);
 
+// Returns once the session is down, so a connect() straight after starts a
+// new one rather than finding the old one still closing.
 static mp_obj_t pb_disconnect(mp_obj_t self_in) {
     pb_check();
-    return ph_done(btc_pb_disconnect());
+    ph_done(btc_pb_disconnect());
+    mp_uint_t start = mp_hal_ticks_ms();
+    btc_pb_status_t st;
+    for (btc_pb_status(&st); st.connected && mp_hal_ticks_ms() - start < 3000; btc_pb_status(&st)) {
+        mp_event_wait_ms(10);
+    }
+    return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(pb_disconnect_obj, pb_disconnect);
 
