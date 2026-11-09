@@ -1,0 +1,9 @@
+# Ai-Thinker ESP32-Audio-Kit, 4 MB flash. A 3.8 MB app slot, the largest that
+# leaves a 128 KB filesystem: Bluetooth Classic with every profile, LVGL, the
+# audio stack and the frozen app libraries take most of the chip. The kit's
+# own files (its app, board config and drivers) are about 20 KB.
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x6000,
+phy_init, data, phy,     0xf000,   0x1000,
+factory,  app,  factory, 0x10000,  0x3D0000,
+vfs,      data, fat,     0x3E0000, 0x20000,
