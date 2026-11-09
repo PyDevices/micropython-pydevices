@@ -8,7 +8,7 @@ BTCLASSIC_MOD_DIR := $(USERMOD_DIR)
 SRC_USERMOD_C += $(BTCLASSIC_MOD_DIR)/src/mod_btclassic.c
 SRC_USERMOD_C += $(BTCLASSIC_MOD_DIR)/esp-idf/btclassic/ring.c
 SRC_USERMOD_C += $(BTCLASSIC_MOD_DIR)/host/btclassic_host.c
-CFLAGS_USERMOD += -I$(BTCLASSIC_MOD_DIR)/esp-idf/btclassic/include -I$(BTCLASSIC_MOD_DIR)/esp-idf/btclassic
+CFLAGS_USERMOD += -I$(BTCLASSIC_MOD_DIR)/esp-idf/btclassic/include -I$(BTCLASSIC_MOD_DIR)/esp-idf/btclassic -DBTC_HOST=1
 
 # With audiodsp in the build, AudioSink and HandsFree are also sources the
 # audio pump pulls, as on a board.
