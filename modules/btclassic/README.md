@@ -419,7 +419,9 @@ run. `packet_types` limits the packets the link may use, so a link in a noisy
 band can keep to short, error-corrected ones, and `poll_ms` sets the longest
 the master waits before sending to the slave. `tune` returns what the
 controller reports in force. `config(min_key_size=16)` makes the board refuse
-a link that would encrypt with a shorter key. These are ESP32 only.
+a link that would encrypt with a shorter key. `tune` works on the ESP32 and
+the Pico W; `min_key_size` is ESP32 only, because the Pico W's controller
+refuses the command.
 
 ```python
 sink = btclassic.AudioSink(bt)
@@ -510,7 +512,7 @@ feed = btclassic.Service(bt, FEED, "Sensor feed", channel=port.channel)
 ```
 
 The same works for an `L2CAP` channel with `psm=`. `feed.deinit()` removes
-the record, and so does turning the radio off. ESP32 only.
+the record, and so does turning the radio off.
 `examples/btclassic_service.py` is the whole program.
 
 While an `AudioSink` has a sender connected, the board can't be called, on

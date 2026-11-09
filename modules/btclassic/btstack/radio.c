@@ -620,9 +620,15 @@ static void apply_eir(void) {
     gap_set_extended_inquiry_response(eir_data);
 }
 
-
-static uint16_t ms_to_slots(uint32_t ms);
+// Link tuning and the program's own SDP records, below.
+static hci_con_handle_t tune_handle;
+static int tune_state;
+static uint32_t tune_value;
+static uint32_t pkt_from_hci(uint16_t hci);
+static void send_tune(void);
 static hci_connection_t *link_for(const uint8_t *addr);
+static void services_clear(bool unregister);
+static uint16_t ms_to_slots(uint32_t ms);
 
 static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
     (void)channel;
@@ -633,6 +639,7 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
     send_inquiry_mode();
     send_features();
     send_subrate();
+    send_tune();
     send_channels();
     bd_addr_t addr;
     switch (hci_event_packet_get_type(packet)) {
@@ -646,6 +653,18 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
             btc_log("acl %s status %u handle %u", bd_addr_to_str(addr),
                 hci_event_connection_complete_get_status(packet),
                 hci_event_connection_complete_get_connection_handle(packet));
+            break;
+        case HCI_EVENT_QOS_SETUP_COMPLETE:
+            if (tune_state == 0 && little_endian_read_16(packet, 3) == tune_handle) {
+                tune_value = (little_endian_read_32(packet, 15) + 500) / 1000;
+                tune_state = packet[2] == ERROR_CODE_SUCCESS ? 1 : BTC_ERR_FAIL;
+            }
+            break;
+        case HCI_EVENT_CONNECTION_PACKET_TYPE_CHANGED:
+            if (tune_state == 0 && little_endian_read_16(packet, 3) == tune_handle) {
+                tune_value = pkt_from_hci(little_endian_read_16(packet, 5));
+                tune_state = packet[2] == ERROR_CODE_SUCCESS ? 1 : BTC_ERR_FAIL;
+            }
             break;
         case HCI_EVENT_COMMAND_COMPLETE:
             if (hci_event_command_complete_get_command_opcode(packet) == hci_sniff_subrating.opcode
@@ -682,6 +701,8 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
                     sniff_state = BTC_ERR_FAIL;
                 } else if (subrate_state == 0 && op == hci_sniff_subrating.opcode) {
                     subrate_state = BTC_ERR_FAIL;
+                } else if (tune_state == 0 && (op == hci_qos_setup.opcode || op == hci_change_connection_packet_type.opcode)) {
+                    tune_state = BTC_ERR_FAIL;
                 }
             }
             break;
@@ -781,6 +802,7 @@ static void sync_host(void) {
         btc_spp_radio_lost();
         btc_l2cap_radio_lost();
         btc_hf_radio_lost();
+        services_clear(false);
         btc_ag_radio_lost();
         btc_sink_radio_lost();
         btc_source_radio_lost();
@@ -879,6 +901,7 @@ void btc_radio_stop(void) {
     gap_discoverable_control(0);
     gap_connectable_control(0);
     hci_remove_event_handler(&hci_cb);
+    services_clear(true);
     sdp_deinit();
     if (rfcomm_up) {
         rfcomm_deinit();
@@ -1232,28 +1255,207 @@ int btc_radio_rssi(int *delta) {
     return rssi_state;
 }
 
-// SDP records of the program's own are Bluedroid's for now too.
+// ---- SDP records of the program's own ----
+
+#define SERVICES_MAX 4
+
+static struct {
+    bool used;
+    uint32_t handle;
+    uint8_t record[160];        // the SDP server reads it from here
+} svc[SERVICES_MAX];
+
 int btc_service_add(const btc_uuid_t *uuid, const char *name, int channel, int psm) {
-    (void)uuid;
-    (void)name;
-    (void)channel;
-    (void)psm;
-    return BTC_ERR_UNSUPPORTED;
+    if (!btc_radio_active()) {
+        return BTC_ERR_STATE;
+    }
+    size_t name_len = strlen(name);
+    if (name_len == 0 || name_len > BTC_SERVICE_NAME_MAX || (channel < 0 && psm < 0) || channel > 30
+        || psm > 0xffff || (uuid->len != 2 && uuid->len != 4 && uuid->len != 16)) {
+        return BTC_ERR_ARG;
+    }
+    int slot = -1;
+    for (int i = 0; i < SERVICES_MAX; i++) {
+        if (!svc[i].used) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        return BTC_ERR_NOMEM;
+    }
+    uint8_t *rec = svc[slot].record;
+    uint32_t handle = sdp_create_service_record_handle();
+    memset(rec, 0, sizeof(svc[slot].record));
+    de_create_sequence(rec);
+    de_add_number(rec, DE_UINT, DE_SIZE_16, BLUETOOTH_ATTRIBUTE_SERVICE_RECORD_HANDLE);
+    de_add_number(rec, DE_UINT, DE_SIZE_32, handle);
+    de_add_number(rec, DE_UINT, DE_SIZE_16, BLUETOOTH_ATTRIBUTE_SERVICE_CLASS_ID_LIST);
+    uint8_t *attr = de_push_sequence(rec);
+    if (uuid->len == 16) {
+        de_add_uuid128(attr, (uint8_t *)uuid->uuid);
+    } else if (uuid->len == 4) {
+        de_add_number(attr, DE_UUID, DE_SIZE_32, big_endian_read_32(uuid->uuid, 0));
+    } else {
+        de_add_number(attr, DE_UUID, DE_SIZE_16, big_endian_read_16(uuid->uuid, 0));
+    }
+    de_pop_sequence(rec, attr);
+    de_add_number(rec, DE_UINT, DE_SIZE_16, BLUETOOTH_ATTRIBUTE_PROTOCOL_DESCRIPTOR_LIST);
+    attr = de_push_sequence(rec);
+    uint8_t *l2cap = de_push_sequence(attr);
+    de_add_number(l2cap, DE_UUID, DE_SIZE_16, BLUETOOTH_PROTOCOL_L2CAP);
+    de_pop_sequence(attr, l2cap);
+    if (channel >= 0) {
+        uint8_t *rfcomm = de_push_sequence(attr);
+        de_add_number(rfcomm, DE_UUID, DE_SIZE_16, BLUETOOTH_PROTOCOL_RFCOMM);
+        de_add_number(rfcomm, DE_UINT, DE_SIZE_8, channel);
+        de_pop_sequence(attr, rfcomm);
+    }
+    de_pop_sequence(rec, attr);
+    de_add_number(rec, DE_UINT, DE_SIZE_16, BLUETOOTH_ATTRIBUTE_BROWSE_GROUP_LIST);
+    attr = de_push_sequence(rec);
+    de_add_number(attr, DE_UUID, DE_SIZE_16, BLUETOOTH_ATTRIBUTE_PUBLIC_BROWSE_ROOT);
+    de_pop_sequence(rec, attr);
+    de_add_number(rec, DE_UINT, DE_SIZE_16, 0x0100);        // ServiceName
+    de_add_data(rec, DE_STRING, (uint16_t)name_len, (uint8_t *)name);
+    if (psm >= 0) {
+        // Where a computer looks for an L2CAP service's PSM: "GOEP L2CAP PSM".
+        de_add_number(rec, DE_UINT, DE_SIZE_16, 0x0200);
+        de_add_number(rec, DE_UINT, DE_SIZE_16, psm);
+    }
+    if (sdp_register_service(rec) != ERROR_CODE_SUCCESS) {
+        return BTC_ERR_FAIL;
+    }
+    svc[slot].used = true;
+    svc[slot].handle = handle;
+    return slot;
+}
+
+static void services_clear(bool unregister) {
+    for (int i = 0; i < SERVICES_MAX; i++) {
+        if (svc[i].used && unregister) {
+            sdp_unregister_service(svc[i].handle);
+        }
+        svc[i].used = false;
+    }
 }
 
 bool btc_service_active(int slot) {
-    (void)slot;
-    return false;
+    return slot >= 0 && slot < SERVICES_MAX && svc[slot].used;
 }
 
 void btc_service_remove(int slot) {
-    (void)slot;
+    if (btc_service_active(slot)) {
+        if (btc_radio_active()) {
+            sdp_unregister_service(svc[slot].handle);
+        }
+        svc[slot].used = false;
+    }
 }
 
-// Link tuning is Bluedroid's for now: BTstack has the HCI commands but
-// nothing here has run them on a CYW43439.
+// ---- link tuning: poll interval, packet types, minimum key size ----
+
+static const struct {
+    uint16_t hci;
+    uint32_t bit;
+    bool forbids;
+} pkt_map[] = {
+    {0x0008, BTC_PKT_DM1, false},  {0x0010, BTC_PKT_DH1, false},
+    {0x0400, BTC_PKT_DM3, false},  {0x0800, BTC_PKT_DH3, false},
+    {0x4000, BTC_PKT_DM5, false},  {0x8000, BTC_PKT_DH5, false},
+    {0x0002, BTC_PKT_2DH1, true},  {0x0004, BTC_PKT_3DH1, true},
+    {0x0100, BTC_PKT_2DH3, true},  {0x0200, BTC_PKT_3DH3, true},
+    {0x1000, BTC_PKT_2DH5, true},  {0x2000, BTC_PKT_3DH5, true},
+};
+
+static uint16_t pkt_to_hci(uint32_t types) {
+    uint16_t hci = 0;
+    for (size_t i = 0; i < sizeof(pkt_map) / sizeof(pkt_map[0]); i++) {
+        bool allowed = (types & pkt_map[i].bit) || pkt_map[i].bit == BTC_PKT_DM1;
+        if (allowed != pkt_map[i].forbids) {
+            hci |= pkt_map[i].hci;
+        }
+    }
+    return hci;
+}
+
+static uint32_t pkt_from_hci(uint16_t hci) {
+    uint32_t types = 0;
+    for (size_t i = 0; i < sizeof(pkt_map) / sizeof(pkt_map[0]); i++) {
+        if (((hci & pkt_map[i].hci) != 0) != pkt_map[i].forbids) {
+            types |= pkt_map[i].bit;
+        }
+    }
+    return types;
+}
+
+static hci_con_handle_t tune_handle = HCI_CON_HANDLE_INVALID;
+static int tune_state = BTC_ERR_STATE;      // 0 waiting, 1 answered, BTC_ERR_*
+static uint32_t tune_value;
+static bool tune_pkt_pending;
+static uint16_t tune_pkt_hci;
+
+static void send_tune(void) {
+    if (tune_pkt_pending && hci_can_send_command_packet_now()) {
+        tune_pkt_pending = false;
+        hci_send_cmd(&hci_change_connection_packet_type, tune_handle, tune_pkt_hci);
+    }
+}
+
+static int tune_start(const uint8_t *addr) {
+    if (!btc_radio_active()) {
+        return BTC_ERR_STATE;
+    }
+    hci_connection_t *c = link_for(addr);
+    if (c == NULL) {
+        return BTC_ERR_STATE;
+    }
+    tune_handle = c->con_handle;
+    tune_state = 0;
+    return BTC_OK;
+}
+
+int btc_radio_set_poll(const uint8_t *addr, uint32_t ms) {
+    if (ms < BTC_POLL_MIN || ms > BTC_POLL_MAX) {
+        return BTC_ERR_ARG;
+    }
+    int err = tune_start(addr);
+    if (err != BTC_OK) {
+        return err;
+    }
+    // A best-effort QoS setup whose latency is the poll interval, in us.
+    if (gap_qos_set(tune_handle, HCI_SERVICE_TYPE_BEST_EFFORT, 0, 0, ms * 1000, 0xffffffff) != ERROR_CODE_SUCCESS) {
+        tune_state = BTC_ERR_FAIL;
+        return BTC_ERR_FAIL;
+    }
+    return BTC_OK;
+}
+
+int btc_radio_set_packet_types(const uint8_t *addr, uint32_t types) {
+    if (types & ~(uint32_t)BTC_PKT_ALL) {
+        return BTC_ERR_ARG;
+    }
+    int err = tune_start(addr);
+    if (err != BTC_OK) {
+        return err;
+    }
+    tune_pkt_hci = pkt_to_hci(types);
+    tune_pkt_pending = true;
+    send_tune();
+    return BTC_OK;
+}
+
+int btc_radio_tune_result(uint32_t *value) {
+    *value = tune_value;
+    return tune_state;
+}
+
+// The CYW43439 refuses the HCI command that sets a minimum key size, at every
+// value, so the setting can't be enforced.
 int btc_radio_set_min_key_size(int bytes) {
-    (void)bytes;
+    if (bytes < BTC_KEY_SIZE_MIN || bytes > BTC_KEY_SIZE_MAX) {
+        return BTC_ERR_ARG;
+    }
     return BTC_ERR_UNSUPPORTED;
 }
 
@@ -1263,23 +1465,6 @@ int btc_radio_min_key_result(void) {
 
 int btc_radio_min_key_size(void) {
     return BTC_KEY_SIZE_MIN;
-}
-
-int btc_radio_set_poll(const uint8_t *addr, uint32_t ms) {
-    (void)addr;
-    (void)ms;
-    return BTC_ERR_UNSUPPORTED;
-}
-
-int btc_radio_set_packet_types(const uint8_t *addr, uint32_t types) {
-    (void)addr;
-    (void)types;
-    return BTC_ERR_UNSUPPORTED;
-}
-
-int btc_radio_tune_result(uint32_t *value) {
-    *value = 0;
-    return BTC_ERR_UNSUPPORTED;
 }
 
 // ---- sniff mode ----
