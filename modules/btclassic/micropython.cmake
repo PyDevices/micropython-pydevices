@@ -19,6 +19,7 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_hid.c
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_phone.c
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_library.c
+        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_l2cap.c
         ${CMAKE_CURRENT_LIST_DIR}/src/modbluetooth_bluedroid.c
         ${BTCLASSIC_IDF}/radio.c
         ${BTCLASSIC_IDF}/a2dp_sink.c
@@ -29,6 +30,7 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
         ${BTCLASSIC_IDF}/avrcp_tg.c
         ${BTCLASSIC_IDF}/inquiry.c
         ${BTCLASSIC_IDF}/spp.c
+        ${BTCLASSIC_IDF}/l2cap.c
         ${BTCLASSIC_IDF}/hid.c
         ${BTCLASSIC_IDF}/pbap.c
         ${BTCLASSIC_IDF}/hfp_ag.c
@@ -87,7 +89,8 @@ elseif(MICROPY_BLUETOOTH_BTSTACK)
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_serial.c
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_hid.c
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_phone.c
-        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_library.c)
+        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_library.c
+        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_l2cap.c)
     # Through MICROPY_DEF_BOARD, so the qstr scan sees the HID and phone book
     # entries too.
     list(APPEND MICROPY_DEF_BOARD BTC_HAS_HID=1 BTC_HAS_PHONEBOOK=1 BTC_HAS_LIBRARY=1)

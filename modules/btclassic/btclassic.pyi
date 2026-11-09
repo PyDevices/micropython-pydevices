@@ -105,6 +105,8 @@ PASSKEY_COMPARE: int
 device shows the same."""
 SERIAL: int
 """`Serial.changes` bit: bytes arrived."""
+DATA: int
+"""`L2CAP.changes` bit: bytes arrived."""
 REMOTE: int
 """`AudioSource.changes` bit: the receiver pressed a key; read it with
 `AudioSource.key`."""
@@ -837,6 +839,77 @@ class Serial:
     def deinit(self) -> None:
         """Drop the link and stop serving the port. The radio stays on."""
     def __enter__(self) -> Serial: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
+
+class L2CAP:
+    """A raw L2CAP channel, as a stream: `read`, `readinto`, `readline` and
+    `write` work as on `machine.UART`, and `select.poll` takes it.
+
+    For a protocol of your own between two devices, with no serial port
+    framing in the way. Making it with a `psm` serves that PSM for other
+    devices to connect to; `connect` calls another device's. One link at a
+    time. Your own protocols take odd PSMs from 0x1001 up, such as 0x1001,
+    0x1003 or 0x2001.
+
+    There is one channel. A second `L2CAP` with the same `psm` takes over
+    the running one, link and all; one with another `psm` closes it first.
+    ESP32 and Pico W.
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+        psm: the PSM to serve, or None to only call out.
+        rxbuf: bytes held for `read`, 256 to 65536. Bytes that arrive with
+            it full are dropped and counted in `stats`.
+        timeout: how long `read` waits for its first byte, in ms.
+    """
+
+    connected: bool
+    """A device is connected."""
+    listening: bool
+    """The PSM is served, waiting for a device to connect."""
+    peer: bytes | None
+    """The connected device's address, or None."""
+    psm: int | None
+    """The PSM served, or None."""
+    mtu: int | None
+    """The most bytes one packet to the peer carries, or None with no link.
+    `write` splits what you give it into packets of this size."""
+    timeout: int
+    """How long `read` waits for its first byte, in ms. Settable."""
+
+    def __init__(self, bt: Bluetooth, psm: int | None = None, *, rxbuf: int = 4096, timeout: int = 0) -> None: ...
+    def read(self, nbytes: int = -1) -> bytes | None:
+        """What has arrived, up to `nbytes`, or None when nothing came
+        within `timeout`."""
+    def readinto(self, buf: bytearray | memoryview, nbytes: int = -1) -> int | None: ...
+    def readline(self) -> bytes | None: ...
+    def write(self, buf: bytes | bytearray | memoryview) -> int:
+        """Send `buf`. Waits while the link is up until all of it is
+        queued, so the link's pace sets yours.
+
+        Raises:
+            OSError: no device is connected.
+        """
+    def any(self) -> int:
+        """How many bytes are waiting to be read."""
+    def changes(self) -> int:
+        """The bits (`CONNECTION`, `DATA`) for what changed since the last
+        call, which clears them."""
+    def connect(self, addr: bytes, psm: int, timeout_ms: int = 10000) -> None:
+        """Call another device's `psm` and wait until the channel is open.
+
+        Raises:
+            OSError: "no answer from the device" when it can't be reached
+                or turns the channel down, ETIMEDOUT after `timeout_ms`.
+        """
+    def disconnect(self) -> None: ...
+    def stats(self) -> dict[str, int]:
+        """Counters: rx_bytes, tx_bytes, and rx_dropped (bytes that found
+        the receive buffer full)."""
+    def deinit(self) -> None:
+        """Drop the link and stop serving the PSM. The radio stays on."""
+    def __enter__(self) -> L2CAP: ...
     def __exit__(self, *args: object) -> None:
         """`deinit`."""
 

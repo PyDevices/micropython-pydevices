@@ -51,6 +51,7 @@ per profile that takes it.
 | `HandsFree(bt)` | Follows a phone (HFP hands-free): `battery`, `signal`, `operator`, the `call` and its `caller`, `answer()`, `hangup()`, `dial()`, and the call's audio through its own `readinto()` and `write()`. |
 | `AudioSource(bt)` | Sends audio to headphones, a speaker or a car stereo (A2DP source) and acts as their remote's target (AVRCP): `write()`, the receiver's keys through `key()`, the `volume`, and the `track()` and `status` its display shows. `Bluetooth.inquiry()` and `found()` find the receiver. |
 | `Serial(bt)` | A serial port (SPP), as a stream like `machine.UART`: a computer gets a Bluetooth COM port to the board, or `connect()` calls another device's port. |
+| `L2CAP(bt, psm)` | A raw L2CAP channel, as a stream: a protocol of your own between two boards, with no serial port framing in the way. Serves a PSM, or `connect()` calls another device's. |
 | `HIDDevice(bt)` | The board as a keyboard, mouse or game controller (HID device): `type()`, `keyboard()`, `mouse()`, `gamepad()`, or `send()` with your own report descriptor, and the keyboard `leds` the computer sends back. |
 | `HIDHost(bt)` | The board reads a keyboard, mouse or controller (HID host): `connect()`, `read()` its reports, `decode()` them, and `send()` its output reports. |
 | `PhoneBook(bt)` | Reads a phone's contacts and call history (PBAP client): `pull()` a book as records of names, numbers and emails, `list()` and `entry()` to page through it, `size()`, and `lookup()` for the name behind a caller's number. |
@@ -408,6 +409,30 @@ shows and answer with `passkey_reply(True, number)`. `IO_DISPLAY_ONLY` gets
 `PASSKEY_DISPLAY`, a number to show and nothing to answer. With any of the
 three, a `Serial` link asks the other side for a checked pairing too.
 `examples/btclassic_pairing.py` is the whole program.
+
+## A channel of your own
+
+Two boards that speak your own protocol don't need a serial port in
+between: `L2CAP` opens a channel straight on L2CAP, the layer every profile
+runs on. One board serves a PSM, a number like a port number; yours are the
+odd ones from 0x1001 up. The other calls it:
+
+```python
+import btclassic
+
+bt = btclassic.Bluetooth()
+ch = btclassic.L2CAP(bt, 0x1001)       # on the board that waits
+# ... once ch.connected:
+ch.write(b"hello")
+
+ch = btclassic.L2CAP(bt)               # on the board that calls
+ch.connect(server_address, 0x1001)
+print(ch.read())                       # b'hello'
+```
+
+It reads and writes as a stream, as `Serial` does. `mtu` says how much one
+packet carries; `write` splits longer writes. Pairing comes first, as for a
+serial link.
 
 ## A phone's music library
 

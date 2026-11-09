@@ -523,6 +523,7 @@ void btc_radio_stop(void) {
     btc_sink_stop();
     btc_source_stop();
     btc_spp_stop();
+    btc_l2cap_stop();
     btc_hid_stop();
     btc_inquiry_stop();
     r.sdp_state = BTC_ERR_STATE;   // a search the stop cut short
