@@ -1435,6 +1435,36 @@ static void audioif_mem_free(void *ptr) {
 }
 #endif
 
+// --- memory a decoder touches on every frame -------------------------------
+//
+// The MP3 decoder's working buffers, about 24 KB that Helix reads and writes
+// many times per frame. On a classic ESP32 with them in PSRAM, decoding ran at
+// half speed in more than half of the runs measured, and never with them in
+// internal RAM. So internal RAM first, but only while this much of it stays
+// free afterwards for Wi-Fi, Bluetooth and DMA; past that, PSRAM as before.
+// Zeroed, as the decoder needs. Only the classic ESP32 is measured; the S3's
+// and P4's PSRAM is faster, and they keep the GC heap until one is.
+#if AUDIOIF_DRV_ESP && defined(AUDIODSP_PORT_MEM_HOT_HOOKS) \
+    && CONFIG_IDF_TARGET_ESP32 && CONFIG_SPIRAM
+#define AUDIOIF_MEM_HOT_RESERVE (48 * 1024)
+#define AUDIOIF_MEM_INTERNAL (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+#define AUDIOIF_MEM_HOT_HOOKS (1)
+
+static void *audioif_mem_alloc_hot(size_t size) {
+    if (heap_caps_get_free_size(AUDIOIF_MEM_INTERNAL) >= size + AUDIOIF_MEM_HOT_RESERVE) {
+        void *ptr = heap_caps_calloc(1, size, AUDIOIF_MEM_INTERNAL);
+        if (ptr != NULL) {
+            return ptr;
+        }
+    }
+    return heap_caps_calloc_prefer(1, size, 2, AUDIOIF_MEM_PREFERRED, MALLOC_CAP_8BIT);
+}
+
+static void audioif_mem_free_hot(void *ptr) {
+    heap_caps_free(ptr);
+}
+#endif
+
 // --- the table, and the binding -------------------------------------------
 
 static const audiodsp_port_ops_t audiopump_driver_ops = {
@@ -1465,6 +1495,10 @@ static const audiodsp_port_ops_t audiopump_driver_ops = {
     .mem_alloc = audioif_mem_alloc,
     .mem_realloc = audioif_mem_realloc,
     .mem_free = audioif_mem_free,
+    #endif
+    #if defined(AUDIOIF_MEM_HOT_HOOKS)
+    .mem_alloc_hot = audioif_mem_alloc_hot,
+    .mem_free_hot = audioif_mem_free_hot,
     #endif
 };
 
