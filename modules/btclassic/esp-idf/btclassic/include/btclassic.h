@@ -62,8 +62,10 @@ extern "C" {
 #define BTC_CHANGED_REQUEST    (1u << 18)   // ag: the headset dialed, sent a DTMF digit or a command
 #define BTC_CHANGED_MESSAGES   (1u << 19)   // msg: a request finished, or the link came or went
 #define BTC_CHANGED_NOTIFY     (1u << 20)   // msg: the phone reported a new, sent, deleted or changed message
+#define BTC_CHANGED_TETHER     (1u << 21)   // tether: the link came or went
 #define BTC_CHANGED_LIBRARY    (1u << 22)   // lib: a request finished
 #define BTC_CHANGED_PUSH       (1u << 23)   // opp: a send or pull finished, or an object arrived
+#define BTC_CHANGED_PASSKEY    (1u << 24)   // radio: pairing wants a passkey shown, typed or checked
 
 typedef uint8_t btc_addr_t[6];  // most significant byte first
 
@@ -106,6 +108,33 @@ int btc_radio_mac(btc_addr_t mac);              // BTC_ERR_STATE while off
 // as it is, whatever runs.
 int btc_radio_set_class(uint32_t cod);
 uint32_t btc_radio_class(void);                 // the class in use
+
+// What the board has to pair with: Secure Simple Pairing's IO capability,
+// the same values as HCI's. BTC_IO_NONE (the default) is "just works",
+// with nothing to show or type. With the others, pairing raises
+// BTC_CHANGED_PASSKEY and waits for btc_radio_passkey_reply().
+#define BTC_IO_DISPLAY_ONLY  0
+#define BTC_IO_DISPLAY_YESNO 1
+#define BTC_IO_KEYBOARD_ONLY 2
+#define BTC_IO_NONE          3
+int btc_radio_set_io(int io);
+int btc_radio_io(void);
+// A pairing step waiting on the program. INPUT: type the passkey the other
+// device shows. DISPLAY: show `passkey` for the other device's user to type;
+// no reply is needed. COMPARE: show `passkey` and say whether it matches the
+// other device's. The values are those of MicroPython's BLE passkey actions.
+#define BTC_PASSKEY_INPUT    2
+#define BTC_PASSKEY_DISPLAY  3
+#define BTC_PASSKEY_COMPARE  4
+typedef struct {
+    btc_addr_t addr;
+    int action;         // BTC_PASSKEY_*, 0 when nothing waits
+    uint32_t passkey;   // 0 to 999999; 0 for INPUT
+} btc_passkey_t;
+void btc_radio_passkey(btc_passkey_t *out);
+// Answer the step waiting: `accept` false refuses the pairing. `passkey` is
+// the one typed, for INPUT. BTC_ERR_STATE when nothing waits for an answer.
+int btc_radio_passkey_reply(bool accept, uint32_t passkey);
 
 // The paired devices: copies up to `max` addresses and returns how many
 // there are (which may be more than `max`), or a negative BTC_ERR_*.
@@ -657,6 +686,39 @@ int btc_lib_play(uint8_t scope, const uint8_t *uid);
 size_t btc_lib_data(uint8_t *dst, size_t size);
 void btc_lib_status(btc_lib_status_t *out);
 uint32_t btc_lib_changes(void);
+
+// ---- the tether: PAN user, the internet through a phone ---------------------
+//
+// The board joins a phone's Bluetooth tethering (its PAN network access
+// point) over BNEP. The phone's frames reach the host's IP stack through a
+// network interface the backend keeps: on BTstack with lwIP, an lwIP netif
+// that asks the phone for an address by DHCP and becomes the default route
+// while the link is up. Backends without a PAN user return BTC_ERR_UNSUPPORTED.
+// Changes: BTC_CHANGED_TETHER.
+
+typedef struct {
+    bool started;
+    bool connecting;
+    bool connected;
+    btc_addr_t peer;
+    int result;             // the last connect's: BTC_OK or a negative BTC_ERR_*
+    uint32_t rx_frames;
+    uint32_t tx_frames;
+    uint32_t tx_dropped;    // frames the link had no room for
+} btc_tether_status_t;
+
+int btc_tether_start(void);
+void btc_tether_stop(void);
+bool btc_tether_started(void);
+// Join a phone's tethering: NULL picks the last device connected, then the
+// first paired one. BTC_CHANGED_TETHER says it came up or failed.
+int btc_tether_connect(const uint8_t *addr);
+int btc_tether_disconnect(void);
+void btc_tether_status(btc_tether_status_t *out);
+uint32_t btc_tether_changes(void);
+// The host's network interface for the link (an lwIP `struct netif *`), or
+// NULL where there is none.
+void *btc_tether_netif(void);
 
 // ---- object push: OPP client and server ------------------------------------
 //

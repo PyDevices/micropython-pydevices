@@ -396,6 +396,8 @@ static mp_obj_t bluetooth_config(size_t n_args, const mp_obj_t *args, mp_map_t *
                 return mp_obj_new_str(buf, btc_radio_name(buf, sizeof(buf)));
             case MP_QSTR_pin:
                 return mp_obj_new_str(buf, btc_radio_pin(buf, sizeof(buf)));
+            case MP_QSTR_io:
+                return MP_OBJ_NEW_SMALL_INT(btc_radio_io());
             case MP_QSTR_discoverable:
                 return mp_obj_new_bool(discoverable);
             case MP_QSTR_connectable:
@@ -455,6 +457,11 @@ static mp_obj_t bluetooth_config(size_t n_args, const mp_obj_t *args, mp_map_t *
                 break;
             case MP_QSTR_pin:
                 done(btc_radio_set_pin(mp_obj_str_get_str(value)));
+                break;
+            case MP_QSTR_io:
+                if (btc_radio_set_io(mp_obj_get_int(value)) == BTC_ERR_ARG) {
+                    mp_raise_ValueError(MP_ERROR_TEXT("io is 0 to 3: IO_DISPLAY_ONLY, IO_DISPLAY_YESNO, IO_KEYBOARD_ONLY or IO_NONE"));
+                }
                 break;
             case MP_QSTR_discoverable:
                 btc_radio_set_visibility(mp_obj_is_true(value), connectable);
@@ -679,6 +686,41 @@ static mp_obj_t bluetooth_services(size_t n_args, const mp_obj_t *pos_args, mp_m
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(bluetooth_services_obj, 2, bluetooth_services);
 
+// passkey() -> None or (addr, action, passkey): the pairing step waiting.
+static mp_obj_t bluetooth_passkey(mp_obj_t self_in) {
+    btc_passkey_t p;
+    btc_radio_passkey(&p);
+    if (!p.action) {
+        return mp_const_none;
+    }
+    mp_obj_t t[3] = {
+        mp_obj_new_bytes(p.addr, sizeof(p.addr)),
+        MP_OBJ_NEW_SMALL_INT(p.action),
+        p.action == BTC_PASSKEY_INPUT ? mp_const_none : mp_obj_new_int_from_uint(p.passkey),
+    };
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(bluetooth_passkey_obj, bluetooth_passkey);
+
+// passkey_reply(accept, passkey=None): answer it.
+static mp_obj_t bluetooth_passkey_reply(size_t n_args, const mp_obj_t *args) {
+    bool accept = mp_obj_is_true(args[1]);
+    uint32_t key = 0;
+    if (n_args > 2 && args[2] != mp_const_none) {
+        mp_int_t k = mp_obj_get_int(args[2]);
+        if (k < 0 || k > 999999) {
+            mp_raise_ValueError(MP_ERROR_TEXT("passkey is 0 to 999999"));
+        }
+        key = (uint32_t)k;
+    }
+    int err = btc_radio_passkey_reply(accept, key);
+    if (err == BTC_ERR_STATE) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: no pairing step waits for an answer"));
+    }
+    return done(err);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(bluetooth_passkey_reply_obj, 2, 3, bluetooth_passkey_reply);
+
 static mp_obj_t bluetooth_changes(mp_obj_t self_in) {
     return MP_OBJ_NEW_SMALL_INT(btc_radio_changes());
 }
@@ -696,6 +738,8 @@ static const mp_rom_map_elem_t bluetooth_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_eir), MP_ROM_PTR(&bluetooth_eir_obj) },
     { MP_ROM_QSTR(MP_QSTR_rssi), MP_ROM_PTR(&bluetooth_rssi_obj) },
     { MP_ROM_QSTR(MP_QSTR_services), MP_ROM_PTR(&bluetooth_services_obj) },
+    { MP_ROM_QSTR(MP_QSTR_passkey), MP_ROM_PTR(&bluetooth_passkey_obj) },
+    { MP_ROM_QSTR(MP_QSTR_passkey_reply), MP_ROM_PTR(&bluetooth_passkey_reply_obj) },
 };
 static MP_DEFINE_CONST_DICT(bluetooth_locals, bluetooth_locals_table);
 
@@ -1459,6 +1503,8 @@ MP_DEFINE_CONST_OBJ_TYPE(
 extern const mp_obj_type_t btc_source_type;
 extern const mp_obj_type_t btc_serial_type;
 extern const mp_obj_type_t btc_library_type;
+// Tether, in mod_btclassic_tether.c: on every backend, raising where there's no PAN.
+extern const mp_obj_type_t btc_tether_type;
 // ObjectPush, in mod_btclassic_push.c: on every backend, raising where there's no OPP.
 extern const mp_obj_type_t btc_push_type;
 #endif
@@ -1493,6 +1539,8 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_Serial), MP_ROM_PTR(&btc_serial_type) },
     { MP_ROM_QSTR(MP_QSTR_Library), MP_ROM_PTR(&btc_library_type) },
     { MP_ROM_QSTR(MP_QSTR_LIBRARY), MP_ROM_INT(BTC_CHANGED_LIBRARY) },
+    { MP_ROM_QSTR(MP_QSTR_Tether), MP_ROM_PTR(&btc_tether_type) },
+    { MP_ROM_QSTR(MP_QSTR_TETHER), MP_ROM_INT(BTC_CHANGED_TETHER) },
     { MP_ROM_QSTR(MP_QSTR_ObjectPush), MP_ROM_PTR(&btc_push_type) },
     { MP_ROM_QSTR(MP_QSTR_PUSH), MP_ROM_INT(BTC_CHANGED_PUSH) },
     #endif
@@ -1531,6 +1579,14 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_PAIRED), MP_ROM_INT(BTC_CHANGED_PAIRED) },
     { MP_ROM_QSTR(MP_QSTR_REMOTE), MP_ROM_INT(BTC_CHANGED_REMOTE) },
     { MP_ROM_QSTR(MP_QSTR_FOUND), MP_ROM_INT(BTC_CHANGED_FOUND) },
+    { MP_ROM_QSTR(MP_QSTR_PASSKEY), MP_ROM_INT(BTC_CHANGED_PASSKEY) },
+    { MP_ROM_QSTR(MP_QSTR_PASSKEY_INPUT), MP_ROM_INT(BTC_PASSKEY_INPUT) },
+    { MP_ROM_QSTR(MP_QSTR_PASSKEY_DISPLAY), MP_ROM_INT(BTC_PASSKEY_DISPLAY) },
+    { MP_ROM_QSTR(MP_QSTR_PASSKEY_COMPARE), MP_ROM_INT(BTC_PASSKEY_COMPARE) },
+    { MP_ROM_QSTR(MP_QSTR_IO_DISPLAY_ONLY), MP_ROM_INT(BTC_IO_DISPLAY_ONLY) },
+    { MP_ROM_QSTR(MP_QSTR_IO_DISPLAY_YESNO), MP_ROM_INT(BTC_IO_DISPLAY_YESNO) },
+    { MP_ROM_QSTR(MP_QSTR_IO_KEYBOARD_ONLY), MP_ROM_INT(BTC_IO_KEYBOARD_ONLY) },
+    { MP_ROM_QSTR(MP_QSTR_IO_NONE), MP_ROM_INT(BTC_IO_NONE) },
     { MP_ROM_QSTR(MP_QSTR_SERIAL), MP_ROM_INT(BTC_CHANGED_SERIAL) },
     // AVRCP pass-through key codes: AudioSink.key() sends them, and
     // AudioSource.key() reports the remote's.

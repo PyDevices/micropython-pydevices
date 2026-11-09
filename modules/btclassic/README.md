@@ -57,6 +57,7 @@ per profile that takes it.
 | `AudioGateway(bt)` | The board as the phone for a headset or car kit (HFP audio gateway): the `signal`, `battery` and `operator` it shows, `ring()` with a caller's number, `dial()`, the headset's answer and hang-up, and the call's audio through `readinto()` and `write()`. |
 | `Messages(bt)` | Reads and sends a phone's texts (MAP client): `list()` a folder, `get()` a message with its sender and text, `mark_read()`, `delete()`, `send()`, and `notify()` to hear about new messages as they arrive. |
 | `Library(bt)` | Browses the media library of the phone `AudioSink` plays from (AVRCP browsing): `players()`, `browse()` one, `items()` in a folder, the queue or a search, `enter()` and `up()`, and `play()` a track. Pico W only. |
+| `Tether(bt)` | The internet through a phone's Bluetooth tethering (PAN), as a network interface like `network.WLAN`: `connect()`, `isconnected()`, `ifconfig()` and `ipconfig()`. Pico W only. |
 | `ObjectPush(bt)` | Files and contact cards (OPP): `send()` one to a phone or computer, `pull()` its owner's card, or `listen()` and take what it sends with `received()`. Pico W only. |
 
 Nothing calls back into Python. Each object's state is properties, and its
@@ -184,9 +185,10 @@ service and operator, and answers, dials, hangs up and sends tones.
 `PhoneBook` works as it does on the ESP32, except that `new_missed` is
 always None. Its reply comes into the heap and grows with it: a phone book
 of 471 contacts without photos is 68 KB, so page with `count` on a Pico W.
-`AudioGateway` and `Messages` are ESP32-only. `Library` and `ObjectPush`
-are the other way round: only the Pico W has them (see
-[A phone's music library](#a-phones-music-library) and
+`AudioGateway` and `Messages` are ESP32-only. `Library`, `Tether` and
+`ObjectPush` are the other way round: only the Pico W has them (see
+[A phone's music library](#a-phones-music-library),
+[The internet through a phone](#the-internet-through-a-phone) and
 [Files and contact cards](#files-and-contact-cards)).
 
 ## How it's built
@@ -387,6 +389,31 @@ remote-control keys (0x110E), joins a network over Bluetooth (0x1115), and
 takes either side of a hands-free call (0x111E, 0x111F). The first search pages the device, about 2 s; a second
 one over the same link took 0.15 s.
 
+## Pairing with a passkey or a number check
+
+By default the board pairs the way most speakers do, "just works", with
+nothing to show or type. A board with a screen, or a REPL someone watches,
+can pair with a check instead: tell it what it has with `config(io=...)`,
+and pairing asks your program through `Bluetooth.changes()` and
+`passkey()`:
+
+```python
+bt.config(io=btclassic.IO_DISPLAY_YESNO)
+port = btclassic.Serial(bt)
+while True:
+    if bt.changes() & btclassic.PASSKEY:
+        addr, action, number = bt.passkey()
+        if action == btclassic.PASSKEY_COMPARE:
+            ok = input("Does it show %06d? [y/n] " % number) == "y"
+            bt.passkey_reply(ok)
+```
+
+`IO_KEYBOARD_ONLY` gets `PASSKEY_INPUT`: type the number the other device
+shows and answer with `passkey_reply(True, number)`. `IO_DISPLAY_ONLY` gets
+`PASSKEY_DISPLAY`, a number to show and nothing to answer. With any of the
+three, a `Serial` link asks the other side for a checked pairing too.
+`examples/btclassic_pairing.py` is the whole program.
+
 ## A phone's music library
 
 On a Pico W, `Library` browses the players on the phone `AudioSink` plays
@@ -415,6 +442,26 @@ raises "that player can't be browsed", and `connect()` and `players()` are
 all you get. Whether `search()` works is up to the player too: the phone
 answers with an error when it can't search.
 
+## The internet through a phone
+
+On a Pico W, `Tether` puts the board on a phone's Bluetooth tethering, with
+no Wi-Fi needed. Turn on Bluetooth tethering in the phone's hotspot settings
+first, and pair the board with the phone.
+
+```python
+import btclassic
+import requests
+
+bt = btclassic.Bluetooth()
+net = btclassic.Tether(bt)
+net.connect()                               # the last phone connected, or the first paired
+print(net.ifconfig())                       # an address from the phone
+print(requests.get("http://example.com").status_code)
+```
+
+The tether is a network interface of its own beside the Wi-Fi's. While it's
+up it's the default route, so `socket` and `requests` go through the phone;
+when it drops, the route goes back to the Wi-Fi if that's connected.
 ## Files and contact cards
 
 On a Pico W, `ObjectPush` sends a file to a paired phone or computer, and

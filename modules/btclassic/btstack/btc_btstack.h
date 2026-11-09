@@ -85,6 +85,8 @@ void btc_lib_radio_lost(void);
 void btc_lib_on_browse(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size);
 // The sink's AVRCP control link, which the library plays items over; 0 without one.
 uint16_t btc_sink_avrcp_cid(void);
+void btc_tether_radio_stopping(void);
+void btc_tether_radio_lost(void);
 void btc_opp_radio_stopping(void);
 void btc_opp_radio_lost(void);
 void btc_pb_radio_stopping(void);

@@ -50,6 +50,9 @@ static struct {
     int sdp_state;      // 0 searching, 1 ended, BTC_ERR_* failed
     int sdp_count;
     btc_uuid_t sdp[BTC_SERVICES_MAX];
+    // Pairing: the IO capability, and the step waiting on the program.
+    int io;
+    btc_passkey_t passkey;
 } r = {
     .discoverable = true,
     .connectable = true,
@@ -58,6 +61,7 @@ static struct {
     .channels = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f},
     .rssi_state = BTC_ERR_STATE,
     .sdp_state = BTC_ERR_STATE,
+    .io = BTC_IO_NONE,
 };
 
 int btc_err(esp_err_t err) {
@@ -130,13 +134,30 @@ static void apply_pin(void) {
     esp_bt_gap_set_pin(ESP_BT_PIN_TYPE_FIXED, len, pin);
 }
 
-// ---- GAP: pairing with no PIN to type, a peer's name and signal ----
+// ---- GAP: pairing, a peer's name and signal ----
+
+static void passkey_step(const uint8_t *bda, int action, uint32_t passkey) {
+    BTC_LOCK();
+    memcpy(r.passkey.addr, bda, sizeof(btc_addr_t));
+    r.passkey.action = action;
+    r.passkey.passkey = passkey;
+    BTC_UNLOCK();
+    mark(BTC_CHANGED_PASSKEY);
+}
+
+static void apply_io(void) {
+    esp_bt_io_cap_t iocap = (esp_bt_io_cap_t)r.io;
+    esp_bt_gap_set_security_param(ESP_BT_SP_IOCAP_MODE, &iocap, sizeof(iocap));
+}
 
 static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
     // Inquiry results, and remote names for the source.
     btc_inquiry_on_gap(event, param);
     switch (event) {
         case ESP_BT_GAP_AUTH_CMPL_EVT:
+            BTC_LOCK();
+            r.passkey.action = 0;
+            BTC_UNLOCK();
             btc_sink_on_auth(param->auth_cmpl.bda);
             if (param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS) {
                 ESP_LOGI(TAG, "paired with %s", param->auth_cmpl.device_name);
@@ -146,8 +167,23 @@ static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
             }
             break;
         case ESP_BT_GAP_CFM_REQ_EVT:
-            // A board has no screen to compare numbers on: accept.
-            esp_bt_gap_ssp_confirm_reply(param->cfm_req.bda, true);
+            if (r.io != BTC_IO_DISPLAY_YESNO) {
+                // No way to answer yes or no: accept, as "just works"
+                // does. A board with a display still shows the number,
+                // for the other side to check.
+                esp_bt_gap_ssp_confirm_reply(param->cfm_req.bda, true);
+                if (r.io == BTC_IO_DISPLAY_ONLY) {
+                    passkey_step(param->cfm_req.bda, BTC_PASSKEY_DISPLAY, param->cfm_req.num_val);
+                }
+            } else {
+                passkey_step(param->cfm_req.bda, BTC_PASSKEY_COMPARE, param->cfm_req.num_val);
+            }
+            break;
+        case ESP_BT_GAP_KEY_NOTIF_EVT:
+            passkey_step(param->key_notif.bda, BTC_PASSKEY_DISPLAY, param->key_notif.passkey);
+            break;
+        case ESP_BT_GAP_KEY_REQ_EVT:
+            passkey_step(param->key_req.bda, BTC_PASSKEY_INPUT, 0);
             break;
         case ESP_BT_GAP_REMOVE_BOND_DEV_COMPLETE_EVT:
             mark(BTC_CHANGED_PAIRED);
@@ -455,9 +491,8 @@ int btc_radio_start(void) {
     users |= USER_CLASSIC;
     esp_bt_gap_set_device_name(r.name[0] ? r.name : "ESP32");
     esp_bt_gap_register_callback(gap_cb);
-    // Secure Simple Pairing with no display or keyboard: "just works".
-    esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_NONE;
-    esp_bt_gap_set_security_param(ESP_BT_SP_IOCAP_MODE, &iocap, sizeof(iocap));
+    // Secure Simple Pairing, by default with no display or keyboard.
+    apply_io();
     // Legacy pairing, for devices without SSP.
     apply_pin();
     r.on = true;
@@ -491,6 +526,7 @@ void btc_radio_stop(void) {
     btc_hid_stop();
     btc_inquiry_stop();
     r.sdp_state = BTC_ERR_STATE;   // a search the stop cut short
+    r.passkey.action = 0;
     if (class_timer) {
         esp_timer_stop(class_timer);
         esp_timer_delete(class_timer);
@@ -655,6 +691,50 @@ int btc_radio_rssi(int *delta) {
     *delta = r.rssi_delta;
     BTC_UNLOCK();
     return state;
+}
+
+// ---- pairing ----
+
+int btc_radio_set_io(int io) {
+    if (io < BTC_IO_DISPLAY_ONLY || io > BTC_IO_NONE) {
+        return BTC_ERR_ARG;
+    }
+    r.io = io;
+    if (r.on) {
+        apply_io();
+    }
+    return BTC_OK;
+}
+
+int btc_radio_io(void) {
+    return r.io;
+}
+
+void btc_radio_passkey(btc_passkey_t *out) {
+    BTC_LOCK();
+    *out = r.passkey;
+    BTC_UNLOCK();
+}
+
+int btc_radio_passkey_reply(bool accept, uint32_t passkey) {
+    BTC_LOCK();
+    btc_passkey_t p = r.passkey;
+    if (p.action == BTC_PASSKEY_INPUT || p.action == BTC_PASSKEY_COMPARE) {
+        r.passkey.action = 0;
+    }
+    BTC_UNLOCK();
+    if (!r.on) {
+        return BTC_ERR_STATE;
+    }
+    esp_bd_addr_t a;
+    memcpy(a, p.addr, sizeof(a));
+    if (p.action == BTC_PASSKEY_INPUT) {
+        return btc_err(esp_bt_gap_ssp_passkey_reply(a, accept, passkey));
+    }
+    if (p.action == BTC_PASSKEY_COMPARE) {
+        return btc_err(esp_bt_gap_ssp_confirm_reply(a, accept));
+    }
+    return BTC_ERR_STATE;
 }
 
 // ---- services ----
