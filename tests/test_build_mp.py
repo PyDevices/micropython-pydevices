@@ -640,6 +640,59 @@ class Rp2BoardDir(unittest.TestCase):
             build_mp.rp2_board_dir(self.gen, self.base, "BOARD", "NOPE")
 
 
+class Esp32Autosize(unittest.TestCase):
+    """An esp32 app that outgrows its partition gets a table grown to fit, with
+    headroom above it, and always leaves the board a filesystem."""
+
+    TABLE = ("# Name, Type, SubType, Offset, Size, Flags\n"
+             "nvs, data, nvs, 0x9000, 0x6000\n"
+             "phy_init, data, phy, 0xf000, 0x1000\n"
+             "factory, app, factory, 0x10000, 0x1F0000\n")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.build = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def grow(self, image, mb=4, table=None):
+        src = self.build / "partitions.csv"
+        src.write_text(table or self.TABLE)
+        (self.build / "sdkconfig").write_text(
+            f'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="{src}"\nCONFIG_ESPTOOLPY_FLASHSIZE="{mb}MB"\n')
+        log = (f"Error: app partition is too small for binary micropython.bin size {hex(image)}:\n"
+               "  - Part 'factory' 0/0 @ 0x10000 size 0x1f0000 (overflow 0x10)\n")
+        dest = self.build / "grown.csv"
+        build_mp.esp32_autosize(log, self.build, self.build, dest)
+        rows = [r.split(", ") for r in dest.read_text().splitlines() if r and not r.startswith("#")]
+        return {r[0]: (int(r[3], 0), int(r[4], 0)) for r in rows}
+
+    def test_room_to_spare_keeps_the_headroom(self):
+        parts = self.grow(0x2F0000)
+        self.assertEqual(parts["factory"], (0x10000, 0x310000))
+
+    def test_the_headroom_shrinks_to_leave_the_filesystem(self):
+        # 0x3c1bc0 fits 0x3d0000; the 128 KB headroom would end the app at the
+        # end of a 4 MB flash and leave no filesystem at all.
+        offset, size = self.grow(0x3C1BC0)["factory"]
+        self.assertEqual(size, 0x3D0000)
+        self.assertEqual(0x400000 - (offset + size), build_mp.ESP32_MIN_VFS)
+
+    def test_an_image_that_leaves_too_little_filesystem_fails_the_build(self):
+        with self.assertRaises(SystemExit) as caught:
+            self.grow(0x3D8000)
+        self.assertIn("filesystem", str(caught.exception))
+
+    def test_a_named_filesystem_partition_keeps_the_minimum(self):
+        table = self.TABLE + "vfs, data, fat, 0x200000, 0x600000\n"
+        parts = self.grow(0x7C0000, mb=8, table=table)
+        offset, size = parts["vfs"]
+        self.assertEqual(offset + size, 0x800000)
+        self.assertGreaterEqual(size, build_mp.ESP32_MIN_VFS)
+        self.assertEqual(parts["factory"][1], 0x7D0000)
+
+
 class Stm32M4Slot(unittest.TestCase):
     """An Arduino GIGA firmware that overflows its 1,280 KB region is built
     again over the M4 core's flash, without OpenAMP; and no GIGA image may
