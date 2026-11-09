@@ -458,6 +458,9 @@ Each runs as it is with `mpftp run`; its docstring says what it needs.
 |---|---|
 | [btclassic_simpletest.py](examples/btclassic_simpletest.py) | Plays your phone through the board's speaker |
 | [btclassic_speaker.py](examples/btclassic_speaker.py) | A Bluetooth speaker the audio pump plays |
+| [btclassic_remote.py](examples/btclassic_remote.py) | Drives a phone's music player: play, skip, volume, pause |
+| [btclassic_cover_art.py](examples/btclassic_cover_art.py) | Saves the cover art of each track as a JPEG |
+| [btclassic_library.py](examples/btclassic_library.py) | Lists the music on a phone and plays a track (Pico W) |
 | [btclassic_speakerphone.py](examples/btclassic_speakerphone.py) | A speakerphone for your phone's calls |
 | [btclassic_source_tone.py](examples/btclassic_source_tone.py) | Plays a tone on Bluetooth headphones or a speaker |
 | [btclassic_transmitter.py](examples/btclassic_transmitter.py) | Sends the line in to headphones or a speaker |
