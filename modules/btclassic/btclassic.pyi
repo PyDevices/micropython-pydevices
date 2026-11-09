@@ -315,7 +315,7 @@ class Bluetooth:
         """Set how one connected device's link is run, and say what the
         controller reports back for each setting given. A link starts with
         every packet type allowed and a poll interval the two devices agree.
-        Waits up to two seconds for each answer. ESP32 only.
+        Waits up to two seconds for each answer.
 
         Args:
             addr: the device's address.
@@ -1021,7 +1021,7 @@ class Service:
     A `Service` adds a record beside that one, for a program that wants to be
     found by a UUID of its own: a phone app or a computer asks for it, then
     connects to the channel the record names. The record is dropped by
-    `deinit`, and when the radio turns off. Up to four at once. ESP32 only.
+    `deinit`, and when the radio turns off. Up to four at once.
 
     A record with a `channel` lists RFCOMM as its protocol, which is what
     computers and phones look for. One with only a `psm` carries the PSM in
