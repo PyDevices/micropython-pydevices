@@ -41,6 +41,12 @@ static volatile bool s_calling_back;
 static int s_tries;
 // The program dropped the sender itself: don't call it back.
 static volatile bool s_dropped;
+// Bluedroid has finished taking A2DP down (ESP_A2D_DEINIT_SUCCESS).
+static volatile bool s_deinit_done;
+// Bluedroid has finished bringing A2DP up (ESP_A2D_INIT_SUCCESS).
+static volatile bool s_init_done;
+// The A2DP link's last reported state: connecting and disconnecting too.
+static volatile esp_a2d_connection_state_t s_link;
 
 #define CALL_BACK_TRIES 12
 #define CALL_BACK_US 6000000        // apart, longer than a page times out: 72 s in all
@@ -177,12 +183,18 @@ void btc_sink_on_auth(const uint8_t *bda) {
 static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
     switch (event) {
         case ESP_A2D_PROF_STATE_EVT:
-            if (param->a2d_prof_stat.init_state == ESP_A2D_INIT_SUCCESS && s.reconnect) {
-                reconnect_last_sender();
+            if (param->a2d_prof_stat.init_state == ESP_A2D_INIT_SUCCESS) {
+                s_init_done = true;
+                if (s.reconnect && !s_dropped) {
+                    reconnect_last_sender();
+                }
+            } else if (param->a2d_prof_stat.init_state == ESP_A2D_DEINIT_SUCCESS) {
+                s_deinit_done = true;
             }
             break;
         case ESP_A2D_CONNECTION_STATE_EVT: {
             esp_a2d_connection_state_t state = param->conn_stat.state;
+            s_link = state;
             if (state == ESP_A2D_CONNECTION_STATE_CONNECTED) {
                 uint8_t *a = param->conn_stat.remote_bda;
                 s_calling_back = false;
@@ -322,6 +334,8 @@ int btc_sink_start(size_t ring_frames, bool reconnect) {
     btc_avrcp_start();
     esp_a2d_register_callback(a2d_cb);
     esp_a2d_sink_register_data_callback(a2d_data_cb);
+    s_init_done = false;
+    s_link = ESP_A2D_CONNECTION_STATE_DISCONNECTED;
     esp_err_t err = esp_a2d_sink_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "A2DP sink didn't start: %s", esp_err_to_name(err));
@@ -363,14 +377,39 @@ void btc_sink_stop(void) {
         esp_timer_delete(s_retry);
         s_retry = NULL;
     }
-    if (s.connected) {
+    // Every A2DP and AVRCP link event runs through Bluedroid's A2DP state
+    // machine, which deinit frees: one that arrives after it reads freed
+    // memory and panics the board. So no link may be opening or closing when
+    // A2DP goes. Hide, so no sender starts one, and let Bluedroid finish
+    // coming up: it refuses a deinit until then, and comes up behind it.
+    btc_radio_hold_hidden(true);
+    for (int i = 0; i < 100 && !s_init_done; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    // Then let a link that's opening finish, close it, and wait until both
+    // the A2DP and AVRCP links have closed and their events have drained.
+    vTaskDelay(pdMS_TO_TICKS(200));
+    for (int round = 0; round < 3; round++) {
+        for (int i = 0; i < 400 && (s_link == ESP_A2D_CONNECTION_STATE_CONNECTING
+            || s_link == ESP_A2D_CONNECTION_STATE_DISCONNECTING); i++) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        if (!s.connected && !s.avrc_connected) {
+            break;
+        }
         btc_sink_disconnect();
-        for (int i = 0; i < 100 && s.connected; i++) {
+        for (int i = 0; i < 400 && (s.connected || s.avrc_connected); i++) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    s.started = false;
+    s_deinit_done = false;
+    if (esp_a2d_sink_deinit() == ESP_OK) {
+        for (int i = 0; i < 400 && !s_deinit_done; i++) {
             vTaskDelay(pdMS_TO_TICKS(10));
         }
     }
-    s.started = false;
-    esp_a2d_sink_deinit();
     btc_avrcp_stop();
     btc_radio_hold_hidden(false);
     btc_radio_profile(BTC_PROFILE_SINK, false, 0);
@@ -453,7 +492,21 @@ size_t btc_sink_text(btc_sink_text_t which, char *dst, size_t size) {
 }
 
 void btc_sink_levels(uint16_t *left, uint16_t *right) {
+    // The ring holds its last peaks until audio arrives again, so once a
+    // sender stops they would read as the last loud moment: silence instead,
+    // after a quarter second with nothing new.
+    static uint32_t seen;
+    static int64_t moved_us;
     btc_ring_levels(&s.ring, left, right);
+    uint32_t received = s.ring.received;
+    int64_t now = esp_timer_get_time();
+    if (received != seen) {
+        seen = received;
+        moved_us = now;
+    } else if (now - moved_us > 250000) {
+        *left = 0;
+        *right = 0;
+    }
 }
 
 int btc_sink_connect(const uint8_t *addr) {
