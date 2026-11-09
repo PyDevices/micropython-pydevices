@@ -10,7 +10,7 @@
 set(srcs)
 if(CONFIG_BT_CLASSIC_ENABLED AND CONFIG_BT_A2DP_ENABLE)
     list(APPEND srcs "radio.c" "a2dp_sink.c" "avrcp_ct.c" "hfp_hf.c" "ring.c"
-                     "a2dp_source.c" "avrcp_tg.c" "inquiry.c" "spp.c" "l2cap.c" "hid.c" "pbap.c" "hfp_ag.c" "map.c" "sdp_shared.c")
+                     "a2dp_source.c" "avrcp_tg.c" "inquiry.c" "spp.c" "l2cap.c" "hid.c" "pbap.c" "hfp_ag.c" "map.c" "opp.c" "sdp_shared.c")
 endif()
 idf_component_register(SRCS ${srcs}
                        INCLUDE_DIRS "include"
@@ -22,4 +22,6 @@ if(srcs)
     btclassic_a2dp_guard(${COMPONENT_LIB} ${CMAKE_CURRENT_LIST_DIR}/a2dp_guard.c)
     include(${CMAKE_CURRENT_LIST_DIR}/map.cmake)
     btclassic_map(${COMPONENT_LIB} ${CMAKE_CURRENT_LIST_DIR}/map.c)
+    include(${CMAKE_CURRENT_LIST_DIR}/opp.cmake)
+    btclassic_opp(${COMPONENT_LIB} ${CMAKE_CURRENT_LIST_DIR}/opp.c)
 endif()

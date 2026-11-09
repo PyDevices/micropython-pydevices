@@ -5,8 +5,8 @@
 // btclassic.ObjectPush: sending a file or contact card to a phone or
 // computer, pulling its owner's card, and taking what it sends (OPP). It
 // wraps the object push half of btclassic.h; mod_btclassic.c registers the
-// type. Only BTstack (the Pico W) has it: on the ESP32 the class is there,
-// and making one raises.
+// type. BTstack (the Pico W) and Bluedroid (the ESP32) both have it; where a
+// build leaves it out, the class is there and making one raises.
 
 #include <string.h>
 
@@ -267,10 +267,10 @@ MP_DEFINE_CONST_OBJ_TYPE(
 
 #else
 
-// No OPP in this backend: the class is there so code can check for it, and
+// No OPP in this build: the class is there so code can check for it, and
 // making one says why it can't work.
 static mp_obj_t opp_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
-    mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: ObjectPush needs the Pico W; this board's Bluetooth stack has no OPP"));
+    mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: ObjectPush isn't in this firmware"));
 }
 
 MP_DEFINE_CONST_OBJ_TYPE(

@@ -1045,8 +1045,8 @@ class ObjectPush:
     devices and keeps one received object at a time: others are turned away
     until `received()` takes it.
 
-    Only the Pico W has it. On the ESP32 the class is there, and making one
-    raises OSError: its Bluetooth stack has no OPP.
+    The ESP32 and the Pico W have it. On a firmware built without it the
+    class is there, and making one raises OSError.
 
     Args:
         bt: the radio, `Bluetooth()`. It is turned on if it's off.

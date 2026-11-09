@@ -291,6 +291,9 @@ static uint32_t auto_class(void) {
     if (p & BTC_PROFILE_AG) {
         service |= ESP_BT_COD_SRVC_AUDIO | ESP_BT_COD_SRVC_TELEPHONY;
     }
+    if (p & BTC_PROFILE_PUSH) {
+        service |= ESP_BT_COD_SRVC_OBJ_TRANSFER;
+    }
     if (p & BTC_PROFILE_AG) {
         // The board is the phone: headsets and car kits look for one.
         major = ESP_BT_COD_MAJOR_DEV_PHONE;
@@ -517,6 +520,7 @@ void btc_radio_stop(void) {
         return;
     }
     btc_msg_stop();
+    btc_opp_stop();
     btc_pb_stop();
     btc_ag_stop();
     btc_hf_stop();

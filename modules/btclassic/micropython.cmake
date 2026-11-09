@@ -37,6 +37,7 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
         ${BTCLASSIC_IDF}/pbap.c
         ${BTCLASSIC_IDF}/hfp_ag.c
         ${BTCLASSIC_IDF}/map.c
+        ${BTCLASSIC_IDF}/opp.c
         ${BTCLASSIC_IDF}/sdp_shared.c)
     target_include_directories(usermod_btclassic INTERFACE ${BTCLASSIC_IDF}/include ${BTCLASSIC_IDF})
     # The source's track metadata for a remote, through link-time hooks into
@@ -69,6 +70,13 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
     # The message client, on Bluedroid's OBEX internals (map.c).
     include(${BTCLASSIC_IDF}/map.cmake)
     btclassic_map(usermod_btclassic ${BTCLASSIC_IDF}/map.c)
+    # Object Push, on the same internals (opp.c); ObjectPush is there only
+    # when it's in.
+    include(${BTCLASSIC_IDF}/opp.cmake)
+    btclassic_opp(usermod_btclassic ${BTCLASSIC_IDF}/opp.c)
+    if(BTCLASSIC_OPP_BUILT)
+        list(APPEND MICROPY_DEF_BOARD BTC_HAS_PUSH=1)
+    endif()
     target_link_libraries(usermod INTERFACE usermod_btclassic)
     list(APPEND MICROPY_DEF_BOARD MICROPY_BLUETOOTH_BLUEDROID=1)
     # The backend's roles: central and the GATT client as well as the
