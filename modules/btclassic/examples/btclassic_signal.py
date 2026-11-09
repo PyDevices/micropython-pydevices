@@ -16,7 +16,8 @@ Run it:
 
     mpftp run btclassic_signal.py
 
-Tested on:
+Tested on: Adafruit QT Py ESP32 Pico, MicroPython 1.30.0-preview with
+btclassic, with a Windows 11 PC connected to its serial port.
 """
 
 import time
