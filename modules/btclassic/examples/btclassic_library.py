@@ -21,7 +21,9 @@ Run it:
 
     mpftp run btclassic_library.py
 
-Tested on:
+Tested on: Pimoroni Pico Plus 2 W, MicroPython 1.30.0-preview with
+btclassic, with a Galaxy S21, whose one player can't be browsed until a
+music app that allows it is open.
 """
 
 import time
@@ -55,7 +57,8 @@ for player in players:
     except OSError as error:
         print("Can't browse %s: %s" % (player["name"], error))
 else:
-    raise SystemExit("No player on this phone can be browsed.")
+    print("No player on this phone can be browsed.")
+    raise SystemExit
 
 # List the top folder, or the results of a search.
 if SEARCH:
