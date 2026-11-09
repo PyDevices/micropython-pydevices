@@ -10,6 +10,8 @@ on:
       - 'build_mp.py'
       - 'tests/test_build_mp.py'
       - 'tests/test_freeze_list.py'
+      - 'tests/test_effects_selection.py'
+      - 'modules/audioeffects/**'
       - 'scripts/freeze_list.py'
       - 'modules/library.py'
       - 'modules.lock'
@@ -25,6 +27,8 @@ on:
       - 'build_mp.py'
       - 'tests/test_build_mp.py'
       - 'tests/test_freeze_list.py'
+      - 'tests/test_effects_selection.py'
+      - 'modules/audioeffects/**'
       - 'scripts/freeze_list.py'
       - 'modules/library.py'
       - 'modules.lock'
@@ -47,7 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Unit tests
-        run: PYTHONPATH=tests python3 -m unittest test_build_mp test_freeze_list -v
+        run: PYTHONPATH=tests python3 -m unittest test_build_mp test_freeze_list test_effects_selection -v
       - name: provenance.json is current
         run: PYTHONPATH=tests python3 -m unittest test_provenance -v
 
