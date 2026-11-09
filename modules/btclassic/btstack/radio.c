@@ -861,6 +861,108 @@ int btc_radio_found(btc_found_t *out, int max) {
     return found_count;
 }
 
+// ---- services ----
+
+// One SDP query for every record that runs over L2CAP (that is, every
+// service), asking for each one's ServiceClassIDList. Its first UUID is
+// the record's most specific class.
+static int sdp_state = BTC_ERR_STATE;   // 0 searching, 1 ended, BTC_ERR_*
+static int sdp_count;
+static btc_uuid_t sdp_found[BTC_SERVICES_MAX];
+static uint8_t sdp_attr[64];            // the attribute value being received
+static bd_addr_t sdp_addr;
+
+static void sdp_take_class(void) {
+    if (sdp_count >= BTC_SERVICES_MAX || de_get_element_type(sdp_attr) != DE_DES) {
+        return;
+    }
+    des_iterator_t it;
+    for (des_iterator_init(&it, sdp_attr); des_iterator_has_more(&it); des_iterator_next(&it)) {
+        if (des_iterator_get_type(&it) != DE_UUID) {
+            continue;
+        }
+        const uint8_t *e = des_iterator_get_element(&it);
+        btc_uuid_t *o = &sdp_found[sdp_count];
+        switch (de_get_size_type(e)) {
+            case DE_SIZE_16:
+                o->len = 2;
+                break;
+            case DE_SIZE_32:
+                o->len = 4;
+                break;
+            case DE_SIZE_128:
+                o->len = 16;
+                break;
+            default:
+                return;
+        }
+        memcpy(o->uuid, e + 1, o->len);
+        // The same class from two records is listed once.
+        for (int i = 0; i < sdp_count; i++) {
+            if (sdp_found[i].len == o->len && memcmp(sdp_found[i].uuid, o->uuid, o->len) == 0) {
+                return;
+            }
+        }
+        sdp_count++;
+        return;
+    }
+}
+
+static void on_sdp_services(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
+    (void)channel;
+    (void)size;
+    if (packet_type != HCI_EVENT_PACKET || sdp_state != 0) {
+        return;
+    }
+    switch (hci_event_packet_get_type(packet)) {
+        case SDP_EVENT_QUERY_ATTRIBUTE_VALUE: {
+            uint16_t len = sdp_event_query_attribute_byte_get_attribute_length(packet);
+            uint16_t at = sdp_event_query_attribute_byte_get_data_offset(packet);
+            if (len > sizeof(sdp_attr)) {
+                break;
+            }
+            sdp_attr[at] = sdp_event_query_attribute_byte_get_data(packet);
+            if (at + 1 == len) {
+                sdp_take_class();
+            }
+            break;
+        }
+        case SDP_EVENT_QUERY_COMPLETE:
+            sdp_state = sdp_event_query_complete_get_status(packet) == ERROR_CODE_SUCCESS ? 1 : BTC_ERR_FAIL;
+            break;
+        default:
+            break;
+    }
+}
+
+int btc_radio_query_services(const uint8_t *addr) {
+    static const uint8_t pattern[] = { 0x35, 0x03, 0x19, 0x01, 0x00 };     // L2CAP
+    static const uint8_t attributes[] = { 0x35, 0x03, 0x09, 0x00, 0x01 };  // ServiceClassIDList
+    if (!btc_radio_active()) {
+        return BTC_ERR_STATE;
+    }
+    // The SDP client takes one query at a time, and says so.
+    memcpy(sdp_addr, addr, 6);
+    sdp_count = 0;
+    sdp_state = 0;
+    if (sdp_client_query(on_sdp_services, sdp_addr, pattern, attributes) != ERROR_CODE_SUCCESS) {
+        // A search still running, or Serial's own lookup, holds the client.
+        sdp_state = BTC_ERR_STATE;
+        return BTC_ERR_STATE;
+    }
+    return BTC_OK;
+}
+
+int btc_radio_services(btc_uuid_t *out, int max, int *count) {
+    int n = sdp_count < max ? sdp_count : max;
+    *count = 0;
+    if (sdp_state == 1) {
+        memcpy(out, sdp_found, n * sizeof(btc_uuid_t));
+        *count = n;
+    }
+    return sdp_state;
+}
+
 int btc_radio_read_rssi(const uint8_t *addr) {
     if (!btc_radio_active()) {
         return BTC_ERR_STATE;

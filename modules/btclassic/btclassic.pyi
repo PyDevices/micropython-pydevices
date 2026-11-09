@@ -244,6 +244,20 @@ class Bluetooth:
         Raises:
             OSError: no link to that device is up.
         """
+    def services(self, addr: bytes, *, timeout_ms: int = 20000) -> list[int | bytes]:
+        """The services a device offers, read from its SDP server: each
+        one's service class UUID, an int for a 16- or 32-bit one (0x110B is
+        an audio sink, 0x1101 a serial port) and 16 bytes, most significant
+        first, for a 128-bit one. The board calls the device if no link is
+        up, which can take the page timeout. Waits up to `timeout_ms`.
+        On the ESP32 the 16-bit services listed are the profiles Bluedroid
+        knows, which take in audio, calls, serial, HID, PAN, OBEX, the
+        phone book and messages; Pico W lists every one.
+
+        Raises:
+            OSError: the radio is off, another search is running, the device
+                didn't answer, or ETIMEDOUT.
+        """
     def inquiring(self) -> bool:
         """An inquiry is running."""
     def found(self) -> list[tuple[bytes, str, int, int | None]]:
