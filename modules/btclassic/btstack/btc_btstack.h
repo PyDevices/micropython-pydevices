@@ -87,6 +87,8 @@ void btc_lib_on_browse(uint8_t packet_type, uint16_t channel, uint8_t *packet, u
 uint16_t btc_sink_avrcp_cid(void);
 void btc_tether_radio_stopping(void);
 void btc_tether_radio_lost(void);
+void btc_opp_radio_stopping(void);
+void btc_opp_radio_lost(void);
 void btc_pb_radio_stopping(void);
 void btc_pb_radio_lost(void);
 
@@ -103,6 +105,7 @@ void btc_goep_init_once(void);
 #define BTC_PROFILE_HF 0x04
 #define BTC_PROFILE_SERIAL 0x08
 #define BTC_PROFILE_HID_DEVICE 0x10
+#define BTC_PROFILE_PUSH 0x20
 void btc_radio_profile(uint32_t profile, bool running, uint8_t hid_subclass);
 
 // A2DP and AVRCP layers, started once while the radio is on (av.c). The

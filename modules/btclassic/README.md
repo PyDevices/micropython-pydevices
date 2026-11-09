@@ -58,6 +58,7 @@ per profile that takes it.
 | `Messages(bt)` | Reads and sends a phone's texts (MAP client): `list()` a folder, `get()` a message with its sender and text, `mark_read()`, `delete()`, `send()`, and `notify()` to hear about new messages as they arrive. |
 | `Library(bt)` | Browses the media library of the phone `AudioSink` plays from (AVRCP browsing): `players()`, `browse()` one, `items()` in a folder, the queue or a search, `enter()` and `up()`, and `play()` a track. Pico W only. |
 | `Tether(bt)` | The internet through a phone's Bluetooth tethering (PAN), as a network interface like `network.WLAN`: `connect()`, `isconnected()`, `ifconfig()` and `ipconfig()`. Pico W only. |
+| `ObjectPush(bt)` | Files and contact cards (OPP): `send()` one to a phone or computer, `pull()` its owner's card, or `listen()` and take what it sends with `received()`. Pico W only. |
 
 Nothing calls back into Python. Each object's state is properties, and its
 `changes()` returns a bit for each kind of state that changed since you last
@@ -184,10 +185,11 @@ service and operator, and answers, dials, hangs up and sends tones.
 `PhoneBook` works as it does on the ESP32, except that `new_missed` is
 always None. Its reply comes into the heap and grows with it: a phone book
 of 471 contacts without photos is 68 KB, so page with `count` on a Pico W.
-`AudioGateway` and `Messages` are ESP32-only. `Library` and `Tether` are
-the other way round: only the Pico W has them (see
-[A phone's music library](#a-phones-music-library) and
-[The internet through a phone](#the-internet-through-a-phone)).
+`AudioGateway` and `Messages` are ESP32-only. `Library`, `Tether` and
+`ObjectPush` are the other way round: only the Pico W has them (see
+[A phone's music library](#a-phones-music-library),
+[The internet through a phone](#the-internet-through-a-phone) and
+[Files and contact cards](#files-and-contact-cards)).
 
 ## How it's built
 
@@ -460,3 +462,34 @@ print(requests.get("http://example.com").status_code)
 The tether is a network interface of its own beside the Wi-Fi's. While it's
 up it's the default route, so `socket` and `requests` go through the phone;
 when it drops, the route goes back to the Wi-Fi if that's connected.
+## Files and contact cards
+
+On a Pico W, `ObjectPush` sends a file to a paired phone or computer, and
+takes the files it sends:
+
+```python
+import btclassic
+
+bt = btclassic.Bluetooth()
+bt.active(True)
+opp = btclassic.ObjectPush(bt)
+opp.send("notes.txt", b"from the Pico\n", type="text/plain")
+
+opp.listen()
+bt.config(discoverable=True)    # so a phone's share sheet finds it
+while not (got := opp.received()):
+    pass
+name, mime, data = got
+```
+
+The phone asks its user to accept each file, and `send()` waits until they
+do, or until `timeout`. A contact card is a file too: send a vCard with
+`type="text/x-vcard"`. `pull()` asks for the owner's card, which many
+phones, Android among them, won't give.
+
+While listening, the Pico keeps one received file at a time, up to
+`max_bytes`, and turns the next away until `received()` takes it. An Android
+phone sends shared text as a small HTML file. Its share sheet lists only
+devices that offer file transfer, so the Pico says so in its class of device
+while it listens. If a phone paired before that doesn't list it, make the
+Pico discoverable and tap Scan.

@@ -1505,6 +1505,8 @@ extern const mp_obj_type_t btc_serial_type;
 extern const mp_obj_type_t btc_library_type;
 // Tether, in mod_btclassic_tether.c: on every backend, raising where there's no PAN.
 extern const mp_obj_type_t btc_tether_type;
+// ObjectPush, in mod_btclassic_push.c: on every backend, raising where there's no OPP.
+extern const mp_obj_type_t btc_push_type;
 #endif
 
 // HIDDevice and HIDHost, in mod_btclassic_hid.c, where the backend has HID.
@@ -1539,6 +1541,8 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_LIBRARY), MP_ROM_INT(BTC_CHANGED_LIBRARY) },
     { MP_ROM_QSTR(MP_QSTR_Tether), MP_ROM_PTR(&btc_tether_type) },
     { MP_ROM_QSTR(MP_QSTR_TETHER), MP_ROM_INT(BTC_CHANGED_TETHER) },
+    { MP_ROM_QSTR(MP_QSTR_ObjectPush), MP_ROM_PTR(&btc_push_type) },
+    { MP_ROM_QSTR(MP_QSTR_PUSH), MP_ROM_INT(BTC_CHANGED_PUSH) },
     #endif
     #if BTC_HAS_PHONEBOOK
     { MP_ROM_QSTR(MP_QSTR_PhoneBook), MP_ROM_PTR(&btc_phonebook_type) },
