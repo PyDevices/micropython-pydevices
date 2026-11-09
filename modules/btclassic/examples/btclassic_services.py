@@ -17,7 +17,8 @@ Run it:
 
     mpftp run btclassic_services.py
 
-Tested on:
+Tested on: ESP32 Audio Kit, MicroPython 1.30.0-preview with btclassic,
+asking an Adafruit QT Py ESP32 Pico running btclassic_serial_echo.py.
 """
 
 import time
