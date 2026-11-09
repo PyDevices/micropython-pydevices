@@ -10,6 +10,9 @@ letting a drawing layer work with the panel's own memory rather than around it.
   it stops being valid. That saves a full-frame copy on every present.
 - A shared dirty-region contract, so a drawing layer that knows which rows
   changed can tell the display, instead of each blit working it out again.
+- A byte-order flag on the ESP32 `spibus`, so a panel that wants its 16-bit
+  colours swapped gets the swap inside the bus's own copy of the frame, and a
+  driver's `reverse_bytes_in_word` costs nothing on those boards.
 
 ## Ports
 
