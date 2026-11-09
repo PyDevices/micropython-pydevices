@@ -84,6 +84,8 @@ Bluetooth Classic:
 - **More profiles on the Pico W.** Its Bluetooth stack has more to offer:
   internet through a phone without Wi-Fi (PAN) and browsing a phone's music
   library (AVRCP browsing).
+- **A Pico W speaker calls its sender back after a lost link,** as the
+  classic ESP32 does. Today it calls back only when `AudioSink` starts.
 
 Every module, the same kit:
 
