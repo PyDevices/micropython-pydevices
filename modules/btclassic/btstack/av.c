@@ -65,6 +65,14 @@ void btc_av_avrcp_use(const btc_av_handlers_t *handlers) {
         avrcp_target_init();
         btc_goep_init_once();
         avrcp_cover_art_client_init();
+        // Browsing, for the library: incoming channels are declined while
+        // it's stopped.
+        avrcp_browsing_init();
+        avrcp_browsing_controller_init();
+        avrcp_browsing_target_init();
+        avrcp_browsing_register_packet_handler(&btc_lib_on_browse);
+        avrcp_browsing_controller_register_packet_handler(&btc_lib_on_browse);
+        avrcp_browsing_target_register_packet_handler(&btc_lib_on_browse);
         avrcp_register_packet_handler(&on_avrcp);
         avrcp_controller_register_packet_handler(&on_avrcp_ct);
         avrcp_target_register_packet_handler(&on_avrcp_tg);
@@ -77,6 +85,9 @@ void btc_av_avrcp_use(const btc_av_handlers_t *handlers) {
 // with it: clear their state so the next start sets them up afresh.
 void btc_av_radio_lost(void) {
     if (avrcp_up) {
+        avrcp_browsing_controller_deinit();
+        avrcp_browsing_target_deinit();
+        avrcp_browsing_deinit();
         avrcp_cover_art_client_deinit();
         avrcp_target_deinit();
         avrcp_controller_deinit();

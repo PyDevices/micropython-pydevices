@@ -103,6 +103,8 @@ MESSAGES: int
 """`Messages.changes` bit: a request finished, whether or not it worked."""
 NOTIFY: int
 """`Messages.changes` bit: the phone reported a change; read `event()`."""
+LIBRARY: int
+"""`Library.changes` bit: a request finished, whether or not it worked."""
 TETHER: int
 """`Tether.changes` bit: the link to the phone came up, failed or went."""
 
@@ -184,6 +186,24 @@ class Bluetooth:
           to the default. Reading it gives the class in use.
         - mac (bytes): the board's Bluetooth address. Read only, and only
           while the radio is on.
+        - page_timeout (int): how long `connect` calls a device before it
+          gives up, in milliseconds, 1 to 40959. Shorter finds out sooner
+          that a device is away; 5120 by default on the ESP32, 15360 on the
+          Pico W.
+        - channel_map (bytes): the channels the board may hop on, 10 bytes
+          with channel 0 (2402 MHz) in bit 0 of the first byte, through
+          channel 78 (2480 MHz). At least 20 must be set; all 79 are by
+          default. Clear the channels a Wi-Fi network sits on to keep out of
+          its way.
+        - eir_uuids (bool): list the services running in the board's
+          inquiry response, so a device searching sees what it offers before
+          connecting. Off by default: the response has the name alone.
+        - eir_tx_power (bool): add the transmit power, for a searching
+          device to judge distance by. Off by default; ESP32 only.
+        - eir_manufacturer (bytes or None): your own data in the inquiry
+          response, a 2-byte company ID (little-endian) then up to 62 bytes.
+        - eir_url (str or None): a URI in the inquiry response, up to 64
+          bytes.
 
         Raises:
             ValueError: an unknown setting, or a value it doesn't take.
@@ -209,6 +229,38 @@ class Bluetooth:
 
         Raises:
             OSError: the radio is off.
+        """
+    def eir(self, addr: bytes) -> bytes | None:
+        """The extended inquiry response a device sent when the last
+        `inquiry` found it, as it came: length, type and data fields, as in
+        the Bluetooth Core Specification. None when it sent none. ESP32
+        only.
+
+        Raises:
+            ValueError: the last inquiry didn't find that device.
+        """
+    def rssi(self, addr: bytes) -> int:
+        """How far a connected device's signal is from the range the
+        controller wants, in dB: 0 inside it, negative weaker, positive
+        stronger. Any profile's link counts. Waits up to a second for the
+        answer.
+
+        Raises:
+            OSError: no link to that device is up.
+        """
+    def services(self, addr: bytes, *, timeout_ms: int = 20000) -> list[int | bytes]:
+        """The services a device offers, read from its SDP server: each
+        one's service class UUID, an int for a 16- or 32-bit one (0x110B is
+        an audio sink, 0x1101 a serial port) and 16 bytes, most significant
+        first, for a 128-bit one. The board calls the device if no link is
+        up, which can take the page timeout. Waits up to `timeout_ms`.
+        On the ESP32 the 16-bit services listed are the profiles Bluedroid
+        knows, which take in audio, calls, serial, HID, PAN, OBEX, the
+        phone book and messages; Pico W lists every one.
+
+        Raises:
+            OSError: the radio is off, another search is running, the device
+                didn't answer, or ETIMEDOUT.
         """
     def inquiring(self) -> bool:
         """An inquiry is running."""
@@ -750,6 +802,71 @@ class Serial:
     def __enter__(self) -> Serial: ...
     def __exit__(self, *args: object) -> None:
         """`deinit`."""
+
+class Library:
+    """The media library of the phone `AudioSink` plays from (AVRCP
+    browsing): its players, a player's folders and tracks, its queue and a
+    search, and a track to play.
+
+    Items are dicts. A folder has "uid", "name", "folder" (True) and
+    "playable"; a track has "uid", "name", "folder" (False), "video", and
+    "artist" and "album" when the phone sends them. A player has "id",
+    "name", "playing" and "browsable". Pass a uid to `enter` or `play`.
+
+    Only the Pico W has it. On the ESP32 the class is there, and making one
+    raises OSError: its Bluetooth stack can't browse.
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+        max_bytes: the most one reply may take; a reply past it is cut, and
+            `truncated` says so.
+    """
+
+    connected: bool
+    """The browsing link to the phone is up."""
+    peer: bytes | None
+    """The phone's address, or None."""
+    depth: int | None
+    """Folders below the browsed player's root, or None before `browse`."""
+    truncated: bool
+    """The last reply outgrew `max_bytes`; ask for fewer items at a time."""
+
+    def __init__(self, bt: Bluetooth, *, max_bytes: int = 16384) -> None: ...
+    def connect(self, *, timeout: int = 10000) -> None:
+        """Open browsing to the phone `AudioSink` is connected to.
+
+        Raises:
+            OSError: no `AudioSink` link, or the phone refused.
+        """
+    def disconnect(self) -> None: ...
+    def players(self, *, timeout: int = 5000) -> list[dict]:
+        """The phone's media players: the apps it can play from."""
+    def browse(self, player: int, *, timeout: int = 5000) -> list[str]:
+        """Browse a player by its "id": returns the names of the folders
+        down to where it is. Some apps can be browsed only while they're
+        open on the phone."""
+    def items(self, offset: int = 0, count: int = 20, *, scope: str = "folder", timeout: int = 10000) -> list[dict]:
+        """A page of items. `scope` is "folder" (the current folder),
+        "search" (the last search's results) or "queue" (what's lined up
+        to play). Past the end, the list is empty."""
+    def enter(self, uid: bytes) -> None:
+        """Go into a folder."""
+    def up(self) -> None:
+        """Go up one folder."""
+    def search(self, text: str) -> None:
+        """Search the browsed player; read the results with
+        `items(scope="search")`."""
+    def play(self, uid: bytes, *, scope: str = "folder") -> None:
+        """Play an item, from the scope it was listed in."""
+    def changes(self) -> int:
+        """The bits (`CONNECTION`, `LIBRARY`) for what changed since the
+        last call, which clears them."""
+    def deinit(self) -> None:
+        """Drop the browsing link. The radio and the sink stay on."""
+    def __enter__(self) -> Library: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
+
 
 class Tether:
     """The internet through a phone's Bluetooth tethering (PAN), as a

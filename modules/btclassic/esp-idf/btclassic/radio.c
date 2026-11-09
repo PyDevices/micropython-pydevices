@@ -38,10 +38,26 @@ static struct {
     uint32_t profiles;  // BTC_PROFILE_* bits of the profiles running
     uint8_t hid_subclass;
     uint32_t class_set; // the class asked for in the settings, or 0
+    uint32_t page_timeout_ms;
+    uint8_t channels[BTC_CHANNEL_MAP_LEN];
+    btc_eir_t eir;
+    // A signal reading asked for by address: where it stands, and the answer.
+    btc_addr_t rssi_addr;
+    int rssi_state;     // 0 waiting, 1 answered, BTC_ERR_* refused
+    int rssi_delta;
+    // A service search, the same way.
+    btc_addr_t sdp_addr;
+    int sdp_state;      // 0 searching, 1 ended, BTC_ERR_* failed
+    int sdp_count;
+    btc_uuid_t sdp[BTC_SERVICES_MAX];
 } r = {
     .discoverable = true,
     .connectable = true,
     .pin = "0000",
+    .page_timeout_ms = 5120,    // the controller's own, 0x2000 slots
+    .channels = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f},
+    .rssi_state = BTC_ERR_STATE,
+    .sdp_state = BTC_ERR_STATE,
 };
 
 int btc_err(esp_err_t err) {
@@ -141,9 +157,70 @@ static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
                 btc_sink_on_remote_name(param->read_rmt_name.bda, (const char *)param->read_rmt_name.rmt_name);
             }
             break;
-        case ESP_BT_GAP_READ_RSSI_DELTA_EVT:
-            if (param->read_rssi_delta.stat == ESP_BT_STATUS_SUCCESS) {
+        case ESP_BT_GAP_READ_RSSI_DELTA_EVT: {
+            bool ok = param->read_rssi_delta.stat == ESP_BT_STATUS_SUCCESS;
+            if (ok) {
                 btc_sink_on_rssi_delta(param->read_rssi_delta.bda, param->read_rssi_delta.rssi_delta);
+            }
+            BTC_LOCK();
+            if (r.rssi_state == 0 && memcmp(r.rssi_addr, param->read_rssi_delta.bda, sizeof(btc_addr_t)) == 0) {
+                r.rssi_delta = param->read_rssi_delta.rssi_delta;
+                r.rssi_state = ok ? 1 : BTC_ERR_STATE;
+            }
+            BTC_UNLOCK();
+            break;
+        }
+        case ESP_BT_GAP_RMT_SRVCS_EVT: {
+            BTC_LOCK();
+            if (r.sdp_state == 0 && memcmp(r.sdp_addr, param->rmt_srvcs.bda, sizeof(btc_addr_t)) == 0) {
+                if (param->rmt_srvcs.stat != ESP_BT_STATUS_SUCCESS) {
+                    // No answer from the device, or no SDP server.
+                    r.sdp_state = BTC_ERR_FAIL;
+                } else {
+                    int n = 0;
+                    for (int i = 0; i < param->rmt_srvcs.num_uuids && n < BTC_SERVICES_MAX; i++) {
+                        const esp_bt_uuid_t *u = &param->rmt_srvcs.uuid_list[i];
+                        btc_uuid_t *o = &r.sdp[n];
+                        if (u->len == ESP_UUID_LEN_16) {
+                            o->len = 2;
+                            o->uuid[0] = u->uuid.uuid16 >> 8;
+                            o->uuid[1] = u->uuid.uuid16;
+                        } else if (u->len == ESP_UUID_LEN_32) {
+                            o->len = 4;
+                            for (int b = 0; b < 4; b++) {
+                                o->uuid[b] = u->uuid.uuid32 >> (24 - 8 * b);
+                            }
+                        } else if (u->len == ESP_UUID_LEN_128) {
+                            // Here, unlike BLE's, Bluedroid hands 128-bit
+                            // UUIDs over most significant byte first: its
+                            // SDP layer and btc each reverse them once.
+                            o->len = 16;
+                            memcpy(o->uuid, u->uuid.uuid128, 16);
+                        } else {
+                            continue;
+                        }
+                        n++;
+                    }
+                    r.sdp_count = n;
+                    r.sdp_state = 1;
+                }
+            }
+            BTC_UNLOCK();
+            break;
+        }
+        case ESP_BT_GAP_SET_AFH_CHANNELS_EVT:
+            if (param->set_afh_channels.stat != ESP_BT_STATUS_SUCCESS) {
+                ESP_LOGW(TAG, "channel map refused: %d", param->set_afh_channels.stat);
+            }
+            break;
+        case ESP_BT_GAP_SET_PAGE_TO_EVT:
+            if (param->set_page_timeout.stat != ESP_BT_STATUS_SUCCESS) {
+                ESP_LOGW(TAG, "page timeout refused: %d", param->set_page_timeout.stat);
+            }
+            break;
+        case ESP_BT_GAP_CONFIG_EIR_DATA_EVT:
+            if (param->config_eir_data.stat != ESP_BT_STATUS_SUCCESS) {
+                ESP_LOGW(TAG, "inquiry response refused: %d", param->config_eir_data.stat);
             }
             break;
         default:
@@ -252,6 +329,46 @@ int btc_radio_set_class(uint32_t cod) {
     return BTC_OK;
 }
 
+// ---- link settings ----
+
+static void apply_page_timeout(void) {
+    // In slots of 0.625 ms.
+    esp_bt_gap_set_page_timeout((uint16_t)((r.page_timeout_ms * 8 + 4) / 5));
+}
+
+static bool channels_default(void) {
+    for (int i = 0; i < BTC_CHANNEL_MAP_LEN; i++) {
+        if (r.channels[i] != (i == BTC_CHANNEL_MAP_LEN - 1 ? 0x7f : 0xff)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void apply_channels(void) {
+    esp_bt_gap_afh_channels map;
+    memcpy(map, r.channels, sizeof(map));
+    esp_bt_gap_set_afh_channels(map);
+}
+
+static void apply_eir(void) {
+    esp_bt_eir_data_t eir = {
+        .fec_required = true,
+        .include_name = true,
+        .include_uuid = r.eir.uuids,
+        .include_txpower = r.eir.tx_power,
+        .manufacturer_len = r.eir.manufacturer_len,
+        .p_manufacturer_data = r.eir.manufacturer_len ? r.eir.manufacturer : NULL,
+        .url_len = r.eir.url_len,
+        .p_url = r.eir.url_len ? r.eir.url : NULL,
+    };
+    esp_bt_gap_config_eir_data(&eir);
+}
+
+static bool eir_default(void) {
+    return !r.eir.uuids && !r.eir.tx_power && !r.eir.manufacturer_len && !r.eir.url_len;
+}
+
 // ---- on and off ----
 
 // The controller and Bluedroid serve two users: Classic (this file's
@@ -347,6 +464,16 @@ int btc_radio_start(void) {
     r.hidden = false;
     apply_scan_mode();
     schedule_class();
+    // Settings made before start, where they differ from the stack's own.
+    if (r.page_timeout_ms != 5120) {
+        apply_page_timeout();
+    }
+    if (!channels_default()) {
+        apply_channels();
+    }
+    if (!eir_default()) {
+        apply_eir();
+    }
     return BTC_OK;
 }
 
@@ -363,6 +490,7 @@ void btc_radio_stop(void) {
     btc_spp_stop();
     btc_hid_stop();
     btc_inquiry_stop();
+    r.sdp_state = BTC_ERR_STATE;   // a search the stop cut short
     if (class_timer) {
         esp_timer_stop(class_timer);
         esp_timer_delete(class_timer);
@@ -498,4 +626,121 @@ uint32_t btc_radio_changes(void) {
     r.changes = 0;
     BTC_UNLOCK();
     return c;
+}
+
+// ---- link quality ----
+
+int btc_radio_read_rssi(const uint8_t *addr) {
+    if (!r.on) {
+        return BTC_ERR_STATE;
+    }
+    esp_bd_addr_t a;
+    memcpy(a, addr, sizeof(a));
+    BTC_LOCK();
+    memcpy(r.rssi_addr, addr, sizeof(btc_addr_t));
+    r.rssi_state = 0;
+    BTC_UNLOCK();
+    int err = btc_err(esp_bt_gap_read_rssi_delta(a));
+    if (err != BTC_OK) {
+        BTC_LOCK();
+        r.rssi_state = err;
+        BTC_UNLOCK();
+    }
+    return err;
+}
+
+int btc_radio_rssi(int *delta) {
+    BTC_LOCK();
+    int state = r.rssi_state;
+    *delta = r.rssi_delta;
+    BTC_UNLOCK();
+    return state;
+}
+
+// ---- services ----
+
+int btc_radio_query_services(const uint8_t *addr) {
+    if (!r.on) {
+        return BTC_ERR_STATE;
+    }
+    esp_bd_addr_t a;
+    memcpy(a, addr, sizeof(a));
+    BTC_LOCK();
+    if (r.sdp_state == 0) {
+        BTC_UNLOCK();
+        return BTC_ERR_STATE;
+    }
+    memcpy(r.sdp_addr, addr, sizeof(btc_addr_t));
+    r.sdp_state = 0;
+    r.sdp_count = 0;
+    BTC_UNLOCK();
+    int err = btc_err(esp_bt_gap_get_remote_services(a));
+    if (err != BTC_OK) {
+        BTC_LOCK();
+        r.sdp_state = err;
+        BTC_UNLOCK();
+    }
+    return err;
+}
+
+int btc_radio_services(btc_uuid_t *out, int max, int *count) {
+    BTC_LOCK();
+    int state = r.sdp_state;
+    int n = r.sdp_count < max ? r.sdp_count : max;
+    if (state == 1) {
+        memcpy(out, r.sdp, n * sizeof(btc_uuid_t));
+    }
+    *count = state == 1 ? n : 0;
+    BTC_UNLOCK();
+    return state;
+}
+
+int btc_radio_set_page_timeout(uint32_t ms) {
+    if (ms < 1 || ms > 40959) {
+        return BTC_ERR_ARG;
+    }
+    r.page_timeout_ms = ms;
+    if (r.on) {
+        apply_page_timeout();
+    }
+    return BTC_OK;
+}
+
+uint32_t btc_radio_page_timeout(void) {
+    return r.page_timeout_ms;
+}
+
+int btc_radio_set_channels(const uint8_t *map) {
+    int count = 0;
+    for (int ch = 0; ch < 79; ch++) {
+        count += (map[ch / 8] >> (ch % 8)) & 1;
+    }
+    if (count < 20 || (map[BTC_CHANNEL_MAP_LEN - 1] & 0x80)) {
+        return BTC_ERR_ARG;
+    }
+    memcpy(r.channels, map, BTC_CHANNEL_MAP_LEN);
+    if (r.on) {
+        apply_channels();
+    }
+    return BTC_OK;
+}
+
+void btc_radio_channels(uint8_t *map) {
+    memcpy(map, r.channels, BTC_CHANNEL_MAP_LEN);
+}
+
+int btc_radio_set_eir(const btc_eir_t *eir) {
+    if (eir->manufacturer_len > BTC_EIR_DATA_MAX || eir->url_len > BTC_EIR_DATA_MAX
+        || (eir->manufacturer_len && eir->manufacturer_len < 2)) {
+        return BTC_ERR_ARG;
+    }
+    r.eir = *eir;
+    if (r.on) {
+        apply_eir();
+    }
+    return BTC_OK;
+}
+
+void btc_radio_eir(btc_eir_t *eir) {
+    *eir = r.eir;
 }

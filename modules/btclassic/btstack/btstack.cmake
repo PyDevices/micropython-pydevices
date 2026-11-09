@@ -37,6 +37,7 @@ if(MICROPY_BLUETOOTH_BTSTACK AND NOT TARGET usermod_btclassic_btstack)
         ${BTCLASSIC_BTSTACK_DIR}/spp.c
         ${BTCLASSIC_BTSTACK_DIR}/hid.c
         ${BTCLASSIC_BTSTACK_DIR}/pbap.c
+        ${BTCLASSIC_BTSTACK_DIR}/browse.c
         ${BTCLASSIC_BTSTACK_DIR}/pan.c
         ${BTCLASSIC_BTSTACK_DIR}/../esp-idf/btclassic/ring.c
         ${BTCLASSIC_BTSTACK_DIR}/mp_host.c
@@ -58,6 +59,7 @@ if(MICROPY_BLUETOOTH_BTSTACK AND NOT TARGET usermod_btclassic_btstack)
         ${_c}/avrcp.c
         ${_c}/avrcp_browsing.c
         ${_c}/avrcp_browsing_controller.c
+        ${_c}/avrcp_browsing_target.c
         ${_c}/avrcp_controller.c
         ${_c}/avrcp_cover_art_client.c
         ${_c}/avrcp_target.c

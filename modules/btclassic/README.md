@@ -46,7 +46,7 @@ per profile that takes it.
 
 | Object | What it does |
 |---|---|
-| `Bluetooth()` | The radio. `active()` turns it on and off; `config()` reads and sets `name`, `discoverable`, `connectable`, `pin` and `mac`; `paired()` and `unpair()` manage pairings. |
+| `Bluetooth()` | The radio. `active()` turns it on and off; `config()` reads and sets `name`, `discoverable`, `connectable`, `pin`, `mac`, the channels it hops on and what a search sees; `paired()` and `unpair()` manage pairings; `inquiry()` finds devices, `services()` asks one what it offers, and `rssi()` reads a link's signal. |
 | `AudioSink(bt)` | Receives audio (A2DP sink) and talks to the sender's player (AVRCP): `readinto()`, the track, `cover`, `position`, `play()`, `next()`, `seek()`, the `volume` shared with the sender's slider, and more. |
 | `HandsFree(bt)` | Follows a phone (HFP hands-free): `battery`, `signal`, `operator`, the `call` and its `caller`, `answer()`, `hangup()`, `dial()`, and the call's audio through its own `readinto()` and `write()`. |
 | `AudioSource(bt)` | Sends audio to headphones, a speaker or a car stereo (A2DP source) and acts as their remote's target (AVRCP): `write()`, the receiver's keys through `key()`, the `volume`, and the `track()` and `status` its display shows. `Bluetooth.inquiry()` and `found()` find the receiver. |
@@ -56,6 +56,7 @@ per profile that takes it.
 | `PhoneBook(bt)` | Reads a phone's contacts and call history (PBAP client): `pull()` a book as records of names, numbers and emails, `list()` and `entry()` to page through it, `size()`, and `lookup()` for the name behind a caller's number. |
 | `AudioGateway(bt)` | The board as the phone for a headset or car kit (HFP audio gateway): the `signal`, `battery` and `operator` it shows, `ring()` with a caller's number, `dial()`, the headset's answer and hang-up, and the call's audio through `readinto()` and `write()`. |
 | `Messages(bt)` | Reads and sends a phone's texts (MAP client): `list()` a folder, `get()` a message with its sender and text, `mark_read()`, `delete()`, `send()`, and `notify()` to hear about new messages as they arrive. |
+| `Library(bt)` | Browses the media library of the phone `AudioSink` plays from (AVRCP browsing): `players()`, `browse()` one, `items()` in a folder, the queue or a search, `enter()` and `up()`, and `play()` a track. Pico W only. |
 | `Tether(bt)` | The internet through a phone's Bluetooth tethering (PAN), as a network interface like `network.WLAN`: `connect()`, `isconnected()`, `ifconfig()` and `ipconfig()`. Pico W only. |
 
 Nothing calls back into Python. Each object's state is properties, and its
@@ -183,8 +184,10 @@ service and operator, and answers, dials, hangs up and sends tones.
 `PhoneBook` works as it does on the ESP32, except that `new_missed` is
 always None. Its reply comes into the heap and grows with it: a phone book
 of 471 contacts without photos is 68 KB, so page with `count` on a Pico W.
-`AudioGateway` and `Messages` are ESP32-only. `Tether` is the other way
-round: only the Pico W has it, and see [The internet through a phone](#the-internet-through-a-phone).
+`AudioGateway` and `Messages` are ESP32-only. `Library` and `Tether` are
+the other way round: only the Pico W has them (see
+[A phone's music library](#a-phones-music-library) and
+[The internet through a phone](#the-internet-through-a-phone)).
 
 ## How it's built
 
@@ -332,6 +335,85 @@ leaves it in the phone's drafts instead.
 A moment after `notify()`, the phone connects back to deliver its reports,
 and `notify_connected` turns True. If it stays False, poll
 `list("inbox", unread=True)` instead.
+
+## Signal, channels and what a search sees
+
+`Bluetooth.rssi(addr)` reads how a connected device's signal sits against
+the range the controller wants, in dB: 0 is inside it, and the further below
+0, the weaker. Any profile's link counts:
+
+```python
+import btclassic
+
+bt = btclassic.Bluetooth()
+sink = btclassic.AudioSink(bt)
+# ... once sink.connected ...
+print(bt.rssi(sink.peer))                   # 0: inside the ideal range
+```
+
+Bluetooth hops across 79 channels, 2402 to 2480 MHz. Wi-Fi sits on 22 MHz
+of the same band, so a board near a busy network can keep off it with
+`config(channel_map=...)`, ten bytes with a bit per channel:
+
+```python
+wifi = 2412 + 5 * (6 - 1)                   # Wi-Fi channel 6's centre, MHz
+m = bytearray(10)
+for ch in range(79):
+    if abs(2402 + ch - wifi) > 11:
+        m[ch // 8] |= 1 << (ch % 8)
+bt.config(channel_map=m)
+```
+
+`config(page_timeout=3000)` makes `connect()` to a device that's away give
+up after 3 s rather than 5 to 15.
+
+A device searching with an inquiry gets the board's name. `eir_uuids=True`
+adds the services running, so it sees a speaker or a serial port before it
+connects, and `eir_manufacturer` and `eir_url` carry data of your own.
+`Bluetooth.eir(addr)` reads what another device sent, after `inquiry()`
+found it.
+
+`Bluetooth.services(addr)` asks a device what it offers, from its SDP
+server, without pairing. It calls the device if no link is up, and returns
+each service's class UUID:
+
+```python
+print([hex(u) for u in bt.services(laptop) if isinstance(u, int)])
+# ['0x110a', '0x111e', '0x1115', '0x110b', '0x110e', '0x111f']
+```
+
+That Windows laptop sends audio (0x110A) and plays it (0x110B), sends
+remote-control keys (0x110E), joins a network over Bluetooth (0x1115), and
+takes either side of a hands-free call (0x111E, 0x111F). The first search pages the device, about 2 s; a second
+one over the same link took 0.15 s.
+
+## A phone's music library
+
+On a Pico W, `Library` browses the players on the phone `AudioSink` plays
+from, and plays what you pick:
+
+```python
+import btclassic
+
+bt = btclassic.Bluetooth()
+music = btclassic.AudioSink(bt)
+# ... once the phone has connected:
+lib = btclassic.Library(bt)
+lib.connect()
+player = [p for p in lib.players() if p["browsable"]][0]
+lib.browse(player["id"])
+for item in lib.items(count=10):
+    print("folder" if item["folder"] else "track", item["name"])
+```
+
+Folders have a `uid` to `enter()`; tracks have one to `play()`. A player
+that isn't browsable may become so once its app is open on the phone.
+
+An Android phone lists one player, "Media Player", whose folders are the
+phone's media apps that let Bluetooth browse them. If none does, `browse()`
+raises "that player can't be browsed", and `connect()` and `players()` are
+all you get. Whether `search()` works is up to the player too: the phone
+answers with an error when it can't search.
 
 ## The internet through a phone
 

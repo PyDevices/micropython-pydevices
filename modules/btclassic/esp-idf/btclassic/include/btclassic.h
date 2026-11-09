@@ -63,6 +63,7 @@ extern "C" {
 #define BTC_CHANGED_MESSAGES   (1u << 19)   // msg: a request finished, or the link came or went
 #define BTC_CHANGED_NOTIFY     (1u << 20)   // msg: the phone reported a new, sent, deleted or changed message
 #define BTC_CHANGED_TETHER     (1u << 21)   // tether: the link came or went
+#define BTC_CHANGED_LIBRARY    (1u << 22)   // lib: a request finished
 
 typedef uint8_t btc_addr_t[6];  // most significant byte first
 
@@ -112,6 +113,39 @@ int btc_radio_paired(btc_addr_t *addrs, int max);
 // Forget one paired device, or all of them with NULL.
 int btc_radio_unpair(const uint8_t *addr);
 uint32_t btc_radio_changes(void);
+
+// ---- link quality, on the radio ----
+
+// Ask how far a connected device's signal is from the controller's ideal
+// range. btc_radio_rssi() then gives 1 with the answer in dB (0 inside the
+// range, below 0 weaker, above 0 stronger), 0 while it's on its way, or a
+// negative BTC_ERR_*: BTC_ERR_STATE when no link to that device is up.
+int btc_radio_read_rssi(const uint8_t *addr);
+int btc_radio_rssi(int *delta);
+
+// How long a connection attempt pages for before giving up, in ms
+// (1 to 40959). Reads back what's set, or the stack's default.
+int btc_radio_set_page_timeout(uint32_t ms);
+uint32_t btc_radio_page_timeout(void);
+
+// The channels the board may hop on, as 79 bits, channel 0 in bit 0 of the
+// first byte; at least 20 must be set. All of them by default.
+#define BTC_CHANNEL_MAP_LEN 10
+int btc_radio_set_channels(const uint8_t *map);
+void btc_radio_channels(uint8_t *map);
+
+// What the board sends in its inquiry response besides its name.
+#define BTC_EIR_DATA_MAX 64
+typedef struct {
+    bool uuids;             // the 16-bit UUIDs of the services running
+    bool tx_power;          // the inquiry transmit power
+    uint8_t manufacturer_len;
+    uint8_t manufacturer[BTC_EIR_DATA_MAX];   // company ID first, little-endian
+    uint8_t url_len;
+    uint8_t url[BTC_EIR_DATA_MAX];
+} btc_eir_t;
+int btc_radio_set_eir(const btc_eir_t *eir);
+void btc_radio_eir(btc_eir_t *eir);
 
 // ---- the audio sink: A2DP sink and AVRCP controller ----
 
@@ -303,6 +337,24 @@ int btc_radio_inquiry(uint32_t duration_ms);
 bool btc_radio_inquiring(void);
 // Copy up to `max` of the devices found so far; returns how many there are.
 int btc_radio_found(btc_found_t *out, int max);
+// The extended inquiry response a found device sent, as it came: copies up
+// to `size` bytes and returns its length, 0 if it sent none, or BTC_ERR_ARG
+// if the last inquiry didn't find it.
+#define BTC_EIR_MAX 240
+int btc_radio_found_eir(const uint8_t *addr, uint8_t *dst, size_t size);
+
+// The services a device offers, read from its SDP server: each one's
+// service class, as a 16-, 32- or 128-bit UUID in big-endian order. Start a
+// search with btc_radio_query_services(); btc_radio_services() then returns
+// 1 with `*count` set when it has ended, 0 while it runs, or BTC_ERR_*.
+// The board pages the device if there's no link to it yet.
+#define BTC_SERVICES_MAX 32
+typedef struct {
+    uint8_t len;        // 2, 4 or 16
+    uint8_t uuid[16];
+} btc_uuid_t;
+int btc_radio_query_services(const uint8_t *addr);
+int btc_radio_services(btc_uuid_t *out, int max, int *count);
 
 // ---- the audio source: A2DP source and AVRCP target ----
 //
@@ -546,6 +598,65 @@ size_t btc_pb_data(uint8_t *dst, size_t size);
 void btc_pb_release(void);
 void btc_pb_status(btc_pb_status_t *out);
 uint32_t btc_pb_changes(void);
+
+// ---- the library: AVRCP browsing -------------------------------------------
+//
+// Browses the media players on the phone the sink plays from: the players,
+// a player's folders and tracks, its queue and a search, and plays an item.
+// One request runs at a time: it returns at once, and BTC_CHANGED_LIBRARY
+// (with `busy` false) says it finished; btc_lib_data() then holds its items,
+// each as AVRCP sent it, after a type byte and a length byte: 1 a player,
+// 2 a folder, 3 a track or video, 4 a folder name from btc_lib_set_player.
+// A long item is cut at 129 bytes. Backends without browsing return
+// BTC_ERR_UNSUPPORTED.
+// Changes: BTC_CHANGED_CONNECTION, BTC_CHANGED_LIBRARY.
+
+#define BTC_LIB_SCOPE_PLAYERS 0
+#define BTC_LIB_SCOPE_FOLDER  1     // the browsed player's current folder
+#define BTC_LIB_SCOPE_SEARCH  2     // the last search's results
+#define BTC_LIB_SCOPE_QUEUE   3     // the player's now-playing list
+
+#define BTC_LIB_OP_NONE   0
+#define BTC_LIB_OP_LIST   1
+#define BTC_LIB_OP_PLAYER 2
+#define BTC_LIB_OP_PATH   3
+#define BTC_LIB_OP_SEARCH 4
+
+typedef struct {
+    bool started;
+    bool connecting;
+    bool connected;
+    btc_addr_t peer;
+    bool busy;
+    int result;             // the last request's: BTC_OK, a negative BTC_ERR_*, or AVRCP's browsing status
+    uint32_t length;        // bytes in its reply
+    uint16_t items;         // items in its reply
+    bool truncated;         // the reply outgrew the buffer; ask for fewer at a time
+    uint16_t player;        // the browsed player
+    int depth;              // folders below the player's root, or BTC_UNKNOWN
+    uint16_t uid_counter;   // the player's, from its last reply
+} btc_lib_status_t;
+
+// `max_bytes` caps the buffer one reply is gathered in.
+int btc_lib_start(size_t max_bytes);
+void btc_lib_stop(void);
+bool btc_lib_started(void);
+// Open browsing to the phone the sink is connected to.
+int btc_lib_connect(void);
+int btc_lib_disconnect(void);
+// Items `start` to `start + count - 1` of a scope.
+int btc_lib_list(uint8_t scope, uint32_t start, uint32_t count);
+// Browse a player: its reply holds the names of the folders down to where it is.
+int btc_lib_set_player(uint16_t player);
+// Into a folder by its 8-byte uid, or up one.
+int btc_lib_enter(const uint8_t *uid);
+int btc_lib_up(void);
+int btc_lib_search(const char *text);
+// Play an item of a scope by its uid; acts at once, over the sink's link.
+int btc_lib_play(uint8_t scope, const uint8_t *uid);
+size_t btc_lib_data(uint8_t *dst, size_t size);
+void btc_lib_status(btc_lib_status_t *out);
+uint32_t btc_lib_changes(void);
 
 // ---- the tether: PAN user, the internet through a phone ---------------------
 //
