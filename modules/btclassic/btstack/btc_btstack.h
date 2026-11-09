@@ -93,6 +93,8 @@ void btc_tether_radio_stopping(void);
 void btc_tether_radio_lost(void);
 void btc_opp_radio_stopping(void);
 void btc_opp_radio_lost(void);
+void btc_map_radio_stopping(void);
+void btc_map_radio_lost(void);
 void btc_pb_radio_stopping(void);
 void btc_pb_radio_lost(void);
 
