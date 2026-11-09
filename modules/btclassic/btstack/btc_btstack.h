@@ -78,6 +78,12 @@ static inline uint8_t btc_sbc_subbands_bits(uint8_t subbands) {
 
 void btc_hid_radio_stopping(void);
 void btc_hid_radio_lost(void);
+void btc_pb_radio_stopping(void);
+void btc_pb_radio_lost(void);
+
+// GOEP (OBEX's transport), shared by cover art and the phone book: started
+// once while the radio is on, and cleared with the AV layers (av.c).
+void btc_goep_init_once(void);
 
 // While a role that needs it runs, the radio shows this Class of Device in
 // place of its own (0 puts its own back).

@@ -1016,7 +1016,8 @@ class PhoneBook:
     """The phone's PBAP feature bits."""
     new_missed: int | None
     """Missed calls the phone hasn't shown yet, from the last pull of a
-    call history, or None."""
+    call history, or None. Always None on the Pico W, whose Bluetooth
+    stack doesn't pass the count on."""
     truncated: bool
     """The last reply was longer than `max_bytes` and was cut."""
 

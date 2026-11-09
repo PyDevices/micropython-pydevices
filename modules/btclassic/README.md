@@ -164,6 +164,7 @@ static RAM, and go back when you close it:
 | `AudioSink` or `AudioSource` | 48 KB at 250 ms, 96 KB at 500 ms |
 | `HandsFree` | 32 KB |
 | Serial port (SPP) | 6 KB |
+| `PhoneBook` | Only its replies: about 150 bytes a contact |
 
 `buffer_ms` defaults to 500 on a board with PSRAM and 250 otherwise. Both
 boards fit any one profile; on a Pico W, a sink and hands-free open together
@@ -177,6 +178,11 @@ link and the call's audio stays on the phone. Everything else works:
 `HandsFree` follows the call, its caller and the phone's signal, battery,
 service and operator, and answers, dials, hangs up and sends tones.
 `HandsFree.audio` stays False, and `connect_audio()` raises OSError.
+
+`PhoneBook` works as it does on the ESP32, except that `new_missed` is
+always None. Its reply comes into the heap and grows with it: a phone book
+of 471 contacts without photos is 68 KB, so page with `count` on a Pico W.
+`AudioGateway` and `Messages` are ESP32-only.
 
 ## How it's built
 

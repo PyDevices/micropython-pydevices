@@ -74,6 +74,9 @@ Bluetooth Classic:
   the phone side of hands-free, serial (SPP), keyboards and gamepads (HID),
   and the phone's contacts and messages.
 - **btclassic alongside Wi-Fi.** Today Wi-Fi has to be off while it plays.
+- **More profiles on the Pico W.** Its Bluetooth stack has more to offer:
+  internet through a phone without Wi-Fi (PAN), browsing a phone's music
+  library (AVRCP browsing), and sending files and contact cards (OBEX).
 
 Every module, the same kit:
 
