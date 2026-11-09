@@ -30,6 +30,19 @@
 #define BTC_CALL_AUDIO 0
 #endif
 
+#if CONFIG_BT_HFP_AG_ENABLE
+#define BTC_AG 1
+#else
+#define BTC_AG 0
+#endif
+
+// The gateway's call audio, over HCI with Bluedroid's codecs, as above.
+#if BTC_AG && CONFIG_BT_HFP_AUDIO_DATA_PATH_HCI && !CONFIG_BT_HFP_USE_EXTERNAL_CODEC
+#define BTC_AG_AUDIO 1
+#else
+#define BTC_AG_AUDIO 0
+#endif
+
 #if CONFIG_BT_AVRCP_CT_COVER_ART_ENABLED
 #define BTC_COVER 1
 #else
@@ -70,6 +83,7 @@ void btc_radio_hold_hidden(bool hidden);
 #define BTC_PROFILE_HF 0x04
 #define BTC_PROFILE_SERIAL 0x08
 #define BTC_PROFILE_HID_DEVICE 0x10
+#define BTC_PROFILE_AG 0x20
 void btc_radio_profile(uint32_t profile, bool running, uint8_t hid_subclass);
 
 // Set radio changes() bits, from another part of the backend.
@@ -175,4 +189,13 @@ void btc_source_tg_track(btc_tg_track_t *out);
 #if BTC_TG_METADATA
 void btc_tg_metadata_reset(void);
 void btc_tg_metadata_changed(uint8_t event_id);
+#endif
+
+// Bluedroid's SDP API, shared (sdp_shared.c): open it with your callback,
+// which then sees every SDP event, and close it when done; it stops when the
+// last user closes. Open waits until SDP is running.
+#if CONFIG_BT_SDP_COMMON_ENABLED
+#include "esp_sdp_api.h"
+esp_err_t btc_sdp_open(esp_sdp_cb_t cb);
+void btc_sdp_close(esp_sdp_cb_t cb);
 #endif

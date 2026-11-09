@@ -53,6 +53,10 @@ per profile that takes it.
 | `Serial(bt)` | A serial port (SPP), as a stream like `machine.UART`: a computer gets a Bluetooth COM port to the board, or `connect()` calls another device's port. |
 | `HIDDevice(bt)` | The board as a keyboard, mouse or game controller (HID device): `type()`, `keyboard()`, `mouse()`, `gamepad()`, or `send()` with your own report descriptor, and the keyboard `leds` the computer sends back. |
 | `HIDHost(bt)` | The board reads a keyboard, mouse or controller (HID host): `connect()`, `read()` its reports, `decode()` them, and `send()` its output reports. |
+| `PhoneBook(bt)` | Reads a phone's contacts and call history (PBAP client): `pull()` a book as records of names, numbers and emails, `list()` and `entry()` to page through it, `size()`, and `lookup()` for the name behind a caller's number. |
+| `AudioGateway(bt)` | The board as the phone for a headset or car kit (HFP audio gateway): the `signal`, `battery` and `operator` it shows, `ring()` with a caller's number, `dial()`, the headset's answer and hang-up, and the call's audio through `readinto()` and `write()`. |
+| `Messages(bt)` | Reads and sends a phone's texts (MAP client): `list()` a folder, `get()` a message with its sender and text, `mark_read()`, `delete()`, `send()`, and `notify()` to hear about new messages as they arrive. |
+| `Library(bt)` | Browses the media library of the phone `AudioSink` plays from (AVRCP browsing): `players()`, `browse()` one, `items()` in a folder, the queue or a search, `enter()` and `up()`, and `play()` a track. Pico W only. |
 
 Nothing calls back into Python. Each object's state is properties, and its
 `changes()` returns a bit for each kind of state that changed since you last
@@ -94,6 +98,10 @@ call, play the `HandsFree` once `audio` is True, at its `sample_rate`, and
 hand `HandsFree.uplink()` the board's open `pcm_in`: the pump's pull then
 sends the microphone to the phone as well. A profile is read one way or the
 other, by the pump or with `readinto()`, not both.
+[`examples/btclassic_speaker.py`](examples/btclassic_speaker.py) plays music
+this way, and
+[`examples/btclassic_speakerphone.py`](examples/btclassic_speakerphone.py)
+answers calls and plays them, with the microphone going back to the phone.
 
 If the phone's caller hears your microphone break up while the board is busy
 (redrawing, decoding a cover, collecting garbage), raise the PSRAM and flash
@@ -125,8 +133,10 @@ Wi-Fi off while listening, as the examples do.
 On ESP32, it's the classic ESP32: the chip in that family with Bluetooth
 Classic and MicroPython support. The Pico W and Pico 2 W are covered below.
 The module is opt-in (`--modules btclassic`, or `--modules all,btclassic`)
-because it turns ESP-IDF's Bluedroid on in place of NimBLE. ESP-IDF runs one Bluetooth host, so a firmware with
-btclassic has no `bluetooth` (BLE) module. A board with PSRAM is the
+because it turns ESP-IDF's Bluedroid on in place of NimBLE. ESP-IDF runs one
+Bluetooth host, so MicroPython's `bluetooth` (BLE) module runs on Bluedroid
+too, beside Classic in the same firmware, with a few differences
+([BLE on Bluedroid](#ble-on-bluedroid)). A board with PSRAM is the
 comfortable fit: the Bluetooth stack's buffers go there.
 
 Pairings live in the board's NVS partition, and the last sender with them.
@@ -155,6 +165,7 @@ static RAM, and go back when you close it:
 | `AudioSink` or `AudioSource` | 48 KB at 250 ms, 96 KB at 500 ms |
 | `HandsFree` | 32 KB |
 | Serial port (SPP) | 6 KB |
+| `PhoneBook` | Only its replies: about 150 bytes a contact |
 
 `buffer_ms` defaults to 500 on a board with PSRAM and 250 otherwise. Both
 boards fit any one profile; on a Pico W, a sink and hands-free open together
@@ -168,6 +179,12 @@ link and the call's audio stays on the phone. Everything else works:
 `HandsFree` follows the call, its caller and the phone's signal, battery,
 service and operator, and answers, dials, hangs up and sends tones.
 `HandsFree.audio` stays False, and `connect_audio()` raises OSError.
+
+`PhoneBook` works as it does on the ESP32, except that `new_missed` is
+always None. Its reply comes into the heap and grows with it: a phone book
+of 471 contacts without photos is 68 KB, so page with `count` on a Pico W.
+`AudioGateway` and `Messages` are ESP32-only. `Library` is the other way
+round: only the Pico W has it (see [A phone's music library](#a-phones-music-library)).
 
 ## How it's built
 
@@ -183,8 +200,23 @@ the two profiles audiosamples when audiodsp is in the build.
 ordinary user C module, so a stock MicroPython esp32 build takes it with
 `USER_C_MODULES`. Two settings go with it: [`sdkconfig.esp32`](sdkconfig.esp32)
 in the board's `SDKCONFIG_DEFAULTS` turns Bluedroid, A2DP, AVRCP cover art, HID and
-HFP on, and `micropython.cmake` turns the `bluetooth` module off itself.
-`build_mp.py` does the first for you.
+HFP on, and `micropython.cmake` puts the `bluetooth` module on Bluedroid
+([`src/modbluetooth_bluedroid.c`](src/modbluetooth_bluedroid.c)), with two
+small MicroPython patches in [`patches/`](patches). `build_mp.py` does the
+first for you.
+
+## BLE on Bluedroid
+
+`import bluetooth` works as upstream documents it: advertising, scanning,
+both roles, the GATT server and client, and pairing. Where it differs:
+
+- `_IRQ_GATTS_READ_REQUEST` can't refuse a read. Events reach Python through
+  the scheduler, never on the Bluetooth task, which also decodes audio.
+- Bonds live in NVS, kept by Bluedroid, so `_IRQ_GET_SECRET` and
+  `_IRQ_SET_SECRET` never fire.
+- The client hears notifications from characteristics it discovered (up to
+  16 per peer), or whose CCCD it wrote.
+- The device name is one name, shared with Classic.
 
 ## Sending audio
 
@@ -206,7 +238,9 @@ source converts it to the stream's: 44.1 kHz stereo SBC, the one format
 every A2DP receiver takes. While the stream runs, `write()` waits for room,
 so the receiver's pace sets your program's.
 [`examples/btclassic_source_tone.py`](examples/btclassic_source_tone.py)
-plays a tone and prints the receiver's keys.
+plays a tone and prints the receiver's keys, and
+[`examples/btclassic_transmitter.py`](examples/btclassic_transmitter.py)
+sends the board's line in.
 
 The receiver's display gets the title, artist, album, play status and
 position through AVRCP. ESP-IDF's Bluetooth stack has no public call for
@@ -250,3 +284,79 @@ each input report. `decode()` turns a report into a tuple such as
 (`connect(address, boot=True)`) or is another btclassic board. A board is a
 device or a host, one at a time.
 
+## Contacts and calls
+
+```python
+import btclassic
+
+bt = btclassic.Bluetooth()
+pb = btclassic.PhoneBook(bt)
+pb.connect()                                # the phone HandsFree follows, or the first paired one
+for card in pb.pull("pb", count=5):
+    print(card["name"], card["numbers"])
+for card in pb.pull("mch", count=3):        # missed calls
+    print(card["time"], card["name"] or card["numbers"])
+print(pb.lookup("+15550100"))               # the name a call screen shows
+```
+
+The phone asks before it shares its contacts the first time; allow it
+there. `pull()` gives records as dicts, and `PhoneBook.parse()` reads a
+`.vcf` file the same way.
+
+`AudioGateway` turns it round: a headset or car kit pairs with the board as
+it would with a phone. `ring("+15550100")` rings it with that number, its
+button answers, and while `audio` is True the call's sound goes both ways
+through `write()` and `readinto()`. A board runs `HandsFree` or
+`AudioGateway`, one at a time.
+
+`Messages` reads the phone's texts the same way:
+
+```python
+import time
+
+msgs = btclassic.Messages(bt)
+msgs.connect()
+for m in msgs.list("inbox", count=5):
+    print(m["datetime"], m["sender_name"], m["subject"])
+msgs.notify()                               # the phone reports new messages
+while True:
+    event = msgs.event()
+    if event and event["type"] == "NewMessage":
+        print(msgs.get(event["handle"])["text"])
+    time.sleep_ms(100)
+```
+
+`send(number, text)` sends a text through the phone; `folder="draft"`
+leaves it in the phone's drafts instead.
+
+A moment after `notify()`, the phone connects back to deliver its reports,
+and `notify_connected` turns True. If it stays False, poll
+`list("inbox", unread=True)` instead.
+
+## A phone's music library
+
+On a Pico W, `Library` browses the players on the phone `AudioSink` plays
+from, and plays what you pick:
+
+```python
+import btclassic
+
+bt = btclassic.Bluetooth()
+music = btclassic.AudioSink(bt)
+# ... once the phone has connected:
+lib = btclassic.Library(bt)
+lib.connect()
+player = [p for p in lib.players() if p["browsable"]][0]
+lib.browse(player["id"])
+for item in lib.items(count=10):
+    print("folder" if item["folder"] else "track", item["name"])
+```
+
+Folders have a `uid` to `enter()`; tracks have one to `play()`. A player
+that isn't browsable may become so once its app is open on the phone.
+
+An Android phone lists one player, "Media Player", whose folders are the
+phone's media apps that let Bluetooth browse them. If none does, `browse()`
+raises "that player can't be browsed", and `connect()` and `players()` are
+all you get. Whether `search()` works is up to the player too: the phone
+answers with an error when it can't search.

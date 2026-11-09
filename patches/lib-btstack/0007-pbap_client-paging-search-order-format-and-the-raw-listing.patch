@@ -1,0 +1,282 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 00:00:00 -0500
+Subject: [PATCH] pbap_client: paging, search, order, format and the raw listing
+
+v1.5.6.2's client always pulled a whole book in the server's format and
+could search a listing only by number. Add the setters upstream master has
+(pbap_set_max_list_count, pbap_set_list_start_offset, pbap_set_order,
+pbap_set_search_property, pbap_set_search_value) with its rule that 0
+leaves a parameter out, plus pbap_set_format for vCard 3.0. A listing's
+body also goes to the client as PBAP_DATA_PACKET, as a pull's does, so a
+client can keep names longer than PBAP_MAX_NAME_LEN.
+
+diff --git a/src/classic/pbap_client.c b/src/classic/pbap_client.c
+--- a/src/classic/pbap_client.c
++++ b/src/classic/pbap_client.c
+@@ -170,6 +170,13 @@
+     uint8_t  vcard_selector_supported;
+     /* property selector */
+     uint32_t property_selector;
++    /* paging, order, search and format: 0 (or NULL) leaves each out */
++    uint16_t max_list_count;
++    uint16_t list_start_offset;
++    uint8_t  order;
++    uint8_t  search_property;
++    const char * search_value;
++    uint8_t  format;
+     /* abort */
+     uint8_t  abort_operation;
+     /* obex parser */
+@@ -551,6 +558,8 @@
+                     }
+                     break;
+                 case PBAP_W4_GET_CARD_LIST_COMPLETE:
++                    // the listing's XML as it came, then each card parsed
++                    client->client_handler(PBAP_DATA_PACKET, client->cid, (uint8_t *) data_buffer, data_len);
+                     pbap_client_process_vcard_list_body(data_buffer, data_len);
+                     break;
+                 default:
+@@ -596,6 +605,62 @@
+     return pos;
+ }
+ 
++static uint16_t pbap_client_application_params_add_list_start_offset(const pbap_client_t * client, uint8_t * application_parameters){
++    uint16_t pos = 0;
++    if (client->list_start_offset != 0){
++        application_parameters[pos++] = PBAP_APPLICATION_PARAMETER_LIST_START_OFFSET;
++        application_parameters[pos++] = 2;
++        big_endian_store_16(application_parameters, pos, client->list_start_offset);
++        pos += 2;
++    }
++    return pos;
++}
++
++static uint16_t pbap_client_application_params_add_paging(const pbap_client_t * client, uint8_t * application_parameters){
++    uint16_t pos = 0;
++    if (client->max_list_count != 0){
++        pos += pbap_client_application_params_add_max_list_count(client, &application_parameters[pos], client->max_list_count);
++    }
++    pos += pbap_client_application_params_add_list_start_offset(client, &application_parameters[pos]);
++    return pos;
++}
++
++// format: vCard 3.0 (1); 2.1 (0), the default, is left out
++static uint16_t pbap_client_application_params_add_format(const pbap_client_t * client, uint8_t * application_parameters){
++    uint16_t pos = 0;
++    if (client->format != 0){
++        application_parameters[pos++] = PBAP_APPLICATION_PARAMETER_FORMAT;
++        application_parameters[pos++] = 1;
++        application_parameters[pos++] = client->format;
++    }
++    return pos;
++}
++
++// Order: alphabetical (1) or phonetical (2); indexed (0), the default, is
++// left out. Search property: number (1) or sound (2); name (0), the
++// default, is left out. Max size: PBAP_MAX_SEARCH_VALUE_LEN + 8
++static uint16_t pbap_client_application_params_add_order_and_search(const pbap_client_t * client, uint8_t * application_parameters){
++    uint16_t pos = 0;
++    if (client->order != 0){
++        application_parameters[pos++] = PBAP_APPLICATION_PARAMETER_ORDER;
++        application_parameters[pos++] = 1;
++        application_parameters[pos++] = client->order;
++    }
++    if (client->search_value != NULL){
++        uint16_t len = btstack_min(PBAP_MAX_SEARCH_VALUE_LEN, (uint16_t) strlen(client->search_value));
++        application_parameters[pos++] = PBAP_APPLICATION_PARAMETER_SEARCH_VALUE;
++        application_parameters[pos++] = (uint8_t) len;
++        (void)memcpy(&application_parameters[pos], client->search_value, len);
++        pos += len;
++        if (client->search_property != 0){
++            application_parameters[pos++] = PBAP_APPLICATION_PARAMETER_SEARCH_PROPERTY;
++            application_parameters[pos++] = 1;
++            application_parameters[pos++] = client->search_property;
++        }
++    }
++    return pos;
++}
++
+ // max size: PBAP_MAX_PHONE_NUMBER_LEN + 5
+ static uint16_t pbap_client_application_params_add_phone_number(const pbap_client_t * client, uint8_t * application_parameters){
+     uint16_t pos = 0;
+@@ -673,7 +738,7 @@
+     uint16_t path_element_start;
+     uint16_t path_element_len;
+     const char * path_element;
+-    uint8_t  application_parameters[PBAP_MAX_PHONE_NUMBER_LEN + 10];
++    uint8_t  application_parameters[PBAP_MAX_PHONE_NUMBER_LEN + PBAP_MAX_SEARCH_VALUE_LEN + 48];
+     uint8_t  challenge_response[36];
+     uint16_t pos;
+ 
+@@ -786,6 +851,8 @@
+                 pos = 0;
+                 pos += pbap_client_application_params_add_property_selector(pbap_client, &application_parameters[pos]);
+                 pos += pbap_client_application_params_add_vcard_selector(pbap_client, &application_parameters[pos]);
++                pos += pbap_client_application_params_add_format(pbap_client, &application_parameters[pos]);
++                pos += pbap_client_application_params_add_paging(pbap_client, &application_parameters[pos]);
+                 pbap_client_add_application_parameters(pbap_client, application_parameters, pos);
+             }
+             // state
+@@ -809,6 +876,10 @@
+                 pos = 0;
+                 pos += pbap_client_application_params_add_vcard_selector(pbap_client, &application_parameters[pos]);
+                 pos += pbap_client_application_params_add_phone_number(pbap_client, &application_parameters[pos]);
++                if (pbap_client->phone_number == NULL){
++                    pos += pbap_client_application_params_add_order_and_search(pbap_client, &application_parameters[pos]);
++                }
++                pos += pbap_client_application_params_add_paging(pbap_client, &application_parameters[pos]);
+                 pbap_client_add_application_parameters(pbap_client, application_parameters, pos);
+             }
+             // state
+@@ -829,6 +900,7 @@
+ 
+                 pos = 0;
+                 pos += pbap_client_application_params_add_property_selector(pbap_client, &application_parameters[pos]);
++                pos += pbap_client_application_params_add_format(pbap_client, &application_parameters[pos]);
+                 pbap_client_add_application_parameters(pbap_client, application_parameters, pos);
+             }
+             // state
+@@ -1176,6 +1248,12 @@
+     pbap_client->client_handler = handler;
+     pbap_client->vcard_selector = 0;
+     pbap_client->vcard_selector_operator = PBAP_VCARD_SELECTOR_OPERATOR_OR;
++    pbap_client->max_list_count = 0;
++    pbap_client->list_start_offset = 0;
++    pbap_client->order = 0;
++    pbap_client->search_property = 0;
++    pbap_client->search_value = NULL;
++    pbap_client->format = 0;
+ 
+     uint8_t err = goep_client_create_connection(&pbap_packet_handler, addr, BLUETOOTH_SERVICE_CLASS_PHONEBOOK_ACCESS_PSE, &pbap_client->goep_cid);
+     *out_cid = pbap_client->cid;
+@@ -1347,3 +1425,61 @@
+     pbap_client->property_selector  = property_selector;
+     return ERROR_CODE_SUCCESS;
+ }
++
++static uint8_t pbap_client_check_connected(void){
++    return pbap_client->state == PBAP_CONNECTED ? ERROR_CODE_SUCCESS : BTSTACK_BUSY;
++}
++
++uint8_t pbap_set_max_list_count(uint16_t pbap_cid, uint16_t max_list_count){
++    UNUSED(pbap_cid);
++    uint8_t status = pbap_client_check_connected();
++    if (status == ERROR_CODE_SUCCESS){
++        pbap_client->max_list_count = max_list_count;
++    }
++    return status;
++}
++
++uint8_t pbap_set_list_start_offset(uint16_t pbap_cid, uint16_t list_start_offset){
++    UNUSED(pbap_cid);
++    uint8_t status = pbap_client_check_connected();
++    if (status == ERROR_CODE_SUCCESS){
++        pbap_client->list_start_offset = list_start_offset;
++    }
++    return status;
++}
++
++uint8_t pbap_set_order(uint16_t pbap_cid, uint8_t order){
++    UNUSED(pbap_cid);
++    uint8_t status = pbap_client_check_connected();
++    if (status == ERROR_CODE_SUCCESS){
++        pbap_client->order = order;
++    }
++    return status;
++}
++
++uint8_t pbap_set_search_property(uint16_t pbap_cid, uint8_t search_property){
++    UNUSED(pbap_cid);
++    uint8_t status = pbap_client_check_connected();
++    if (status == ERROR_CODE_SUCCESS){
++        pbap_client->search_property = search_property;
++    }
++    return status;
++}
++
++uint8_t pbap_set_search_value(uint16_t pbap_cid, const char * search_value){
++    UNUSED(pbap_cid);
++    uint8_t status = pbap_client_check_connected();
++    if (status == ERROR_CODE_SUCCESS){
++        pbap_client->search_value = search_value;
++    }
++    return status;
++}
++
++uint8_t pbap_set_format(uint16_t pbap_cid, uint8_t format){
++    UNUSED(pbap_cid);
++    uint8_t status = pbap_client_check_connected();
++    if (status == ERROR_CODE_SUCCESS){
++        pbap_client->format = format;
++    }
++    return status;
++}
+diff --git a/src/classic/pbap_client.h b/src/classic/pbap_client.h
+--- a/src/classic/pbap_client.h
++++ b/src/classic/pbap_client.h
+@@ -58,6 +58,8 @@
+ // max len of vcard handle reported in PBAP_SUBEVENT_CARD_RESULT
+ #define PBAP_MAX_HANDLE_LEN 16
+ 
++#define PBAP_MAX_SEARCH_VALUE_LEN 64
++
+ /* API_START */
+ 
+ /**
+@@ -210,6 +212,55 @@
+ uint8_t pbap_next_packet(uint16_t pbap_cid);
+ 
+ /**
++ * @brief Ask for at most this many entries in the next pull or listing; 0 leaves it to the server.
++ * @note The setters below hold until changed; each needs a connection.
++ * @param pbap_cid
++ * @param max_list_count
++ * @return status ERROR_CODE_SUCCESS on success, otherwise BTSTACK_BUSY if in a wrong state.
++ */
++uint8_t pbap_set_max_list_count(uint16_t pbap_cid, uint16_t max_list_count);
++
++/**
++ * @brief Start the next pull or listing at this entry.
++ * @param pbap_cid
++ * @param list_start_offset
++ * @return status
++ */
++uint8_t pbap_set_list_start_offset(uint16_t pbap_cid, uint16_t list_start_offset);
++
++/**
++ * @brief Order of the next listing: 0 indexed (the default), 1 alphabetical, 2 phonetical.
++ * @param pbap_cid
++ * @param order
++ * @return status
++ */
++uint8_t pbap_set_order(uint16_t pbap_cid, uint8_t order);
++
++/**
++ * @brief What the next listing's search matches: 0 name (the default), 1 number, 2 sound.
++ * @param pbap_cid
++ * @param search_property
++ * @return status
++ */
++uint8_t pbap_set_search_property(uint16_t pbap_cid, uint8_t search_property);
++
++/**
++ * @brief Search value for the next listing, or NULL for none. The string must outlive the request.
++ * @param pbap_cid
++ * @param search_value
++ * @return status
++ */
++uint8_t pbap_set_search_value(uint16_t pbap_cid, const char * search_value);
++
++/**
++ * @brief vCard format of the next pull or entry: 0 vCard 2.1 (the default), 1 vCard 3.0.
++ * @param pbap_cid
++ * @param format
++ * @return status
++ */
++uint8_t pbap_set_format(uint16_t pbap_cid, uint8_t format);
++
++/**
+  * @brief De-Init PBAP Client
+  */
+ void pbap_client_deinit(void);

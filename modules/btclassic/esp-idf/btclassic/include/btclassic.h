@@ -58,6 +58,11 @@ extern "C" {
 #define BTC_CHANGED_FOUND      (1u << 14)   // radio: an inquiry found a device, or ended
 #define BTC_CHANGED_SERIAL     (1u << 15)   // spp: bytes arrived
 #define BTC_CHANGED_HID        (1u << 16)   // hid: a report came, the host set one, or room to send
+#define BTC_CHANGED_PHONEBOOK  (1u << 17)   // pb: a request finished, or the link came or went
+#define BTC_CHANGED_REQUEST    (1u << 18)   // ag: the headset dialed, sent a DTMF digit or a command
+#define BTC_CHANGED_MESSAGES   (1u << 19)   // msg: a request finished, or the link came or went
+#define BTC_CHANGED_NOTIFY     (1u << 20)   // msg: the phone reported a new, sent, deleted or changed message
+#define BTC_CHANGED_LIBRARY    (1u << 22)   // lib: a request finished
 
 typedef uint8_t btc_addr_t[6];  // most significant byte first
 
@@ -80,6 +85,11 @@ typedef struct {
 int btc_radio_start(void);
 // End every profile and shut Bluetooth down. btc_radio_start() may run again.
 void btc_radio_stop(void);
+// BLE's share of the stack, for MicroPython's `bluetooth` module: the
+// controller and host come up with whichever of Classic and BLE starts
+// first, and go down with the last to stop.
+int btc_stack_ble_start(void);
+void btc_stack_ble_stop(void);
 bool btc_radio_active(void);
 
 int btc_radio_set_name(const char *name);       // up to 248 bytes of UTF-8
@@ -263,6 +273,12 @@ int btc_hf_dtmf(char digit);
 int btc_hf_voice_recognition(bool on);
 int btc_hf_set_speaker_gain(int gain);      // 0..15, told to the phone
 int btc_hf_set_mic_gain(int gain);
+// Bluedroid's audio gateway has global functions of these four names, so
+// the hands-free unit's link under other symbols. Code keeps these names.
+#define btc_hf_connect_audio btclassic_hf_connect_audio
+#define btc_hf_disconnect_audio btclassic_hf_disconnect_audio
+#define btc_hf_connect btclassic_hf_connect
+#define btc_hf_disconnect btclassic_hf_disconnect
 int btc_hf_connect_audio(void);
 int btc_hf_disconnect_audio(void);
 // Call a paired phone, or the sink's sender with NULL.
@@ -466,6 +482,284 @@ int btc_hid_disconnect(void);
 void btc_hid_stop(void);
 void btc_hid_status(btc_hid_status_t *out);
 uint32_t btc_hid_changes(void);
+
+// ---- the phone book: PBAP client -------------------------------------------
+//
+// Reads a phone's contacts and call history. One request runs at a time: it
+// returns at once, and BTC_CHANGED_PHONEBOOK (with `busy` false) says it
+// finished; btc_pb_data() then holds the reply. Paths are PBAP's: the books
+// are "telecom/pb" (contacts), "telecom/ich", "och", "mch" (incoming,
+// outgoing, missed calls), "telecom/cch" (all calls), "telecom/spd" and
+// "telecom/fav", and the same under "SIM1/" for the SIM card's.
+// Changes: BTC_CHANGED_CONNECTION, BTC_CHANGED_PHONEBOOK.
+
+// PBAP's vCard property bits, for the `properties` filters (0 means all).
+#define BTC_PB_PROP_VERSION   (1ull << 0)
+#define BTC_PB_PROP_FN        (1ull << 1)     // the formatted name
+#define BTC_PB_PROP_N         (1ull << 2)     // the structured name
+#define BTC_PB_PROP_PHOTO     (1ull << 3)
+#define BTC_PB_PROP_TEL       (1ull << 7)
+#define BTC_PB_PROP_EMAIL     (1ull << 8)
+#define BTC_PB_PROP_ORG       (1ull << 16)
+#define BTC_PB_PROP_CALL_TIME (1ull << 28)    // X-IRMC-CALL-DATETIME, in call history
+
+#define BTC_PB_ALL 0xffff   // a count meaning "every entry"
+
+typedef struct {
+    bool started;
+    bool connected;
+    btc_addr_t peer;
+    uint8_t repositories;   // the phone's: 1 phone, 2 SIM, 4 speed dial, 8 favourites
+    uint32_t features;      // the phone's PBAP features
+    bool busy;              // a request is running
+    int result;             // the last one's: BTC_OK, a negative BTC_ERR_*, or an OBEX response code (0xc4 not found ...)
+    uint32_t length;        // bytes in its reply
+    bool truncated;         // the reply outgrew the buffer; ask for fewer at a time
+    int book_size;          // entries the phone says the book holds, or BTC_UNKNOWN
+    int new_missed;         // missed calls not yet seen, or BTC_UNKNOWN
+} btc_pb_status_t;
+
+// `max_bytes` caps the buffer one reply is gathered in.
+int btc_pb_start(size_t max_bytes);
+void btc_pb_stop(void);
+bool btc_pb_started(void);
+// Call a phone's PBAP server: NULL picks the hands-free unit's phone, then
+// the sink's sender, then the first paired device. The phone may ask its
+// user to allow access first.
+int btc_pb_connect(const uint8_t *addr);
+int btc_pb_disconnect(void);
+
+// Pull a whole book as vCards: `offset` and `count` page it (count 0 asks
+// for the size alone), `format` 0 is vCard 2.1 and 1 is 3.0, `properties`
+// the BTC_PB_PROP_* wanted. `path` names the file: "telecom/pb.vcf".
+int btc_pb_pull(const char *path, uint16_t offset, uint16_t count, uint8_t format, uint64_t properties);
+// The listing of a book's folder ("telecom/pb"): one handle and name per
+// entry, as PBAP's XML. `order` 0 indexed, 1 by name; with `search`, only
+// entries whose name (`search_by` 0) or number (1) matches.
+int btc_pb_list(const char *folder, uint16_t offset, uint16_t count, uint8_t order,
+    const char *search, uint8_t search_by);
+// One entry by its handle in a folder: "telecom/pb", "5.vcf".
+int btc_pb_entry(const char *folder, const char *handle, uint8_t format, uint64_t properties);
+// Copy the last reply, up to `size` bytes; returns how many.
+size_t btc_pb_data(uint8_t *dst, size_t size);
+// Let the last reply's buffer go.
+void btc_pb_release(void);
+void btc_pb_status(btc_pb_status_t *out);
+uint32_t btc_pb_changes(void);
+
+// ---- the library: AVRCP browsing -------------------------------------------
+//
+// Browses the media players on the phone the sink plays from: the players,
+// a player's folders and tracks, its queue and a search, and plays an item.
+// One request runs at a time: it returns at once, and BTC_CHANGED_LIBRARY
+// (with `busy` false) says it finished; btc_lib_data() then holds its items,
+// each as AVRCP sent it, after a type byte and a length byte: 1 a player,
+// 2 a folder, 3 a track or video, 4 a folder name from btc_lib_set_player.
+// A long item is cut at 129 bytes. Backends without browsing return
+// BTC_ERR_UNSUPPORTED.
+// Changes: BTC_CHANGED_CONNECTION, BTC_CHANGED_LIBRARY.
+
+#define BTC_LIB_SCOPE_PLAYERS 0
+#define BTC_LIB_SCOPE_FOLDER  1     // the browsed player's current folder
+#define BTC_LIB_SCOPE_SEARCH  2     // the last search's results
+#define BTC_LIB_SCOPE_QUEUE   3     // the player's now-playing list
+
+#define BTC_LIB_OP_NONE   0
+#define BTC_LIB_OP_LIST   1
+#define BTC_LIB_OP_PLAYER 2
+#define BTC_LIB_OP_PATH   3
+#define BTC_LIB_OP_SEARCH 4
+
+typedef struct {
+    bool started;
+    bool connecting;
+    bool connected;
+    btc_addr_t peer;
+    bool busy;
+    int result;             // the last request's: BTC_OK, a negative BTC_ERR_*, or AVRCP's browsing status
+    uint32_t length;        // bytes in its reply
+    uint16_t items;         // items in its reply
+    bool truncated;         // the reply outgrew the buffer; ask for fewer at a time
+    uint16_t player;        // the browsed player
+    int depth;              // folders below the player's root, or BTC_UNKNOWN
+    uint16_t uid_counter;   // the player's, from its last reply
+} btc_lib_status_t;
+
+// `max_bytes` caps the buffer one reply is gathered in.
+int btc_lib_start(size_t max_bytes);
+void btc_lib_stop(void);
+bool btc_lib_started(void);
+// Open browsing to the phone the sink is connected to.
+int btc_lib_connect(void);
+int btc_lib_disconnect(void);
+// Items `start` to `start + count - 1` of a scope.
+int btc_lib_list(uint8_t scope, uint32_t start, uint32_t count);
+// Browse a player: its reply holds the names of the folders down to where it is.
+int btc_lib_set_player(uint16_t player);
+// Into a folder by its 8-byte uid, or up one.
+int btc_lib_enter(const uint8_t *uid);
+int btc_lib_up(void);
+int btc_lib_search(const char *text);
+// Play an item of a scope by its uid; acts at once, over the sink's link.
+int btc_lib_play(uint8_t scope, const uint8_t *uid);
+size_t btc_lib_data(uint8_t *dst, size_t size);
+void btc_lib_status(btc_lib_status_t *out);
+uint32_t btc_lib_changes(void);
+
+// ---- the audio gateway: HFP AG, the board as the phone ----------------------
+//
+// A headset, a speaker or a car kit connects to the board as it would to a
+// phone. The board reports a network, signal and battery, rings with a
+// caller's number, and carries the call's audio both ways. Bluedroid runs
+// one HFP role at a time: btc_ag_start() fails with BTC_ERR_STATE while the
+// hands-free unit is started, and btc_hf_start() while the gateway is.
+//
+// The headset's answer, hang-up and redial act at once, as a phone's would;
+// a number it dials becomes an outgoing call, and DTMF digits and commands
+// the gateway doesn't know queue for the program.
+// Changes: BTC_CHANGED_CONNECTION, BTC_CHANGED_CALL, BTC_CHANGED_AUDIO,
+// BTC_CHANGED_PHONE (gains, voice recognition), BTC_CHANGED_REQUEST.
+
+typedef enum {
+    BTC_AG_OPERATOR = 0,    // what the headset is told the network is called
+    BTC_AG_NUMBER,          // the board's own number, for the headset's AT+CNUM
+    BTC_AG_CALLER,          // the current call's number
+    BTC_AG_DIALED,          // the last number the headset dialed
+    BTC_AG_TEXT_COUNT,
+} btc_ag_text_t;
+
+typedef struct {
+    bool connected;         // the service level connection is up
+    btc_addr_t peer;
+    uint32_t peer_features; // the headset's HFP features
+    int service;            // 0 or 1, as reported
+    int signal;             // 0..5
+    int roaming;            // 0 or 1
+    int battery;            // 0..5
+    int call;               // btc_call_t
+    bool in_band_ring;      // ringing plays through the call's audio
+    bool voice_recognition;
+    bool nrec;              // the headset wants the board's echo cancelling on
+    int speaker_gain;       // 0..15, BTC_UNKNOWN until the headset says
+    int mic_gain;
+    bool audio;
+    uint32_t sample_rate;   // 8000 or 16000 while audio is up, else 0
+    bool wideband;          // the headset offers mSBC
+    uint32_t sent;          // frames sent to the headset
+    uint32_t silent;        // of those, filled with silence for want of audio
+} btc_ag_status_t;
+
+// `ring_ms` sizes the buffer for the headset's microphone, and the queue
+// for what the board sends it.
+int btc_ag_start(uint32_t ring_ms);
+void btc_ag_stop(void);
+bool btc_ag_started(void);
+int btc_ag_connect(const uint8_t *addr);    // NULL: the last headset, if paired
+int btc_ag_disconnect(void);
+int btc_ag_connect_audio(void);
+int btc_ag_disconnect_audio(void);
+
+// What the gateway reports; BTC_UNKNOWN keeps a value.
+int btc_ag_set_indicators(int service, int signal, int roaming, int battery);
+int btc_ag_set_text(btc_ag_text_t which, const char *text);   // operator or number
+// Calls. Each moves the call state and tells the headset.
+int btc_ag_ring(const char *number);        // an incoming call rings
+int btc_ag_dial(const char *number);        // the board calls out: dialing
+int btc_ag_alerting(void);                  // the far end rings
+int btc_ag_answer(void);                    // the call is active (either way)
+int btc_ag_hangup(void);                    // end or reject it
+int btc_ag_set_in_band_ring(bool on);
+int btc_ag_voice_recognition(bool on);
+int btc_ag_set_speaker_gain(int gain);      // 0..15, sent to the headset
+int btc_ag_set_mic_gain(int gain);
+// The headset's DTMF digits since the last call, oldest first; returns how many.
+size_t btc_ag_dtmf(char *dst, size_t size);
+
+// The headset's microphone: frames at the call's rate, `channels` (1 or 2)
+// wide, scaled by nothing. Silence while there's no audio; returns how many
+// came from the headset.
+size_t btc_ag_read(int16_t *dst, size_t frames, uint8_t channels);
+// Queue 16-bit mono at the call's rate for the headset's speaker. Returns
+// the frames taken, 0 without call audio.
+size_t btc_ag_write(const int16_t *pcm, size_t frames);
+uint32_t btc_ag_changes(void);
+void btc_ag_status(btc_ag_status_t *out);
+void btc_ag_stats(btc_ring_stats_t *out);
+size_t btc_ag_text(btc_ag_text_t which, char *dst, size_t size);
+
+// ---- messages: MAP client ----
+
+// A phone's texts (and its email, where it offers them), over OBEX. Folders
+// are paths from the phone's root: "telecom/msg/inbox". One request runs at
+// a time; each one's reply gathers into a buffer of up to `max_bytes`, read
+// with btc_msg_data() once `busy` drops.
+
+// Listing filters.
+#define BTC_MSG_UNREAD          1   // read_filter: unread only
+#define BTC_MSG_READ            2   //              read only
+#define BTC_MSG_NO_SMS_GSM      0x01    // type_filter: these bits leave a type out
+#define BTC_MSG_NO_SMS_CDMA     0x02
+#define BTC_MSG_NO_EMAIL        0x04
+#define BTC_MSG_NO_MMS          0x08
+
+// btc_msg_set_status() indicators.
+#define BTC_MSG_STATUS_READ     0
+#define BTC_MSG_STATUS_DELETED  1
+
+typedef struct {
+    bool started;
+    bool connected;
+    bool connecting;
+    btc_addr_t peer;
+    int instance;           // the message service in use, or BTC_UNKNOWN
+    int instances;          // how many the phone offers
+    uint32_t features;      // its MAP feature bits
+    uint32_t types;         // its message types: 1 email, 2 SMS GSM, 4 SMS CDMA, 8 MMS, 16 IM
+    bool busy;              // a request is running
+    int result;             // the last one's: BTC_OK, a negative BTC_ERR_*, or 0x80 | an OBEX response code
+    size_t length;          // bytes of reply gathered
+    bool truncated;         // the reply outgrew max_bytes
+    int listing_size;       // from the last listing, or BTC_UNKNOWN
+    int new_message;        // the phone's new-message flag from the last listing, or BTC_UNKNOWN
+    char mse_time[24];      // the phone's clock at the last listing, "20261108T101500+0000"
+    char pushed[64];        // the handle the phone gave the last pushed message
+    bool notifying;         // the phone agreed to report changes
+    bool notify_connected;  // the phone's report link is up
+    uint8_t events;         // reports waiting for btc_msg_event()
+    uint32_t events_dropped;
+} btc_msg_status_t;
+
+int btc_msg_start(size_t max_bytes);
+void btc_msg_stop(void);
+bool btc_msg_started(void);
+// Find the phone's message services and open one: `instance` by its ID, or
+// -1 for the first with texts. NULL: HandsFree's phone, the sink's sender,
+// or the first paired device. The link comes later; watch CONNECTION.
+int btc_msg_connect(const uint8_t *addr, int instance);
+int btc_msg_disconnect(void);
+// The subfolders of `folder`, as x-obex/folder-listing XML.
+int btc_msg_folders(const char *folder, uint16_t offset, uint16_t count);
+// The messages in folder/name, as MAP-msg-listing XML; count 0 asks only for
+// listing_size. A zero filter or mask leaves it out.
+int btc_msg_list(const char *folder, const char *name, uint16_t offset, uint16_t count,
+    uint8_t read_filter, uint8_t type_filter, uint32_t parameter_mask, uint8_t subject_length);
+// One message by handle, as a bMessage.
+int btc_msg_get(const char *handle, bool attachments, bool utf8);
+int btc_msg_set_status(const char *handle, uint8_t indicator, bool value);
+// Hand the phone a bMessage for folder/name ("telecom/msg", "outbox" sends
+// it); `pushed` then holds its handle.
+int btc_msg_push(const char *folder, const char *name, const uint8_t *bmsg, size_t len, bool utf8, bool retry);
+// Ask the phone to check for new messages now.
+int btc_msg_update_inbox(void);
+// Ask the phone to report changes (or stop). Starts the report server here
+// and its SDP record the first time.
+int btc_msg_notify(bool on);
+size_t btc_msg_data(uint8_t *dst, size_t size);
+void btc_msg_release(void);
+// The oldest waiting report, MAP-event-report XML, or 0 when none waits.
+size_t btc_msg_event(uint8_t *dst, size_t size);
+void btc_msg_status(btc_msg_status_t *out);
+uint32_t btc_msg_changes(void);
 
 #ifdef __cplusplus
 }

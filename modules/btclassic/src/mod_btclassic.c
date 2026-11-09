@@ -1274,11 +1274,23 @@ MP_DEFINE_CONST_OBJ_TYPE(
 extern const mp_obj_type_t btc_source_type;
 // Serial, in mod_btclassic_serial.c.
 extern const mp_obj_type_t btc_serial_type;
+// Library, in mod_btclassic_library.c: on every backend, raising where it can't browse.
+extern const mp_obj_type_t btc_library_type;
 
 // HIDDevice and HIDHost, in mod_btclassic_hid.c, where the backend has HID.
 #if BTC_HAS_HID
 extern const mp_obj_type_t btc_hid_device_type;
 extern const mp_obj_type_t btc_hid_host_type;
+#endif
+
+// PhoneBook, AudioGateway and Messages, in mod_btclassic_phone.c, where the
+// backend has them.
+#if BTC_HAS_PHONEBOOK
+extern const mp_obj_type_t btc_phonebook_type;
+#endif
+#if BTC_HAS_PHONE
+extern const mp_obj_type_t btc_gateway_type;
+extern const mp_obj_type_t btc_messages_type;
 #endif
 
 // =========================================================================
@@ -1292,6 +1304,19 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_HandsFree), MP_ROM_PTR(&btc_hf_type) },
     { MP_ROM_QSTR(MP_QSTR_AudioSource), MP_ROM_PTR(&btc_source_type) },
     { MP_ROM_QSTR(MP_QSTR_Serial), MP_ROM_PTR(&btc_serial_type) },
+    { MP_ROM_QSTR(MP_QSTR_Library), MP_ROM_PTR(&btc_library_type) },
+    { MP_ROM_QSTR(MP_QSTR_LIBRARY), MP_ROM_INT(BTC_CHANGED_LIBRARY) },
+    #if BTC_HAS_PHONEBOOK
+    { MP_ROM_QSTR(MP_QSTR_PhoneBook), MP_ROM_PTR(&btc_phonebook_type) },
+    { MP_ROM_QSTR(MP_QSTR_PHONEBOOK), MP_ROM_INT(BTC_CHANGED_PHONEBOOK) },
+    #endif
+    #if BTC_HAS_PHONE
+    { MP_ROM_QSTR(MP_QSTR_AudioGateway), MP_ROM_PTR(&btc_gateway_type) },
+    { MP_ROM_QSTR(MP_QSTR_REQUEST), MP_ROM_INT(BTC_CHANGED_REQUEST) },
+    { MP_ROM_QSTR(MP_QSTR_Messages), MP_ROM_PTR(&btc_messages_type) },
+    { MP_ROM_QSTR(MP_QSTR_MESSAGES), MP_ROM_INT(BTC_CHANGED_MESSAGES) },
+    { MP_ROM_QSTR(MP_QSTR_NOTIFY), MP_ROM_INT(BTC_CHANGED_NOTIFY) },
+    #endif
     #if BTC_HAS_HID
     { MP_ROM_QSTR(MP_QSTR_HIDDevice), MP_ROM_PTR(&btc_hid_device_type) },
     { MP_ROM_QSTR(MP_QSTR_HIDHost), MP_ROM_PTR(&btc_hid_host_type) },

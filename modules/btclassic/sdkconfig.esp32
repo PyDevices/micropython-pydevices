@@ -1,13 +1,23 @@
 # btclassic: Bluedroid with Classic, A2DP sink, AVRCP and HFP, in place of the
-# NimBLE host MicroPython's BLE module uses. The controller runs BR/EDR only.
+# NimBLE host MicroPython's BLE module uses. The controller runs both Classic
+# and BLE (dual mode), and the `bluetooth` module runs on Bluedroid too.
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=n
 CONFIG_BT_BLUEDROID_ENABLED=y
 CONFIG_BTDM_CTRL_MODE_BLE_ONLY=n
-CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=y
-CONFIG_BTDM_CTRL_MODE_BTDM=n
+CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=n
+CONFIG_BTDM_CTRL_MODE_BTDM=y
 CONFIG_BT_CLASSIC_ENABLED=y
-CONFIG_BT_BLE_ENABLED=n
+# BLE for the `bluetooth` module: the GATT server and client, and pairing,
+# with bonds kept in NVS. A client hears notifications only from handles it
+# registered, which the backend does as it discovers them, up to this many
+# for each peer.
+CONFIG_BT_BLE_ENABLED=y
+CONFIG_BT_GATTS_ENABLE=y
+CONFIG_BT_GATTC_ENABLE=y
+CONFIG_BT_GATTC_NOTIF_REG_MAX=16
+CONFIG_BT_BLE_SMP_ENABLE=y
+CONFIG_BT_BLE_SMP_BOND_NVS_FLASH=y
 CONFIG_BT_A2DP_ENABLE=y
 CONFIG_BT_A2DP_USE_EXTERNAL_CODEC=n
 CONFIG_BT_AVRCP_ENABLED=y
@@ -20,12 +30,13 @@ CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST=y
 CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY=y
 # AVRCP 1.6 cover art: the album image, over OBEX (GOEP client).
 CONFIG_BT_AVRCP_CT_COVER_ART_ENABLED=y
-# Hands-free unit (HFP), for the phone's battery, signal, carrier and calls.
+# Hands-free unit (HFP), for the phone's battery, signal, carrier and calls,
+# and the audio gateway, the board as the phone. One role runs at a time.
 # Call audio both ways goes over HCI as PCM, which Bluedroid codes as CVSD
 # or wideband mSBC; the controller keeps one link for it.
 CONFIG_BT_HFP_ENABLE=y
 CONFIG_BT_HFP_CLIENT_ENABLE=y
-CONFIG_BT_HFP_AG_ENABLE=n
+CONFIG_BT_HFP_AG_ENABLE=y
 CONFIG_BT_HFP_AUDIO_DATA_PATH_HCI=y
 CONFIG_BTDM_CTRL_BR_EDR_SCO_DATA_PATH_HCI=y
 CONFIG_BTDM_CTRL_BR_EDR_MAX_SYNC_CONN=1
@@ -40,5 +51,9 @@ CONFIG_BT_HID_HOST_ENABLED=y
 CONFIG_BT_HID_DEVICE_ENABLED=y
 
 # SDP records of our own: the Device ID record an HIDDevice gives a host so
-# it knows the product.
+# it knows the product, and the record where a phone sends Messages its
+# reports. Messages also finds the phone's message service through it.
 CONFIG_BT_SDP_COMMON_ENABLED=y
+
+# Phone book access (PBAP client, over OBEX): contacts and call history.
+CONFIG_BT_PBAC_ENABLED=y

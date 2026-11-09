@@ -78,6 +78,19 @@ static inline uint8_t btc_sbc_subbands_bits(uint8_t subbands) {
 
 void btc_hid_radio_stopping(void);
 void btc_hid_radio_lost(void);
+void btc_lib_radio_stopping(void);
+void btc_lib_radio_lost(void);
+
+// AVRCP browsing's events, which av.c routes to the library.
+void btc_lib_on_browse(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size);
+// The sink's AVRCP control link, which the library plays items over; 0 without one.
+uint16_t btc_sink_avrcp_cid(void);
+void btc_pb_radio_stopping(void);
+void btc_pb_radio_lost(void);
+
+// GOEP (OBEX's transport), shared by cover art and the phone book: started
+// once while the radio is on, and cleared with the AV layers (av.c).
+void btc_goep_init_once(void);
 
 // While a role that needs it runs, the radio shows this Class of Device in
 // place of its own (0 puts its own back).

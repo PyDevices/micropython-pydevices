@@ -36,6 +36,8 @@ if(MICROPY_BLUETOOTH_BTSTACK AND NOT TARGET usermod_btclassic_btstack)
         ${BTCLASSIC_BTSTACK_DIR}/hf.c
         ${BTCLASSIC_BTSTACK_DIR}/spp.c
         ${BTCLASSIC_BTSTACK_DIR}/hid.c
+        ${BTCLASSIC_BTSTACK_DIR}/pbap.c
+        ${BTCLASSIC_BTSTACK_DIR}/browse.c
         ${BTCLASSIC_BTSTACK_DIR}/../esp-idf/btclassic/ring.c
         ${BTCLASSIC_BTSTACK_DIR}/mp_host.c
 
@@ -55,6 +57,7 @@ if(MICROPY_BLUETOOTH_BTSTACK AND NOT TARGET usermod_btclassic_btstack)
         ${_c}/avrcp.c
         ${_c}/avrcp_browsing.c
         ${_c}/avrcp_browsing_controller.c
+        ${_c}/avrcp_browsing_target.c
         ${_c}/avrcp_controller.c
         ${_c}/avrcp_cover_art_client.c
         ${_c}/avrcp_target.c
@@ -74,6 +77,9 @@ if(MICROPY_BLUETOOTH_BTSTACK AND NOT TARGET usermod_btclassic_btstack)
         ${_c}/obex_iterator.c
         ${_c}/obex_message_builder.c
         ${_c}/obex_parser.c
+        ${_c}/pbap_client.c
+        ${BTCLASSIC_BTSTACK_LIB}/3rd-party/md5/md5.c
+        ${BTCLASSIC_BTSTACK_LIB}/3rd-party/yxml/yxml.c
         ${_c}/rfcomm.c
         ${_c}/sdp_client.c
         ${_c}/sdp_client_rfcomm.c

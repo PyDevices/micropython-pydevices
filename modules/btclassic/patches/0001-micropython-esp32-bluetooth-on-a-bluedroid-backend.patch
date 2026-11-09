@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 00:00:00 -0600
+Subject: [PATCH] esp32: let a user C module supply the bluetooth backend on
+ Bluedroid.
+
+ESP-IDF runs one Bluetooth host. The port uses NimBLE, which is BLE only,
+so firmware that also wants Bluetooth Classic has to run Bluedroid and
+loses the `bluetooth` module. With MICROPY_BLUETOOTH_BLUEDROID set, the
+port leaves NimBLE out and a user C module provides the backend; the
+soft reset turns it off as it does NimBLE.
+
+Inert unless the macro is set: every existing board builds as before.
+
+Based-on: micropython b70ae1aca (v1.30.0-preview)
+---
+--- a/ports/esp32/main.c
++++ b/ports/esp32/main.c
+@@ -68,7 +68,7 @@
+ #include "network_wlan_csi.h"
+ #endif
+ 
+-#if MICROPY_BLUETOOTH_NIMBLE
++#if MICROPY_BLUETOOTH_NIMBLE || MICROPY_BLUETOOTH_BLUEDROID
+ #include "extmod/modbluetooth.h"
+ #endif
+ 
+@@ -187,7 +187,7 @@
+ 
+ soft_reset_exit:
+ 
+-    #if MICROPY_BLUETOOTH_NIMBLE
++    #if MICROPY_BLUETOOTH_NIMBLE || MICROPY_BLUETOOTH_BLUEDROID
+     mp_bluetooth_deinit();
+     #endif
+ 
+--- a/ports/esp32/mpconfigport.h
++++ b/ports/esp32/mpconfigport.h
+@@ -97,7 +97,17 @@
+ #define MICROPY_PY_BLUETOOTH                (1)
+ #endif
+ 
+-#if MICROPY_PY_BLUETOOTH
++#ifndef MICROPY_BLUETOOTH_BLUEDROID
++#define MICROPY_BLUETOOTH_BLUEDROID         (0)
++#endif
++
++#if MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_BLUEDROID
++// A Bluedroid backend supplied by a user C module, for firmware that keeps
++// Bluetooth Classic as well (ESP-IDF runs one host). Its callbacks run on
++// Bluedroid's own task, which also decodes audio, so events go through the
++// ring buffer and Python runs from the scheduler.
++#define MICROPY_BLUETOOTH_NIMBLE            (0)
++#elif MICROPY_PY_BLUETOOTH
+ #define MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS (1)
+ #define MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS_WITH_INTERLOCK (1)
+ // Event stack size is the RTOS stack size minus an allowance for the stack used

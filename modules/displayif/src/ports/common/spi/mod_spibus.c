@@ -454,6 +454,19 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &spibus_locals_dict
 );
 
+// CONFIG_IDF_TARGET, from sdkconfig.h through the port's mpconfigport.h, and
+// not ESP_PLATFORM: the esp32 build compiles user C modules a second time,
+// for the firmware image itself, without ESP-IDF's command-line defines.
+#if defined(CONFIG_IDF_TARGET)
+// On ESP32 targets spibus.SPIBus is the esp_lcd DMA bus
+// (src/ports/esp32/mod_spibus.c), which uses this machine.SPI bus where DMA
+// doesn't apply: soft SPI, 9-bit mode, a bus shared through machine.SPI.
+const mp_obj_type_t *const displayif_spibus_machine_type_ptr = &spibus_type;
+
+void displayif_spibus_machine_teardown(void) {
+    spibus_host_teardown();
+}
+#else
 static const mp_rom_map_elem_t spibus_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_spibus) },
     DISPLAYIF_REVISION_ENTRY,
@@ -471,3 +484,4 @@ const mp_obj_module_t spibus_user_cmodule = {
 };
 
 MP_REGISTER_MODULE(MP_QSTR_spibus, spibus_user_cmodule);
+#endif // CONFIG_IDF_TARGET
