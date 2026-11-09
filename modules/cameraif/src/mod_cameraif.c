@@ -517,7 +517,7 @@ static void cameraif_teardown(void) {
 // machine.PWM reaches for last.
 static esp_err_t cameraif_xclk_start(cameraif_obj_t *c, int pin, uint32_t hz) {
     esp_err_t err = ESP_ERR_NOT_SUPPORTED;
-    #if CONFIG_CAMERA_XCLK_USE_ESP_CLOCK_ROUTER
+    #if defined(CONFIG_CAMERA_XCLK_USE_ESP_CLOCK_ROUTER) && CONFIG_CAMERA_XCLK_USE_ESP_CLOCK_ROUTER
     if (esp_cam_sensor_xclk_allocate(ESP_CAM_SENSOR_XCLK_ESP_CLOCK_ROUTER, &c->xclk) == ESP_OK) {
         esp_cam_sensor_xclk_config_t cfg = {
             .esp_clock_router_cfg = { .xclk_pin = pin, .xclk_freq_hz = hz },
@@ -530,7 +530,7 @@ static esp_err_t cameraif_xclk_start(cameraif_obj_t *c, int pin, uint32_t hz) {
         c->xclk = NULL;
     }
     #endif
-    #if CONFIG_CAMERA_XCLK_USE_LEDC
+    #if defined(CONFIG_CAMERA_XCLK_USE_LEDC) && CONFIG_CAMERA_XCLK_USE_LEDC
     if (esp_cam_sensor_xclk_allocate(ESP_CAM_SENSOR_XCLK_LEDC, &c->xclk) == ESP_OK) {
         esp_cam_sensor_xclk_config_t cfg = {
             .ledc_cfg = {

@@ -53,10 +53,12 @@ size_t btc_btstack_log_read(char *dst, size_t size);
 void btc_sink_radio_stopping(void);
 void btc_hf_radio_stopping(void);
 void btc_spp_radio_stopping(void);
+void btc_l2cap_radio_stopping(void);
 // The stack went down underneath (a soft reset): forget, without calling it.
 void btc_sink_radio_lost(void);
 void btc_hf_radio_lost(void);
 void btc_spp_radio_lost(void);
+void btc_l2cap_radio_lost(void);
 void btc_source_radio_stopping(void);
 void btc_source_radio_lost(void);
 
@@ -85,6 +87,10 @@ void btc_lib_radio_lost(void);
 void btc_lib_on_browse(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size);
 // The sink's AVRCP control link, which the library plays items over; 0 without one.
 uint16_t btc_sink_avrcp_cid(void);
+void btc_tether_radio_stopping(void);
+void btc_tether_radio_lost(void);
+void btc_opp_radio_stopping(void);
+void btc_opp_radio_lost(void);
 void btc_pb_radio_stopping(void);
 void btc_pb_radio_lost(void);
 
@@ -101,6 +107,7 @@ void btc_goep_init_once(void);
 #define BTC_PROFILE_HF 0x04
 #define BTC_PROFILE_SERIAL 0x08
 #define BTC_PROFILE_HID_DEVICE 0x10
+#define BTC_PROFILE_PUSH 0x20
 void btc_radio_profile(uint32_t profile, bool running, uint8_t hid_subclass);
 
 // A2DP and AVRCP layers, started once while the radio is on (av.c). The
