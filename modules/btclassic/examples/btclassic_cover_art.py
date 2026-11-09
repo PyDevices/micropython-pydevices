@@ -20,7 +20,8 @@ Run it:
     mpftp run btclassic_cover_art.py
     mpftp cp :cover.jpg .
 
-Tested on:
+Tested on: ESP32 Audio Kit, MicroPython 1.30.0-preview with btclassic,
+with a Galaxy S21 playing Spotify. Covers arrive while the phone plays.
 """
 
 import time
