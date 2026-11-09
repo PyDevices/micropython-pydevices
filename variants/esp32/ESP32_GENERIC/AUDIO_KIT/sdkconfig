@@ -8,3 +8,9 @@ CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 CONFIG_ESPTOOLPY_FLASHFREQ_40M=n
 CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_SPEED_40M=n
+
+# Logs, not features: Bluedroid's trace strings and every IDF log under ERROR
+# come out, which is about 220 KB of the image. Errors still print.
+CONFIG_BT_STACK_NO_LOG=y
+CONFIG_LOG_MAXIMUM_LEVEL_INFO=n
+CONFIG_LOG_MAXIMUM_LEVEL_ERROR=y
