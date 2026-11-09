@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 00:00:00 -0500
+Subject: [PATCH] hfp_ag: end the +CNUM reply with the service field
+
+The Hands-Free spec has the gateway answer AT+CNUM with
++CNUM: ,"number",type,,service, where service is 4 for voice. BTstack sent
+the speed and service as empty, space-padded fields (`,129, , `), which its
+own hands-free parser takes but Bluedroid's does not: it matches the two
+commas and the service number together, so the reply was dropped and the
+headset never saw the number. The line also had room for only 28 digits of the 32 the spec allows.
+
+diff --git a/src/classic/hfp_ag.c b/src/classic/hfp_ag.c
+--- a/src/classic/hfp_ag.c
++++ b/src/classic/hfp_ag.c
+@@ -241,8 +241,8 @@
+ }
+ 
+ static int hfp_send_subscriber_number_cmd(uint16_t cid, uint8_t type, const char * number){
+-    char buffer[50];
+-    snprintf(buffer, sizeof(buffer), "\r\n%s: ,\"%s\",%u, , \r\n",
++    char buffer[64];
++    snprintf(buffer, sizeof(buffer), "\r\n%s: ,\"%s\",%u,,4\r\n",
+              HFP_SUBSCRIBER_NUMBER_INFORMATION, number, type);
+     buffer[sizeof(buffer) - 1] = 0;
+     return send_str_over_rfcomm(cid, buffer);
