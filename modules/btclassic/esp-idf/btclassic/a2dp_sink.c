@@ -225,10 +225,13 @@ static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
                 btc_ring_restart(&s.ring);
                 btc_radio_hold_unlisted(false);
                 btc_sink_mark(BTC_CHANGED_CONNECTION | BTC_CHANGED_STREAM | BTC_CHANGED_PEER);
-                // The link dropped (the sender went out of range, or its
-                // Bluetooth went off): call it back for a minute, so it finds
-                // the board when it returns, as a speaker does.
-                if (was && s.reconnect && !s_dropped && s_retry) {
+                // The link was lost (the sender went out of range): call it
+                // back for a minute, so it finds the board when it returns,
+                // as a speaker does. A sender that disconnected on purpose
+                // is left alone, or it could never let go of the board.
+                bool lost = param->conn_stat.disc_rsn == ESP_A2D_DISC_RSN_ABNORMAL;
+                ESP_LOGI(TAG, "sender %s", lost ? "lost: calling it back" : "disconnected");
+                if (was && lost && s.reconnect && !s_dropped && s_retry) {
                     s_tries = 0;
                     s_calling_back = true;
                     esp_timer_start_once(s_retry, CALL_BACK_US);
