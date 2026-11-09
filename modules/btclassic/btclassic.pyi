@@ -249,8 +249,9 @@ class Bluetooth:
           its way.
         - min_key_size (int): the shortest encryption key, in bytes, 7 to
           16, the board lets a link use. 7 by default, the controller's own.
-          Raise it to refuse a device that encrypts with a weak key. ESP32
-          only.
+          Raise it to refuse a device that encrypts with a weak key. Waits
+          for the controller to accept it, and raises OSError if it refuses.
+          ESP32 only.
         - eir_uuids (bool): list the services running in the board's
           inquiry response, so a device searching sees what it offers before
           connecting. Off by default: the response has the name alone.
@@ -319,10 +320,9 @@ class Bluetooth:
         Args:
             addr: the device's address.
             poll_ms: the longest the master may go without sending to the
-                slave, 2 to 40959 ms. A shorter one keeps a keyboard or a
+                slave, 4 to 2560 ms. A shorter one keeps a keyboard or a
                 game pad responsive and costs air time; a longer one saves
-                power. Only the device that is master of the link can change
-                it.
+                power. Either end of the link can ask.
             packet_types: the packet types the link may use, `PKT_` bits
                 added together: `PKT_DH1 | PKT_DH3` keeps to 1- and 3-slot
                 packets. Short, error-corrected ones (`PKT_DM1`, `PKT_DM3`)

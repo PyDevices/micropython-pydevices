@@ -165,6 +165,9 @@ uint32_t btc_radio_page_timeout(void);
 #define BTC_KEY_SIZE_MIN 7
 #define BTC_KEY_SIZE_MAX 16
 int btc_radio_set_min_key_size(int bytes);
+// After a set while the radio is on: 1 once the controller has accepted it,
+// 0 while it's on its way, or BTC_ERR_FAIL if it refused.
+int btc_radio_min_key_result(void);
 int btc_radio_min_key_size(void);
 
 // Two settings of one connected device's ACL link, each answered by the
@@ -176,8 +179,8 @@ int btc_radio_min_key_size(void);
 // slave, in ms (BTC_POLL_MIN to BTC_POLL_MAX); shorter means lower latency
 // and more air time. The controller reports it back in slots of 0.625 ms,
 // which this converts to ms (rounded).
-#define BTC_POLL_MIN 2
-#define BTC_POLL_MAX 40959
+#define BTC_POLL_MIN 4
+#define BTC_POLL_MAX 2560
 int btc_radio_set_poll(const uint8_t *addr, uint32_t ms);
 // The packet types the link may use, as BTC_PKT_* bits. DM1 is always
 // allowed: Bluetooth needs it for control traffic.

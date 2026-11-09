@@ -41,6 +41,7 @@ static struct {
     uint32_t class_set; // the class asked for in the settings, or 0
     uint32_t page_timeout_ms;
     int min_key_size;   // bytes; 7 is the controller's own
+    int key_state;      // 0 waiting, 1 accepted, BTC_ERR_FAIL refused
     uint8_t channels[BTC_CHANNEL_MAP_LEN];
     btc_eir_t eir;
     // A signal reading asked for by address: where it stands, and the answer.
@@ -320,9 +321,7 @@ static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
                 pkt_from_hci(param->set_acl_pkt_types.pkt_types));
             break;
         case ESP_BT_GAP_SET_MIN_ENC_KEY_SIZE_EVT:
-            if (param->set_min_enc_key_size.status != ESP_BT_STATUS_SUCCESS) {
-                ESP_LOGW(TAG, "minimum key size refused: %d", param->set_min_enc_key_size.status);
-            }
+            r.key_state = param->set_min_enc_key_size.status == ESP_BT_STATUS_SUCCESS ? 1 : BTC_ERR_FAIL;
             break;
         case ESP_BT_GAP_SET_PAGE_TO_EVT:
             if (param->set_page_timeout.stat != ESP_BT_STATUS_SUCCESS) {
@@ -889,9 +888,18 @@ int btc_radio_set_min_key_size(int bytes) {
     }
     r.min_key_size = bytes;
     if (r.on) {
-        return btc_err(esp_bt_gap_set_min_enc_key_size((uint8_t)bytes));
+        r.key_state = 0;
+        int err = btc_err(esp_bt_gap_set_min_enc_key_size((uint8_t)bytes));
+        if (err != BTC_OK) {
+            r.key_state = err;
+        }
+        return err;
     }
     return BTC_OK;
+}
+
+int btc_radio_min_key_result(void) {
+    return r.key_state;
 }
 
 int btc_radio_min_key_size(void) {

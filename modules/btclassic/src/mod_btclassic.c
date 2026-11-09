@@ -488,6 +488,19 @@ static mp_obj_t bluetooth_config(size_t n_args, const mp_obj_t *args, mp_map_t *
                     mp_raise_ValueError(MP_ERROR_TEXT("min_key_size is 7 to 16 bytes"));
                 }
                 done(err);
+                if (btc_radio_active()) {
+                    // The controller answers a moment later; a refusal is an error.
+                    int state = 0;
+                    for (int waited = 0; waited < 1000 && state == 0; waited += 10) {
+                        state = btc_radio_min_key_result();
+                        if (state == 0) {
+                            mp_event_wait_ms(10);
+                        }
+                    }
+                    if (state != 1) {
+                        raise_btc(state < 0 ? state : BTC_ERR_FAIL);
+                    }
+                }
                 break;
             }
             case MP_QSTR_channel_map: {
@@ -670,7 +683,7 @@ static mp_obj_t bluetooth_tune(size_t n_args, const mp_obj_t *pos_args, mp_map_t
     if (args[ARG_poll_ms].u_obj != mp_const_none) {
         mp_int_t ms = mp_obj_get_int(args[ARG_poll_ms].u_obj);
         if (ms < BTC_POLL_MIN || ms > BTC_POLL_MAX) {
-            mp_raise_ValueError(MP_ERROR_TEXT("poll_ms is 2 to 40959"));
+            mp_raise_ValueError(MP_ERROR_TEXT("poll_ms is 4 to 2560"));
         }
         done(btc_radio_set_poll(addr, (uint32_t)ms));
         int state = tune_wait(&value);

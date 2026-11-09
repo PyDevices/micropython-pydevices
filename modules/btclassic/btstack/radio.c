@@ -1098,6 +1098,10 @@ int btc_radio_set_min_key_size(int bytes) {
     return BTC_ERR_UNSUPPORTED;
 }
 
+int btc_radio_min_key_result(void) {
+    return BTC_ERR_UNSUPPORTED;
+}
+
 int btc_radio_min_key_size(void) {
     return BTC_KEY_SIZE_MIN;
 }

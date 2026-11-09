@@ -574,6 +574,7 @@ Each runs as it is with `mpftp run`; its docstring says what it needs.
 | [btclassic_settings.py](examples/btclassic_settings.py) | Sets the name, PIN and inquiry response, and lists pairings |
 | [btclassic_pairing.py](examples/btclassic_pairing.py) | Pairs with a number check, then echoes a serial link |
 | [btclassic_signal.py](examples/btclassic_signal.py) | Keeps off a Wi-Fi channel and prints a link's signal |
+| [btclassic_link_tuning.py](examples/btclassic_link_tuning.py) | Limits a link's packet types, sets its poll interval and minimum key size |
 | [btclassic_serial_echo.py](examples/btclassic_serial_echo.py) | A serial port that echoes in upper case |
 | [btclassic_serial_client.py](examples/btclassic_serial_client.py) | Calls another board's serial port and talks to it |
 | [btclassic_with_ble.py](examples/btclassic_with_ble.py) | A Classic serial port beside BLE advertising and scanning |
