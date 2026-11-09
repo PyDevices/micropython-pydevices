@@ -2,12 +2,12 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Bluedroid in ESP-IDF 5.5 hands every A2DP and AVRCP link event to
+// Bluedroid in ESP-IDF 5.5 and 6.1 hands every A2DP and AVRCP link event to
 // btc_a2dp_cb_handler, which passes it to the A2DP state machine without
 // checking that the machine still exists. A link event that arrives after
 // esp_a2d_sink_deinit() or esp_a2d_source_deinit() freed it (a sender's
 // connection that was still opening, say) then reads freed memory and
-// panics the board. ESP-IDF's newer handler drops such an event; this wraps
+// panics the board. ESP-IDF's master branch drops such an event; this wraps
 // the old one, at link time (--wrap=btc_a2dp_cb_handler), to do the same.
 
 #include "btc/btc_task.h"

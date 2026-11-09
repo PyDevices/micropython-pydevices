@@ -6,8 +6,9 @@
 #   btclassic_a2dp_guard(<target> <path of a2dp_guard.c>)
 
 function(btclassic_a2dp_guard target file)
+    set(known "5.5" "6.1")
     set(version "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}")
-    if(NOT version STREQUAL "5.5")
+    if(NOT version IN_LIST known)
         return()
     endif()
     idf_build_get_property(idf_path IDF_PATH)
