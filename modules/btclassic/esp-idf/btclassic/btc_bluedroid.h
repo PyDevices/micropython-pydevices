@@ -87,6 +87,7 @@ void btc_radio_hold_unlisted(bool unlisted);
 #define BTC_PROFILE_SERIAL 0x08
 #define BTC_PROFILE_HID_DEVICE 0x10
 #define BTC_PROFILE_AG 0x20
+#define BTC_PROFILE_PUSH 0x40
 void btc_radio_profile(uint32_t profile, bool running, uint8_t hid_subclass);
 
 // Set radio changes() bits, from another part of the backend.

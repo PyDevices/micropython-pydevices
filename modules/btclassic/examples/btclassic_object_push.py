@@ -9,16 +9,15 @@ asks you to accept it. Then the board listens: share a file or some text
 to the board from the phone's share menu, and the board prints its name,
 type and size, and saves it.
 
-Needs: a Pico W or Pico 2 W with firmware built with the btclassic module
-(an ESP32's Bluetooth stack has no Object Push), and a phone or computer
-paired with the board.
+Needs: a classic ESP32, Pico W or Pico 2 W with firmware built with the
+btclassic module, and a phone or computer paired with the board.
 
 Run it:
 
     mpftp run btclassic_object_push.py
 
-Tested on: Pimoroni Pico Plus 2 W, MicroPython 1.30.0-preview with
-btclassic, with a Galaxy S21.
+Tested on: Pimoroni Pico Plus 2 W and Adafruit QT Py ESP32 Pico,
+MicroPython 1.30.0-preview with btclassic, with a Galaxy S21.
 """
 
 import time
