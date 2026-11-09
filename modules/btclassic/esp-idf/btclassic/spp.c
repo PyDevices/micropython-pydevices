@@ -47,6 +47,12 @@ static struct {
     btc_spp_status_t st;
 } p;
 
+// Pairing for a serial link: authenticated, and with a passkey or number
+// check (MITM protection) when the board has the means for one.
+static esp_spp_sec_t sec_mask(void) {
+    return btc_radio_io() == BTC_IO_NONE ? ESP_SPP_SEC_AUTHENTICATE : (ESP_SPP_SEC_AUTHENTICATE | ESP_SPP_SEC_MITM);
+}
+
 static void mark(uint32_t bits) {
     BTC_LOCK();
     p.changes |= bits;
@@ -98,7 +104,7 @@ static void spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
         case ESP_SPP_INIT_EVT:
             if (param->init.status == ESP_SPP_SUCCESS) {
                 p.initialised = true;
-                esp_spp_start_srv(ESP_SPP_SEC_AUTHENTICATE, ESP_SPP_ROLE_SLAVE, 0, p.name);
+                esp_spp_start_srv(sec_mask(), ESP_SPP_ROLE_SLAVE, 0, p.name);
             } else {
                 ESP_LOGW(TAG, "spp: init failed: %d", param->init.status);
             }
@@ -130,7 +136,7 @@ static void spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
             }
             if (param->disc_comp.status == ESP_SPP_SUCCESS && param->disc_comp.scn_num > 0) {
                 ESP_LOGI(TAG, "spp: calling channel %u", param->disc_comp.scn[0]);
-                esp_spp_connect(ESP_SPP_SEC_AUTHENTICATE, ESP_SPP_ROLE_MASTER, param->disc_comp.scn[0], p.connecting);
+                esp_spp_connect(sec_mask(), ESP_SPP_ROLE_MASTER, param->disc_comp.scn[0], p.connecting);
             } else {
                 ESP_LOGW(TAG, "spp: no serial port found");
                 p.calling = false;
@@ -303,7 +309,7 @@ int btc_spp_connect(const uint8_t *addr, int channel) {
     p.calling = true;
     p.call_handle = 0;
     esp_err_t err = channel > 0
-        ? esp_spp_connect(ESP_SPP_SEC_AUTHENTICATE, ESP_SPP_ROLE_MASTER, (uint8_t)channel, p.connecting)
+        ? esp_spp_connect(sec_mask(), ESP_SPP_ROLE_MASTER, (uint8_t)channel, p.connecting)
         : esp_spp_start_discovery(p.connecting);
     if (err != ESP_OK) {
         p.calling = false;

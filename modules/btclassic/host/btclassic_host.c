@@ -217,6 +217,30 @@ int btc_radio_services(btc_uuid_t *out, int max, int *count) {
     return BTC_ERR_UNSUPPORTED;
 }
 
+static int host_io = BTC_IO_NONE;
+
+int btc_radio_set_io(int io) {
+    if (io < BTC_IO_DISPLAY_ONLY || io > BTC_IO_NONE) {
+        return BTC_ERR_ARG;
+    }
+    host_io = io;
+    return BTC_OK;
+}
+
+int btc_radio_io(void) {
+    return host_io;
+}
+
+void btc_radio_passkey(btc_passkey_t *out) {
+    memset(out, 0, sizeof(*out));
+}
+
+int btc_radio_passkey_reply(bool accept, uint32_t passkey) {
+    (void)accept;
+    (void)passkey;
+    return BTC_ERR_STATE;
+}
+
 // No A2DP source here either: AudioSource and Serial aren't in this build.
 bool btc_source_started(void) {
     return false;

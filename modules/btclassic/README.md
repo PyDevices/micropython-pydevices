@@ -384,6 +384,31 @@ remote-control keys (0x110E), joins a network over Bluetooth (0x1115), and
 takes either side of a hands-free call (0x111E, 0x111F). The first search pages the device, about 2 s; a second
 one over the same link took 0.15 s.
 
+## Pairing with a passkey or a number check
+
+By default the board pairs the way most speakers do, "just works", with
+nothing to show or type. A board with a screen, or a REPL someone watches,
+can pair with a check instead: tell it what it has with `config(io=...)`,
+and pairing asks your program through `Bluetooth.changes()` and
+`passkey()`:
+
+```python
+bt.config(io=btclassic.IO_DISPLAY_YESNO)
+port = btclassic.Serial(bt)
+while True:
+    if bt.changes() & btclassic.PASSKEY:
+        addr, action, number = bt.passkey()
+        if action == btclassic.PASSKEY_COMPARE:
+            ok = input("Does it show %06d? [y/n] " % number) == "y"
+            bt.passkey_reply(ok)
+```
+
+`IO_KEYBOARD_ONLY` gets `PASSKEY_INPUT`: type the number the other device
+shows and answer with `passkey_reply(True, number)`. `IO_DISPLAY_ONLY` gets
+`PASSKEY_DISPLAY`, a number to show and nothing to answer. With any of the
+three, a `Serial` link asks the other side for a checked pairing too.
+`examples/btclassic_pairing.py` is the whole program.
+
 ## A phone's music library
 
 On a Pico W, `Library` browses the players on the phone `AudioSink` plays
