@@ -461,7 +461,14 @@ Each runs as it is with `mpftp run`; its docstring says what it needs.
 | [btclassic_speakerphone.py](examples/btclassic_speakerphone.py) | A speakerphone for your phone's calls |
 | [btclassic_source_tone.py](examples/btclassic_source_tone.py) | Plays a tone on Bluetooth headphones or a speaker |
 | [btclassic_transmitter.py](examples/btclassic_transmitter.py) | Sends the line in to headphones or a speaker |
+| [btclassic_scan.py](examples/btclassic_scan.py) | Lists the devices nearby and their inquiry responses |
+| [btclassic_services.py](examples/btclassic_services.py) | Asks a device which services it offers |
+| [btclassic_settings.py](examples/btclassic_settings.py) | Sets the name, PIN and inquiry response, and lists pairings |
+| [btclassic_pairing.py](examples/btclassic_pairing.py) | Pairs with a number check, then echoes a serial link |
+| [btclassic_signal.py](examples/btclassic_signal.py) | Keeps off a Wi-Fi channel and prints a link's signal |
 | [btclassic_serial_echo.py](examples/btclassic_serial_echo.py) | A serial port that echoes in upper case |
+| [btclassic_serial_client.py](examples/btclassic_serial_client.py) | Calls another board's serial port and talks to it |
+| [btclassic_with_ble.py](examples/btclassic_with_ble.py) | A Classic serial port beside BLE advertising and scanning |
 | [btclassic_hid_keyboard.py](examples/btclassic_hid_keyboard.py) | Types a line as a keyboard and moves the pointer |
 | [btclassic_hid_media_keys.py](examples/btclassic_hid_media_keys.py) | Presses media keys on a phone or computer |
 | [btclassic_hid_gamepad.py](examples/btclassic_hid_gamepad.py) | A gamepad, with a setting the host reads and changes |
