@@ -18,7 +18,8 @@ Run it:
 Pair your phone or computer with the board's hostname. Its volume steps
 down three times.
 
-Tested on:
+Tested on: Adafruit QT Py ESP32 Pico, MicroPython 1.30.0-preview with
+btclassic, paired with a Windows 11 PC.
 """
 
 import time

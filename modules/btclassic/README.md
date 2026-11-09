@@ -292,6 +292,11 @@ changes, and
 [`examples/btclassic_hid_media_keys.py`](examples/btclassic_hid_media_keys.py)
 steps a phone's volume.
 
+A computer learns what the board offers when it pairs. If it paired with
+the board as a speaker, or as a different kind of HID device, forget the
+board on the computer, `unpair()` the computer on the board, and pair
+again: until then it won't connect.
+
 ## Contacts and calls
 
 ```python
