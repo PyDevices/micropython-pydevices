@@ -541,6 +541,7 @@ static void on_response(cb_msg_t *c) {
         m.goep = 0;
         BTC_LOCK();
         m.connected = false;
+        m.notifying = false;            // the registration ends with the session
         BTC_UNLOCK();
         mark(BTC_CHANGED_CONNECTION);
     } else if (opcode == OBEX_OPCODE_SETPATH) {
