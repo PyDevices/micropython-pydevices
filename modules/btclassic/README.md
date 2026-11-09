@@ -315,7 +315,7 @@ while True:
 `send(number, text)` sends a text through the phone; `folder="draft"`
 leaves it in the phone's drafts instead.
 
-Some phones accept `notify()` and never connect back to deliver events; a
-Galaxy S21 is one. `notify_connected` turns True when the phone does. Where
-it stays False, poll `list("inbox", unread=True)` instead.
+A moment after `notify()`, the phone connects back to deliver its reports,
+and `notify_connected` turns True. If it stays False, poll
+`list("inbox", unread=True)` instead.
 

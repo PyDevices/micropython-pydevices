@@ -1280,9 +1280,13 @@ class Messages:
         """Ask the phone to fetch new mail now (email services only)."""
     def notify(self, on: bool = True) -> None:
         """Ask the phone to report changes as they happen. `changes`
-        reports `NOTIFY` for each, and `event()` reads them. Some phones
-        accept the request and never report: `notify_connected` says
-        whether the phone opened its link for reports."""
+        reports `NOTIFY` for each, and `event()` reads them.
+        `notify_connected` says whether the phone has opened its link for
+        reports, a moment after it agrees.
+
+        Raises:
+            OSError: the board couldn't advertise where the phone should
+                send its reports."""
     def event(self) -> dict | None:
         """The oldest waiting report from the phone, or None. A dict of its
         fields as strings: "type" ("NewMessage", "MessageDeleted",

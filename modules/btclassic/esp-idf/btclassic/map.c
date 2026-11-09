@@ -740,6 +740,9 @@ static void sdp_cb(esp_sdp_cb_event_t event, esp_sdp_cb_param_t *param) {
             m.mns_record = param->create_record.record_handle;
         }
         BTC_UNLOCK();
+        if (!m.mns_record) {
+            ESP_LOGW(TAG, "messages: the notification record wasn't made (status %d)", param->create_record.status);
+        }
     }
 }
 
@@ -938,7 +941,7 @@ static void on_notify_server(void) {
     esp_bluetooth_sdp_record_t rec = {0};
     rec.mns.hdr.type = ESP_SDP_TYPE_MAP_MNS;
     rec.mns.hdr.service_name = "MAP MNS";
-    rec.mns.hdr.service_name_length = 7;
+    rec.mns.hdr.service_name_length = sizeof("MAP MNS");  // with its NUL, which esp_sdp checks
     rec.mns.hdr.rfcomm_channel_number = m.scn;
     rec.mns.hdr.l2cap_psm = -1;
     rec.mns.hdr.profile_version = 0x0104;
@@ -1098,7 +1101,8 @@ static int notify_server_up(void) {
     for (int i = 0; i < 50 && (m.record_pending || !m.obex_server); i++) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    return m.obex_server ? BTC_OK : BTC_ERR_FAIL;
+    // Without its record the phone can't find the server, and never calls.
+    return m.obex_server && m.mns_record ? BTC_OK : BTC_ERR_FAIL;
 }
 
 int btc_msg_connect(const uint8_t *addr, int instance) {
@@ -1111,7 +1115,7 @@ int btc_msg_connect(const uint8_t *addr, int instance) {
     // Android looks for the notification record once, as the session opens,
     // and drops later registrations if it found none: so the record goes up
     // first. Without it everything but notify() still works.
-    if (!m.obex_server && notify_server_up() != BTC_OK) {
+    if ((!m.obex_server || !m.mns_record) && notify_server_up() != BTC_OK) {
         ESP_LOGW(TAG, "messages: no notification server; notify() will fail");
     }
     btc_addr_t a;
@@ -1317,7 +1321,7 @@ int btc_msg_notify(bool on) {
     if (!m.started || !m.connected) {
         return BTC_ERR_STATE;
     }
-    if (on && !m.obex_server) {
+    if (on && (!m.obex_server || !m.mns_record)) {
         int err = notify_server_up();
         if (err != BTC_OK) {
             return err;
