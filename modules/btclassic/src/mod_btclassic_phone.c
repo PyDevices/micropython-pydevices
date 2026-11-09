@@ -10,6 +10,7 @@
 // The vCard and listing parsers here are plain C over the reply's bytes, so
 // every backend gets the same records.
 
+#include <stdio.h>
 #include <string.h>
 
 #include "py/mperrno.h"
@@ -42,10 +43,10 @@ static mp_obj_t ph_done(int err) {
             if (err > 0) {
                 // An OBEX response from the phone.
                 if (err == 0xc1 || err == 0xc3) {
-                    mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: the phone refused; allow access to contacts on the phone"));
+                    mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: the phone refused; allow access on the phone"));
                 }
                 if (err == 0xc4) {
-                    mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: the phone has no such book or entry"));
+                    mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: the phone has no such folder or entry"));
                 }
                 mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: the phone answered 0x%02x"), err);
             }
@@ -383,71 +384,138 @@ static mp_obj_t vcards_parse(const char *data, size_t size) {
 
 // ---- the vCard listing: <card handle="1.vcf" name="Doe;John"/> ----
 
-// The value of attribute `attr` inside one element, entities decoded.
-static mp_obj_t xml_attr(const char *el, size_t n, const char *attr) {
-    size_t an = strlen(attr);
-    for (size_t i = 0; i + an + 2 <= n; i++) {
-        if (memcmp(el + i, attr, an) == 0 && (i == 0 || el[i - 1] == ' ' || el[i - 1] == '\t' || el[i - 1] == '\n')) {
-            size_t j = i + an;
-            while (j < n && el[j] == ' ') {
-                j++;
-            }
-            if (j >= n || el[j] != '=') {
-                continue;
-            }
-            j++;
-            while (j < n && el[j] == ' ') {
-                j++;
-            }
-            if (j >= n || (el[j] != '"' && el[j] != '\'')) {
-                continue;
-            }
-            char q = el[j++];
-            vstr_t v;
-            vstr_init(&v, 32);
-            while (j < n && el[j] != q) {
-                if (el[j] == '&') {
-                    const char *semi = memchr(el + j, ';', n - j);
-                    size_t en = semi ? (size_t)(semi - (el + j)) : 0;
-                    const char *e = el + j + 1;
-                    uint32_t cp = 0;
-                    if (en == 4 && memcmp(e, "amp", 3) == 0) {
-                        cp = '&';
-                    } else if (en == 3 && memcmp(e, "lt", 2) == 0) {
-                        cp = '<';
-                    } else if (en == 3 && memcmp(e, "gt", 2) == 0) {
-                        cp = '>';
-                    } else if (en == 5 && memcmp(e, "quot", 4) == 0) {
-                        cp = '"';
-                    } else if (en == 5 && memcmp(e, "apos", 4) == 0) {
-                        cp = '\'';
-                    } else if (en > 2 && e[0] == '#') {
-                        for (size_t k = 1; k < en - 1; k++) {
-                            int d = e[1] == 'x' ? (k == 1 ? 0 : hexval(e[k])) : e[k] - '0';
-                            if (k == 1 && e[1] == 'x') {
-                                continue;
-                            }
-                            cp = cp * (e[1] == 'x' ? 16 : 10) + (d < 0 ? 0 : d);
-                        }
-                    }
-                    if (cp) {
-                        if (cp < 0x80) {
-                            vstr_add_byte(&v, cp);
-                        } else {
-                            vstr_add_char(&v, cp);
-                        }
-                        j += en + 1;
-                        continue;
-                    }
+// An attribute value's text, entities decoded.
+static mp_obj_t xml_decode(const char *el, size_t n) {
+    vstr_t v;
+    vstr_init(&v, n + 1);
+    for (size_t j = 0; j < n;) {
+        if (el[j] == '&') {
+            const char *semi = memchr(el + j, ';', n - j);
+            size_t en = semi ? (size_t)(semi - (el + j)) : 0;
+            const char *e = el + j + 1;
+            uint32_t cp = 0;
+            if (en == 4 && memcmp(e, "amp", 3) == 0) {
+                cp = '&';
+            } else if (en == 3 && memcmp(e, "lt", 2) == 0) {
+                cp = '<';
+            } else if (en == 3 && memcmp(e, "gt", 2) == 0) {
+                cp = '>';
+            } else if (en == 5 && memcmp(e, "quot", 4) == 0) {
+                cp = '"';
+            } else if (en == 5 && memcmp(e, "apos", 4) == 0) {
+                cp = '\'';
+            } else if (en > 2 && e[0] == '#') {
+                bool hex = e[1] == 'x' || e[1] == 'X';
+                for (size_t k = hex ? 2 : 1; k < en - 1; k++) {
+                    int d = hex ? hexval(e[k]) : e[k] - '0';
+                    cp = cp * (hex ? 16 : 10) + (d < 0 ? 0 : d);
                 }
-                vstr_add_byte(&v, el[j++]);
             }
-            mp_obj_t s = text_from(v.buf, v.len);
-            vstr_clear(&v);
-            return s;
+            if (cp) {
+                if (cp < 0x80) {
+                    vstr_add_byte(&v, cp);
+                } else {
+                    vstr_add_char(&v, cp);
+                }
+                j += en + 1;
+                continue;
+            }
         }
+        vstr_add_byte(&v, el[j++]);
     }
-    return MP_OBJ_NEW_QSTR(MP_QSTR_);
+    mp_obj_t s = text_from(v.buf, v.len);
+    vstr_clear(&v);
+    return s;
+}
+
+static bool xml_space(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+// Each attribute of one element (the text after its tag name): calls
+// `fn(ctx, name, name_len, value, value_len)` with the raw value.
+typedef void (*xml_attr_fn)(void *ctx, const char *name, size_t nn, const char *value, size_t vn);
+
+static void xml_attrs(const char *el, size_t n, xml_attr_fn fn, void *ctx) {
+    size_t i = 0;
+    while (i < n) {
+        while (i < n && xml_space(el[i])) {
+            i++;
+        }
+        size_t a = i;
+        while (i < n && el[i] != '=' && !xml_space(el[i]) && el[i] != '/' && el[i] != '>') {
+            i++;
+        }
+        size_t an = i - a;
+        while (i < n && xml_space(el[i])) {
+            i++;
+        }
+        if (an == 0 || i >= n || el[i] != '=') {
+            i++;
+            continue;
+        }
+        i++;
+        while (i < n && xml_space(el[i])) {
+            i++;
+        }
+        if (i >= n || (el[i] != '"' && el[i] != '\'')) {
+            continue;
+        }
+        char q = el[i++];
+        size_t v = i;
+        while (i < n && el[i] != q) {
+            i++;
+        }
+        fn(ctx, el + a, an, el + v, i - v);
+        i++;
+    }
+}
+
+typedef struct {
+    const char *want;
+    mp_obj_t found;
+} attr_find_t;
+
+static void attr_find(void *ctx, const char *name, size_t nn, const char *value, size_t vn) {
+    attr_find_t *f = ctx;
+    if (f->found == MP_OBJ_NULL && strlen(f->want) == nn && memcmp(f->want, name, nn) == 0) {
+        f->found = xml_decode(value, vn);
+    }
+}
+
+// The value of attribute `attr` inside one element, or "".
+static mp_obj_t xml_attr(const char *el, size_t n, const char *attr) {
+    attr_find_t f = { attr, MP_OBJ_NULL };
+    xml_attrs(el, n, attr_find, &f);
+    return f.found == MP_OBJ_NULL ? MP_OBJ_NEW_QSTR(MP_QSTR_) : f.found;
+}
+
+static void attr_store(void *ctx, const char *name, size_t nn, const char *value, size_t vn) {
+    mp_obj_dict_store(*(mp_obj_t *)ctx, mp_obj_new_str(name, nn), xml_decode(value, vn));
+}
+
+// Every element named `tag`, as a dict of its attributes.
+static mp_obj_t xml_elements(const char *data, size_t size, const char *tag) {
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    size_t tn = strlen(tag);
+    const char *s = data, *end = data + size;
+    while (s < end) {
+        const char *lt = memchr(s, '<', end - s);
+        if (lt == NULL) {
+            break;
+        }
+        const char *gt = memchr(lt, '>', end - lt);
+        if (gt == NULL) {
+            break;
+        }
+        if ((size_t)(gt - lt) > tn && memcmp(lt + 1, tag, tn) == 0 && (xml_space(lt[tn + 1]) || lt[tn + 1] == '/' || lt[tn + 1] == '>')) {
+            mp_obj_t d = mp_obj_new_dict(0);
+            xml_attrs(lt + 1 + tn, gt - lt - 1 - tn, attr_store, &d);
+            mp_obj_list_append(out, d);
+        }
+        s = gt + 1;
+    }
+    return out;
 }
 
 static mp_obj_t listing_parse(const char *data, size_t size) {
@@ -1176,4 +1244,573 @@ MP_DEFINE_CONST_OBJ_TYPE(
     make_new, ag_make_new,
     attr, ag_attr,
     locals_dict, &ag_locals
+    );
+
+// =========================================================================
+// Messages: MAP client
+// =========================================================================
+
+static void msg_check(void) {
+    if (!btc_msg_started()) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: messages are stopped"));
+    }
+}
+
+// Messages(bt, *, max_bytes=262144)
+static mp_obj_t msg_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
+    enum { ARG_bt, ARG_max_bytes };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_bt, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_max_bytes, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 262144} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed), allowed, args);
+    radio_arg(args[ARG_bt].u_obj);
+    if (!btc_msg_started()) {
+        mp_int_t max = args[ARG_max_bytes].u_int;
+        if (max < 1024) {
+            mp_raise_ValueError(MP_ERROR_TEXT("max_bytes must be 1024 or more"));
+        }
+        ph_done(btc_msg_start((size_t)max));
+    }
+    return MP_OBJ_FROM_PTR(mp_obj_malloc(phone_obj_t, type));
+}
+
+static void msg_wait(mp_int_t timeout_ms) {
+    mp_uint_t start = mp_hal_ticks_ms();
+    btc_msg_status_t st;
+    for (;;) {
+        btc_msg_status(&st);
+        if (!st.busy) {
+            break;
+        }
+        if ((mp_int_t)(mp_hal_ticks_ms() - start) >= timeout_ms) {
+            mp_raise_OSError(MP_ETIMEDOUT);
+        }
+        mp_event_wait_ms(5);
+    }
+    ph_done(st.result);
+}
+
+static mp_obj_t msg_take(void) {
+    btc_msg_status_t st;
+    btc_msg_status(&st);
+    vstr_t v;
+    vstr_init_len(&v, st.length);
+    v.len = btc_msg_data((uint8_t *)v.buf, st.length);
+    btc_msg_release();
+    return mp_obj_new_bytes_from_vstr(&v);
+}
+
+// "inbox" -> "telecom/msg/inbox"; a path with a '/' is taken as it is.
+static void msg_path(vstr_t *v, mp_obj_t folder) {
+    const char *f = mp_obj_str_get_str(folder);
+    vstr_init(v, 32);
+    if (strchr(f, '/') == NULL) {
+        vstr_add_str(v, "telecom/msg/");
+    }
+    vstr_add_str(v, f);
+    while (v->len && v->buf[v->len - 1] == '/') {
+        v->len--;
+    }
+}
+
+// Split "a/b/c" into "a/b" and "c" in place: returns the last part.
+static const char *msg_split(vstr_t *v) {
+    char *s = vstr_null_terminated_str(v);
+    char *slash = strrchr(s, '/');
+    if (slash == NULL) {
+        return s + strlen(s);           // the whole is the folder; no name
+    }
+    *slash = 0;
+    return slash + 1;
+}
+
+static mp_obj_t msg_connect(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_self, ARG_addr, ARG_instance, ARG_timeout };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_self, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_addr, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_instance, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 30000} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
+    msg_check();
+    btc_msg_changes();
+    int instance = args[ARG_instance].u_obj == mp_const_none ? -1 : mp_obj_get_int(args[ARG_instance].u_obj);
+    ph_done(btc_msg_connect(addr_or_none(args[ARG_addr].u_obj), instance));
+    mp_int_t timeout = args[ARG_timeout].u_int;
+    if (timeout <= 0) {
+        return mp_const_none;
+    }
+    mp_uint_t start = mp_hal_ticks_ms();
+    btc_msg_status_t st;
+    for (;;) {
+        btc_msg_status(&st);
+        if (st.connected) {
+            return mp_const_none;
+        }
+        if ((btc_msg_changes() & BTC_CHANGED_CONNECTION) && !st.connecting) {
+            ph_done(st.result ? st.result : BTC_ERR_FAIL);
+        }
+        if ((mp_int_t)(mp_hal_ticks_ms() - start) >= timeout) {
+            mp_raise_OSError(MP_ETIMEDOUT);
+        }
+        mp_event_wait_ms(10);
+    }
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(msg_connect_obj, 1, msg_connect);
+
+// Returns once the session is down, as PhoneBook.disconnect does.
+static mp_obj_t msg_disconnect(mp_obj_t self_in) {
+    msg_check();
+    ph_done(btc_msg_disconnect());
+    mp_uint_t start = mp_hal_ticks_ms();
+    btc_msg_status_t st;
+    for (btc_msg_status(&st); st.connected && mp_hal_ticks_ms() - start < 3000; btc_msg_status(&st)) {
+        mp_event_wait_ms(10);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(msg_disconnect_obj, msg_disconnect);
+
+// folders(folder="telecom/msg", *, timeout=30000) -> [name]
+static mp_obj_t msg_folders(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_self, ARG_folder, ARG_timeout };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_self, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_folder, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 30000} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
+    msg_check();
+    vstr_t path;
+    if (args[ARG_folder].u_obj == mp_const_none) {
+        vstr_init(&path, 16);
+        vstr_add_str(&path, "telecom/msg");
+    } else {
+        msg_path(&path, args[ARG_folder].u_obj);
+    }
+    int err = btc_msg_folders(vstr_null_terminated_str(&path), 0, 1024);
+    vstr_clear(&path);
+    ph_done(err);
+    msg_wait(args[ARG_timeout].u_int);
+    mp_obj_t data = msg_take();
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(data, &buf, MP_BUFFER_READ);
+    mp_obj_t found = xml_elements(buf.buf, buf.len, "folder");
+    size_t n;
+    mp_obj_t *items;
+    mp_obj_list_get(found, &n, &items);
+    for (size_t i = 0; i < n; i++) {
+        items[i] = mp_obj_dict_get(items[i], MP_OBJ_NEW_QSTR(MP_QSTR_name));
+    }
+    return found;
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(msg_folders_obj, 1, msg_folders);
+
+// list(folder="inbox", *, offset=0, count=None, unread=None, sms_only=False,
+//      subject_length=None, timeout=30000) -> [dict]
+enum { LARG_self, LARG_folder, LARG_offset, LARG_count, LARG_unread, LARG_sms_only, LARG_subject_length, LARG_timeout };
+static const mp_arg_t msg_list_args[] = {
+    { MP_QSTR_self, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+    { MP_QSTR_folder, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_QSTR(MP_QSTR_inbox)} },
+    { MP_QSTR_offset, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
+    { MP_QSTR_count, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+    { MP_QSTR_unread, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+    { MP_QSTR_sms_only, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
+    { MP_QSTR_subject_length, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
+    { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 30000} },
+};
+
+static void msg_list_send(mp_arg_val_t *args, uint16_t count) {
+    msg_check();
+    vstr_t path;
+    msg_path(&path, args[LARG_folder].u_obj);
+    const char *name = msg_split(&path);
+    mp_obj_t unread = args[LARG_unread].u_obj;
+    uint8_t read_filter = unread == mp_const_none ? 0 : mp_obj_is_true(unread) ? BTC_MSG_UNREAD : BTC_MSG_READ;
+    uint8_t type_filter = args[LARG_sms_only].u_bool ? (BTC_MSG_NO_EMAIL | BTC_MSG_NO_MMS) : 0;
+    mp_int_t subject = args[LARG_subject_length].u_int;
+    if (subject < 0 || subject > 255) {
+        vstr_clear(&path);
+        mp_raise_ValueError(MP_ERROR_TEXT("subject_length must be 0 to 255"));
+    }
+    int err = btc_msg_list(vstr_str(&path), name, (uint16_t)args[LARG_offset].u_int, count,
+        read_filter, type_filter, 0, (uint8_t)subject);
+    vstr_clear(&path);
+    ph_done(err);
+    msg_wait(args[LARG_timeout].u_int);
+}
+
+static mp_obj_t msg_list(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    mp_arg_val_t args[MP_ARRAY_SIZE(msg_list_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(msg_list_args), msg_list_args, args);
+    msg_list_send(args, pb_count(args[LARG_count].u_obj));
+    mp_obj_t data = msg_take();
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(data, &buf, MP_BUFFER_READ);
+    return xml_elements(buf.buf, buf.len, "msg");
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(msg_list_obj, 1, msg_list);
+
+// size(folder="inbox", *, unread=None) -> how many messages
+static mp_obj_t msg_size(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    mp_arg_val_t args[MP_ARRAY_SIZE(msg_list_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(msg_list_args), msg_list_args, args);
+    msg_list_send(args, 0);
+    btc_msg_release();
+    btc_msg_status_t st;
+    btc_msg_status(&st);
+    return maybe_int(st.listing_size);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(msg_size_obj, 1, msg_size);
+
+// ---- bMessage ----
+
+static const char *find(const char *s, const char *end, const char *what) {
+    size_t n = strlen(what);
+    for (; s + n <= end; s++) {
+        if (memcmp(s, what, n) == 0) {
+            return s;
+        }
+    }
+    return NULL;
+}
+
+// The value of a top-level "KEY:" line before `end`, or None.
+static mp_obj_t bmsg_field(const char *s, const char *end, const char *key) {
+    size_t kn = strlen(key);
+    size_t pos = 0, len;
+    const char *l;
+    while ((l = next_line(s, end - s, &pos, &len)) != NULL) {
+        if (len > kn && memcmp(l, key, kn) == 0 && l[kn] == ':') {
+            return text_from(l + kn + 1, len - kn - 1);
+        }
+    }
+    return mp_const_none;
+}
+
+// A bMessage as a dict: status, type, folder, sender (a record or None),
+// recipients (records) and text.
+static mp_obj_t bmsg_parse(const char *data, size_t size) {
+    const char *end = data + size;
+    const char *benv = find(data, end, "BEGIN:BENV");
+    const char *head_end = benv ? benv : end;
+    const char *first_card = find(data, head_end, "BEGIN:VCARD");
+    const char *top = first_card ? first_card : head_end;
+    mp_obj_t d = mp_obj_new_dict(6);
+    put(d, MP_QSTR_status, bmsg_field(data, top, "STATUS"));
+    put(d, MP_QSTR_type, bmsg_field(data, top, "TYPE"));
+    put(d, MP_QSTR_folder, bmsg_field(data, top, "FOLDER"));
+    mp_obj_t sender = mp_const_none;
+    if (first_card) {
+        const char *ce = find(first_card, head_end, "END:VCARD");
+        if (ce) {
+            mp_obj_t cards = vcards_parse(first_card, ce + 9 - first_card);
+            size_t n;
+            mp_obj_t *items;
+            mp_obj_list_get(cards, &n, &items);
+            sender = n ? items[0] : mp_const_none;
+        }
+    }
+    put(d, MP_QSTR_sender, sender);
+    const char *bbody = benv ? find(benv, end, "BEGIN:BBODY") : NULL;
+    put(d, MP_QSTR_recipients, benv ? vcards_parse(benv, (bbody ? bbody : end) - benv) : mp_obj_new_list(0, NULL));
+    vstr_t text;
+    vstr_init(&text, 64);
+    const char *s = bbody ? bbody : data;
+    const char *b;
+    while ((b = find(s, end, "BEGIN:MSG")) != NULL) {
+        b += 9;
+        if (b < end && *b == '\r') {
+            b++;
+        }
+        if (b < end && *b == '\n') {
+            b++;
+        }
+        const char *e = find(b, end, "END:MSG");
+        if (e == NULL) {
+            e = end;
+        }
+        const char *t = e;
+        if (t > b && t[-1] == '\n') {
+            t--;
+        }
+        if (t > b && t[-1] == '\r') {
+            t--;
+        }
+        vstr_add_strn(&text, b, t - b);
+        s = e;
+        if (e == end) {
+            break;
+        }
+        s += 7;
+    }
+    put(d, MP_QSTR_text, text_from(text.buf, text.len));
+    vstr_clear(&text);
+    return d;
+}
+
+// get(handle, *, raw=False, attachments=False, timeout=30000) -> dict or bytes
+static mp_obj_t msg_get(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_self, ARG_handle, ARG_raw, ARG_attachments, ARG_timeout };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_self, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_handle, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_raw, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
+        { MP_QSTR_attachments, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
+        { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 30000} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
+    msg_check();
+    ph_done(btc_msg_get(mp_obj_str_get_str(args[ARG_handle].u_obj), args[ARG_attachments].u_bool, true));
+    msg_wait(args[ARG_timeout].u_int);
+    mp_obj_t data = msg_take();
+    if (args[ARG_raw].u_bool) {
+        return data;
+    }
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(data, &buf, MP_BUFFER_READ);
+    return bmsg_parse(buf.buf, buf.len);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(msg_get_obj, 2, msg_get);
+
+static mp_obj_t msg_status_call(mp_obj_t handle, uint8_t indicator, bool value) {
+    msg_check();
+    ph_done(btc_msg_set_status(mp_obj_str_get_str(handle), indicator, value));
+    msg_wait(30000);
+    btc_msg_release();
+    return mp_const_none;
+}
+
+// mark_read(handle, read=True)
+static mp_obj_t msg_mark_read(size_t n_args, const mp_obj_t *args) {
+    return msg_status_call(args[1], BTC_MSG_STATUS_READ, n_args > 2 ? mp_obj_is_true(args[2]) : true);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(msg_mark_read_obj, 2, 3, msg_mark_read);
+
+// delete(handle, deleted=True): to the phone's deleted folder, or back
+static mp_obj_t msg_delete(size_t n_args, const mp_obj_t *args) {
+    return msg_status_call(args[1], BTC_MSG_STATUS_DELETED, n_args > 2 ? mp_obj_is_true(args[2]) : true);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(msg_delete_obj, 2, 3, msg_delete);
+
+// push(bmessage, *, folder="outbox", retry=True, timeout=30000) -> handle
+static mp_obj_t msg_push_bytes(const char *bm, size_t len, mp_obj_t folder, bool retry, mp_int_t timeout) {
+    msg_check();
+    vstr_t path;
+    msg_path(&path, folder);
+    const char *name = msg_split(&path);
+    int err = btc_msg_push(vstr_str(&path), name, (const uint8_t *)bm, len, true, retry);
+    vstr_clear(&path);
+    ph_done(err);
+    msg_wait(timeout);
+    btc_msg_release();
+    btc_msg_status_t st;
+    btc_msg_status(&st);
+    return st.pushed[0] ? mp_obj_new_str(st.pushed, strlen(st.pushed)) : mp_const_none;
+}
+
+static mp_obj_t msg_push(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_self, ARG_bmessage, ARG_folder, ARG_retry, ARG_timeout };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_self, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_bmessage, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_folder, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_QSTR(MP_QSTR_outbox)} },
+        { MP_QSTR_retry, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true} },
+        { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 30000} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(args[ARG_bmessage].u_obj, &buf, MP_BUFFER_READ);
+    return msg_push_bytes(buf.buf, buf.len, args[ARG_folder].u_obj, args[ARG_retry].u_bool, args[ARG_timeout].u_int);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(msg_push_obj, 2, msg_push);
+
+// send(number, text, *, folder="outbox", timeout=30000) -> handle: a text
+// message, which the phone sends from "outbox" (or keeps, in "draft").
+static mp_obj_t msg_send(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_self, ARG_number, ARG_text, ARG_folder, ARG_timeout };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_self, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_number, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_text, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_folder, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_QSTR(MP_QSTR_outbox)} },
+        { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 30000} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
+    size_t tn;
+    const char *text = mp_obj_str_get_data(args[ARG_text].u_obj, &tn);
+    const char *number = mp_obj_str_get_str(args[ARG_number].u_obj);
+    vstr_t folder;
+    msg_path(&folder, args[ARG_folder].u_obj);
+    vstr_t b;
+    vstr_init(&b, 256 + tn);
+    vstr_add_str(&b, "BEGIN:BMSG\r\nVERSION:1.0\r\nSTATUS:READ\r\nTYPE:SMS_GSM\r\nFOLDER:");
+    vstr_add_strn(&b, folder.buf, folder.len);
+    vstr_add_str(&b, "\r\nBEGIN:BENV\r\nBEGIN:VCARD\r\nVERSION:2.1\r\nN:\r\nTEL:");
+    vstr_add_str(&b, number);
+    vstr_add_str(&b, "\r\nEND:VCARD\r\nBEGIN:BBODY\r\nCHARSET:UTF-8\r\nLENGTH:");
+    char num[16];
+    // BEGIN:MSG<CRLF> text <CRLF>END:MSG<CRLF>
+    int nn = snprintf(num, sizeof(num), "%u", (unsigned)(11 + tn + 11));
+    vstr_add_strn(&b, num, nn);
+    vstr_add_str(&b, "\r\nBEGIN:MSG\r\n");
+    vstr_add_strn(&b, text, tn);
+    vstr_add_str(&b, "\r\nEND:MSG\r\nEND:BBODY\r\nEND:BENV\r\nEND:BMSG\r\n");
+    vstr_clear(&folder);
+    mp_obj_t handle = msg_push_bytes(b.buf, b.len, args[ARG_folder].u_obj, true, args[ARG_timeout].u_int);
+    vstr_clear(&b);
+    return handle;
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(msg_send_obj, 3, msg_send);
+
+static mp_obj_t msg_update_inbox(mp_obj_t self_in) {
+    msg_check();
+    ph_done(btc_msg_update_inbox());
+    msg_wait(30000);
+    btc_msg_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(msg_update_inbox_obj, msg_update_inbox);
+
+// notify(on=True): ask the phone to report changes; read them with event()
+static mp_obj_t msg_notify(size_t n_args, const mp_obj_t *args) {
+    msg_check();
+    bool on = n_args > 1 ? mp_obj_is_true(args[1]) : true;
+    ph_done(btc_msg_notify(on));
+    msg_wait(30000);
+    btc_msg_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(msg_notify_obj, 1, 2, msg_notify);
+
+// event() -> the oldest report the phone sent, as a dict, or None
+static mp_obj_t msg_event(mp_obj_t self_in) {
+    vstr_t v;
+    vstr_init_len(&v, 1024);
+    size_t n = btc_msg_event((uint8_t *)v.buf, v.len);
+    if (n == 0) {
+        vstr_clear(&v);
+        return mp_const_none;
+    }
+    mp_obj_t found = xml_elements(v.buf, n, "event");
+    vstr_clear(&v);
+    size_t k;
+    mp_obj_t *items;
+    mp_obj_list_get(found, &k, &items);
+    return k ? items[0] : mp_obj_new_dict(0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(msg_event_obj, msg_event);
+
+static mp_obj_t msg_changes(mp_obj_t self_in) {
+    return MP_OBJ_NEW_SMALL_INT(btc_msg_changes());
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(msg_changes_obj, msg_changes);
+
+static mp_obj_t msg_deinit(mp_obj_t self_in) {
+    btc_msg_stop();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(msg_deinit_obj, msg_deinit);
+
+// Messages.parse(data) -> dict: a bMessage from anywhere.
+static mp_obj_t msg_parse(mp_obj_t data) {
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(data, &buf, MP_BUFFER_READ);
+    return bmsg_parse(buf.buf, buf.len);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(msg_parse_fun_obj, msg_parse);
+static MP_DEFINE_CONST_STATICMETHOD_OBJ(msg_parse_obj, MP_ROM_PTR(&msg_parse_fun_obj));
+
+static void msg_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    if (dest[0] != MP_OBJ_NULL) {
+        return;
+    }
+    btc_msg_status_t st;
+    btc_msg_status(&st);
+    switch (attr) {
+        case MP_QSTR_connected:
+            dest[0] = mp_obj_new_bool(st.connected);
+            return;
+        case MP_QSTR_peer:
+            dest[0] = st.connected ? mp_obj_new_bytes(st.peer, 6) : mp_const_none;
+            return;
+        case MP_QSTR_instance:
+            dest[0] = maybe_int(st.instance);
+            return;
+        case MP_QSTR_features:
+            dest[0] = mp_obj_new_int_from_uint(st.features);
+            return;
+        case MP_QSTR_types: {
+            // What the open service carries.
+            static const qstr names[] = { MP_QSTR_email, MP_QSTR_sms_gsm, MP_QSTR_sms_cdma, MP_QSTR_mms, MP_QSTR_im };
+            mp_obj_t l = mp_obj_new_list(0, NULL);
+            for (int i = 0; i < 5; i++) {
+                if (st.types & (1 << i)) {
+                    mp_obj_list_append(l, MP_OBJ_NEW_QSTR(names[i]));
+                }
+            }
+            dest[0] = l;
+            return;
+        }
+        case MP_QSTR_new_message:
+            dest[0] = st.new_message < 0 ? mp_const_none : mp_obj_new_bool(st.new_message);
+            return;
+        case MP_QSTR_time:
+            dest[0] = st.mse_time[0] ? mp_obj_new_str(st.mse_time, strlen(st.mse_time)) : mp_const_none;
+            return;
+        case MP_QSTR_truncated:
+            dest[0] = mp_obj_new_bool(st.truncated);
+            return;
+        case MP_QSTR_notifying:
+            dest[0] = mp_obj_new_bool(st.notifying);
+            return;
+        case MP_QSTR_notify_connected:
+            dest[0] = mp_obj_new_bool(st.notify_connected);
+            return;
+        case MP_QSTR_events:
+            dest[0] = MP_OBJ_NEW_SMALL_INT(st.events);
+            return;
+        default:
+            dest[1] = MP_OBJ_SENTINEL;
+            return;
+    }
+}
+
+static const mp_rom_map_elem_t msg_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_connect), MP_ROM_PTR(&msg_connect_obj) },
+    { MP_ROM_QSTR(MP_QSTR_disconnect), MP_ROM_PTR(&msg_disconnect_obj) },
+    { MP_ROM_QSTR(MP_QSTR_folders), MP_ROM_PTR(&msg_folders_obj) },
+    { MP_ROM_QSTR(MP_QSTR_list), MP_ROM_PTR(&msg_list_obj) },
+    { MP_ROM_QSTR(MP_QSTR_size), MP_ROM_PTR(&msg_size_obj) },
+    { MP_ROM_QSTR(MP_QSTR_get), MP_ROM_PTR(&msg_get_obj) },
+    { MP_ROM_QSTR(MP_QSTR_mark_read), MP_ROM_PTR(&msg_mark_read_obj) },
+    { MP_ROM_QSTR(MP_QSTR_delete), MP_ROM_PTR(&msg_delete_obj) },
+    { MP_ROM_QSTR(MP_QSTR_send), MP_ROM_PTR(&msg_send_obj) },
+    { MP_ROM_QSTR(MP_QSTR_push), MP_ROM_PTR(&msg_push_obj) },
+    { MP_ROM_QSTR(MP_QSTR_update_inbox), MP_ROM_PTR(&msg_update_inbox_obj) },
+    { MP_ROM_QSTR(MP_QSTR_notify), MP_ROM_PTR(&msg_notify_obj) },
+    { MP_ROM_QSTR(MP_QSTR_event), MP_ROM_PTR(&msg_event_obj) },
+    { MP_ROM_QSTR(MP_QSTR_parse), MP_ROM_PTR(&msg_parse_obj) },
+    { MP_ROM_QSTR(MP_QSTR_changes), MP_ROM_PTR(&msg_changes_obj) },
+    { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&msg_deinit_obj) },
+    { MP_ROM_QSTR(MP_QSTR___enter__), MP_ROM_PTR(&mp_identity_obj) },
+    { MP_ROM_QSTR(MP_QSTR___exit__), MP_ROM_PTR(&ph_exit_obj) },
+};
+static MP_DEFINE_CONST_DICT(msg_locals, msg_locals_table);
+
+MP_DEFINE_CONST_OBJ_TYPE(
+    btc_messages_type,
+    MP_QSTR_Messages,
+    MP_TYPE_FLAG_NONE,
+    make_new, msg_make_new,
+    attr, msg_attr,
+    locals_dict, &msg_locals
     );

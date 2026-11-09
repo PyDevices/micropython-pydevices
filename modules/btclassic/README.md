@@ -55,6 +55,7 @@ per profile that takes it.
 | `HIDHost(bt)` | The board reads a keyboard, mouse or controller (HID host): `connect()`, `read()` its reports, `decode()` them, and `send()` its output reports. |
 | `PhoneBook(bt)` | Reads a phone's contacts and call history (PBAP client): `pull()` a book as records of names, numbers and emails, `list()` and `entry()` to page through it, `size()`, and `lookup()` for the name behind a caller's number. |
 | `AudioGateway(bt)` | The board as the phone for a headset or car kit (HFP audio gateway): the `signal`, `battery` and `operator` it shows, `ring()` with a caller's number, `dial()`, the headset's answer and hang-up, and the call's audio through `readinto()` and `write()`. |
+| `Messages(bt)` | Reads and sends a phone's texts (MAP client): `list()` a folder, `get()` a message with its sender and text, `mark_read()`, `delete()`, `send()`, and `notify()` to hear about new messages as they arrive. |
 
 Nothing calls back into Python. Each object's state is properties, and its
 `changes()` returns a bit for each kind of state that changed since you last
@@ -299,4 +300,28 @@ it would with a phone. `ring("+15550100")` rings it with that number, its
 button answers, and while `audio` is True the call's sound goes both ways
 through `write()` and `readinto()`. A board runs `HandsFree` or
 `AudioGateway`, one at a time.
+
+`Messages` reads the phone's texts the same way:
+
+```python
+import time
+
+msgs = btclassic.Messages(bt)
+msgs.connect()
+for m in msgs.list("inbox", count=5):
+    print(m["datetime"], m["sender_name"], m["subject"])
+msgs.notify()                               # the phone reports new messages
+while True:
+    event = msgs.event()
+    if event and event["type"] == "NewMessage":
+        print(msgs.get(event["handle"])["text"])
+    time.sleep_ms(100)
+```
+
+`send(number, text)` sends a text through the phone; `folder="draft"`
+leaves it in the phone's drafts instead.
+
+A moment after `notify()`, the phone connects back to deliver its reports,
+and `notify_connected` turns True. If it stays False, poll
+`list("inbox", unread=True)` instead.
 

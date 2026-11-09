@@ -30,7 +30,9 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
         ${BTCLASSIC_IDF}/spp.c
         ${BTCLASSIC_IDF}/hid.c
         ${BTCLASSIC_IDF}/pbap.c
-        ${BTCLASSIC_IDF}/hfp_ag.c)
+        ${BTCLASSIC_IDF}/hfp_ag.c
+        ${BTCLASSIC_IDF}/map.c
+        ${BTCLASSIC_IDF}/sdp_shared.c)
     target_include_directories(usermod_btclassic INTERFACE ${BTCLASSIC_IDF}/include ${BTCLASSIC_IDF})
     # The source's track metadata for a remote, through link-time hooks into
     # Bluedroid (avrcp_tg.c); off where they aren't known to fit.
@@ -54,6 +56,10 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
         target_compile_definitions(usermod_btclassic INTERFACE BTCLASSIC_AUDIOSAMPLE=1)
         message(STATUS "btclassic: sources for audiodsp at ${BTCLASSIC_AUDIODSP_DIR}")
     endif()
+
+    # The message client, on Bluedroid's OBEX internals (map.c).
+    include(${BTCLASSIC_IDF}/map.cmake)
+    btclassic_map(usermod_btclassic ${BTCLASSIC_IDF}/map.c)
     target_link_libraries(usermod INTERFACE usermod_btclassic)
     list(APPEND MICROPY_DEF_BOARD MICROPY_BLUETOOTH_BLUEDROID=1)
     # The backend's roles: central and the GATT client as well as the

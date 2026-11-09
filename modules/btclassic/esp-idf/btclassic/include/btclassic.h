@@ -60,6 +60,8 @@ extern "C" {
 #define BTC_CHANGED_HID        (1u << 16)   // hid: a report came, the host set one, or room to send
 #define BTC_CHANGED_PHONEBOOK  (1u << 17)   // pb: a request finished, or the link came or went
 #define BTC_CHANGED_REQUEST    (1u << 18)   // ag: the headset dialed, sent a DTMF digit or a command
+#define BTC_CHANGED_MESSAGES   (1u << 19)   // msg: a request finished, or the link came or went
+#define BTC_CHANGED_NOTIFY     (1u << 20)   // msg: the phone reported a new, sent, deleted or changed message
 
 typedef uint8_t btc_addr_t[6];  // most significant byte first
 
@@ -624,6 +626,80 @@ uint32_t btc_ag_changes(void);
 void btc_ag_status(btc_ag_status_t *out);
 void btc_ag_stats(btc_ring_stats_t *out);
 size_t btc_ag_text(btc_ag_text_t which, char *dst, size_t size);
+
+// ---- messages: MAP client ----
+
+// A phone's texts (and its email, where it offers them), over OBEX. Folders
+// are paths from the phone's root: "telecom/msg/inbox". One request runs at
+// a time; each one's reply gathers into a buffer of up to `max_bytes`, read
+// with btc_msg_data() once `busy` drops.
+
+// Listing filters.
+#define BTC_MSG_UNREAD          1   // read_filter: unread only
+#define BTC_MSG_READ            2   //              read only
+#define BTC_MSG_NO_SMS_GSM      0x01    // type_filter: these bits leave a type out
+#define BTC_MSG_NO_SMS_CDMA     0x02
+#define BTC_MSG_NO_EMAIL        0x04
+#define BTC_MSG_NO_MMS          0x08
+
+// btc_msg_set_status() indicators.
+#define BTC_MSG_STATUS_READ     0
+#define BTC_MSG_STATUS_DELETED  1
+
+typedef struct {
+    bool started;
+    bool connected;
+    bool connecting;
+    btc_addr_t peer;
+    int instance;           // the message service in use, or BTC_UNKNOWN
+    int instances;          // how many the phone offers
+    uint32_t features;      // its MAP feature bits
+    uint32_t types;         // its message types: 1 email, 2 SMS GSM, 4 SMS CDMA, 8 MMS, 16 IM
+    bool busy;              // a request is running
+    int result;             // the last one's: BTC_OK, a negative BTC_ERR_*, or 0x80 | an OBEX response code
+    size_t length;          // bytes of reply gathered
+    bool truncated;         // the reply outgrew max_bytes
+    int listing_size;       // from the last listing, or BTC_UNKNOWN
+    int new_message;        // the phone's new-message flag from the last listing, or BTC_UNKNOWN
+    char mse_time[24];      // the phone's clock at the last listing, "20261108T101500+0000"
+    char pushed[64];        // the handle the phone gave the last pushed message
+    bool notifying;         // the phone agreed to report changes
+    bool notify_connected;  // the phone's report link is up
+    uint8_t events;         // reports waiting for btc_msg_event()
+    uint32_t events_dropped;
+} btc_msg_status_t;
+
+int btc_msg_start(size_t max_bytes);
+void btc_msg_stop(void);
+bool btc_msg_started(void);
+// Find the phone's message services and open one: `instance` by its ID, or
+// -1 for the first with texts. NULL: HandsFree's phone, the sink's sender,
+// or the first paired device. The link comes later; watch CONNECTION.
+int btc_msg_connect(const uint8_t *addr, int instance);
+int btc_msg_disconnect(void);
+// The subfolders of `folder`, as x-obex/folder-listing XML.
+int btc_msg_folders(const char *folder, uint16_t offset, uint16_t count);
+// The messages in folder/name, as MAP-msg-listing XML; count 0 asks only for
+// listing_size. A zero filter or mask leaves it out.
+int btc_msg_list(const char *folder, const char *name, uint16_t offset, uint16_t count,
+    uint8_t read_filter, uint8_t type_filter, uint32_t parameter_mask, uint8_t subject_length);
+// One message by handle, as a bMessage.
+int btc_msg_get(const char *handle, bool attachments, bool utf8);
+int btc_msg_set_status(const char *handle, uint8_t indicator, bool value);
+// Hand the phone a bMessage for folder/name ("telecom/msg", "outbox" sends
+// it); `pushed` then holds its handle.
+int btc_msg_push(const char *folder, const char *name, const uint8_t *bmsg, size_t len, bool utf8, bool retry);
+// Ask the phone to check for new messages now.
+int btc_msg_update_inbox(void);
+// Ask the phone to report changes (or stop). Starts the report server here
+// and its SDP record the first time.
+int btc_msg_notify(bool on);
+size_t btc_msg_data(uint8_t *dst, size_t size);
+void btc_msg_release(void);
+// The oldest waiting report, MAP-event-report XML, or 0 when none waits.
+size_t btc_msg_event(uint8_t *dst, size_t size);
+void btc_msg_status(btc_msg_status_t *out);
+uint32_t btc_msg_changes(void);
 
 #ifdef __cplusplus
 }
