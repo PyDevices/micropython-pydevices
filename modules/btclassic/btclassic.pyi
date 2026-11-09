@@ -124,6 +124,8 @@ NOTIFY: int
 """`Messages.changes` bit: the phone reported a change; read `event()`."""
 LIBRARY: int
 """`Library.changes` bit: a request finished, whether or not it worked."""
+TETHER: int
+"""`Tether.changes` bit: the link to the phone came up, failed or went."""
 
 HID_KEYBOARD: int
 """`HIDDevice` subclass: a keyboard."""
@@ -901,6 +903,59 @@ class Library:
     def deinit(self) -> None:
         """Drop the browsing link. The radio and the sink stay on."""
     def __enter__(self) -> Library: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
+
+
+class Tether:
+    """The internet through a phone's Bluetooth tethering (PAN), as a
+    network interface beside the Wi-Fi's: once it's connected, `socket`,
+    `requests` and `ntptime` use it as they would `network.WLAN`.
+
+    The phone hands out the address by DHCP, and the tether becomes the
+    default route while it's up; the route goes back to the Wi-Fi when it
+    drops. Turn on Bluetooth tethering in the phone's hotspot settings first.
+
+    Only the Pico W has it. On the ESP32 the class is there, and making one
+    raises OSError: its Bluetooth stack has no PAN.
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+    """
+
+    connected: bool
+    """The Bluetooth link to the phone is up (it may not have an address
+    yet; `isconnected()` says it has)."""
+    peer: bytes | None
+    """The phone's address, or None."""
+
+    def __init__(self, bt: Bluetooth) -> None: ...
+    def connect(self, addr: bytes | None = None, *, timeout: int = 30000) -> None:
+        """Join the phone's tethering, and wait until the phone has given the
+        board an address. With no address, the last device connected, or else
+        the first paired one. `timeout=0` returns at once; watch for `TETHER`
+        and `isconnected()`.
+
+        Raises:
+            OSError: the phone refused (its Bluetooth tethering is off), or
+                ETIMEDOUT.
+        """
+    def disconnect(self) -> None: ...
+    def isconnected(self) -> bool:
+        """Up, with an address from the phone."""
+    def ifconfig(self, config: tuple[str, str, str, str] | None = None) -> tuple[str, str, str, str]:
+        """As `network.WLAN.ifconfig`: address, netmask, gateway, DNS."""
+    def ipconfig(self, *args: str, **kwargs: object) -> object:
+        """As `network.WLAN.ipconfig`: `ipconfig("addr4")`, `ipconfig("gw4")`."""
+    def stats(self) -> dict[str, int]:
+        """Counters: rx_frames, tx_frames, and tx_dropped (frames the link
+        had no room for, which TCP sends again)."""
+    def changes(self) -> int:
+        """The bits (`TETHER`) for what changed since the last call, which
+        clears them."""
+    def deinit(self) -> None:
+        """Drop the link and take the interface down. The radio stays on."""
+    def __enter__(self) -> Tether: ...
     def __exit__(self, *args: object) -> None:
         """`deinit`."""
 
