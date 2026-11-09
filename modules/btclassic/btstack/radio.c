@@ -336,6 +336,8 @@ static void apply_io(void) {
     gap_ssp_set_io_capability(radio_io);
     // "Just works" and a display-only board answer by themselves.
     gap_ssp_set_auto_accept(radio_io == BTC_IO_NONE || radio_io == BTC_IO_DISPLAY_ONLY);
+    // With a way to check, ask for it: services then need MITM protection.
+    gap_set_security_level(radio_io == BTC_IO_NONE ? LEVEL_2 : LEVEL_3);
 }
 static bool discoverable = true, connectable = true;
 static btstack_packet_callback_registration_t hci_cb;
