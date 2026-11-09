@@ -51,12 +51,15 @@ per profile that takes it.
 | `HandsFree(bt)` | Follows a phone (HFP hands-free): `battery`, `signal`, `operator`, the `call` and its `caller`, `answer()`, `hangup()`, `dial()`, and the call's audio through its own `readinto()` and `write()`. |
 | `AudioSource(bt)` | Sends audio to headphones, a speaker or a car stereo (A2DP source) and acts as their remote's target (AVRCP): `write()`, the receiver's keys through `key()`, the `volume`, and the `track()` and `status` its display shows. `Bluetooth.inquiry()` and `found()` find the receiver. |
 | `Serial(bt)` | A serial port (SPP), as a stream like `machine.UART`: a computer gets a Bluetooth COM port to the board, or `connect()` calls another device's port. |
+| `L2CAP(bt, psm)` | A raw L2CAP channel, as a stream: a protocol of your own between two boards, with no serial port framing in the way. Serves a PSM, or `connect()` calls another device's. |
 | `HIDDevice(bt)` | The board as a keyboard, mouse or game controller (HID device): `type()`, `keyboard()`, `mouse()`, `gamepad()`, or `send()` with your own report descriptor, and the keyboard `leds` the computer sends back. |
 | `HIDHost(bt)` | The board reads a keyboard, mouse or controller (HID host): `connect()`, `read()` its reports, `decode()` them, and `send()` its output reports. |
 | `PhoneBook(bt)` | Reads a phone's contacts and call history (PBAP client): `pull()` a book as records of names, numbers and emails, `list()` and `entry()` to page through it, `size()`, and `lookup()` for the name behind a caller's number. |
 | `AudioGateway(bt)` | The board as the phone for a headset or car kit (HFP audio gateway): the `signal`, `battery` and `operator` it shows, `ring()` with a caller's number, `dial()`, the headset's answer and hang-up, and the call's audio through `readinto()` and `write()`. |
 | `Messages(bt)` | Reads and sends a phone's texts (MAP client): `list()` a folder, `get()` a message with its sender and text, `mark_read()`, `delete()`, `send()`, and `notify()` to hear about new messages as they arrive. |
 | `Library(bt)` | Browses the media library of the phone `AudioSink` plays from (AVRCP browsing): `players()`, `browse()` one, `items()` in a folder, the queue or a search, `enter()` and `up()`, and `play()` a track. Pico W only. |
+| `Tether(bt)` | The internet through a phone's Bluetooth tethering (PAN), as a network interface like `network.WLAN`: `connect()`, `isconnected()`, `ifconfig()` and `ipconfig()`. Pico W only. |
+| `ObjectPush(bt)` | Files and contact cards (OPP): `send()` one to a phone or computer, `pull()` its owner's card, or `listen()` and take what it sends with `received()`. Pico W only. |
 
 Nothing calls back into Python. Each object's state is properties, and its
 `changes()` returns a bit for each kind of state that changed since you last
@@ -183,8 +186,11 @@ service and operator, and answers, dials, hangs up and sends tones.
 `PhoneBook` works as it does on the ESP32, except that `new_missed` is
 always None. Its reply comes into the heap and grows with it: a phone book
 of 471 contacts without photos is 68 KB, so page with `count` on a Pico W.
-`AudioGateway` and `Messages` are ESP32-only. `Library` is the other way
-round: only the Pico W has it (see [A phone's music library](#a-phones-music-library)).
+`AudioGateway` and `Messages` are ESP32-only. `Library`, `Tether` and
+`ObjectPush` are the other way round: only the Pico W has them (see
+[A phone's music library](#a-phones-music-library),
+[The internet through a phone](#the-internet-through-a-phone) and
+[Files and contact cards](#files-and-contact-cards)).
 
 ## How it's built
 
@@ -422,6 +428,33 @@ shows and answer with `passkey_reply(True, number)`. `IO_DISPLAY_ONLY` gets
 three, a `Serial` link asks the other side for a checked pairing too.
 `examples/btclassic_pairing.py` is the whole program.
 
+## A channel of your own
+
+Two boards that speak your own protocol don't need a serial port in
+between: `L2CAP` opens a channel straight on L2CAP, the layer every profile
+runs on. One board serves a PSM, a number like a port number; yours are the
+odd ones from 0x1001 up. The other calls it:
+
+```python
+import btclassic
+
+bt = btclassic.Bluetooth()
+ch = btclassic.L2CAP(bt, 0x1001)       # on the board that waits
+# ... once ch.connected:
+ch.write(b"hello")
+
+ch = btclassic.L2CAP(bt)               # on the board that calls
+ch.connect(server_address, 0x1001)
+print(ch.read())                       # b'hello'
+```
+
+It reads and writes as a stream, as `Serial` does. `mtu` says how much one
+packet carries; `write` splits longer writes. Pairing comes first, as for a
+serial link. `examples/btclassic_l2cap.py` runs both ends.
+
+While an `AudioSink` has a sender connected, the board can't be called, on
+any channel: hang the sender up first, or call out from that board instead.
+
 ## A phone's music library
 
 On a Pico W, `Library` browses the players on the phone `AudioSink` plays
@@ -449,6 +482,58 @@ phone's media apps that let Bluetooth browse them. If none does, `browse()`
 raises "that player can't be browsed", and `connect()` and `players()` are
 all you get. Whether `search()` works is up to the player too: the phone
 answers with an error when it can't search.
+
+## The internet through a phone
+
+On a Pico W, `Tether` puts the board on a phone's Bluetooth tethering, with
+no Wi-Fi needed. Turn on Bluetooth tethering in the phone's hotspot settings
+first, and pair the board with the phone.
+
+```python
+import btclassic
+import requests
+
+bt = btclassic.Bluetooth()
+net = btclassic.Tether(bt)
+net.connect()                               # the last phone connected, or the first paired
+print(net.ifconfig())                       # an address from the phone
+print(requests.get("http://example.com").status_code)
+```
+
+The tether is a network interface of its own beside the Wi-Fi's. While it's
+up it's the default route, so `socket` and `requests` go through the phone;
+when it drops, the route goes back to the Wi-Fi if that's connected.
+## Files and contact cards
+
+On a Pico W, `ObjectPush` sends a file to a paired phone or computer, and
+takes the files it sends:
+
+```python
+import btclassic
+
+bt = btclassic.Bluetooth()
+bt.active(True)
+opp = btclassic.ObjectPush(bt)
+opp.send("notes.txt", b"from the Pico\n", type="text/plain")
+
+opp.listen()
+bt.config(discoverable=True)    # so a phone's share sheet finds it
+while not (got := opp.received()):
+    pass
+name, mime, data = got
+```
+
+The phone asks its user to accept each file, and `send()` waits until they
+do, or until `timeout`. A contact card is a file too: send a vCard with
+`type="text/x-vcard"`. `pull()` asks for the owner's card, which many
+phones, Android among them, won't give.
+
+While listening, the Pico keeps one received file at a time, up to
+`max_bytes`, and turns the next away until `received()` takes it. An Android
+phone sends shared text as a small HTML file. Its share sheet lists only
+devices that offer file transfer, so the Pico says so in its class of device
+while it listens. If a phone paired before that doesn't list it, make the
+Pico discoverable and tap Scan.
 
 ## Examples
 
