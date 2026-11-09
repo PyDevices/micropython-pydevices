@@ -708,6 +708,102 @@ static mp_obj_t bluetooth_tune(size_t n_args, const mp_obj_t *pos_args, mp_map_t
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(bluetooth_tune_obj, 2, bluetooth_tune);
 
+// link_mode(addr) -> (mode, interval_ms): "active", "hold" or "sniff", and
+// how often a sniffing link wakes (0 otherwise).
+static mp_obj_t bluetooth_link_mode(mp_obj_t self_in, mp_obj_t addr_in) {
+    const uint8_t *addr = addr_arg(addr_in);
+    if (addr == NULL) {
+        mp_raise_TypeError(MP_ERROR_TEXT("an address"));
+    }
+    uint32_t ms;
+    int mode = btc_radio_link_mode(addr, &ms);
+    if (mode < 0) {
+        raise_btc(mode);
+    }
+    static const qstr names[] = { MP_QSTR_active, MP_QSTR_hold, MP_QSTR_sniff };
+    mp_obj_t t[2] = { MP_OBJ_NEW_QSTR(names[mode < 3 ? mode : 0]), mp_obj_new_int_from_uint(ms) };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(bluetooth_link_mode_obj, bluetooth_link_mode);
+
+// sniff(addr, enable=True, *, min_ms=250, max_ms=500, attempt=4, timeout=1)
+// -> the interval the link now wakes at, in ms (0 once it's active again).
+static mp_obj_t bluetooth_sniff(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_addr, ARG_enable, ARG_min_ms, ARG_max_ms, ARG_attempt, ARG_timeout };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
+        { MP_QSTR_enable, MP_ARG_BOOL, {.u_bool = true} },
+        { MP_QSTR_min_ms, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 250} },
+        { MP_QSTR_max_ms, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 500} },
+        { MP_QSTR_attempt, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 4} },
+        { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 1} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
+    const uint8_t *addr = addr_arg(args[ARG_addr].u_obj);
+    if (addr == NULL) {
+        mp_raise_TypeError(MP_ERROR_TEXT("an address"));
+    }
+    if (args[ARG_min_ms].u_int < 2 || args[ARG_max_ms].u_int > 40000 || args[ARG_attempt].u_int < 1
+        || args[ARG_timeout].u_int < 0) {
+        mp_raise_ValueError(NULL);
+    }
+    bool enable = args[ARG_enable].u_bool;
+    done(btc_radio_sniff(addr, enable, args[ARG_min_ms].u_int, args[ARG_max_ms].u_int,
+        args[ARG_attempt].u_int, args[ARG_timeout].u_int));
+    int status = 0;
+    // A link that is subrating wakes only as often as its latency, so waking
+    // it can take a couple of seconds.
+    int limit = enable ? 3000 : 8000;
+    for (int waited = 0; waited < limit; waited += 10) {
+        int state = btc_radio_sniff_state(&status);
+        if (state == 1) {
+            uint32_t ms;
+            int mode = btc_radio_link_mode(addr, &ms);
+            return mp_obj_new_int_from_uint(mode == BTC_LINK_SNIFF ? ms : 0);
+        }
+        if (state < 0) {
+            mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: the controller refused, 0x%02x"), status);
+        }
+        mp_event_wait_ms(10);
+    }
+    mp_raise_OSError(MP_ETIMEDOUT);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(bluetooth_sniff_obj, 1, bluetooth_sniff);
+
+// subrate(addr, *, max_latency_ms=2000, remote_timeout_ms=0, local_timeout_ms=0)
+// -> the latency the two sides agreed on, in ms.
+static mp_obj_t bluetooth_subrate(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_addr, ARG_max_latency_ms, ARG_remote_timeout_ms, ARG_local_timeout_ms };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
+        { MP_QSTR_max_latency_ms, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 2000} },
+        { MP_QSTR_remote_timeout_ms, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_local_timeout_ms, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
+    const uint8_t *addr = addr_arg(args[ARG_addr].u_obj);
+    if (addr == NULL) {
+        mp_raise_TypeError(MP_ERROR_TEXT("an address"));
+    }
+    done(btc_radio_sniff_subrating(addr, args[ARG_max_latency_ms].u_int,
+        args[ARG_remote_timeout_ms].u_int, args[ARG_local_timeout_ms].u_int));
+    uint32_t ms = 0;
+    for (int waited = 0; waited < 3000; waited += 10) {
+        int state = btc_radio_sniff_subrating_state(&ms);
+        if (state == 1) {
+            return mp_obj_new_int_from_uint(ms);
+        }
+        if (state < 0) {
+            raise_btc(state);
+        }
+        mp_event_wait_ms(10);
+    }
+    mp_raise_OSError(MP_ETIMEDOUT);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(bluetooth_subrate_obj, 1, bluetooth_subrate);
+
 // services(addr, timeout_ms=20000) -> [uuid, ...]: the service classes a
 // device's SDP server lists. A 16- or 32-bit UUID is an int, a 128-bit one
 // 16 bytes, most significant first.
@@ -818,6 +914,9 @@ static const mp_rom_map_elem_t bluetooth_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_found), MP_ROM_PTR(&bluetooth_found_obj) },
     { MP_ROM_QSTR(MP_QSTR_eir), MP_ROM_PTR(&bluetooth_eir_obj) },
     { MP_ROM_QSTR(MP_QSTR_rssi), MP_ROM_PTR(&bluetooth_rssi_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sniff), MP_ROM_PTR(&bluetooth_sniff_obj) },
+    { MP_ROM_QSTR(MP_QSTR_subrate), MP_ROM_PTR(&bluetooth_subrate_obj) },
+    { MP_ROM_QSTR(MP_QSTR_link_mode), MP_ROM_PTR(&bluetooth_link_mode_obj) },
     { MP_ROM_QSTR(MP_QSTR_tune), MP_ROM_PTR(&bluetooth_tune_obj) },
     { MP_ROM_QSTR(MP_QSTR_services), MP_ROM_PTR(&bluetooth_services_obj) },
     { MP_ROM_QSTR(MP_QSTR_passkey), MP_ROM_PTR(&bluetooth_passkey_obj) },

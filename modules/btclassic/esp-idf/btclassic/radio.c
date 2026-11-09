@@ -60,6 +60,13 @@ static struct {
     btc_addr_t tune_addr;
     int tune_state;     // 0 waiting, 1 answered, BTC_ERR_*
     uint32_t tune_value;
+    // The mode each link is in, from the controller's mode change events.
+    struct {
+        bool used;
+        btc_addr_t addr;
+        uint8_t mode;
+        uint32_t interval_ms;
+    } modes[4];
     // A service search, the same way.
     btc_addr_t sdp_addr;
     int sdp_state;      // 0 searching, 1 ended, BTC_ERR_* failed
@@ -273,6 +280,27 @@ static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
             if (r.rssi_state == 0 && memcmp(r.rssi_addr, param->read_rssi_delta.bda, sizeof(btc_addr_t)) == 0) {
                 r.rssi_delta = param->read_rssi_delta.rssi_delta;
                 r.rssi_state = ok ? 1 : BTC_ERR_STATE;
+            }
+            BTC_UNLOCK();
+            break;
+        }
+        case ESP_BT_GAP_MODE_CHG_EVT: {
+            int at = -1;
+            BTC_LOCK();
+            for (int i = 0; i < 4; i++) {
+                if (r.modes[i].used && memcmp(r.modes[i].addr, param->mode_chg.bda, sizeof(btc_addr_t)) == 0) {
+                    at = i;
+                    break;
+                }
+                if (at < 0 && !r.modes[i].used) {
+                    at = i;
+                }
+            }
+            if (at >= 0) {
+                r.modes[at].used = param->mode_chg.mode != ESP_BT_PM_MD_ACTIVE;
+                memcpy(r.modes[at].addr, param->mode_chg.bda, sizeof(btc_addr_t));
+                r.modes[at].mode = param->mode_chg.mode == ESP_BT_PM_MD_SNIFF ? BTC_LINK_SNIFF : BTC_LINK_HOLD;
+                r.modes[at].interval_ms = param->mode_chg.interval * 5 / 8;
             }
             BTC_UNLOCK();
             break;
@@ -974,6 +1002,47 @@ int btc_radio_tune_result(uint32_t *value) {
     *value = r.tune_value;
     BTC_UNLOCK();
     return state;
+}
+
+// Bluedroid decides when a link sniffs (its power manager asks the phone
+// itself) and has no call to ask for it; it only says what happened.
+int btc_radio_sniff(const uint8_t *addr, bool enable, uint32_t min_ms, uint32_t max_ms,
+    uint16_t attempt, uint16_t timeout) {
+    (void)addr; (void)enable; (void)min_ms; (void)max_ms; (void)attempt; (void)timeout;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_sniff_state(int *status) {
+    *status = 0;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_sniff_subrating(const uint8_t *addr, uint32_t max_latency_ms,
+    uint32_t remote_timeout_ms, uint32_t local_timeout_ms) {
+    (void)addr; (void)max_latency_ms; (void)remote_timeout_ms; (void)local_timeout_ms;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_sniff_subrating_state(uint32_t *latency_ms) {
+    *latency_ms = 0;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_link_mode(const uint8_t *addr, uint32_t *interval_ms) {
+    *interval_ms = 0;
+    if (!r.on) {
+        return BTC_ERR_STATE;
+    }
+    int mode = BTC_LINK_ACTIVE;
+    BTC_LOCK();
+    for (int i = 0; i < 4; i++) {
+        if (r.modes[i].used && memcmp(r.modes[i].addr, addr, sizeof(btc_addr_t)) == 0) {
+            mode = r.modes[i].mode;
+            *interval_ms = r.modes[i].interval_ms;
+        }
+    }
+    BTC_UNLOCK();
+    return mode;
 }
 
 int btc_radio_set_page_timeout(uint32_t ms) {

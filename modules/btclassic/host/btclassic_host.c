@@ -155,6 +155,34 @@ int btc_radio_rssi(int *delta) {
     return BTC_ERR_UNSUPPORTED;
 }
 
+int btc_radio_sniff(const uint8_t *addr, bool enable, uint32_t min_ms, uint32_t max_ms,
+    uint16_t attempt, uint16_t timeout) {
+    (void)addr; (void)enable; (void)min_ms; (void)max_ms; (void)attempt; (void)timeout;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_sniff_state(int *status) {
+    *status = 0;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_sniff_subrating(const uint8_t *addr, uint32_t max_latency_ms,
+    uint32_t remote_timeout_ms, uint32_t local_timeout_ms) {
+    (void)addr; (void)max_latency_ms; (void)remote_timeout_ms; (void)local_timeout_ms;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_sniff_subrating_state(uint32_t *latency_ms) {
+    *latency_ms = 0;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_link_mode(const uint8_t *addr, uint32_t *interval_ms) {
+    (void)addr;
+    *interval_ms = 0;
+    return BTC_ERR_UNSUPPORTED;
+}
+
 int btc_radio_set_page_timeout(uint32_t ms) {
     (void)ms;
     return BTC_ERR_UNSUPPORTED;

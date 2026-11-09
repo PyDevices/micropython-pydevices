@@ -153,6 +153,27 @@ uint32_t btc_radio_changes(void);
 int btc_radio_read_rssi(const uint8_t *addr);
 int btc_radio_rssi(int *delta);
 
+// Sniff mode: an idle link that wakes only every so often, to save power.
+// btc_radio_sniff() asks the controller to enter it (or, with `enable`
+// false, leave it); the intervals are in ms and the attempt and timeout in
+// baseband slots. btc_radio_sniff_state() then gives 1 when the mode
+// changed, 0 while it's on its way, or a negative BTC_ERR_* with the
+// controller's error code in `status`. btc_radio_link_mode() gives a link's
+// mode as BTC_LINK_*, with the sniff interval, or a negative BTC_ERR_*.
+// Sniff subrating lets a sniffing link skip wake-ups when idle: the state
+// call gives 1 with the negotiated latency in ms. BTC_ERR_UNSUPPORTED where
+// the stack has no request call (Bluedroid decides for itself).
+#define BTC_LINK_ACTIVE 0
+#define BTC_LINK_HOLD 1
+#define BTC_LINK_SNIFF 2
+int btc_radio_sniff(const uint8_t *addr, bool enable, uint32_t min_ms, uint32_t max_ms,
+    uint16_t attempt, uint16_t timeout);
+int btc_radio_sniff_state(int *status);
+int btc_radio_link_mode(const uint8_t *addr, uint32_t *interval_ms);
+int btc_radio_sniff_subrating(const uint8_t *addr, uint32_t max_latency_ms,
+    uint32_t remote_timeout_ms, uint32_t local_timeout_ms);
+int btc_radio_sniff_subrating_state(uint32_t *latency_ms);
+
 // How long a connection attempt pages for before giving up, in ms
 // (1 to 40959). Reads back what's set, or the stack's default.
 int btc_radio_set_page_timeout(uint32_t ms);
