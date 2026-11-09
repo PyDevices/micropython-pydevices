@@ -207,8 +207,11 @@ static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
                 esp_bt_gap_read_remote_name(a);
                 // A phone also takes calls: the hands-free unit follows it.
                 btc_hf_follow(a);
-                // One sender at a time: hide until it leaves.
-                btc_radio_hold_hidden(true);
+                // One sender at a time: out of searches until it leaves. The
+                // board stays connectable, so a device that knows it still
+                // reaches its other services (Serial, L2CAP, HID): Bluedroid
+                // has one A2DP stream, and refuses a second sender itself.
+                btc_radio_hold_unlisted(true);
                 btc_sink_mark(BTC_CHANGED_CONNECTION | BTC_CHANGED_PEER);
             } else if (state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
                 bool was = s.connected;
@@ -220,7 +223,7 @@ static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
                 s.text[BTC_SINK_PEER_NAME][0] = 0;
                 BTC_UNLOCK();
                 btc_ring_restart(&s.ring);
-                btc_radio_hold_hidden(false);
+                btc_radio_hold_unlisted(false);
                 btc_sink_mark(BTC_CHANGED_CONNECTION | BTC_CHANGED_STREAM | BTC_CHANGED_PEER);
                 // The link dropped (the sender went out of range, or its
                 // Bluetooth went off): call it back for a minute, so it finds
@@ -411,6 +414,7 @@ void btc_sink_stop(void) {
         }
     }
     btc_avrcp_stop();
+    btc_radio_hold_unlisted(false);
     btc_radio_hold_hidden(false);
     btc_radio_profile(BTC_PROFILE_SINK, false, 0);
     // Bluedroid's task may still be finishing a callback that writes the ring.

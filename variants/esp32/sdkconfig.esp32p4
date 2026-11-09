@@ -36,3 +36,10 @@ CONFIG_BT_NIMBLE_HS_FLOW_CTRL=y
 # baseline).
 CONFIG_ESP_MM_CACHE_MSYNC_C2M_CHUNKED_OPS=y
 CONFIG_ESP_MM_CACHE_MSYNC_C2M_CHUNKED_OPS_MAX_LEN=0x2000
+
+# A 1 ms tick, as the S3 builds have. IDF's default is 10 ms, and a task that
+# blocks on a semaphore an interrupt gives without asking for a context switch
+# runs again at the next tick: on the P4X-EYE every 24-row strip of a 240x240
+# frame cost the spibus ten milliseconds in a wait (ten strips, 100 ms) for
+# 1.2 ms of SPI data.
+CONFIG_FREERTOS_HZ=1000

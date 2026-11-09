@@ -42,6 +42,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
+// Xtensa's portYIELD_FROM_ISR calls this trace hook. FreeRTOS.h gives it its
+// empty default only under ESP_PLATFORM, which a user C module isn't built
+// with, so the classic ESP32 and the S2 and S3 need it here.
+#ifndef traceISR_EXIT_TO_SCHEDULER
+#define traceISR_EXIT_TO_SCHEDULER()
+#endif
+
 #define DC_CMD 0
 #define DC_DATA 1
 #define CS_ACTIVE 0
@@ -109,6 +116,12 @@ static bool IRAM_ATTR spibus_on_color_done(esp_lcd_panel_io_handle_t io,
     BaseType_t woken = pdFALSE;
     if (s_dma.done_sem != NULL) {
         xSemaphoreGiveFromISR(s_dma.done_sem, &woken);
+    }
+    // esp_lcd's SPI path ignores what this callback returns, so a task that
+    // waits in spibus_wait_inflight would otherwise run again only at the
+    // next tick. Ask for the switch here.
+    if (woken == pdTRUE) {
+        portYIELD_FROM_ISR();
     }
     return woken == pdTRUE;
 }

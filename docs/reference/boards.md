@@ -10,6 +10,7 @@ top. Add `--modules` to any of these:
 | Waveshare ESP32-P4-WIFI6-DEV-KIT, USB device on a USB-C wired to header P6 | `--port esp32 --board ESP32_GENERIC_P4 --variant WIFI6_DEV_KIT --flash 16MB` |
 | Waveshare ESP32-P4-WIFI6-DEV-KIT, USB device on its USB-C marked "USB" | `--port esp32 --board ESP32_GENERIC_P4 --variant WIFI6_DEV_KIT_H2 --flash 16MB` |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-4B | `--port esp32 --board ESP32_GENERIC_P4 --variant PRE_REV3_C6_WIFI --flash 32MB` |
+| Espressif ESP32-P4X-EYE | `--port esp32 --board ESP32_GENERIC_P4 --variant P4X_EYE --flash 16MB`; the camera, the H.264 encoder and the detectors come with `--modules all,vision` |
 | Another ESP32-P4 board, chip revision 3 or later, with an ESP32-C6 for Wi-Fi | `--port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB` |
 | Waveshare ESP32-S3-Touch-LCD-7 | `--port esp32 --board ESP32_GENERIC_S3 --variant LCD_7 --flash 8MB` |
 | Waveshare ESP32-S3-Touch-LCD-4.3 | `--port esp32 --board ESP32_GENERIC_S3 --variant LCD_4_3 --flash 8MB` |
@@ -45,6 +46,7 @@ Our variants, in [`variants/`](https://github.com/PyDevices/micropython-pydevice
 | esp32 | `ESP32_GENERIC` `AUDIO_KIT` | The ESP32 Audio Kit: upstream's PSRAM variant with flash and PSRAM at 80 MHz, which keeps Bluetooth call audio whole while a program is busy. |
 | esp32 | `ESP32_GENERIC_S3` `LCD_4_3`, `LCD_7`, `T_EMBED` | The S3 boards in the table above. |
 | esp32 | `ESP32_GENERIC_P4` `WIFI6_DEV_KIT`, `WIFI6_DEV_KIT_H2` | The P4 DEV-KIT, with the USB device on the two different connectors in the table above. |
+| esp32 | `ESP32_GENERIC_P4` `P4X_EYE` | The ESP32-P4X-EYE: `C6_WIFI` with ESP-Hosted on the pins its C6 uses, the OV2710 sensor driver, the USB device on the port marked "USB 2.0" and the REPL on "Debug", and a 9 MB app slot for the camera and vision modules. |
 | esp32 | `ESP32_GENERIC` `QTPY_PICO` | The QT Py ESP32 Pico: upstream's PSRAM variant with flash and PSRAM at 80 MHz, which keeps Bluetooth audio from falling behind. |
 | rp2 | `RPI_PICO2_W` `PIMORONI_PICO_PLUS2_W` | The Pimoroni Pico Plus 2 W. |
 | stm32 | `ARDUINO_GIGA` `DISPLAY_SHIELD` | The GIGA R1 WiFi with room for LVGL and the shield's MIPI DSI panel: the Wi-Fi and Bluetooth firmware moved to QSPI flash as a second image, Bluetooth LE through NimBLE, a one-dimensional ulab with numpy's array core and elementwise maths only ([what's out](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/stm32/ARDUINO_GIGA/DISPLAY_SHIELD/ulab_config.h)), LVGL's 40 px font left out, and USB through TinyUSB: `machine.USBDevice` on the USB-C port and a USB host on the USB-A port, where bus-powered devices that draw more than about 500 mA may not run; use a powered hub. |

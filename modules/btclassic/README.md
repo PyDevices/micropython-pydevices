@@ -289,6 +289,19 @@ each input report. `decode()` turns a report into a tuple such as
 (`connect(address, boot=True)`) or is another btclassic board. A board is a
 device or a host, one at a time.
 
+[`examples/btclassic_hid_host.py`](examples/btclassic_hid_host.py) reads
+whatever connects, and two more devices give it something to read:
+[`examples/btclassic_hid_gamepad.py`](examples/btclassic_hid_gamepad.py)
+turns a gamepad's stick and keeps a feature report the host reads and
+changes, and
+[`examples/btclassic_hid_media_keys.py`](examples/btclassic_hid_media_keys.py)
+steps a phone's volume.
+
+A computer learns what the board offers when it pairs. If it paired with
+the board as a speaker, or as a different kind of HID device, forget the
+board on the computer, `unpair()` the computer on the board, and pair
+again: until then it won't connect.
+
 ## Contacts and calls
 
 ```python
@@ -489,6 +502,7 @@ print(requests.get("http://example.com").status_code)
 The tether is a network interface of its own beside the Wi-Fi's. While it's
 up it's the default route, so `socket` and `requests` go through the phone;
 when it drops, the route goes back to the Wi-Fi if that's connected.
+
 ## Files and contact cards
 
 `ObjectPush` sends a file to a paired phone or computer, and takes the
@@ -520,3 +534,38 @@ phone sends shared text as a small HTML file. Its share sheet lists only
 devices that offer file transfer, so the board says so in its class of device
 while it listens. If a phone paired before that doesn't list it, make the
 board discoverable and tap Scan.
+
+## Examples
+
+Each runs as it is with `mpftp run`; its docstring says what it needs.
+
+| Example | What it does |
+|---|---|
+| [btclassic_simpletest.py](examples/btclassic_simpletest.py) | Plays your phone through the board's speaker |
+| [btclassic_speaker.py](examples/btclassic_speaker.py) | A Bluetooth speaker the audio pump plays |
+| [btclassic_remote.py](examples/btclassic_remote.py) | Drives a phone's music player: play, skip, volume, pause |
+| [btclassic_cover_art.py](examples/btclassic_cover_art.py) | Saves the cover art of each track as a JPEG |
+| [btclassic_library.py](examples/btclassic_library.py) | Lists the music on a phone and plays a track (Pico W) |
+| [btclassic_object_push.py](examples/btclassic_object_push.py) | Sends a file to a phone and takes the files it shares |
+| [btclassic_tether.py](examples/btclassic_tether.py) | Reaches the internet through a phone's tethering (Pico W) |
+| [btclassic_speakerphone.py](examples/btclassic_speakerphone.py) | A speakerphone for your phone's calls |
+| [btclassic_phone_status.py](examples/btclassic_phone_status.py) | Follows a phone's signal, battery and calls, and answers them |
+| [btclassic_call_tone.py](examples/btclassic_call_tone.py) | Sends a tone into a call and measures the caller |
+| [btclassic_audio_gateway.py](examples/btclassic_audio_gateway.py) | Rings a headset as a phone does, and talks to it |
+| [btclassic_phonebook.py](examples/btclassic_phonebook.py) | Reads a phone's contacts and recent calls |
+| [btclassic_messages.py](examples/btclassic_messages.py) | Reads a phone's texts and hears about new ones |
+| [btclassic_source_tone.py](examples/btclassic_source_tone.py) | Plays a tone on Bluetooth headphones or a speaker |
+| [btclassic_transmitter.py](examples/btclassic_transmitter.py) | Sends the line in to headphones or a speaker |
+| [btclassic_scan.py](examples/btclassic_scan.py) | Lists the devices nearby and their inquiry responses |
+| [btclassic_services.py](examples/btclassic_services.py) | Asks a device which services it offers |
+| [btclassic_settings.py](examples/btclassic_settings.py) | Sets the name, PIN and inquiry response, and lists pairings |
+| [btclassic_pairing.py](examples/btclassic_pairing.py) | Pairs with a number check, then echoes a serial link |
+| [btclassic_signal.py](examples/btclassic_signal.py) | Keeps off a Wi-Fi channel and prints a link's signal |
+| [btclassic_serial_echo.py](examples/btclassic_serial_echo.py) | A serial port that echoes in upper case |
+| [btclassic_serial_client.py](examples/btclassic_serial_client.py) | Calls another board's serial port and talks to it |
+| [btclassic_with_ble.py](examples/btclassic_with_ble.py) | A Classic serial port beside BLE advertising and scanning |
+| [btclassic_l2cap.py](examples/btclassic_l2cap.py) | Two boards talking over an L2CAP channel of their own |
+| [btclassic_hid_keyboard.py](examples/btclassic_hid_keyboard.py) | Types a line as a keyboard and moves the pointer |
+| [btclassic_hid_media_keys.py](examples/btclassic_hid_media_keys.py) | Presses media keys on a phone or computer |
+| [btclassic_hid_gamepad.py](examples/btclassic_hid_gamepad.py) | A gamepad, with a setting the host reads and changes |
+| [btclassic_hid_host.py](examples/btclassic_hid_host.py) | Reads a keyboard, mouse or gamepad |

@@ -46,6 +46,11 @@ CONFIG_BTDM_CTRL_BR_EDR_MAX_SYNC_CONN=1
 # Serial port (SPP over RFCOMM).
 CONFIG_BT_SPP_ENABLED=y
 
+# Three Classic links: with two, a board that a phone or computer streams to
+# is refused (Connection Limit Exceeded) when it calls a third device, as a
+# Serial client or anything else. Each link costs the controller 1.2 KB.
+CONFIG_BTDM_CTRL_BR_EDR_MAX_ACL_CONN=3
+
 # HID: the board as a keyboard, mouse or gamepad, or the host of one. One
 # role runs at a time; each takes the two HID L2CAP channels while it does.
 CONFIG_BT_HID_ENABLED=y

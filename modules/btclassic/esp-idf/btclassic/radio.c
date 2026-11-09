@@ -31,7 +31,8 @@ static struct {
     bool on;
     bool discoverable;
     bool connectable;
-    bool hidden;        // a profile holds its one device
+    bool hidden;        // a profile is stopping: no new links at all
+    bool unlisted;      // a profile holds its one device: out of searches
     char name[BT_NAME_MAX + 1];
     char pin[BT_PIN_MAX + 1];
     uint32_t changes;
@@ -117,13 +118,18 @@ static void apply_scan_mode(void) {
         return;
     }
     bool connectable = r.connectable && !r.hidden;
-    bool discoverable = connectable && r.discoverable;
+    bool discoverable = connectable && r.discoverable && !r.unlisted;
     esp_bt_gap_set_scan_mode(connectable ? ESP_BT_CONNECTABLE : ESP_BT_NON_CONNECTABLE,
         discoverable ? ESP_BT_GENERAL_DISCOVERABLE : ESP_BT_NON_DISCOVERABLE);
 }
 
 void btc_radio_hold_hidden(bool hidden) {
     r.hidden = hidden;
+    apply_scan_mode();
+}
+
+void btc_radio_hold_unlisted(bool unlisted) {
+    r.unlisted = unlisted;
     apply_scan_mode();
 }
 
@@ -500,6 +506,7 @@ int btc_radio_start(void) {
     apply_pin();
     r.on = true;
     r.hidden = false;
+    r.unlisted = false;
     apply_scan_mode();
     schedule_class();
     // Settings made before start, where they differ from the stack's own.

@@ -193,8 +193,9 @@ class Bluetooth:
           board's hostname, `network.hostname()`.
         - discoverable (bool): other devices can find the board when they
           search. On by default. A profile that takes one device at a time
-          hides the board while that device is connected, and shows it
-          again afterwards if this is True.
+          keeps the board out of searches while that device is connected,
+          and lists it again afterwards if this is True. Paired devices can
+          still connect meanwhile, to Serial or any other service.
         - connectable (bool): devices already paired can connect. On by
           default.
         - pin (str): the PIN for devices that pair the old way, 1 to 16
