@@ -103,10 +103,9 @@ int btc_service_add(const btc_uuid_t *uuid, const char *name, int channel, int p
         rec.raw.hdr.uuid.uuid.uuid32 = (uint32_t)uuid->uuid[0] << 24 | (uint32_t)uuid->uuid[1] << 16
             | (uint32_t)uuid->uuid[2] << 8 | uuid->uuid[3];
     } else if (uuid->len == 16) {
-        // esp_bt_uuid_t holds a 128-bit UUID least significant byte first.
-        for (int i = 0; i < 16; i++) {
-            rec.raw.hdr.uuid.uuid.uuid128[i] = uuid->uuid[15 - i];
-        }
+        // A raw record writes the 128 bits into the record as given, most
+        // significant byte first.
+        memcpy(rec.raw.hdr.uuid.uuid.uuid128, uuid->uuid, 16);
     } else {
         svc[slot].used = false;
         return BTC_ERR_ARG;
