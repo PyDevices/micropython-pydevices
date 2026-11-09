@@ -40,12 +40,17 @@ static struct {
     uint8_t hid_subclass;
     uint32_t class_set; // the class asked for in the settings, or 0
     uint32_t page_timeout_ms;
+    int min_key_size;   // bytes; 7 is the controller's own
     uint8_t channels[BTC_CHANNEL_MAP_LEN];
     btc_eir_t eir;
     // A signal reading asked for by address: where it stands, and the answer.
     btc_addr_t rssi_addr;
     int rssi_state;     // 0 waiting, 1 answered, BTC_ERR_* refused
     int rssi_delta;
+    // A link setting (poll interval or packet types) asked for by address.
+    btc_addr_t tune_addr;
+    int tune_state;     // 0 waiting, 1 answered, BTC_ERR_*
+    uint32_t tune_value;
     // A service search, the same way.
     btc_addr_t sdp_addr;
     int sdp_state;      // 0 searching, 1 ended, BTC_ERR_* failed
@@ -59,8 +64,10 @@ static struct {
     .connectable = true,
     .pin = "0000",
     .page_timeout_ms = 5120,    // the controller's own, 0x2000 slots
+    .min_key_size = BTC_KEY_SIZE_MIN,
     .channels = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f},
     .rssi_state = BTC_ERR_STATE,
+    .tune_state = BTC_ERR_STATE,
     .sdp_state = BTC_ERR_STATE,
     .io = BTC_IO_NONE,
 };
@@ -154,6 +161,55 @@ static void passkey_step(const uint8_t *bda, int action, uint32_t passkey) {
 static void apply_io(void) {
     esp_bt_io_cap_t iocap = (esp_bt_io_cap_t)r.io;
     esp_bt_gap_set_security_param(ESP_BT_SP_IOCAP_MODE, &iocap, sizeof(iocap));
+}
+
+// ---- per-link settings ----
+
+// HCI's ACL packet type field: a set bit allows DM/DH types and forbids EDR
+// ones. The API turns that around so every BTC_PKT_* bit means "allowed".
+static const struct {
+    uint16_t hci;
+    uint32_t bit;
+    bool forbids;
+} pkt_map[] = {
+    {0x0008, BTC_PKT_DM1, false},  {0x0010, BTC_PKT_DH1, false},
+    {0x0400, BTC_PKT_DM3, false},  {0x0800, BTC_PKT_DH3, false},
+    {0x4000, BTC_PKT_DM5, false},  {0x8000, BTC_PKT_DH5, false},
+    {0x0002, BTC_PKT_2DH1, true},  {0x0004, BTC_PKT_3DH1, true},
+    {0x0100, BTC_PKT_2DH3, true},  {0x0200, BTC_PKT_3DH3, true},
+    {0x1000, BTC_PKT_2DH5, true},  {0x2000, BTC_PKT_3DH5, true},
+};
+
+static uint16_t pkt_to_hci(uint32_t types) {
+    uint16_t hci = 0;
+    for (size_t i = 0; i < sizeof(pkt_map) / sizeof(pkt_map[0]); i++) {
+        bool allowed = (types & pkt_map[i].bit) || pkt_map[i].bit == BTC_PKT_DM1;
+        if (allowed != pkt_map[i].forbids) {
+            hci |= pkt_map[i].hci;
+        }
+    }
+    return hci;
+}
+
+static uint32_t pkt_from_hci(uint16_t hci) {
+    uint32_t types = 0;
+    for (size_t i = 0; i < sizeof(pkt_map) / sizeof(pkt_map[0]); i++) {
+        bool set = hci & pkt_map[i].hci;
+        if (set != pkt_map[i].forbids) {
+            types |= pkt_map[i].bit;
+        }
+    }
+    return types;
+}
+
+// The controller's answer to a poll interval or packet type request.
+static void tune_done(const uint8_t *bda, bool ok, uint32_t value) {
+    BTC_LOCK();
+    if (r.tune_state == 0 && memcmp(r.tune_addr, bda, sizeof(btc_addr_t)) == 0) {
+        r.tune_value = value;
+        r.tune_state = ok ? 1 : BTC_ERR_FAIL;
+    }
+    BTC_UNLOCK();
 }
 
 static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
@@ -253,6 +309,19 @@ static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
         case ESP_BT_GAP_SET_AFH_CHANNELS_EVT:
             if (param->set_afh_channels.stat != ESP_BT_STATUS_SUCCESS) {
                 ESP_LOGW(TAG, "channel map refused: %d", param->set_afh_channels.stat);
+            }
+            break;
+        case ESP_BT_GAP_QOS_CMPL_EVT:
+            tune_done(param->qos_cmpl.bda, param->qos_cmpl.stat == ESP_BT_STATUS_SUCCESS,
+                (param->qos_cmpl.t_poll * 5 + 4) / 8);
+            break;
+        case ESP_BT_GAP_ACL_PKT_TYPE_CHANGED_EVT:
+            tune_done(param->set_acl_pkt_types.bda, param->set_acl_pkt_types.status == ESP_BT_STATUS_SUCCESS,
+                pkt_from_hci(param->set_acl_pkt_types.pkt_types));
+            break;
+        case ESP_BT_GAP_SET_MIN_ENC_KEY_SIZE_EVT:
+            if (param->set_min_enc_key_size.status != ESP_BT_STATUS_SUCCESS) {
+                ESP_LOGW(TAG, "minimum key size refused: %d", param->set_min_enc_key_size.status);
             }
             break;
         case ESP_BT_GAP_SET_PAGE_TO_EVT:
@@ -540,6 +609,9 @@ int btc_radio_start(void) {
     if (!channels_default()) {
         apply_channels();
     }
+    if (r.min_key_size != BTC_KEY_SIZE_MIN) {
+        esp_bt_gap_set_min_enc_key_size((uint8_t)r.min_key_size);
+    }
     if (!eir_default()) {
         apply_eir();
     }
@@ -807,6 +879,76 @@ int btc_radio_services(btc_uuid_t *out, int max, int *count) {
         memcpy(out, r.sdp, n * sizeof(btc_uuid_t));
     }
     *count = state == 1 ? n : 0;
+    BTC_UNLOCK();
+    return state;
+}
+
+int btc_radio_set_min_key_size(int bytes) {
+    if (bytes < BTC_KEY_SIZE_MIN || bytes > BTC_KEY_SIZE_MAX) {
+        return BTC_ERR_ARG;
+    }
+    r.min_key_size = bytes;
+    if (r.on) {
+        return btc_err(esp_bt_gap_set_min_enc_key_size((uint8_t)bytes));
+    }
+    return BTC_OK;
+}
+
+int btc_radio_min_key_size(void) {
+    return r.min_key_size;
+}
+
+static int tune_start(const uint8_t *addr) {
+    if (!r.on) {
+        return BTC_ERR_STATE;
+    }
+    BTC_LOCK();
+    memcpy(r.tune_addr, addr, sizeof(btc_addr_t));
+    r.tune_state = 0;
+    BTC_UNLOCK();
+    return BTC_OK;
+}
+
+static int tune_sent(int err) {
+    if (err != BTC_OK) {
+        BTC_LOCK();
+        r.tune_state = err;
+        BTC_UNLOCK();
+    }
+    return err;
+}
+
+int btc_radio_set_poll(const uint8_t *addr, uint32_t ms) {
+    if (ms < BTC_POLL_MIN || ms > BTC_POLL_MAX) {
+        return BTC_ERR_ARG;
+    }
+    int err = tune_start(addr);
+    if (err != BTC_OK) {
+        return err;
+    }
+    esp_bd_addr_t a;
+    memcpy(a, addr, sizeof(a));
+    // In slots of 0.625 ms.
+    return tune_sent(btc_err(esp_bt_gap_set_qos(a, (ms * 8 + 4) / 5)));
+}
+
+int btc_radio_set_packet_types(const uint8_t *addr, uint32_t types) {
+    if (types & ~(uint32_t)BTC_PKT_ALL) {
+        return BTC_ERR_ARG;
+    }
+    int err = tune_start(addr);
+    if (err != BTC_OK) {
+        return err;
+    }
+    esp_bd_addr_t a;
+    memcpy(a, addr, sizeof(a));
+    return tune_sent(btc_err(esp_bt_gap_set_acl_pkt_types(a, pkt_to_hci(types))));
+}
+
+int btc_radio_tune_result(uint32_t *value) {
+    BTC_LOCK();
+    int state = r.tune_state;
+    *value = r.tune_value;
     BTC_UNLOCK();
     return state;
 }

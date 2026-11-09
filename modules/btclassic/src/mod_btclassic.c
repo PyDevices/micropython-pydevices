@@ -406,6 +406,8 @@ static mp_obj_t bluetooth_config(size_t n_args, const mp_obj_t *args, mp_map_t *
                 return mp_obj_new_int_from_uint(btc_radio_class());
             case MP_QSTR_page_timeout:
                 return mp_obj_new_int_from_uint(btc_radio_page_timeout());
+            case MP_QSTR_min_key_size:
+                return MP_OBJ_NEW_SMALL_INT(btc_radio_min_key_size());
             case MP_QSTR_channel_map: {
                 uint8_t map[BTC_CHANNEL_MAP_LEN];
                 btc_radio_channels(map);
@@ -478,6 +480,14 @@ static mp_obj_t bluetooth_config(size_t n_args, const mp_obj_t *args, mp_map_t *
                     mp_raise_ValueError(MP_ERROR_TEXT("page_timeout must be 1 to 40959 ms"));
                 }
                 done(btc_radio_set_page_timeout((uint32_t)ms));
+                break;
+            }
+            case MP_QSTR_min_key_size: {
+                int err = btc_radio_set_min_key_size(mp_obj_get_int(value));
+                if (err == BTC_ERR_ARG) {
+                    mp_raise_ValueError(MP_ERROR_TEXT("min_key_size is 7 to 16 bytes"));
+                }
+                done(err);
                 break;
             }
             case MP_QSTR_channel_map: {
@@ -627,6 +637,64 @@ static mp_obj_t bluetooth_rssi(mp_obj_t self_in, mp_obj_t addr_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(bluetooth_rssi_obj, bluetooth_rssi);
 
+// tune(addr, *, poll_ms=None, packet_types=None) -> dict: set a connected
+// device's poll interval and ACL packet types, and say what the controller
+// reports back for each one set.
+static int tune_wait(uint32_t *value) {
+    for (int waited = 0; waited < 2000; waited += 10) {
+        int state = btc_radio_tune_result(value);
+        if (state != 0) {
+            return state;
+        }
+        mp_event_wait_ms(10);
+    }
+    // The stack gives no answer for a link it doesn't have.
+    return BTC_ERR_STATE;
+}
+
+static mp_obj_t bluetooth_tune(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_addr, ARG_poll_ms, ARG_packet_types };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_addr, MP_ARG_REQUIRED | MP_ARG_OBJ },
+        { MP_QSTR_poll_ms, MP_ARG_KW_ONLY | MP_ARG_OBJ, { .u_obj = mp_const_none } },
+        { MP_QSTR_packet_types, MP_ARG_KW_ONLY | MP_ARG_OBJ, { .u_obj = mp_const_none } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+    const uint8_t *addr = addr_arg(args[ARG_addr].u_obj);
+    if (addr == NULL) {
+        mp_raise_TypeError(MP_ERROR_TEXT("an address"));
+    }
+    mp_obj_t result = mp_obj_new_dict(2);
+    uint32_t value = 0;
+    if (args[ARG_poll_ms].u_obj != mp_const_none) {
+        mp_int_t ms = mp_obj_get_int(args[ARG_poll_ms].u_obj);
+        if (ms < BTC_POLL_MIN || ms > BTC_POLL_MAX) {
+            mp_raise_ValueError(MP_ERROR_TEXT("poll_ms is 2 to 40959"));
+        }
+        done(btc_radio_set_poll(addr, (uint32_t)ms));
+        int state = tune_wait(&value);
+        if (state < 0) {
+            raise_btc(state);
+        }
+        mp_obj_dict_store(result, MP_OBJ_NEW_QSTR(MP_QSTR_poll_ms), mp_obj_new_int_from_uint(value));
+    }
+    if (args[ARG_packet_types].u_obj != mp_const_none) {
+        mp_int_t types = mp_obj_get_int(args[ARG_packet_types].u_obj);
+        if (types < 0 || types & ~BTC_PKT_ALL) {
+            mp_raise_ValueError(MP_ERROR_TEXT("packet_types is PKT_ bits"));
+        }
+        done(btc_radio_set_packet_types(addr, (uint32_t)types));
+        int state = tune_wait(&value);
+        if (state < 0) {
+            raise_btc(state);
+        }
+        mp_obj_dict_store(result, MP_OBJ_NEW_QSTR(MP_QSTR_packet_types), mp_obj_new_int_from_uint(value));
+    }
+    return result;
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(bluetooth_tune_obj, 2, bluetooth_tune);
+
 // services(addr, timeout_ms=20000) -> [uuid, ...]: the service classes a
 // device's SDP server lists. A 16- or 32-bit UUID is an int, a 128-bit one
 // 16 bytes, most significant first.
@@ -737,6 +805,7 @@ static const mp_rom_map_elem_t bluetooth_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_found), MP_ROM_PTR(&bluetooth_found_obj) },
     { MP_ROM_QSTR(MP_QSTR_eir), MP_ROM_PTR(&bluetooth_eir_obj) },
     { MP_ROM_QSTR(MP_QSTR_rssi), MP_ROM_PTR(&bluetooth_rssi_obj) },
+    { MP_ROM_QSTR(MP_QSTR_tune), MP_ROM_PTR(&bluetooth_tune_obj) },
     { MP_ROM_QSTR(MP_QSTR_services), MP_ROM_PTR(&bluetooth_services_obj) },
     { MP_ROM_QSTR(MP_QSTR_passkey), MP_ROM_PTR(&bluetooth_passkey_obj) },
     { MP_ROM_QSTR(MP_QSTR_passkey_reply), MP_ROM_PTR(&bluetooth_passkey_reply_obj) },
@@ -1590,6 +1659,19 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_IO_DISPLAY_YESNO), MP_ROM_INT(BTC_IO_DISPLAY_YESNO) },
     { MP_ROM_QSTR(MP_QSTR_IO_KEYBOARD_ONLY), MP_ROM_INT(BTC_IO_KEYBOARD_ONLY) },
     { MP_ROM_QSTR(MP_QSTR_IO_NONE), MP_ROM_INT(BTC_IO_NONE) },
+    { MP_ROM_QSTR(MP_QSTR_PKT_DM1), MP_ROM_INT(BTC_PKT_DM1) },
+    { MP_ROM_QSTR(MP_QSTR_PKT_DH1), MP_ROM_INT(BTC_PKT_DH1) },
+    { MP_ROM_QSTR(MP_QSTR_PKT_DM3), MP_ROM_INT(BTC_PKT_DM3) },
+    { MP_ROM_QSTR(MP_QSTR_PKT_DH3), MP_ROM_INT(BTC_PKT_DH3) },
+    { MP_ROM_QSTR(MP_QSTR_PKT_DM5), MP_ROM_INT(BTC_PKT_DM5) },
+    { MP_ROM_QSTR(MP_QSTR_PKT_DH5), MP_ROM_INT(BTC_PKT_DH5) },
+    { MP_ROM_QSTR(MP_QSTR_PKT_2DH1), MP_ROM_INT(BTC_PKT_2DH1) },
+    { MP_ROM_QSTR(MP_QSTR_PKT_3DH1), MP_ROM_INT(BTC_PKT_3DH1) },
+    { MP_ROM_QSTR(MP_QSTR_PKT_2DH3), MP_ROM_INT(BTC_PKT_2DH3) },
+    { MP_ROM_QSTR(MP_QSTR_PKT_3DH3), MP_ROM_INT(BTC_PKT_3DH3) },
+    { MP_ROM_QSTR(MP_QSTR_PKT_2DH5), MP_ROM_INT(BTC_PKT_2DH5) },
+    { MP_ROM_QSTR(MP_QSTR_PKT_3DH5), MP_ROM_INT(BTC_PKT_3DH5) },
+    { MP_ROM_QSTR(MP_QSTR_PKT_ALL), MP_ROM_INT(BTC_PKT_ALL) },
     { MP_ROM_QSTR(MP_QSTR_SERIAL), MP_ROM_INT(BTC_CHANGED_SERIAL) },
     // AVRCP pass-through key codes: AudioSink.key() sends them, and
     // AudioSource.key() reports the remote's.

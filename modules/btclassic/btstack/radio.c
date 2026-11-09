@@ -1091,6 +1091,34 @@ int btc_radio_rssi(int *delta) {
     return rssi_state;
 }
 
+// Link tuning is Bluedroid's for now: BTstack has the HCI commands but
+// nothing here has run them on a CYW43439.
+int btc_radio_set_min_key_size(int bytes) {
+    (void)bytes;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_min_key_size(void) {
+    return BTC_KEY_SIZE_MIN;
+}
+
+int btc_radio_set_poll(const uint8_t *addr, uint32_t ms) {
+    (void)addr;
+    (void)ms;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_set_packet_types(const uint8_t *addr, uint32_t types) {
+    (void)addr;
+    (void)types;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_tune_result(uint32_t *value) {
+    *value = 0;
+    return BTC_ERR_UNSUPPORTED;
+}
+
 int btc_radio_set_page_timeout(uint32_t ms) {
     if (ms < 1 || ms > 40959) {
         return BTC_ERR_ARG;
