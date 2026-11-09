@@ -110,6 +110,12 @@ static bool IRAM_ATTR spibus_on_color_done(esp_lcd_panel_io_handle_t io,
     if (s_dma.done_sem != NULL) {
         xSemaphoreGiveFromISR(s_dma.done_sem, &woken);
     }
+    // esp_lcd's SPI path ignores what this callback returns, so a task that
+    // waits in spibus_wait_inflight would otherwise run again only at the
+    // next tick. Ask for the switch here.
+    if (woken == pdTRUE) {
+        portYIELD_FROM_ISR();
+    }
     return woken == pdTRUE;
 }
 
