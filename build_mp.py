@@ -1251,6 +1251,12 @@ def autosize_headroom(flash_bytes):
     return max(0x10000, min(0x40000, (flash_bytes // 32) & ~0xFFFF))
 
 
+# The smallest filesystem autosize leaves on an esp32: room for a board's
+# settings, its drivers and an app or two. Growing the app past this fails the
+# build instead of flashing a board with no filesystem.
+ESP32_MIN_VFS = 0x20000
+
+
 def esp32_autosize(log_text, build, port_dir, dest):
     """The table this build used, with its app partition grown to fit."""
     m = re.search(r"app partition is too small for binary \S+ size (0x[0-9a-fA-F]+)", log_text)
@@ -1284,8 +1290,21 @@ def esp32_autosize(log_text, build, port_dir, dest):
     flash = re.search(r'^CONFIG_ESPTOOLPY_FLASHSIZE="(\d+)MB"$', sdk, re.M)
     align, headroom = 0x10000, autosize_headroom(int(flash.group(1)) * 1024 * 1024 if flash else 0x400000)
     image = int(m.group(1), 16)
-    size = (image + align - 1) & ~(align - 1)
-    size = (size + headroom + align - 1) & ~(align - 1)
+    fitted = (image + align - 1) & ~(align - 1)
+    size = (fitted + headroom + align - 1) & ~(align - 1)
+    # The filesystem is the last data partition, or the flash after the last
+    # partition. On a small flash the headroom alone can take all of it, so it
+    # shrinks first, down to none, to leave ESP32_MIN_VFS.
+    flash_bytes = int(flash.group(1)) * 1024 * 1024 if flash else 0
+    if flash_bytes:
+        named = rows[-1] if len(rows) > idx + 1 and rows[-1][1] == "data" and rows[-1][2] in ("fat", "littlefs", "spiffs") else None
+        between = sum(num(r[4]) for r in rows[idx + 1:] if r is not named)
+        room = flash_bytes - num(rows[idx][3]) - between
+        if room - fitted < ESP32_MIN_VFS:
+            die(f"autosize: an image of {hex(image)} needs an app partition of {hex(fitted)}, which leaves "
+                f"{max(0, room - fitted) // 1024} KB for the filesystem in {flash.group(1)} MB, under the "
+                f"{ESP32_MIN_VFS // 1024} KB autosize keeps. Build fewer modules, or use a board with more flash.")
+        size = min(size, room - ESP32_MIN_VFS)
     rows[idx][4] = hex(size)
     cursor = num(rows[idx][3]) + size
     for r in rows[idx + 1:]:
@@ -1296,7 +1315,6 @@ def esp32_autosize(log_text, build, port_dir, dest):
     # A table that names its filesystem gives it a size, and growing the app
     # pushes that partition past the end of the flash. The filesystem is the
     # part that can shrink: cut the last data partition to what is left.
-    flash_bytes = int(flash.group(1)) * 1024 * 1024 if flash else 0
     if after and flash_bytes and cursor > flash_bytes:
         last = after[-1]
         if last[1] == "data" and last[2] in ("fat", "littlefs", "spiffs"):
