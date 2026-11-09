@@ -191,7 +191,8 @@ class Bluetooth:
         are kept in flash and survive a reset."""
     def unpair(self, addr: bytes | None = None) -> None:
         """Forget a paired device, or every one with no argument. The
-        device has to pair again before it can connect."""
+        device has to pair again before it can connect. An address the
+        board isn't paired with is left alone, without an error."""
     def changes(self) -> int:
         """The bits (`PAIRED`, `FOUND`) for what changed since the last
         call, which clears them."""
@@ -246,7 +247,8 @@ class AudioSink:
             half of it has arrived, so that half is the delay to the
             speaker. The other half absorbs reads that come late: a program
             that redraws a screen between reads wants 1000. Played by the
-            audio pump, nothing reads late, and 500 is plenty.
+            audio pump, nothing reads late, and 500 is plenty. The default
+            depends on the board: 500 where there is PSRAM, 250 otherwise.
         reconnect: call the last sender back, if it is still paired, as a
             speaker does: when the sink starts, and whenever the link drops
             (the sender went out of range, or its Bluetooth went off),
@@ -301,7 +303,7 @@ class AudioSink:
     peer_name: str
     """The sender's device name, or "" before it is known."""
 
-    def __init__(self, bt: Bluetooth, *, buffer_ms: int = 500, reconnect: bool = True) -> None: ...
+    def __init__(self, bt: Bluetooth, *, buffer_ms: int | None = None, reconnect: bool = True) -> None: ...
     def readinto(self, buf: bytearray | memoryview) -> int:
         """Fill `buf` with 16-bit stereo frames (4 bytes each) at
         `sample_rate`, scaled by `volume`. Never waits: silence fills
@@ -582,7 +584,8 @@ class AudioSource:
         channels: what you `write`, 1 or 2.
         buffer_ms: how much audio to hold ahead of the stream, 50 to 5000.
             More rides out longer gaps between writes; the receiver hears
-            it later.
+            it later. The default depends on the board: 500 where there is
+            PSRAM, 250 otherwise.
     """
 
     connected: bool
@@ -615,7 +618,7 @@ class AudioSource:
     peer_name: str
     """The receiver's device name, or "" before it is known."""
 
-    def __init__(self, bt: Bluetooth, *, rate: int = 44100, channels: int = 2, buffer_ms: int = 500) -> None: ...
+    def __init__(self, bt: Bluetooth, *, rate: int = 44100, channels: int = 2, buffer_ms: int | None = None) -> None: ...
     def write(self, buf: bytes | bytearray | memoryview) -> int:
         """Send 16-bit PCM at `rate` and `channels`.
 
@@ -909,9 +912,10 @@ class HIDHost:
     """The device's (vendor, product, version) from its service record,
     once connected: what tells one gamepad from another, to map its
     buttons. None before, or when the device publishes no Device ID
-    record. The board keeps what a device published when they first
+    record. An ESP32 keeps what a device published when they first
     paired, even through `unpair`: a device that changes or drops its
-    record later still shows the IDs it had then."""
+    record later still shows the IDs it had then. A Pico W board reads
+    the record again on each connection."""
     INPUT: int
     OUTPUT: int
     FEATURE: int

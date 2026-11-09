@@ -1,0 +1,10 @@
+# Ai-Thinker ESP32-Audio-Kit (ESP32-A1S module): flash and PSRAM at 80 MHz.
+# On a classic ESP32 they share one bus with the code the Bluetooth stack runs
+# from, and at the default 40 MHz a program busy in PSRAM (redrawing, decoding
+# a cover) held it long enough to lose a call's microphone audio: 8 or 9
+# dropouts in 15 s of tone, against none in 13 calls at 80 MHz.
+# The flash clock is set in the bootloader, so write it with the app.
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=n
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_SPEED_40M=n

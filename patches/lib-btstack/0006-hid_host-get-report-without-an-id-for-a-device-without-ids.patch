@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 00:00:00 -0500
+Subject: [PATCH] hid_host: GET_REPORT carries no report ID for a device without IDs
+
+v1.5.6.2 always sent a report ID byte after the GET_REPORT header, 0 for a
+device whose descriptor has none, and such a device refuses the request as
+the wrong length. Report ID 0 is reserved, so leave the byte out for it.
+Upstream master does the same with HID_REPORT_ID_UNDEFINED.
+
+diff --git a/src/classic/hid_host.c b/src/classic/hid_host.c
+--- a/src/classic/hid_host.c
++++ b/src/classic/hid_host.c
+@@ -972,10 +972,16 @@
+ 
+                             case HID_HOST_W2_SEND_GET_REPORT:{
+                                 uint8_t header = (HID_MESSAGE_TYPE_GET_REPORT << 4) | connection->report_type;
+-                                uint8_t report[] = {header, connection->report_id};
++                                uint8_t report[2];
++                                uint16_t pos = 0;
++                                report[pos++] = header;
++                                // report ID 0 is reserved: it means the device has no IDs
++                                if (connection->report_id != 0){
++                                    report[pos++] = connection->report_id;
++                                }
+                                 
+                                 connection->state = HID_HOST_W4_GET_REPORT_RESPONSE;
+-                                l2cap_send(connection->control_cid, (uint8_t*) report, sizeof(report));
++                                l2cap_send(connection->control_cid, (uint8_t*) report, pos);
+                                 break;
+                             }
+ 
+-- 
+2.43.0

@@ -84,6 +84,11 @@ typedef struct {
 int btc_radio_start(void);
 // End every profile and shut Bluetooth down. btc_radio_start() may run again.
 void btc_radio_stop(void);
+// BLE's share of the stack, for MicroPython's `bluetooth` module: the
+// controller and host come up with whichever of Classic and BLE starts
+// first, and go down with the last to stop.
+int btc_stack_ble_start(void);
+void btc_stack_ble_stop(void);
 bool btc_radio_active(void);
 
 int btc_radio_set_name(const char *name);       // up to 248 bytes of UTF-8

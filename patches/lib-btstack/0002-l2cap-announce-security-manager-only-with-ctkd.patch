@@ -1,0 +1,26 @@
+From 4249526c73822178db1ce6fd283f95afc3ea0f3d Mon Sep 17 00:00:00 2001
+From: Matthias Ringwald <matthias@ringwald.ch>
+Date: Thu, 28 Sep 2023 15:02:52 +0200
+Subject: [PATCH] l2cap: announce support for security manager only if CTKD and LE are enabled
+
+Backported to BTstack v1.5.6.2, the version MicroPython carries. With
+ENABLE_BLE and ENABLE_CLASSIC both on, v1.5.6.2 lists the BR/EDR Security
+Manager in its fixed-channel map whenever Secure Connections is active,
+though nothing answers on that channel but Pairing Failed. An Android phone
+then starts cross-transport key derivation right after a successful Classic
+bond, gets Pairing Failed, and removes the whole bond. Upstream announces
+the channel only when cross-transport key derivation is built in.
+
+diff --git a/src/l2cap.c b/src/l2cap.c
+index 6ab9bb945..9f46b1f71 100644
+--- a/src/l2cap.c
++++ b/src/l2cap.c
+@@ -1927,7 +1927,7 @@ static void l2cap_run_signaling_response(void) {
+                             memset(map, 0, 8);
+                             // L2CAP Signaling Channel + Connectionless reception
+                             map[0] = (1 << L2CAP_CID_SIGNALING) | (1 << L2CAP_CID_CONNECTIONLESS_CHANNEL);
+-#if defined(ENABLE_BLE) || defined (ENABLE_EXPLICIT_BR_EDR_SECURITY_MANAGER)
++#if defined (ENABLE_EXPLICIT_BR_EDR_SECURITY_MANAGER) || (defined(ENABLE_BLE) && defined(ENABLE_CROSS_TRANSPORT_KEY_DERIVATION))
+                             // BR/EDR Security Manager (bit 7) if BR/EDR Secure Connections possible
+                             if (gap_secure_connections_active()){
+                                 map[0] |= (1 << L2CAP_CID_BR_EDR_SECURITY_MANAGER);
