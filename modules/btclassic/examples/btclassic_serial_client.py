@@ -42,7 +42,8 @@ for _ in range(100):
         break
     time.sleep_ms(100)
 if not port.connected:
-    raise SystemExit("Couldn't connect to " + ADDRESS)
+    print("Couldn't connect to", ADDRESS)
+    raise SystemExit
 print("Connected to", ADDRESS)
 
 # Send a line, then read the reply; read waits up to the timeout for it.
