@@ -492,7 +492,21 @@ size_t btc_sink_text(btc_sink_text_t which, char *dst, size_t size) {
 }
 
 void btc_sink_levels(uint16_t *left, uint16_t *right) {
+    // The ring holds its last peaks until audio arrives again, so once a
+    // sender stops they would read as the last loud moment: silence instead,
+    // after a quarter second with nothing new.
+    static uint32_t seen;
+    static int64_t moved_us;
     btc_ring_levels(&s.ring, left, right);
+    uint32_t received = s.ring.received;
+    int64_t now = esp_timer_get_time();
+    if (received != seen) {
+        seen = received;
+        moved_us = now;
+    } else if (now - moved_us > 250000) {
+        *left = 0;
+        *right = 0;
+    }
 }
 
 int btc_sink_connect(const uint8_t *addr) {
