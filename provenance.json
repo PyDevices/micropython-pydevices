@@ -145,6 +145,12 @@
   },
   "0049-micropython-esp32-spi-raise-when-a-transfer-cant-be-queued.patch": {
    "sha256": "dfcc439dbc66dd97077b723be329018770aade6d5e2d5c19d53ece340d01ba54"
+  },
+  "0049-micropython-rp2-a-module-may-name-the-btstack-config.patch": {
+   "sha256": "3aabad125bc0f54187c9186b93a353599dd0f05033762aa3c3513ea1f0ee56d5"
+  },
+  "0050-micropython-extmod-btstack-ble-irq-skips-classic-links.patch": {
+   "sha256": "58394115f42aa906c3e6a5f31efec8b8d23bf2d2e2c4da9c76421ad65c3e9852"
   }
  },
  "tinyusb_patches": {

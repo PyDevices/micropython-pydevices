@@ -14,7 +14,9 @@ top. Add `--modules` to any of these:
 | Waveshare ESP32-S3-Touch-LCD-7 | `--port esp32 --board ESP32_GENERIC_S3 --variant LCD_7 --flash 8MB` |
 | Waveshare ESP32-S3-Touch-LCD-4.3 | `--port esp32 --board ESP32_GENERIC_S3 --variant LCD_4_3 --flash 8MB` |
 | LilyGO T-Embed S3 | `--port esp32 --board ESP32_GENERIC_S3 --variant T_EMBED --flash 16MB` |
+| Ai-Thinker ESP32-Audio-Kit (ESP32-A1S), flash and PSRAM at 80 MHz | `--port esp32 --board ESP32_GENERIC --variant AUDIO_KIT --flash 4MB` (write the bootloader with the app) |
 | WT32-SC01 Plus | `--port esp32 --board ESP32_GENERIC_S3 --flash 16MB` |
+| Adafruit QT Py ESP32 Pico (8 MB flash, 2 MB PSRAM), flash and PSRAM at 80 MHz | `--port esp32 --board ESP32_GENERIC --variant QTPY_PICO --flash 8MB` (write the bootloader with the app) |
 | Raspberry Pi Pico (RP2040) | `--port rp2 --board RPI_PICO` (not `--modules all`: [it doesn't fit](../guides/fit-firmware-on-a-small-flash.md)) |
 | Raspberry Pi Pico 2 (RP2350) | `--port rp2 --board RPI_PICO2` |
 | Pimoroni Pico Plus 2 W (16 MB flash, 8 MB PSRAM, 48 GPIOs) | `--port rp2 --board RPI_PICO2_W --variant PIMORONI_PICO_PLUS2_W` |
@@ -40,8 +42,10 @@ Our variants, in [`variants/`](https://github.com/PyDevices/micropython-pydevice
 | windows | `pydevices` | The same as unix `pydevices`, with the Windows display and audio backends (`displaydev.windisplay`, `audiodev.win_audio`). |
 | windows | `vst3-engine` | The same as unix `vst3-engine`. |
 | webassembly | `pydevices` | The browser runtime, with the `wasmbridge` module and a Fetch-backed `requests`. |
+| esp32 | `ESP32_GENERIC` `AUDIO_KIT` | The ESP32 Audio Kit: upstream's PSRAM variant with flash and PSRAM at 80 MHz, which keeps Bluetooth call audio whole while a program is busy. |
 | esp32 | `ESP32_GENERIC_S3` `LCD_4_3`, `LCD_7`, `T_EMBED` | The S3 boards in the table above. |
 | esp32 | `ESP32_GENERIC_P4` `WIFI6_DEV_KIT`, `WIFI6_DEV_KIT_H2` | The P4 DEV-KIT, with the USB device on the two different connectors in the table above. |
+| esp32 | `ESP32_GENERIC` `QTPY_PICO` | The QT Py ESP32 Pico: upstream's PSRAM variant with flash and PSRAM at 80 MHz, which keeps Bluetooth audio from falling behind. |
 | rp2 | `RPI_PICO2_W` `PIMORONI_PICO_PLUS2_W` | The Pimoroni Pico Plus 2 W. |
 | stm32 | `ARDUINO_GIGA` `DISPLAY_SHIELD` | The GIGA R1 WiFi with room for LVGL and the shield's MIPI DSI panel: the Wi-Fi and Bluetooth firmware moved to QSPI flash as a second image, Bluetooth LE through NimBLE, a one-dimensional ulab with numpy's array core and elementwise maths only ([what's out](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/stm32/ARDUINO_GIGA/DISPLAY_SHIELD/ulab_config.h)), LVGL's 40 px font left out, and USB through TinyUSB: `machine.USBDevice` on the USB-C port and a USB host on the USB-A port, where bus-powered devices that draw more than about 500 mA may not run; use a powered hub. |
 

@@ -1,0 +1,83 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 00:00:00 -0600
+Subject: [PATCH] extmod/modbluetooth: pairing with ring-buffer events where
+ the backend keeps the keys.
+
+Pairing and bonding needed synchronous events, because _IRQ_GET_SECRET
+and _IRQ_SET_SECRET want an answer straight away. A backend whose host
+stack stores its own bonds never raises those two, so it can pair with
+ring-buffer events: _IRQ_ENCRYPTION_UPDATE and _IRQ_PASSKEY_ACTION go
+through the ring buffer like every other event. Such a backend sets
+MICROPY_PY_BLUETOOTH_BACKEND_STORES_KEYS.
+
+Inert unless the macro is set: every existing port builds as before.
+
+Based-on: micropython b70ae1aca (v1.30.0-preview)
+---
+--- a/extmod/modbluetooth.c
++++ b/extmod/modbluetooth.c
+@@ -47,7 +47,10 @@
+ #error l2cap channels require synchronous modbluetooth events
+ #endif
+ 
+-#if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING && !MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS
++// With ring-buffer events, pairing works only where the backend keeps the
++// keys itself: the _IRQ_GET_SECRET and _IRQ_SET_SECRET handlers need an
++// answer straight away, so they aren't raised.
++#if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING && !MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS && !MICROPY_PY_BLUETOOTH_BACKEND_STORES_KEYS
+ #error pairing and bonding require synchronous modbluetooth events
+ #endif
+ 
+@@ -1093,6 +1096,17 @@
+         } else if (event == MP_BLUETOOTH_IRQ_MTU_EXCHANGED) {
+             // conn_handle, mtu
+             ringbuf_extract(&o->ringbuf, data_tuple, 2, 0, NULL, 0, NULL, NULL);
++        #if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
++        } else if (event == MP_BLUETOOTH_IRQ_ENCRYPTION_UPDATE) {
++            // conn_handle, encrypted, authenticated, bonded, key_size
++            ringbuf_extract(&o->ringbuf, data_tuple, 1, 4, NULL, 0, NULL, NULL);
++        } else if (event == MP_BLUETOOTH_IRQ_PASSKEY_ACTION) {
++            // conn_handle, action, passkey (up to six digits, in two halves)
++            ringbuf_extract(&o->ringbuf, data_tuple, 1, 1, NULL, 0, NULL, NULL);
++            mp_int_t passkey = ringbuf_get16(&o->ringbuf) << 16;
++            passkey |= ringbuf_get16(&o->ringbuf);
++            data_tuple->items[data_tuple->len++] = MP_OBJ_NEW_SMALL_INT(passkey);
++        #endif
+         #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
+         } else if (event == MP_BLUETOOTH_IRQ_SCAN_RESULT) {
+             // addr_type, addr, adv_type, rssi, adv_data
+@@ -1565,6 +1579,33 @@
+     schedule_ringbuf(atomic_state);
+ }
+ 
++#if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
++void mp_bluetooth_gatts_on_encryption_update(uint16_t conn_handle, bool encrypted, bool authenticated, bool bonded, uint8_t key_size) {
++    MICROPY_PY_BLUETOOTH_ENTER
++    mp_obj_bluetooth_ble_t *o = MP_OBJ_TO_PTR(MP_STATE_VM(bluetooth));
++    if (enqueue_irq(o, 2 + 1 + 1 + 1 + 1, MP_BLUETOOTH_IRQ_ENCRYPTION_UPDATE)) {
++        ringbuf_put16(&o->ringbuf, conn_handle);
++        ringbuf_put(&o->ringbuf, encrypted);
++        ringbuf_put(&o->ringbuf, authenticated);
++        ringbuf_put(&o->ringbuf, bonded);
++        ringbuf_put(&o->ringbuf, key_size);
++    }
++    schedule_ringbuf(atomic_state);
++}
++
++void mp_bluetooth_gap_on_passkey_action(uint16_t conn_handle, uint8_t action, mp_int_t passkey) {
++    MICROPY_PY_BLUETOOTH_ENTER
++    mp_obj_bluetooth_ble_t *o = MP_OBJ_TO_PTR(MP_STATE_VM(bluetooth));
++    if (enqueue_irq(o, 2 + 1 + 2 + 2, MP_BLUETOOTH_IRQ_PASSKEY_ACTION)) {
++        ringbuf_put16(&o->ringbuf, conn_handle);
++        ringbuf_put(&o->ringbuf, action);
++        ringbuf_put16(&o->ringbuf, (passkey >> 16) & 0xffff);
++        ringbuf_put16(&o->ringbuf, passkey & 0xffff);
++    }
++    schedule_ringbuf(atomic_state);
++}
++#endif // MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
++
+ #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
+ void mp_bluetooth_gap_on_scan_complete(void) {
+     MICROPY_PY_BLUETOOTH_ENTER

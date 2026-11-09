@@ -254,20 +254,32 @@ int btc_radio_set_class(uint32_t cod) {
 
 // ---- on and off ----
 
-int btc_radio_start(void) {
-    if (r.on) {
-        return BTC_OK;
-    }
+// The controller and Bluedroid serve two users: Classic (this file's
+// radio) and BLE (MicroPython's `bluetooth` module). They come up with the
+// first and go down with the last.
+#define USER_CLASSIC 1
+#define USER_BLE 2
+static uint8_t users;
+
+#if CONFIG_BTDM_CTRL_MODE_BTDM
+#define CONTROLLER_MODE ESP_BT_MODE_BTDM
+#else
+#define CONTROLLER_MODE ESP_BT_MODE_CLASSIC_BT
+#endif
+
+static int stack_up(void) {
     esp_err_t err = ESP_OK;
     if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE) {
+        #if !CONFIG_BTDM_CTRL_MODE_BTDM
         // Classic only: give the BLE half of the controller's memory back.
         // Harmless if it has gone already.
         esp_bt_controller_mem_release(ESP_BT_MODE_BLE);
+        #endif
         esp_bt_controller_config_t cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
         err = esp_bt_controller_init(&cfg);
     }
     if (err == ESP_OK && esp_bt_controller_get_status() != ESP_BT_CONTROLLER_STATUS_ENABLED) {
-        err = esp_bt_controller_enable(ESP_BT_MODE_CLASSIC_BT);
+        err = esp_bt_controller_enable(CONTROLLER_MODE);
     }
     if (err == ESP_OK && esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_UNINITIALIZED) {
         esp_bluedroid_config_t bcfg = BT_BLUEDROID_INIT_CONFIG_DEFAULT();
@@ -278,8 +290,52 @@ int btc_radio_start(void) {
     }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Bluetooth didn't start: %s", esp_err_to_name(err));
-        return btc_err(err);
     }
+    return btc_err(err);
+}
+
+static void stack_down(void) {
+    esp_bluedroid_disable();
+    esp_bluedroid_deinit();
+    esp_bt_controller_disable();
+    esp_bt_controller_deinit();
+}
+
+int btc_stack_ble_start(void) {
+    if (users & USER_BLE) {
+        return BTC_OK;
+    }
+    if (!users) {
+        int err = stack_up();
+        if (err != BTC_OK) {
+            return err;
+        }
+    }
+    users |= USER_BLE;
+    return BTC_OK;
+}
+
+void btc_stack_ble_stop(void) {
+    if (!(users & USER_BLE)) {
+        return;
+    }
+    users &= ~USER_BLE;
+    if (!users) {
+        stack_down();
+    }
+}
+
+int btc_radio_start(void) {
+    if (r.on) {
+        return BTC_OK;
+    }
+    if (!users) {
+        int err = stack_up();
+        if (err != BTC_OK) {
+            return err;
+        }
+    }
+    users |= USER_CLASSIC;
     esp_bt_gap_set_device_name(r.name[0] ? r.name : "ESP32");
     esp_bt_gap_register_callback(gap_cb);
     // Secure Simple Pairing with no display or keyboard: "just works".
@@ -312,10 +368,13 @@ void btc_radio_stop(void) {
         class_timer = NULL;
     }
     r.on = false;
-    esp_bluedroid_disable();
-    esp_bluedroid_deinit();
-    esp_bt_controller_disable();
-    esp_bt_controller_deinit();
+    users &= ~USER_CLASSIC;
+    if (!users) {
+        stack_down();
+    } else {
+        // BLE keeps the stack: just stop being found or connected.
+        esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
+    }
 }
 
 bool btc_radio_active(void) {
