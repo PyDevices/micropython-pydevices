@@ -372,7 +372,7 @@ print([hex(u) for u in bt.services(laptop) if isinstance(u, int)])
 # ['0x110a', '0x111e', '0x1115', '0x110b', '0x110e', '0x111f']
 ```
 
-That Windows laptop sends audio (0x110A), plays it (0x110B), takes and
-sends remote-control keys (0x110E, 0x111E), shares its network (0x1115) and
-makes calls (0x111F). The first search pages the device, about 2 s; a second
+That Windows laptop sends audio (0x110A) and plays it (0x110B), sends
+remote-control keys (0x110E), joins a network over Bluetooth (0x1115), and
+takes either side of a hands-free call (0x111E, 0x111F). The first search pages the device, about 2 s; a second
 one over the same link took 0.15 s.
