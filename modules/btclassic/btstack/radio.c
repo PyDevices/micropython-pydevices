@@ -241,6 +241,7 @@ static bool rfcomm_up;
 #define COD_SRVC_TELEPHONY (1u << 22)
 #define COD_MAJOR_PERIPHERAL 0x05
 #define COD_MAJOR_AV 0x04
+#define COD_MAJOR_PHONE 0x02
 #define COD_MAJOR_UNCATEGORIZED 0x1f
 
 static uint32_t profiles;
@@ -258,11 +259,18 @@ static uint32_t auto_class(void) {
     if (profiles & BTC_PROFILE_HF) {
         service |= COD_SRVC_AUDIO | COD_SRVC_TELEPHONY;
     }
+    if (profiles & BTC_PROFILE_AG) {
+        service |= COD_SRVC_AUDIO | COD_SRVC_TELEPHONY;
+    }
     if (profiles & BTC_PROFILE_PUSH) {
         // Object Transfer: a phone's share sheet lists only devices with it.
         service |= 0x100000;
     }
-    if (profiles & (BTC_PROFILE_SINK | BTC_PROFILE_SOURCE | BTC_PROFILE_HF)) {
+    if (profiles & BTC_PROFILE_AG) {
+        // The board is the phone: headsets and car kits look for one.
+        major = COD_MAJOR_PHONE;
+        minor = 0x03;                                  // smartphone
+    } else if (profiles & (BTC_PROFILE_SINK | BTC_PROFILE_SOURCE | BTC_PROFILE_HF)) {
         // Audio/Video, even with a keyboard: a computer offers audio by it.
         major = COD_MAJOR_AV;
         minor = (profiles & BTC_PROFILE_HF) ? 0x02     // hands-free
@@ -581,6 +589,9 @@ static void apply_eir(void) {
         if (profiles & BTC_PROFILE_HF) {
             uuids[n++] = BLUETOOTH_SERVICE_CLASS_HANDSFREE;
         }
+        if (profiles & BTC_PROFILE_AG) {
+            uuids[n++] = 0x111f;       // Handsfree Audio Gateway
+        }
         if (profiles & BTC_PROFILE_SERIAL) {
             uuids[n++] = BLUETOOTH_SERVICE_CLASS_SERIAL_PORT;
         }
@@ -770,6 +781,7 @@ static void sync_host(void) {
         btc_spp_radio_lost();
         btc_l2cap_radio_lost();
         btc_hf_radio_lost();
+        btc_ag_radio_lost();
         btc_sink_radio_lost();
         btc_source_radio_lost();
         btc_hid_radio_lost();
@@ -854,6 +866,7 @@ void btc_radio_stop(void) {
     btc_spp_radio_stopping();
     btc_l2cap_radio_stopping();
     btc_hf_radio_stopping();
+    btc_ag_radio_stopping();
     btc_sink_radio_stopping();
     btc_source_radio_stopping();
     btc_hid_radio_stopping();

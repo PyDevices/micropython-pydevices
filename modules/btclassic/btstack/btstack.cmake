@@ -34,6 +34,7 @@ if(MICROPY_BLUETOOTH_BTSTACK AND NOT TARGET usermod_btclassic_btstack)
         ${BTCLASSIC_BTSTACK_DIR}/sink.c
         ${BTCLASSIC_BTSTACK_DIR}/source.c
         ${BTCLASSIC_BTSTACK_DIR}/hf.c
+        ${BTCLASSIC_BTSTACK_DIR}/ag.c
         ${BTCLASSIC_BTSTACK_DIR}/spp.c
         ${BTCLASSIC_BTSTACK_DIR}/l2cap.c
         ${BTCLASSIC_BTSTACK_DIR}/hid.c
@@ -74,6 +75,8 @@ if(MICROPY_BLUETOOTH_BTSTACK AND NOT TARGET usermod_btclassic_btstack)
         ${_c}/goep_client.c
         ${_c}/goep_server.c
         ${_c}/hfp.c
+        ${_c}/hfp_ag.c
+        ${_c}/hfp_gsm_model.c
         ${_c}/hfp_codec.c
         ${_c}/hfp_hf.c
         ${_c}/hfp_msbc.c

@@ -1568,6 +1568,12 @@ class AudioGateway:
     The board runs one hands-free role at a time: `deinit` a `HandsFree`
     before making an `AudioGateway`, and the other way round.
 
+    On the Pico W it is control only: the CYW43439 never completes a call
+    audio link, so `audio` stays False, `connect_audio` raises OSError,
+    `in_band_ring` can't be turned on, and `readinto` and `write` move
+    nothing. `ring`, `dial`, `answer`, `hangup`, the indicators and the
+    volumes all work.
+
     Args:
         bt: the radio, `Bluetooth()`. It is turned on if it's off.
         buffer_ms: audio held each way, 50 to 1000 ms.
