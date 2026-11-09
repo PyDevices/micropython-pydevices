@@ -94,6 +94,10 @@ call, play the `HandsFree` once `audio` is True, at its `sample_rate`, and
 hand `HandsFree.uplink()` the board's open `pcm_in`: the pump's pull then
 sends the microphone to the phone as well. A profile is read one way or the
 other, by the pump or with `readinto()`, not both.
+[`examples/btclassic_speaker.py`](examples/btclassic_speaker.py) plays music
+this way, and
+[`examples/btclassic_speakerphone.py`](examples/btclassic_speakerphone.py)
+answers calls and plays them, with the microphone going back to the phone.
 
 If the phone's caller hears your microphone break up while the board is busy
 (redrawing, decoding a cover, collecting garbage), raise the PSRAM and flash
@@ -223,7 +227,9 @@ source converts it to the stream's: 44.1 kHz stereo SBC, the one format
 every A2DP receiver takes. While the stream runs, `write()` waits for room,
 so the receiver's pace sets your program's.
 [`examples/btclassic_source_tone.py`](examples/btclassic_source_tone.py)
-plays a tone and prints the receiver's keys.
+plays a tone and prints the receiver's keys, and
+[`examples/btclassic_transmitter.py`](examples/btclassic_transmitter.py)
+sends the board's line in.
 
 The receiver's display gets the title, artist, album, play status and
 position through AVRCP. ESP-IDF's Bluetooth stack has no public call for
