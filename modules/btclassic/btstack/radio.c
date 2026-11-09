@@ -493,6 +493,7 @@ static void sync_host(void) {
         btc_source_radio_lost();
         btc_hid_radio_lost();
         btc_pb_radio_lost();
+        btc_lib_radio_lost();
         btc_av_radio_lost();
         active = false;
         host_started = false;
@@ -566,6 +567,7 @@ void btc_radio_stop(void) {
     btc_source_radio_stopping();
     btc_hid_radio_stopping();
     btc_pb_radio_stopping();
+    btc_lib_radio_stopping();
     gap_discoverable_control(0);
     gap_connectable_control(0);
     hci_remove_event_handler(&hci_cb);
