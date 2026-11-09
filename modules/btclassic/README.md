@@ -432,7 +432,10 @@ print(ch.read())                       # b'hello'
 
 It reads and writes as a stream, as `Serial` does. `mtu` says how much one
 packet carries; `write` splits longer writes. Pairing comes first, as for a
-serial link.
+serial link. `examples/btclassic_l2cap.py` runs both ends.
+
+While an `AudioSink` has a sender connected, the board can't be called, on
+any channel: hang the sender up first, or call out from that board instead.
 
 ## A phone's music library
 
