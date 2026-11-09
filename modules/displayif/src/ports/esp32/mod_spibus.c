@@ -42,6 +42,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
+// Xtensa's portYIELD_FROM_ISR calls this trace hook. FreeRTOS.h gives it its
+// empty default only under ESP_PLATFORM, which a user C module isn't built
+// with, so the classic ESP32 and the S2 and S3 need it here.
+#ifndef traceISR_EXIT_TO_SCHEDULER
+#define traceISR_EXIT_TO_SCHEDULER()
+#endif
+
 #define DC_CMD 0
 #define DC_DATA 1
 #define CS_ACTIVE 0
