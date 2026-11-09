@@ -10,18 +10,24 @@
 // phone to its folder (SETPATH from the root, a step per component), then
 // runs as a GET or PUT; its reply gathers into one heap buffer up to
 // `max_bytes`. The phone's change reports (a notification server on this
-// side) are not offered here: notify() raises.
+// side) come to a second OBEX server here, the notification server: see
+// notify().
 
 #include <string.h>
 
 #include "btstack.h"
 #include "classic/goep_client.h"
+#include "classic/goep_server.h"
 #include "classic/obex.h"
 #include "classic/obex_parser.h"
 
 #include "btc_btstack.h"
 
 #define MAP_ERTM_SIZE 4400
+#define MNS_RFCOMM_CHANNEL 4
+#define MNS_EVENTS 4            // reports kept for event()
+#define MNS_EVENT_MAX 1024
+#define MNS_FEATURES 0x0000007fu
 #define NAME_MAX_LEN 64
 #define PATH_MAX_LEN 96
 #define AP_MAX 40
@@ -35,6 +41,7 @@
 #define AP_ATTACHMENT 0x0a
 #define AP_RETRY 0x0c
 #define AP_NEW_MESSAGE 0x0d
+#define AP_NOTIFICATION_STATUS 0x0e
 #define AP_PARAMETER_MASK 0x10
 #define AP_FOLDER_LISTING_SIZE 0x11
 #define AP_LISTING_SIZE 0x12
@@ -48,6 +55,17 @@
 static const uint8_t mas_target[16] = {
     0xbb, 0x58, 0x2b, 0x40, 0x42, 0x0c, 0x11, 0xdb, 0xb0, 0xde, 0x08, 0x00, 0x20, 0x0c, 0x9a, 0x66
 };
+
+static const uint8_t mns_target[16] = {
+    0xbb, 0x58, 0x2b, 0x41, 0x42, 0x0c, 0x11, 0xdb, 0xb0, 0xde, 0x08, 0x00, 0x20, 0x0c, 0x9a, 0x66
+};
+
+// BTstack's GOEP server can't take a service back: it stays registered while
+// the radio is on. Not part of `m`, which a new start clears.
+static bool mns_up;
+static uint32_t mns_sdp_handle;
+static uint8_t sdp_mns[150];
+void goep_server_deinit(void);
 
 typedef enum {
     C_IDLE = 0,
@@ -72,6 +90,7 @@ typedef enum {
     OP_STATUS,          // PUT x-bt/messageStatus
     OP_PUSH,            // PUT x-bt/message
     OP_UPDATE,          // PUT x-bt/MAP-messageUpdate
+    OP_REGISTER,        // PUT x-bt/MAP-NotificationRegistration
 } op_t;
 
 static struct {
@@ -105,6 +124,21 @@ static struct {
     uint8_t *body;                  // a PUT's, a copy
     size_t body_len, body_off;
     uint8_t reply_ap[48];           // the reply's application parameters
+
+    // The notification server: the phone's connection and its event reports.
+    bool notify_wanted, notifying, mns_listening;
+    uint16_t scid;
+    bool sconnected, sparsing, sconnect_reply, sis_mns;
+    obex_parser_t sparser;
+    uint8_t sresponse;
+    struct {
+        uint16_t len;
+        uint8_t data[MNS_EVENT_MAX];
+    } *events;                      // MNS_EVENTS of them, a ring
+    int ev_head, ev_count;
+    uint8_t *ev_buf;
+    size_t ev_len;
+    uint32_t ev_dropped;
 
     // The reply.
     int result;
@@ -287,6 +321,7 @@ static const char *op_type(op_t op) {
         case OP_PUSH: return "x-bt/message";
         case OP_STATUS: return "x-bt/messageStatus";
         case OP_UPDATE: return "x-bt/MAP-messageUpdate";
+        case OP_REGISTER: return "x-bt/MAP-NotificationRegistration";
         default: return "";
     }
 }
@@ -315,7 +350,7 @@ static bool walk_part(char *part, size_t cap) {
 }
 
 static void send_request_packet(void) {
-    bool put = m.op == OP_STATUS || m.op == OP_PUSH || m.op == OP_UPDATE;
+    bool put = m.op == OP_STATUS || m.op == OP_PUSH || m.op == OP_UPDATE || m.op == OP_REGISTER;
     if (!put) {
         goep_client_request_create_get(m.cid);
         if (m.first) {
@@ -336,7 +371,7 @@ static void send_request_packet(void) {
     goep_client_request_create_put(m.cid);
     if (m.first) {
         goep_client_header_add_type(m.cid, op_type(m.op));
-        if (m.op != OP_UPDATE) {
+        if (m.op != OP_UPDATE && m.op != OP_REGISTER) {
             goep_client_header_add_name(m.cid, m.name);
         }
         if (m.ap_len) {
@@ -452,6 +487,9 @@ static void client_response(void) {
             if (code == OBEX_RESP_CONTINUE) {
                 client_next(C_W2_REQUEST);
             } else {
+                if (m.op == OP_REGISTER && code == OBEX_RESP_SUCCESS) {
+                    m.notifying = m.notify_wanted;
+                }
                 request_done(obex_result(code));
             }
             break;
@@ -504,6 +542,7 @@ static void on_client(uint8_t packet_type, uint16_t channel, uint8_t *packet, ui
             m.cs = C_IDLE;
             m.cid = 0;
             m.cwd_known = false;
+            m.notifying = false;        // the registration ends with the session
             free_ertm();
             if (m.busy) {
                 request_done(BTC_ERR_STATE);
@@ -516,6 +555,245 @@ static void on_client(uint8_t packet_type, uint16_t channel, uint8_t *packet, ui
         default:
             break;
     }
+}
+
+// ---- the notification server ----
+
+static void ev_gather(const uint8_t *data, size_t n) {
+    if (m.ev_buf == NULL || data == NULL) {
+        return;
+    }
+    if (m.ev_len + n > MNS_EVENT_MAX) {
+        n = MNS_EVENT_MAX - m.ev_len;
+    }
+    memcpy(m.ev_buf + m.ev_len, data, n);
+    m.ev_len += n;
+}
+
+static void ev_queue(void) {
+    if (m.ev_len == 0 || m.events == NULL) {
+        return;
+    }
+    if (m.ev_count == MNS_EVENTS) {
+        m.ev_head = (m.ev_head + 1) % MNS_EVENTS;
+        m.ev_count--;
+        m.ev_dropped++;
+    }
+    int slot = (m.ev_head + m.ev_count) % MNS_EVENTS;
+    memcpy(m.events[slot].data, m.ev_buf, m.ev_len);
+    m.events[slot].len = (uint16_t)m.ev_len;
+    m.ev_count++;
+    m.changes |= BTC_CHANGED_NOTIFY;
+}
+
+static void on_server_header(void *user, uint8_t id, uint16_t total, uint16_t off, const uint8_t *data, uint16_t len) {
+    (void)user;
+    switch (id) {
+        case OBEX_HEADER_TARGET:
+            if (total == sizeof(mns_target) && off == 0 && len == total) {
+                m.sis_mns = memcmp(data, mns_target, sizeof(mns_target)) == 0;
+            }
+            break;
+        case OBEX_HEADER_BODY:
+        case OBEX_HEADER_END_OF_BODY:
+            ev_gather(data, len);
+            break;
+        default:
+            break;
+    }
+}
+
+static void server_reply(uint8_t code) {
+    m.sresponse = code;
+    goep_server_request_can_send_now(m.scid);
+}
+
+static void server_request(void) {
+    obex_parser_operation_info_t info;
+    obex_parser_get_operation_info(&m.sparser, &info);
+    uint8_t op = info.opcode;
+    bool final = (op & OBEX_OPCODE_FINAL_BIT_MASK) != 0;
+    switch (op & ~OBEX_OPCODE_FINAL_BIT_MASK) {
+        case OBEX_OPCODE_CONNECT & ~OBEX_OPCODE_FINAL_BIT_MASK:
+            if (m.sis_mns) {
+                m.sconnect_reply = true;
+                server_reply(OBEX_RESP_SUCCESS);
+            } else {
+                server_reply(OBEX_RESP_NOT_ACCEPTABLE);
+            }
+            break;
+        case OBEX_OPCODE_DISCONNECT & ~OBEX_OPCODE_FINAL_BIT_MASK:
+            server_reply(OBEX_RESP_SUCCESS);
+            break;
+        case OBEX_OPCODE_PUT:
+            if (final) {
+                ev_queue();
+                m.ev_len = 0;
+                server_reply(OBEX_RESP_SUCCESS);
+            } else {
+                server_reply(OBEX_RESP_CONTINUE);
+            }
+            break;
+        case OBEX_OPCODE_ABORT & ~OBEX_OPCODE_FINAL_BIT_MASK:
+            m.ev_len = 0;
+            server_reply(OBEX_RESP_SUCCESS);
+            break;
+        default:
+            server_reply(OBEX_RESP_NOT_IMPLEMENTED);
+            break;
+    }
+}
+
+static void on_server(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
+    (void)channel;
+    if (packet_type == GOEP_DATA_PACKET) {
+        if (!m.sparsing) {
+            m.sis_mns = false;
+            obex_parser_init_for_request(&m.sparser, on_server_header, NULL);
+            m.sparsing = true;
+        }
+        if (obex_parser_process_data(&m.sparser, packet, size) != OBEX_PARSER_OBJECT_STATE_INCOMPLETE) {
+            m.sparsing = false;
+            server_request();
+        }
+        return;
+    }
+    if (packet_type != HCI_EVENT_PACKET || hci_event_packet_get_type(packet) != HCI_EVENT_GOEP_META) {
+        return;
+    }
+    switch (hci_event_goep_meta_get_subevent_code(packet)) {
+        case GOEP_SUBEVENT_INCOMING_CONNECTION: {
+            uint16_t cid = goep_subevent_incoming_connection_get_goep_cid(packet);
+            if (m.started && m.mns_listening && !m.sconnected) {
+                goep_server_accept_connection(cid);
+            } else {
+                goep_server_decline_connection(cid);
+            }
+            break;
+        }
+        case GOEP_SUBEVENT_CONNECTION_OPENED:
+            if (goep_subevent_connection_opened_get_status(packet) == ERROR_CODE_SUCCESS) {
+                m.scid = goep_subevent_connection_opened_get_goep_cid(packet);
+                m.sconnected = true;
+                m.sparsing = false;
+                m.ev_len = 0;
+                btc_log("messages: the phone opened notifications");
+                m.changes |= BTC_CHANGED_CONNECTION;
+            }
+            break;
+        case GOEP_SUBEVENT_CONNECTION_CLOSED:
+            m.sconnected = m.sparsing = false;
+            m.scid = 0;
+            m.changes |= BTC_CHANGED_CONNECTION;
+            break;
+        case GOEP_SUBEVENT_CAN_SEND_NOW:
+            if (m.sresponse == 0) {
+                break;
+            }
+            if (m.sconnect_reply) {
+                m.sconnect_reply = false;
+                goep_server_response_create_connect(m.scid, OBEX_VERSION, 0,
+                    goep_server_response_get_max_message_size(m.scid));
+                goep_server_header_add_who(m.scid, mns_target);
+            } else {
+                goep_server_response_create_general(m.scid);
+            }
+            goep_server_execute(m.scid, m.sresponse);
+            m.sresponse = 0;
+            break;
+        default:
+            break;
+    }
+}
+
+// The notification service's SDP record: RFCOMM, MAP 1.4, the features.
+static void make_mns_record(uint8_t *rec, uint32_t handle) {
+    memset(rec, 0, sizeof(sdp_mns));
+    de_create_sequence(rec);
+    de_add_number(rec, DE_UINT, DE_SIZE_16, BLUETOOTH_ATTRIBUTE_SERVICE_RECORD_HANDLE);
+    de_add_number(rec, DE_UINT, DE_SIZE_32, handle);
+    de_add_number(rec, DE_UINT, DE_SIZE_16, BLUETOOTH_ATTRIBUTE_SERVICE_CLASS_ID_LIST);
+    uint8_t *a = de_push_sequence(rec);
+    de_add_number(a, DE_UUID, DE_SIZE_16, BLUETOOTH_SERVICE_CLASS_MESSAGE_NOTIFICATION_SERVER);
+    de_pop_sequence(rec, a);
+    de_add_number(rec, DE_UINT, DE_SIZE_16, BLUETOOTH_ATTRIBUTE_PROTOCOL_DESCRIPTOR_LIST);
+    a = de_push_sequence(rec);
+    {
+        uint8_t *l = de_push_sequence(a);
+        de_add_number(l, DE_UUID, DE_SIZE_16, BLUETOOTH_PROTOCOL_L2CAP);
+        de_pop_sequence(a, l);
+        uint8_t *r = de_push_sequence(a);
+        de_add_number(r, DE_UUID, DE_SIZE_16, BLUETOOTH_PROTOCOL_RFCOMM);
+        de_add_number(r, DE_UINT, DE_SIZE_8, MNS_RFCOMM_CHANNEL);
+        de_pop_sequence(a, r);
+        uint8_t *x = de_push_sequence(a);
+        de_add_number(x, DE_UUID, DE_SIZE_16, BLUETOOTH_PROTOCOL_OBEX);
+        de_pop_sequence(a, x);
+    }
+    de_pop_sequence(rec, a);
+    de_add_number(rec, DE_UINT, DE_SIZE_16, BLUETOOTH_ATTRIBUTE_BROWSE_GROUP_LIST);
+    a = de_push_sequence(rec);
+    de_add_number(a, DE_UUID, DE_SIZE_16, BLUETOOTH_ATTRIBUTE_PUBLIC_BROWSE_ROOT);
+    de_pop_sequence(rec, a);
+    de_add_number(rec, DE_UINT, DE_SIZE_16, BLUETOOTH_ATTRIBUTE_BLUETOOTH_PROFILE_DESCRIPTOR_LIST);
+    a = de_push_sequence(rec);
+    {
+        uint8_t *p = de_push_sequence(a);
+        de_add_number(p, DE_UUID, DE_SIZE_16, BLUETOOTH_SERVICE_CLASS_MESSAGE_ACCESS_PROFILE);
+        de_add_number(p, DE_UINT, DE_SIZE_16, 0x0104);
+        de_pop_sequence(a, p);
+    }
+    de_pop_sequence(rec, a);
+    static const char name[] = "MAP MNS";
+    de_add_number(rec, DE_UINT, DE_SIZE_16, 0x0100);
+    de_add_data(rec, DE_STRING, sizeof(name) - 1, (uint8_t *)name);
+    de_add_number(rec, DE_UINT, DE_SIZE_16, 0x0317);        // MapSupportedFeatures
+    de_add_number(rec, DE_UINT, DE_SIZE_32, MNS_FEATURES);
+}
+
+// Listen for the phone's notifications: the OBEX server on its RFCOMM
+// channel, and the record that tells the phone where.
+static int mns_listen(bool on) {
+    if (on == m.mns_listening) {
+        return BTC_OK;
+    }
+    if (on) {
+        if (!mns_up) {
+            btc_rfcomm_init_once();
+            goep_server_init();
+            uint8_t s = goep_server_register_service(&on_server, MNS_RFCOMM_CHANNEL, 0xffff, 0, 0, LEVEL_2);
+            if (s != ERROR_CODE_SUCCESS) {
+                btc_log("messages: no notification server, 0x%02x", s);
+                return BTC_ERR_FAIL;
+            }
+            mns_up = true;
+        }
+        if (m.events == NULL) {
+            m.events = btc_btstack_alloc(sizeof(*m.events) * MNS_EVENTS);
+            m.ev_buf = btc_btstack_alloc(MNS_EVENT_MAX);
+            if (m.events == NULL || m.ev_buf == NULL) {
+                if (m.events) {
+                    btc_btstack_free(m.events);
+                }
+                if (m.ev_buf) {
+                    btc_btstack_free(m.ev_buf);
+                }
+                m.events = NULL;
+                m.ev_buf = NULL;
+                return BTC_ERR_NOMEM;
+            }
+            m.ev_head = m.ev_count = 0;
+            m.ev_len = 0;
+        }
+        mns_sdp_handle = sdp_create_service_record_handle();
+        make_mns_record(sdp_mns, mns_sdp_handle);
+        sdp_register_service(sdp_mns);
+    } else {
+        sdp_unregister_service(mns_sdp_handle);
+        mns_sdp_handle = 0;
+    }
+    m.mns_listening = on;
+    return BTC_OK;
 }
 
 // ---- start and stop ----
@@ -549,6 +827,16 @@ void btc_msg_stop(void) {
         m.body = NULL;
     }
     free_ertm();
+    mns_listen(false);
+    if (m.events) {
+        btc_btstack_free(m.events);
+        m.events = NULL;
+    }
+    if (m.ev_buf) {
+        btc_btstack_free(m.ev_buf);
+        m.ev_buf = NULL;
+    }
+    m.notifying = m.notify_wanted = false;
     m.started = false;
     m.busy = m.connected = m.connecting = false;
 }
@@ -559,9 +847,22 @@ bool btc_msg_started(void) {
 
 void btc_map_radio_stopping(void) {
     btc_msg_stop();
+    // The radio's stop takes RFCOMM down with the notification service on it.
+    if (mns_up) {
+        goep_server_deinit();
+    }
+    mns_up = false;
 }
 
 void btc_map_radio_lost(void) {
+    if (mns_up) {
+        goep_server_deinit();
+    }
+    mns_up = false;
+    mns_sdp_handle = 0;
+    m.events = NULL;       // the heap went with a soft reset; stopping freed it before
+    m.ev_buf = NULL;
+    m.mns_listening = m.sconnected = m.notifying = m.notify_wanted = false;
     m.started = m.connected = m.connecting = m.busy = false;
     m.cs = C_IDLE;
     m.buf = NULL;       // the heap went with a soft reset; stopping freed it before
@@ -779,9 +1080,35 @@ int btc_msg_update_inbox(void) {
 }
 
 int btc_msg_notify(bool on) {
-    // The phone's reports come to a server on this side, which isn't built.
-    (void)on;
-    return BTC_ERR_UNSUPPORTED;
+    if (!m.started || !m.connected) {
+        return BTC_ERR_STATE;
+    }
+    if (m.busy || m.cs != C_READY) {
+        return BTC_ERR_STATE;
+    }
+    if (on) {
+        int err = mns_listen(true);
+        if (err) {
+            return err;
+        }
+    }
+    int err = begin(OP_REGISTER, "", NULL);
+    if (err) {
+        return err;
+    }
+    keep_folder();
+    ap8(AP_NOTIFICATION_STATUS, on ? 1 : 0);
+    m.notify_wanted = on;
+    // The spec asks for a one-byte filler body.
+    m.body = btc_btstack_alloc(1);
+    if (m.body == NULL) {
+        m.busy = false;
+        return BTC_ERR_NOMEM;
+    }
+    m.body[0] = '0';
+    m.body_len = 1;
+    begin_request();
+    return BTC_OK;
 }
 
 size_t btc_msg_data(uint8_t *dst, size_t size) {
@@ -805,9 +1132,17 @@ void btc_msg_release(void) {
 }
 
 size_t btc_msg_event(uint8_t *dst, size_t size) {
-    (void)dst;
-    (void)size;
-    return 0;
+    if (m.events == NULL || m.ev_count == 0) {
+        return 0;
+    }
+    size_t n = m.events[m.ev_head].len;
+    if (n > size) {
+        n = size;
+    }
+    memcpy(dst, m.events[m.ev_head].data, n);
+    m.ev_head = (m.ev_head + 1) % MNS_EVENTS;
+    m.ev_count--;
+    return n;
 }
 
 void btc_msg_status(btc_msg_status_t *out) {
@@ -821,6 +1156,8 @@ void btc_msg_status(btc_msg_status_t *out) {
     out->features = m.connected ? m.features : 0;
     out->types = m.connected ? m.types : 0;
     out->busy = m.busy;
+    out->notifying = m.notifying;
+    out->notify_connected = m.sconnected;
     out->result = m.result;
     out->length = m.len;
     out->truncated = m.truncated;

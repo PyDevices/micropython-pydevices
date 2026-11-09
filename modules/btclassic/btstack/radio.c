@@ -325,6 +325,9 @@ int btc_radio_set_class(uint32_t cod) {
 
 void btc_rfcomm_init_once(void) {
     if (!rfcomm_up) {
+        // A soft reset leaves RFCOMM's service list as it was, and a service
+        // registered before it would be refused as already there.
+        rfcomm_deinit();
         rfcomm_init();
         rfcomm_up = true;
     }
