@@ -45,6 +45,11 @@ static struct {
     btc_addr_t rssi_addr;
     int rssi_state;     // 0 waiting, 1 answered, BTC_ERR_* refused
     int rssi_delta;
+    // A service search, the same way.
+    btc_addr_t sdp_addr;
+    int sdp_state;      // 0 searching, 1 ended, BTC_ERR_* failed
+    int sdp_count;
+    btc_uuid_t sdp[BTC_SERVICES_MAX];
 } r = {
     .discoverable = true,
     .connectable = true,
@@ -52,6 +57,7 @@ static struct {
     .page_timeout_ms = 5120,    // the controller's own, 0x2000 slots
     .channels = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f},
     .rssi_state = BTC_ERR_STATE,
+    .sdp_state = BTC_ERR_STATE,
 };
 
 int btc_err(esp_err_t err) {
@@ -160,6 +166,44 @@ static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
             if (r.rssi_state == 0 && memcmp(r.rssi_addr, param->read_rssi_delta.bda, sizeof(btc_addr_t)) == 0) {
                 r.rssi_delta = param->read_rssi_delta.rssi_delta;
                 r.rssi_state = ok ? 1 : BTC_ERR_STATE;
+            }
+            BTC_UNLOCK();
+            break;
+        }
+        case ESP_BT_GAP_RMT_SRVCS_EVT: {
+            BTC_LOCK();
+            if (r.sdp_state == 0 && memcmp(r.sdp_addr, param->rmt_srvcs.bda, sizeof(btc_addr_t)) == 0) {
+                if (param->rmt_srvcs.stat != ESP_BT_STATUS_SUCCESS) {
+                    // No answer from the device, or no SDP server.
+                    r.sdp_state = BTC_ERR_FAIL;
+                } else {
+                    int n = 0;
+                    for (int i = 0; i < param->rmt_srvcs.num_uuids && n < BTC_SERVICES_MAX; i++) {
+                        const esp_bt_uuid_t *u = &param->rmt_srvcs.uuid_list[i];
+                        btc_uuid_t *o = &r.sdp[n];
+                        if (u->len == ESP_UUID_LEN_16) {
+                            o->len = 2;
+                            o->uuid[0] = u->uuid.uuid16 >> 8;
+                            o->uuid[1] = u->uuid.uuid16;
+                        } else if (u->len == ESP_UUID_LEN_32) {
+                            o->len = 4;
+                            for (int b = 0; b < 4; b++) {
+                                o->uuid[b] = u->uuid.uuid32 >> (24 - 8 * b);
+                            }
+                        } else if (u->len == ESP_UUID_LEN_128) {
+                            // Here, unlike BLE's, Bluedroid hands 128-bit
+                            // UUIDs over most significant byte first: its
+                            // SDP layer and btc each reverse them once.
+                            o->len = 16;
+                            memcpy(o->uuid, u->uuid.uuid128, 16);
+                        } else {
+                            continue;
+                        }
+                        n++;
+                    }
+                    r.sdp_count = n;
+                    r.sdp_state = 1;
+                }
             }
             BTC_UNLOCK();
             break;
@@ -446,6 +490,7 @@ void btc_radio_stop(void) {
     btc_spp_stop();
     btc_hid_stop();
     btc_inquiry_stop();
+    r.sdp_state = BTC_ERR_STATE;   // a search the stop cut short
     if (class_timer) {
         esp_timer_stop(class_timer);
         esp_timer_delete(class_timer);
@@ -608,6 +653,44 @@ int btc_radio_rssi(int *delta) {
     BTC_LOCK();
     int state = r.rssi_state;
     *delta = r.rssi_delta;
+    BTC_UNLOCK();
+    return state;
+}
+
+// ---- services ----
+
+int btc_radio_query_services(const uint8_t *addr) {
+    if (!r.on) {
+        return BTC_ERR_STATE;
+    }
+    esp_bd_addr_t a;
+    memcpy(a, addr, sizeof(a));
+    BTC_LOCK();
+    if (r.sdp_state == 0) {
+        BTC_UNLOCK();
+        return BTC_ERR_STATE;
+    }
+    memcpy(r.sdp_addr, addr, sizeof(btc_addr_t));
+    r.sdp_state = 0;
+    r.sdp_count = 0;
+    BTC_UNLOCK();
+    int err = btc_err(esp_bt_gap_get_remote_services(a));
+    if (err != BTC_OK) {
+        BTC_LOCK();
+        r.sdp_state = err;
+        BTC_UNLOCK();
+    }
+    return err;
+}
+
+int btc_radio_services(btc_uuid_t *out, int max, int *count) {
+    BTC_LOCK();
+    int state = r.sdp_state;
+    int n = r.sdp_count < max ? r.sdp_count : max;
+    if (state == 1) {
+        memcpy(out, r.sdp, n * sizeof(btc_uuid_t));
+    }
+    *count = state == 1 ? n : 0;
     BTC_UNLOCK();
     return state;
 }

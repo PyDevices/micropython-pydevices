@@ -205,6 +205,18 @@ int btc_radio_found_eir(const uint8_t *addr, uint8_t *dst, size_t size) {
     return BTC_ERR_UNSUPPORTED;
 }
 
+int btc_radio_query_services(const uint8_t *addr) {
+    (void)addr;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_services(btc_uuid_t *out, int max, int *count) {
+    (void)out;
+    (void)max;
+    *count = 0;
+    return BTC_ERR_UNSUPPORTED;
+}
+
 // No A2DP source here either: AudioSource and Serial aren't in this build.
 bool btc_source_started(void) {
     return false;

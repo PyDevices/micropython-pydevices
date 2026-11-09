@@ -46,7 +46,7 @@ per profile that takes it.
 
 | Object | What it does |
 |---|---|
-| `Bluetooth()` | The radio. `active()` turns it on and off; `config()` reads and sets `name`, `discoverable`, `connectable`, `pin`, `mac`, the channels it hops on and what a search sees; `paired()` and `unpair()` manage pairings; `inquiry()` finds devices and `rssi()` reads a link's signal. |
+| `Bluetooth()` | The radio. `active()` turns it on and off; `config()` reads and sets `name`, `discoverable`, `connectable`, `pin`, `mac`, the channels it hops on and what a search sees; `paired()` and `unpair()` manage pairings; `inquiry()` finds devices, `services()` asks one what it offers, and `rssi()` reads a link's signal. |
 | `AudioSink(bt)` | Receives audio (A2DP sink) and talks to the sender's player (AVRCP): `readinto()`, the track, `cover`, `position`, `play()`, `next()`, `seek()`, the `volume` shared with the sender's slider, and more. |
 | `HandsFree(bt)` | Follows a phone (HFP hands-free): `battery`, `signal`, `operator`, the `call` and its `caller`, `answer()`, `hangup()`, `dial()`, and the call's audio through its own `readinto()` and `write()`. |
 | `AudioSource(bt)` | Sends audio to headphones, a speaker or a car stereo (A2DP source) and acts as their remote's target (AVRCP): `write()`, the receiver's keys through `key()`, the `volume`, and the `track()` and `status` its display shows. `Bluetooth.inquiry()` and `found()` find the receiver. |
@@ -369,6 +369,20 @@ adds the services running, so it sees a speaker or a serial port before it
 connects, and `eir_manufacturer` and `eir_url` carry data of your own.
 `Bluetooth.eir(addr)` reads what another device sent, after `inquiry()`
 found it.
+
+`Bluetooth.services(addr)` asks a device what it offers, from its SDP
+server, without pairing. It calls the device if no link is up, and returns
+each service's class UUID:
+
+```python
+print([hex(u) for u in bt.services(laptop) if isinstance(u, int)])
+# ['0x110a', '0x111e', '0x1115', '0x110b', '0x110e', '0x111f']
+```
+
+That Windows laptop sends audio (0x110A) and plays it (0x110B), sends
+remote-control keys (0x110E), joins a network over Bluetooth (0x1115), and
+takes either side of a hands-free call (0x111E, 0x111F). The first search pages the device, about 2 s; a second
+one over the same link took 0.15 s.
 
 ## A phone's music library
 

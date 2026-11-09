@@ -342,6 +342,19 @@ int btc_radio_found(btc_found_t *out, int max);
 #define BTC_EIR_MAX 240
 int btc_radio_found_eir(const uint8_t *addr, uint8_t *dst, size_t size);
 
+// The services a device offers, read from its SDP server: each one's
+// service class, as a 16-, 32- or 128-bit UUID in big-endian order. Start a
+// search with btc_radio_query_services(); btc_radio_services() then returns
+// 1 with `*count` set when it has ended, 0 while it runs, or BTC_ERR_*.
+// The board pages the device if there's no link to it yet.
+#define BTC_SERVICES_MAX 32
+typedef struct {
+    uint8_t len;        // 2, 4 or 16
+    uint8_t uuid[16];
+} btc_uuid_t;
+int btc_radio_query_services(const uint8_t *addr);
+int btc_radio_services(btc_uuid_t *out, int max, int *count);
+
 // ---- the audio source: A2DP source and AVRCP target ----
 //
 // The board plays to headphones, a speaker or another board. Bluedroid runs

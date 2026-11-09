@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "py/mperrno.h"
+#include "py/mphal.h"
 #include "py/obj.h"
 #include "py/objstr.h"
 #include "py/gc.h"
@@ -619,6 +620,65 @@ static mp_obj_t bluetooth_rssi(mp_obj_t self_in, mp_obj_t addr_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(bluetooth_rssi_obj, bluetooth_rssi);
 
+// services(addr, timeout_ms=20000) -> [uuid, ...]: the service classes a
+// device's SDP server lists. A 16- or 32-bit UUID is an int, a 128-bit one
+// 16 bytes, most significant first.
+static mp_obj_t bluetooth_services(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_addr, ARG_timeout_ms };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
+        { MP_QSTR_timeout_ms, MP_ARG_INT, {.u_int = 20000} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(allowed), allowed, args);
+    const uint8_t *addr = addr_arg(args[ARG_addr].u_obj);
+    if (addr == NULL) {
+        mp_raise_TypeError(MP_ERROR_TEXT("an address"));
+    }
+    if (!btc_radio_active()) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: Bluetooth is off"));
+    }
+    int err = btc_radio_query_services(addr);
+    if (err == BTC_ERR_STATE) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: a search is running"));
+    }
+    done(err);
+    static btc_uuid_t found[BTC_SERVICES_MAX];
+    int count = 0;
+    mp_uint_t start = mp_hal_ticks_ms();
+    for (;;) {
+        int state = btc_radio_services(found, BTC_SERVICES_MAX, &count);
+        if (state == 1) {
+            break;
+        }
+        if (state == BTC_ERR_FAIL) {
+            mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("btclassic: no answer from the device"));
+        }
+        if (state < 0) {
+            raise_btc(state);
+        }
+        if (mp_hal_ticks_ms() - start >= (mp_uint_t)args[ARG_timeout_ms].u_int) {
+            mp_raise_OSError(MP_ETIMEDOUT);
+        }
+        mp_event_wait_ms(20);
+    }
+    mp_obj_t list = mp_obj_new_list(0, NULL);
+    for (int i = 0; i < count; i++) {
+        const btc_uuid_t *u = &found[i];
+        if (u->len == 16) {
+            mp_obj_list_append(list, mp_obj_new_bytes(u->uuid, 16));
+        } else {
+            uint32_t v = 0;
+            for (int b = 0; b < u->len; b++) {
+                v = v << 8 | u->uuid[b];
+            }
+            mp_obj_list_append(list, mp_obj_new_int_from_uint(v));
+        }
+    }
+    return list;
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(bluetooth_services_obj, 2, bluetooth_services);
+
 static mp_obj_t bluetooth_changes(mp_obj_t self_in) {
     return MP_OBJ_NEW_SMALL_INT(btc_radio_changes());
 }
@@ -635,6 +695,7 @@ static const mp_rom_map_elem_t bluetooth_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_found), MP_ROM_PTR(&bluetooth_found_obj) },
     { MP_ROM_QSTR(MP_QSTR_eir), MP_ROM_PTR(&bluetooth_eir_obj) },
     { MP_ROM_QSTR(MP_QSTR_rssi), MP_ROM_PTR(&bluetooth_rssi_obj) },
+    { MP_ROM_QSTR(MP_QSTR_services), MP_ROM_PTR(&bluetooth_services_obj) },
 };
 static MP_DEFINE_CONST_DICT(bluetooth_locals, bluetooth_locals_table);
 
