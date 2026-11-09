@@ -175,10 +175,7 @@ void btc_ring_stats(const btc_ring_t *r, btc_ring_stats_t *out) {
 }
 
 void btc_ring_levels(btc_ring_t *r, uint16_t *left, uint16_t *right) {
-    // Still marked for clearing: nothing arrived since the last reading, so
-    // the peaks held are old. Silence, not the last loud moment.
-    bool stale = r->peak_clear;
-    *left = stale ? 0 : (uint16_t)r->peak_l;
-    *right = stale ? 0 : (uint16_t)r->peak_r;
+    *left = (uint16_t)r->peak_l;
+    *right = (uint16_t)r->peak_r;
     r->peak_clear = true;
 }
