@@ -47,5 +47,5 @@ A display project's set like this one builds to about 540 KB and fits with the
 Pico's default 1408 KB filesystem untouched.
 
 On a 4 MB ESP32, `audioinstruments` is the biggest of the modules, and you can
-freeze only the instruments you play:
-[Build with a few instruments](build-with-a-few-instruments.md).
+freeze only the instruments you play, and of `audioeffects` only the effects you
+use: [Build with a few instruments and effects](build-with-a-few-instruments.md).
