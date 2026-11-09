@@ -68,12 +68,19 @@ Bluetooth Classic:
 - **btclassic on the ESP32-S31.** The S31 has Bluetooth Classic too, and
   btclassic's C already builds for it on ESP-IDF 6.1; the module follows once
   MicroPython builds for the chip.
-- **btclassic on the Pico W and Pico 2 W,** on the BTstack host MicroPython's
-  rp2 port already carries, behind the same API.
-- **More profiles.** Sending audio (A2DP source), being a remote's target,
-  the phone side of hands-free, serial (SPP), keyboards and gamepads (HID),
-  and the phone's contacts and messages.
+- **The phone book and the phone side of hands-free on the Pico W.** Call
+  audio there waits on the CYW43439's firmware, which never brings the call's
+  audio link up.
+- **Link quality.** Signal strength for any connected device, the channels
+  to avoid near Wi-Fi, a faster reconnect, and your own inquiry response.
+- **What a device offers.** List another device's services before you
+  connect, to find its serial channel or check for a profile.
+- **Pairing with a passkey or number check,** for devices that won't pair
+  without one.
+- **L2CAP channels** on a PSM of your choosing, for your own protocol.
+- **Several devices at once:** a keyboard beside the phone, or two phones.
 - **btclassic alongside Wi-Fi.** Today Wi-Fi has to be off while it plays.
+- **Sending a file or contact card** (OBEX Object Push).
 
 Every module, the same kit:
 
