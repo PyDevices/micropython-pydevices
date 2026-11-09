@@ -6,6 +6,7 @@
 // names, classes and signal. radio.c hands every GAP event here. See
 // include/btclassic.h.
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_gap_bt_api.h"
@@ -19,6 +20,9 @@ static struct {
     bool running;
     int count;
     btc_found_t found[BTC_FOUND_MAX];
+    // Each one's extended inquiry response, on the heap, or NULL.
+    uint8_t *eir[BTC_FOUND_MAX];
+    uint8_t eir_len[BTC_FOUND_MAX];
 } q;
 
 static void mark(void) {
@@ -57,12 +61,32 @@ static size_t result_name(const esp_bt_gap_cb_param_t *param, char *dst, size_t 
 static void on_result(const esp_bt_gap_cb_param_t *param) {
     btc_found_t f = {.rssi = BTC_UNKNOWN};
     memcpy(f.addr, param->disc_res.bda, sizeof(btc_addr_t));
+    const uint8_t *eir = NULL;
+    int eir_len = 0;
     for (int i = 0; i < param->disc_res.num_prop; i++) {
         const esp_bt_gap_dev_prop_t *p = &param->disc_res.prop[i];
         if (p->type == ESP_BT_GAP_DEV_PROP_COD) {
             f.cod = *(const uint32_t *)p->val;
         } else if (p->type == ESP_BT_GAP_DEV_PROP_RSSI) {
             f.rssi = *(const int8_t *)p->val;
+        } else if (p->type == ESP_BT_GAP_DEV_PROP_EIR) {
+            eir = p->val;
+            eir_len = p->len > BTC_EIR_MAX ? BTC_EIR_MAX : p->len;
+        }
+    }
+    // The EIR as it came, without the zero padding after its last field.
+    uint8_t *copy = NULL;
+    if (eir) {
+        int used = 0;
+        while (used < eir_len && eir[used] && used + 1 + eir[used] <= eir_len) {
+            used += 1 + eir[used];
+        }
+        eir_len = used;
+        if (eir_len) {
+            copy = malloc(eir_len);
+            if (copy) {
+                memcpy(copy, eir, eir_len);
+            }
         }
     }
     result_name(param, f.name, sizeof(f.name));
@@ -73,9 +97,20 @@ static void on_result(const esp_bt_gap_cb_param_t *param) {
         at++;
     }
     bool fresh = at == q.count;
+    uint8_t *old_eir = NULL;
     if (fresh && q.count < BTC_FOUND_MAX) {
-        q.found[q.count++] = f;
+        q.found[q.count] = f;
+        q.eir[q.count] = copy;
+        q.eir_len[q.count] = copy ? eir_len : 0;
+        q.count++;
+        copy = NULL;
     } else if (!fresh) {
+        if (copy) {
+            old_eir = q.eir[at];
+            q.eir[at] = copy;
+            q.eir_len[at] = eir_len;
+            copy = NULL;
+        }
         // A second response: keep what the first had that this one lacks.
         btc_found_t *old = &q.found[at];
         if (f.name[0]) {
@@ -89,7 +124,26 @@ static void on_result(const esp_bt_gap_cb_param_t *param) {
         }
     }
     BTC_UNLOCK();
+    free(copy);
+    free(old_eir);
     mark();
+}
+
+// Forget the last inquiry's devices and their responses.
+static void forget(void) {
+    uint8_t *gone[BTC_FOUND_MAX];
+    BTC_LOCK();
+    int n = q.count;
+    for (int i = 0; i < n; i++) {
+        gone[i] = q.eir[i];
+        q.eir[i] = NULL;
+        q.eir_len[i] = 0;
+    }
+    q.count = 0;
+    BTC_UNLOCK();
+    for (int i = 0; i < n; i++) {
+        free(gone[i]);
+    }
 }
 
 void btc_inquiry_on_gap(int event, void *arg) {
@@ -135,9 +189,7 @@ int btc_radio_inquiry(uint32_t duration_ms) {
     if (q.running) {
         esp_bt_gap_cancel_discovery();
     }
-    BTC_LOCK();
-    q.count = 0;
-    BTC_UNLOCK();
+    forget();
     q.running = true;
     esp_err_t err = esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, (uint8_t)units, 0);
     if (err != ESP_OK) {
@@ -162,4 +214,20 @@ int btc_radio_found(btc_found_t *out, int max) {
     }
     BTC_UNLOCK();
     return n;
+}
+
+int btc_radio_found_eir(const uint8_t *addr, uint8_t *dst, size_t size) {
+    int len = BTC_ERR_ARG;
+    BTC_LOCK();
+    for (int i = 0; i < q.count; i++) {
+        if (memcmp(q.found[i].addr, addr, sizeof(btc_addr_t)) == 0) {
+            len = q.eir_len[i];
+            if (len) {
+                memcpy(dst, q.eir[i], (size_t)len < size ? (size_t)len : size);
+            }
+            break;
+        }
+    }
+    BTC_UNLOCK();
+    return len;
 }

@@ -401,6 +401,30 @@ static mp_obj_t bluetooth_config(size_t n_args, const mp_obj_t *args, mp_map_t *
                 return mp_obj_new_bool(connectable);
             case MP_QSTR_device_class:
                 return mp_obj_new_int_from_uint(btc_radio_class());
+            case MP_QSTR_page_timeout:
+                return mp_obj_new_int_from_uint(btc_radio_page_timeout());
+            case MP_QSTR_channel_map: {
+                uint8_t map[BTC_CHANNEL_MAP_LEN];
+                btc_radio_channels(map);
+                return mp_obj_new_bytes(map, sizeof(map));
+            }
+            case MP_QSTR_eir_uuids:
+            case MP_QSTR_eir_tx_power:
+            case MP_QSTR_eir_manufacturer:
+            case MP_QSTR_eir_url: {
+                btc_eir_t eir;
+                btc_radio_eir(&eir);
+                switch (mp_obj_str_get_qstr(args[1])) {
+                    case MP_QSTR_eir_uuids:
+                        return mp_obj_new_bool(eir.uuids);
+                    case MP_QSTR_eir_tx_power:
+                        return mp_obj_new_bool(eir.tx_power);
+                    case MP_QSTR_eir_manufacturer:
+                        return eir.manufacturer_len ? mp_obj_new_bytes(eir.manufacturer, eir.manufacturer_len) : mp_const_none;
+                    default:
+                        return eir.url_len ? mp_obj_new_str((const char *)eir.url, eir.url_len) : mp_const_none;
+                }
+            }
             case MP_QSTR_mac: {
                 btc_addr_t mac;
                 done(btc_radio_mac(mac));
@@ -413,6 +437,10 @@ static mp_obj_t bluetooth_config(size_t n_args, const mp_obj_t *args, mp_map_t *
     if (n_args != 1) {
         mp_raise_TypeError(MP_ERROR_TEXT("read one setting, or set by keyword"));
     }
+    // The inquiry response's settings change together, from what's set now.
+    btc_eir_t eir;
+    btc_radio_eir(&eir);
+    bool eir_changed = false;
     for (size_t i = 0; i < kwargs->alloc; i++) {
         if (!mp_map_slot_is_filled(kwargs, i)) {
             continue;
@@ -436,9 +464,57 @@ static mp_obj_t bluetooth_config(size_t n_args, const mp_obj_t *args, mp_map_t *
             case MP_QSTR_device_class:
                 done(btc_radio_set_class(value == mp_const_none ? 0 : mp_obj_get_int(value)));
                 break;
+            case MP_QSTR_page_timeout: {
+                mp_int_t ms = mp_obj_get_int(value);
+                if (ms < 1 || ms > 40959) {
+                    mp_raise_ValueError(MP_ERROR_TEXT("page_timeout must be 1 to 40959 ms"));
+                }
+                done(btc_radio_set_page_timeout((uint32_t)ms));
+                break;
+            }
+            case MP_QSTR_channel_map: {
+                mp_buffer_info_t b;
+                mp_get_buffer_raise(value, &b, MP_BUFFER_READ);
+                if (b.len != BTC_CHANNEL_MAP_LEN) {
+                    mp_raise_ValueError(MP_ERROR_TEXT("channel_map is 10 bytes"));
+                }
+                int err = btc_radio_set_channels(b.buf);
+                if (err == BTC_ERR_ARG) {
+                    mp_raise_ValueError(MP_ERROR_TEXT("channel_map needs 20 of channels 0 to 78"));
+                }
+                done(err);
+                break;
+            }
+            case MP_QSTR_eir_uuids:
+                eir.uuids = mp_obj_is_true(value);
+                eir_changed = true;
+                break;
+            case MP_QSTR_eir_tx_power:
+                eir.tx_power = mp_obj_is_true(value);
+                eir_changed = true;
+                break;
+            case MP_QSTR_eir_manufacturer:
+            case MP_QSTR_eir_url: {
+                bool url = mp_obj_str_get_qstr(kwargs->table[i].key) == MP_QSTR_eir_url;
+                mp_buffer_info_t b = {0};
+                if (value != mp_const_none) {
+                    mp_get_buffer_raise(value, &b, MP_BUFFER_READ);
+                }
+                if (b.len > BTC_EIR_DATA_MAX || (!url && b.len == 1)) {
+                    mp_raise_ValueError(url ? MP_ERROR_TEXT("eir_url is up to 64 bytes")
+                        : MP_ERROR_TEXT("eir_manufacturer is a 2-byte company ID and up to 62 bytes"));
+                }
+                memcpy(url ? eir.url : eir.manufacturer, b.buf, b.len);
+                *(url ? &eir.url_len : &eir.manufacturer_len) = (uint8_t)b.len;
+                eir_changed = true;
+                break;
+            }
             default:
                 mp_raise_ValueError(MP_ERROR_TEXT("unknown config param"));
         }
+    }
+    if (eir_changed) {
+        done(btc_radio_set_eir(&eir));
     }
     return mp_const_none;
 }
@@ -501,6 +577,48 @@ static mp_obj_t bluetooth_found(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(bluetooth_found_obj, bluetooth_found);
 
+// eir(addr) -> bytes or None: the inquiry response a found device sent.
+static mp_obj_t bluetooth_eir(mp_obj_t self_in, mp_obj_t addr_in) {
+    const uint8_t *addr = addr_arg(addr_in);
+    if (addr == NULL) {
+        mp_raise_TypeError(MP_ERROR_TEXT("an address"));
+    }
+    uint8_t buf[BTC_EIR_MAX];
+    int n = btc_radio_found_eir(addr, buf, sizeof(buf));
+    if (n == BTC_ERR_ARG) {
+        mp_raise_ValueError(MP_ERROR_TEXT("not found by the last inquiry"));
+    }
+    if (n < 0) {
+        raise_btc(n);
+    }
+    return n ? mp_obj_new_bytes(buf, n) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(bluetooth_eir_obj, bluetooth_eir);
+
+// rssi(addr) -> int: a connected device's signal, in dB from the ideal range.
+static mp_obj_t bluetooth_rssi(mp_obj_t self_in, mp_obj_t addr_in) {
+    const uint8_t *addr = addr_arg(addr_in);
+    if (addr == NULL) {
+        mp_raise_TypeError(MP_ERROR_TEXT("an address"));
+    }
+    done(btc_radio_read_rssi(addr));
+    int delta = 0;
+    for (int waited = 0; waited < 1000; waited += 10) {
+        int state = btc_radio_rssi(&delta);
+        if (state == 1) {
+            return mp_obj_new_int(delta);
+        }
+        if (state < 0) {
+            raise_btc(state);
+        }
+        mp_event_wait_ms(10);
+    }
+    // Bluedroid doesn't answer for a device it has no link to.
+    raise_btc(BTC_ERR_STATE);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(bluetooth_rssi_obj, bluetooth_rssi);
+
 static mp_obj_t bluetooth_changes(mp_obj_t self_in) {
     return MP_OBJ_NEW_SMALL_INT(btc_radio_changes());
 }
@@ -515,6 +633,8 @@ static const mp_rom_map_elem_t bluetooth_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_inquiry), MP_ROM_PTR(&bluetooth_inquiry_obj) },
     { MP_ROM_QSTR(MP_QSTR_inquiring), MP_ROM_PTR(&bluetooth_inquiring_obj) },
     { MP_ROM_QSTR(MP_QSTR_found), MP_ROM_PTR(&bluetooth_found_obj) },
+    { MP_ROM_QSTR(MP_QSTR_eir), MP_ROM_PTR(&bluetooth_eir_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rssi), MP_ROM_PTR(&bluetooth_rssi_obj) },
 };
 static MP_DEFINE_CONST_DICT(bluetooth_locals, bluetooth_locals_table);
 
