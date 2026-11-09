@@ -62,7 +62,9 @@ extern "C" {
 #define BTC_CHANGED_REQUEST    (1u << 18)   // ag: the headset dialed, sent a DTMF digit or a command
 #define BTC_CHANGED_MESSAGES   (1u << 19)   // msg: a request finished, or the link came or went
 #define BTC_CHANGED_NOTIFY     (1u << 20)   // msg: the phone reported a new, sent, deleted or changed message
+#define BTC_CHANGED_TETHER     (1u << 21)   // tether: the link came or went
 #define BTC_CHANGED_LIBRARY    (1u << 22)   // lib: a request finished
+#define BTC_CHANGED_PUSH       (1u << 23)   // opp: a send or pull finished, or an object arrived
 #define BTC_CHANGED_PASSKEY    (1u << 24)   // radio: pairing wants a passkey shown, typed or checked
 
 typedef uint8_t btc_addr_t[6];  // most significant byte first
@@ -684,6 +686,86 @@ int btc_lib_play(uint8_t scope, const uint8_t *uid);
 size_t btc_lib_data(uint8_t *dst, size_t size);
 void btc_lib_status(btc_lib_status_t *out);
 uint32_t btc_lib_changes(void);
+
+// ---- the tether: PAN user, the internet through a phone ---------------------
+//
+// The board joins a phone's Bluetooth tethering (its PAN network access
+// point) over BNEP. The phone's frames reach the host's IP stack through a
+// network interface the backend keeps: on BTstack with lwIP, an lwIP netif
+// that asks the phone for an address by DHCP and becomes the default route
+// while the link is up. Backends without a PAN user return BTC_ERR_UNSUPPORTED.
+// Changes: BTC_CHANGED_TETHER.
+
+typedef struct {
+    bool started;
+    bool connecting;
+    bool connected;
+    btc_addr_t peer;
+    int result;             // the last connect's: BTC_OK or a negative BTC_ERR_*
+    uint32_t rx_frames;
+    uint32_t tx_frames;
+    uint32_t tx_dropped;    // frames the link had no room for
+} btc_tether_status_t;
+
+int btc_tether_start(void);
+void btc_tether_stop(void);
+bool btc_tether_started(void);
+// Join a phone's tethering: NULL picks the last device connected, then the
+// first paired one. BTC_CHANGED_TETHER says it came up or failed.
+int btc_tether_connect(const uint8_t *addr);
+int btc_tether_disconnect(void);
+void btc_tether_status(btc_tether_status_t *out);
+uint32_t btc_tether_changes(void);
+// The host's network interface for the link (an lwIP `struct netif *`), or
+// NULL where there is none.
+void *btc_tether_netif(void);
+
+// ---- object push: OPP client and server ------------------------------------
+//
+// Sends a file or contact card to a device, pulls its owner's card, and takes
+// what it sends. A send or pull returns at once, and BTC_CHANGED_PUSH (with
+// `busy` false) says it finished: the session opens, the object goes, and the
+// session closes. While listening, the board offers Object Push, takes one
+// object at a time from a paired device into the buffer, and turns others
+// away until btc_opp_take() empties it. Backends without OPP don't build it.
+// Changes: BTC_CHANGED_CONNECTION, BTC_CHANGED_PUSH.
+
+#define BTC_OPP_NAME_MAX 64     // a name, in UTF-8, cut at a character
+#define BTC_OPP_TYPE_MAX 48
+
+typedef struct {
+    bool started;
+    bool busy;              // a send or pull is running
+    bool listening;
+    bool receiving;         // a device is sending
+    bool held;              // a received object waits in the buffer
+    btc_addr_t peer;        // the last send's or pull's, or the last sender's
+    int result;             // the last send's or pull's: BTC_OK, a negative BTC_ERR_*, or the OBEX response
+    uint32_t sent;          // bytes of the last send that went
+    uint32_t length;        // bytes in the buffer
+    bool truncated;         // a pulled or received object outgrew the buffer
+    uint32_t received;      // objects taken in since start
+    uint32_t refused;       // objects turned away since start
+} btc_opp_status_t;
+
+// `max_bytes` caps the buffer a pulled or received object is kept in.
+int btc_opp_start(size_t max_bytes);
+void btc_opp_stop(void);
+bool btc_opp_started(void);
+// Send `data` (copied) as `name`, with a MIME `type` or NULL. NULL `addr`
+// sends to the last device, or the first paired one.
+int btc_opp_send(const uint8_t *addr, const char *name, const char *type, const uint8_t *data, size_t len);
+// Pull the device's default object: its owner's card.
+int btc_opp_pull(const uint8_t *addr);
+int btc_opp_listen(bool on);
+// The object in the buffer, with its name and type as the sender gave them.
+size_t btc_opp_data(uint8_t *dst, size_t size);
+const char *btc_opp_name(void);
+const char *btc_opp_type(void);
+// Empty the buffer, so the next object can come in.
+void btc_opp_take(void);
+void btc_opp_status(btc_opp_status_t *out);
+uint32_t btc_opp_changes(void);
 
 // ---- the audio gateway: HFP AG, the board as the phone ----------------------
 //

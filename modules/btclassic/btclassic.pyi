@@ -124,6 +124,11 @@ NOTIFY: int
 """`Messages.changes` bit: the phone reported a change; read `event()`."""
 LIBRARY: int
 """`Library.changes` bit: a request finished, whether or not it worked."""
+TETHER: int
+"""`Tether.changes` bit: the link to the phone came up, failed or went."""
+PUSH: int
+"""`ObjectPush.changes` bit: a send or pull finished, or an object came in
+(read `received()`)."""
 
 HID_KEYBOARD: int
 """`HIDDevice` subclass: a keyboard."""
@@ -901,6 +906,125 @@ class Library:
     def deinit(self) -> None:
         """Drop the browsing link. The radio and the sink stay on."""
     def __enter__(self) -> Library: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
+
+
+class Tether:
+    """The internet through a phone's Bluetooth tethering (PAN), as a
+    network interface beside the Wi-Fi's: once it's connected, `socket`,
+    `requests` and `ntptime` use it as they would `network.WLAN`.
+
+    The phone hands out the address by DHCP, and the tether becomes the
+    default route while it's up; the route goes back to the Wi-Fi when it
+    drops. Turn on Bluetooth tethering in the phone's hotspot settings first.
+
+    Only the Pico W has it. On the ESP32 the class is there, and making one
+    raises OSError: its Bluetooth stack has no PAN.
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+    """
+
+    connected: bool
+    """The Bluetooth link to the phone is up (it may not have an address
+    yet; `isconnected()` says it has)."""
+    peer: bytes | None
+    """The phone's address, or None."""
+
+    def __init__(self, bt: Bluetooth) -> None: ...
+    def connect(self, addr: bytes | None = None, *, timeout: int = 30000) -> None:
+        """Join the phone's tethering, and wait until the phone has given the
+        board an address. With no address, the last device connected, or else
+        the first paired one. `timeout=0` returns at once; watch for `TETHER`
+        and `isconnected()`.
+
+        Raises:
+            OSError: the phone refused (its Bluetooth tethering is off), or
+                ETIMEDOUT.
+        """
+    def disconnect(self) -> None: ...
+    def isconnected(self) -> bool:
+        """Up, with an address from the phone."""
+    def ifconfig(self, config: tuple[str, str, str, str] | None = None) -> tuple[str, str, str, str]:
+        """As `network.WLAN.ifconfig`: address, netmask, gateway, DNS."""
+    def ipconfig(self, *args: str, **kwargs: object) -> object:
+        """As `network.WLAN.ipconfig`: `ipconfig("addr4")`, `ipconfig("gw4")`."""
+    def stats(self) -> dict[str, int]:
+        """Counters: rx_frames, tx_frames, and tx_dropped (frames the link
+        had no room for, which TCP sends again)."""
+    def changes(self) -> int:
+        """The bits (`TETHER`) for what changed since the last call, which
+        clears them."""
+    def deinit(self) -> None:
+        """Drop the link and take the interface down. The radio stays on."""
+    def __enter__(self) -> Tether: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
+
+
+class ObjectPush:
+    """Files and contact cards over Bluetooth (OPP): send one to a phone or
+    computer, pull its owner's card, or take what it sends.
+
+    A send or pull opens a session to the device, moves the one object and
+    closes it. While `listen()` is on, the board offers Object Push to paired
+    devices and keeps one received object at a time: others are turned away
+    until `received()` takes it.
+
+    Only the Pico W has it. On the ESP32 the class is there, and making one
+    raises OSError: its Bluetooth stack has no OPP.
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+        max_bytes: the most a pulled or received object may take; past it the
+            object is cut, and `truncated` says so.
+    """
+
+    busy: bool
+    """A send or pull is running."""
+    listening: bool
+    """`listen()` is on."""
+    receiving: bool
+    """A device is sending an object now."""
+    peer: bytes
+    """The address of the last device sent to, pulled from or received from."""
+    sent: int
+    """Bytes of the last send that went."""
+    truncated: bool
+    """The last pulled or received object outgrew `max_bytes`."""
+    refused: int
+    """Objects turned away while one waited to be taken."""
+
+    def __init__(self, bt: Bluetooth, *, max_bytes: int = 65536) -> None: ...
+    def send(self, name: str, data: bytes, *, addr: bytes | None = None, type: str | None = None,
+             timeout: int = 60000) -> None:
+        """Send `data` as a file called `name`, with a MIME `type` such as
+        "text/x-vcard" for a contact card. Without `addr`, it goes to the
+        last device the board talked to, or the first paired one. A phone
+        usually asks its user to accept it.
+
+        Raises:
+            OSError: the device refused it, or couldn't be reached; or
+                ETIMEDOUT.
+        """
+    def pull(self, *, addr: bytes | None = None, timeout: int = 30000) -> bytes:
+        """The device owner's contact card. Many phones don't give one.
+
+        Raises:
+            OSError: the device has nothing to give, or refused.
+        """
+    def listen(self, on: bool = True) -> None:
+        """Offer Object Push to paired devices, or stop."""
+    def received(self) -> tuple[str, str | None, bytes] | None:
+        """The name, MIME type and contents of the object a device sent, or
+        None. Taking it lets the next one in."""
+    def changes(self) -> int:
+        """The bits (`CONNECTION`, `PUSH`) for what changed since the last
+        call, which clears them."""
+    def deinit(self) -> None:
+        """Stop listening and drop what's held. The radio stays on."""
+    def __enter__(self) -> ObjectPush: ...
     def __exit__(self, *args: object) -> None:
         """`deinit`."""
 
