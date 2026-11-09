@@ -85,7 +85,11 @@ The bus uses the blocking `machine.SPI` bus instead, with the same methods
 - `machine.SPI` already holds the host, or internal RAM can't hold the buffer.
 
 `dma=True` asks for DMA whatever `miso` says, and raises if it can't have it;
-`dma=False` keeps the blocking bus. While waiting for a transfer the bus
+`dma=False` keeps the blocking bus. `dma=<bytes>` asks for DMA with a buffer no
+bigger than that (16 KB chunks, a power of two, at least 32 KB): a board that
+needs its internal RAM for something else, such as a 1080p H.264 encoder's
+155 KB on the ESP32-P4, asks for `dma=32768` and gives up nothing but how much
+of a frame is queued at once. While waiting for a transfer the bus
 releases the GIL, so other threads run. `deinit()`, `__del__` and a soft reset
 wait for queued transfers (up to a second), then free the panel IO, the SPI
 host and the buffers.

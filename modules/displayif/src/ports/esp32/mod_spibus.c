@@ -168,12 +168,19 @@ static void spibus_dma_release(void) {
     s_dma.done = 0;
 }
 
+// The biggest block to ask for: SPIBUS_RING_MAX, or what `dma=<bytes>` said.
+static size_t s_ring_max = SPIBUS_RING_MAX;
+
 static bool spibus_dma_alloc_buffers(void) {
     s_dma.param_buf = heap_caps_aligned_alloc(64, SPIBUS_PARAM_MAX, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     if (s_dma.param_buf == NULL) {
         return false;
     }
-    for (size_t size = SPIBUS_RING_MAX; size >= 2 * SPIBUS_CHUNK; size /= 2) {
+    size_t start = s_ring_max > SPIBUS_RING_MAX ? SPIBUS_RING_MAX : s_ring_max;
+    if (start < 2 * SPIBUS_CHUNK) {
+        start = 2 * SPIBUS_CHUNK;
+    }
+    for (size_t size = start; size >= 2 * SPIBUS_CHUNK; size /= 2) {
         s_dma.ring = heap_caps_aligned_alloc(64, size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
         if (s_dma.ring != NULL) {
             s_dma.ring_size = size;
@@ -356,8 +363,18 @@ static mp_obj_t spibus_make(const mp_obj_type_t *type, size_t n_args, size_t n_k
         && !displayif_pin_spec_unset(sck) && !displayif_pin_spec_unset(mosi)
         && id >= 1 && id < SOC_SPI_PERIPH_NUM;
     bool want_dma;
+    s_ring_max = SPIBUS_RING_MAX;
     if (dma == mp_const_none) {
         want_dma = dma_able && displayif_pin_spec_unset(miso);
+    } else if (mp_obj_is_int(dma) && mp_obj_get_int(dma) > 1) {
+        // dma=<bytes>: DMA on, with at most this much internal RAM queued
+        // (rounded down to a power of two of 16 KB chunks, at least 32 KB).
+        // A board that needs its internal RAM elsewhere asks for less.
+        want_dma = true;
+        s_ring_max = (size_t)mp_obj_get_int(dma);
+        if (!dma_able) {
+            mp_raise_ValueError(MP_ERROR_TEXT("dma needs id, sck, mosi and command, bits=8 and soft=False"));
+        }
     } else {
         want_dma = mp_obj_is_true(dma);
         if (want_dma && !dma_able) {
