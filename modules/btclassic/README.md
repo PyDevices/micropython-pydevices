@@ -290,6 +290,19 @@ each input report. `decode()` turns a report into a tuple such as
 (`connect(address, boot=True)`) or is another btclassic board. A board is a
 device or a host, one at a time.
 
+[`examples/btclassic_hid_host.py`](examples/btclassic_hid_host.py) reads
+whatever connects, and two more devices give it something to read:
+[`examples/btclassic_hid_gamepad.py`](examples/btclassic_hid_gamepad.py)
+turns a gamepad's stick and keeps a feature report the host reads and
+changes, and
+[`examples/btclassic_hid_media_keys.py`](examples/btclassic_hid_media_keys.py)
+steps a phone's volume.
+
+A computer learns what the board offers when it pairs. If it paired with
+the board as a speaker, or as a different kind of HID device, forget the
+board on the computer, `unpair()` the computer on the board, and pair
+again: until then it won't connect.
+
 ## Contacts and calls
 
 ```python
@@ -521,3 +534,20 @@ phone sends shared text as a small HTML file. Its share sheet lists only
 devices that offer file transfer, so the Pico says so in its class of device
 while it listens. If a phone paired before that doesn't list it, make the
 Pico discoverable and tap Scan.
+
+## Examples
+
+Each runs as it is with `mpftp run`; its docstring says what it needs.
+
+| Example | What it does |
+|---|---|
+| [btclassic_simpletest.py](examples/btclassic_simpletest.py) | Plays your phone through the board's speaker |
+| [btclassic_speaker.py](examples/btclassic_speaker.py) | A Bluetooth speaker the audio pump plays |
+| [btclassic_speakerphone.py](examples/btclassic_speakerphone.py) | A speakerphone for your phone's calls |
+| [btclassic_source_tone.py](examples/btclassic_source_tone.py) | Plays a tone on Bluetooth headphones or a speaker |
+| [btclassic_transmitter.py](examples/btclassic_transmitter.py) | Sends the line in to headphones or a speaker |
+| [btclassic_serial_echo.py](examples/btclassic_serial_echo.py) | A serial port that echoes in upper case |
+| [btclassic_hid_keyboard.py](examples/btclassic_hid_keyboard.py) | Types a line as a keyboard and moves the pointer |
+| [btclassic_hid_media_keys.py](examples/btclassic_hid_media_keys.py) | Presses media keys on a phone or computer |
+| [btclassic_hid_gamepad.py](examples/btclassic_hid_gamepad.py) | A gamepad, with a setting the host reads and changes |
+| [btclassic_hid_host.py](examples/btclassic_hid_host.py) | Reads a keyboard, mouse or gamepad |
