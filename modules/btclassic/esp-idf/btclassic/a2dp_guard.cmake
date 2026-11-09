@@ -1,0 +1,25 @@
+# A guard on Bluedroid's A2DP event handler (a2dp_guard.c): a link event that
+# arrives after A2DP was deinitialised is dropped instead of panicking the
+# board. It wraps an internal function at link time, so it's on only for the
+# ESP-IDF versions it was written against.
+#
+#   btclassic_a2dp_guard(<target> <path of a2dp_guard.c>)
+
+function(btclassic_a2dp_guard target file)
+    set(version "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}")
+    if(NOT version STREQUAL "5.5")
+        return()
+    endif()
+    idf_build_get_property(idf_path IDF_PATH)
+    set(bt ${idf_path}/components/bt)
+    set_source_files_properties(${file} DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR} PROPERTIES INCLUDE_DIRECTORIES
+        "${bt}/common/btc/include;${bt}/common/include;${bt}/host/bluedroid/common/include;${bt}/host/bluedroid/stack/include;${bt}/host/bluedroid/bta/include")
+    get_target_property(type ${target} TYPE)
+    if(type STREQUAL "INTERFACE_LIBRARY")
+        set(scope INTERFACE)
+    else()
+        set(scope PUBLIC)
+    endif()
+    target_sources(${target} ${scope} ${file})
+    target_link_libraries(${target} ${scope} "-Wl,--wrap=btc_a2dp_cb_handler")
+endfunction()

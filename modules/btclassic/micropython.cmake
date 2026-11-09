@@ -41,6 +41,10 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
     # Bluedroid (avrcp_tg.c); off where they aren't known to fit.
     include(${BTCLASSIC_IDF}/avrcp_tg.cmake)
     btclassic_avrcp_tg(usermod_btclassic ${BTCLASSIC_IDF}/avrcp_tg.c)
+    # A2DP and AVRCP link events that come after A2DP stops are dropped, not
+    # dispatched into freed memory (a2dp_guard.c).
+    include(${BTCLASSIC_IDF}/a2dp_guard.cmake)
+    btclassic_a2dp_guard(usermod_btclassic ${BTCLASSIC_IDF}/a2dp_guard.c)
 
     # With audiodsp in the build, AudioSink and HandsFree are also sources the
     # audio pump pulls in C. It's found the way audioif finds it: among the

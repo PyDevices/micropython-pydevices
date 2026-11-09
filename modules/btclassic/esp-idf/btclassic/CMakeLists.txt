@@ -18,6 +18,8 @@ idf_component_register(SRCS ${srcs}
 if(srcs)
     include(${CMAKE_CURRENT_LIST_DIR}/avrcp_tg.cmake)
     btclassic_avrcp_tg(${COMPONENT_LIB} ${CMAKE_CURRENT_LIST_DIR}/avrcp_tg.c)
+    include(${CMAKE_CURRENT_LIST_DIR}/a2dp_guard.cmake)
+    btclassic_a2dp_guard(${COMPONENT_LIB} ${CMAKE_CURRENT_LIST_DIR}/a2dp_guard.c)
     include(${CMAKE_CURRENT_LIST_DIR}/map.cmake)
     btclassic_map(${COMPONENT_LIB} ${CMAKE_CURRENT_LIST_DIR}/map.c)
 endif()
