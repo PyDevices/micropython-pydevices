@@ -56,6 +56,7 @@ per profile that takes it.
 | `PhoneBook(bt)` | Reads a phone's contacts and call history (PBAP client): `pull()` a book as records of names, numbers and emails, `list()` and `entry()` to page through it, `size()`, and `lookup()` for the name behind a caller's number. |
 | `AudioGateway(bt)` | The board as the phone for a headset or car kit (HFP audio gateway): the `signal`, `battery` and `operator` it shows, `ring()` with a caller's number, `dial()`, the headset's answer and hang-up, and the call's audio through `readinto()` and `write()`. |
 | `Messages(bt)` | Reads and sends a phone's texts (MAP client): `list()` a folder, `get()` a message with its sender and text, `mark_read()`, `delete()`, `send()`, and `notify()` to hear about new messages as they arrive. |
+| `Library(bt)` | Browses the media library of the phone `AudioSink` plays from (AVRCP browsing): `players()`, `browse()` one, `items()` in a folder, the queue or a search, `enter()` and `up()`, and `play()` a track. Pico W only. |
 
 Nothing calls back into Python. Each object's state is properties, and its
 `changes()` returns a bit for each kind of state that changed since you last
@@ -182,7 +183,8 @@ service and operator, and answers, dials, hangs up and sends tones.
 `PhoneBook` works as it does on the ESP32, except that `new_missed` is
 always None. Its reply comes into the heap and grows with it: a phone book
 of 471 contacts without photos is 68 KB, so page with `count` on a Pico W.
-`AudioGateway` and `Messages` are ESP32-only.
+`AudioGateway` and `Messages` are ESP32-only. `Library` is the other way
+round: only the Pico W has it (see [A phone's music library](#a-phones-music-library)).
 
 ## How it's built
 
@@ -331,3 +333,30 @@ A moment after `notify()`, the phone connects back to deliver its reports,
 and `notify_connected` turns True. If it stays False, poll
 `list("inbox", unread=True)` instead.
 
+## A phone's music library
+
+On a Pico W, `Library` browses the players on the phone `AudioSink` plays
+from, and plays what you pick:
+
+```python
+import btclassic
+
+bt = btclassic.Bluetooth()
+music = btclassic.AudioSink(bt)
+# ... once the phone has connected:
+lib = btclassic.Library(bt)
+lib.connect()
+player = [p for p in lib.players() if p["browsable"]][0]
+lib.browse(player["id"])
+for item in lib.items(count=10):
+    print("folder" if item["folder"] else "track", item["name"])
+```
+
+Folders have a `uid` to `enter()`; tracks have one to `play()`. A player
+that isn't browsable may become so once its app is open on the phone.
+
+An Android phone lists one player, "Media Player", whose folders are the
+phone's media apps that let Bluetooth browse them. If none does, `browse()`
+raises "that player can't be browsed", and `connect()` and `players()` are
+all you get. Whether `search()` works is up to the player too: the phone
+answers with an error when it can't search.

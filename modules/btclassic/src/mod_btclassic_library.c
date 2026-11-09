@@ -140,7 +140,7 @@ static mp_obj_t parse_item(uint8_t type, const uint8_t *body, size_t n) {
             put(d, MP_QSTR_id, MP_OBJ_NEW_SMALL_INT(be16(body)));
             put(d, MP_QSTR_name, name_at(body, n, 26, &after));
             put(d, MP_QSTR_playing, mp_obj_new_bool(body[7] == 1));
-            put(d, MP_QSTR_browsable, mp_obj_new_bool(body[8 + 7] & 0x08));
+            put(d, MP_QSTR_browsable, mp_obj_new_bool(body[8 + 7] & 0x04));
             break;
         }
         case 2: {   // a folder
