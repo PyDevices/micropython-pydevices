@@ -24,7 +24,7 @@ import time
 import btclassic
 
 PSM = 0x1001
-SERVER = None  # the waiting board's address, such as bytes.fromhex("4c7525eed708")
+SERVER = None  # the waiting board's address, such as bytes.fromhex("4c7525eed70a")
 
 bt = btclassic.Bluetooth()
 bt.active(True)
