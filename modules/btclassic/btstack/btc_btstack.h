@@ -53,10 +53,12 @@ size_t btc_btstack_log_read(char *dst, size_t size);
 void btc_sink_radio_stopping(void);
 void btc_hf_radio_stopping(void);
 void btc_spp_radio_stopping(void);
+void btc_l2cap_radio_stopping(void);
 // The stack went down underneath (a soft reset): forget, without calling it.
 void btc_sink_radio_lost(void);
 void btc_hf_radio_lost(void);
 void btc_spp_radio_lost(void);
+void btc_l2cap_radio_lost(void);
 void btc_source_radio_stopping(void);
 void btc_source_radio_lost(void);
 

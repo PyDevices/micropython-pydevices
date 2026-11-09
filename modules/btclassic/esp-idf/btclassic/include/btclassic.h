@@ -66,6 +66,7 @@ extern "C" {
 #define BTC_CHANGED_LIBRARY    (1u << 22)   // lib: a request finished
 #define BTC_CHANGED_PUSH       (1u << 23)   // opp: a send or pull finished, or an object arrived
 #define BTC_CHANGED_PASSKEY    (1u << 24)   // radio: pairing wants a passkey shown, typed or checked
+#define BTC_CHANGED_L2CAP      (1u << 25)   // l2cap: bytes arrived
 
 typedef uint8_t btc_addr_t[6];  // most significant byte first
 
@@ -493,6 +494,40 @@ size_t btc_spp_write(const uint8_t *src, size_t size);  // what fits; never wait
 size_t btc_spp_write_room(void);
 uint32_t btc_spp_changes(void);
 void btc_spp_status(btc_spp_status_t *out);
+
+// ---- raw L2CAP channel ----------------------------------------------------
+//
+// A channel straight on L2CAP, for a protocol of your own between two
+// devices, one link at a time. Starting it with a PSM serves that PSM for
+// others to connect to (psm 0 serves nothing); btc_l2cap_connect() calls
+// another device's. Your own protocols take odd PSMs from 0x1001 up. Bytes
+// arrive in a receive ring of `rx_bytes`, more than which are dropped and
+// counted. Changes: BTC_CHANGED_CONNECTION, BTC_CHANGED_L2CAP.
+
+typedef struct {
+    bool connected;
+    bool listening;         // the server is up for others to connect to
+    btc_addr_t peer;
+    uint16_t psm;           // the PSM served, 0 for none
+    uint16_t mtu;           // the most one packet to the peer carries, 0 before a link
+    uint32_t rx_bytes;
+    uint32_t tx_bytes;
+    uint32_t rx_dropped;    // bytes that found the receive ring full
+} btc_l2cap_status_t;
+
+int btc_l2cap_start(uint16_t psm, size_t rx_bytes);
+void btc_l2cap_stop(void);
+bool btc_l2cap_started(void);
+bool btc_l2cap_connected(void);
+int btc_l2cap_connect(const uint8_t *addr, uint16_t psm);
+bool btc_l2cap_calling(void);                     // a connect is under way
+int btc_l2cap_disconnect(void);
+size_t btc_l2cap_any(void);
+size_t btc_l2cap_read(uint8_t *dst, size_t size);   // never waits
+size_t btc_l2cap_write(const uint8_t *src, size_t size);
+size_t btc_l2cap_write_room(void);
+uint32_t btc_l2cap_changes(void);
+void btc_l2cap_status(btc_l2cap_status_t *out);
 
 // ---- HID: the board as a keyboard, mouse or gamepad, or the host of one ---
 //
