@@ -1362,9 +1362,16 @@ static mp_obj_t msg_connect(size_t n_args, const mp_obj_t *pos_args, mp_map_t *k
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(msg_connect_obj, 1, msg_connect);
 
+// Returns once the session is down, as PhoneBook.disconnect does.
 static mp_obj_t msg_disconnect(mp_obj_t self_in) {
     msg_check();
-    return ph_done(btc_msg_disconnect());
+    ph_done(btc_msg_disconnect());
+    mp_uint_t start = mp_hal_ticks_ms();
+    btc_msg_status_t st;
+    for (btc_msg_status(&st); st.connected && mp_hal_ticks_ms() - start < 3000; btc_msg_status(&st)) {
+        mp_event_wait_ms(10);
+    }
+    return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(msg_disconnect_obj, msg_disconnect);
 
