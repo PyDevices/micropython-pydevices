@@ -35,6 +35,8 @@ static struct {
     bool started;
     bool initialised;       // ESP_SPP_INIT_EVT came
     bool server;            // the server is listening
+    bool parked;            // stopped, but left up underneath for L2CAP
+    bool srv_stopped;       // ESP_SPP_SRV_STOP_EVT came
     char name[32];
     uint32_t handle;        // the link, 0 with none
     btc_addr_t connecting;  // a client call waiting for SDP
@@ -186,8 +188,15 @@ static void spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
             }
             BTC_UNLOCK();
             break;
+        case ESP_SPP_SRV_STOP_EVT:
+            p.server = false;
+            p.srv_stopped = true;
+            break;
         case ESP_SPP_DATA_IND_EVT: {
             uint32_t n = param->data_ind.len;
+            if (p.rx.buf == NULL) {
+                break;      // a stop is under way
+            }
             BTC_LOCK();
             uint32_t room = p.rx.size - p.rx.count;
             uint32_t take = n < room ? n : room;
@@ -226,6 +235,54 @@ static void spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
     }
 }
 
+// Bring Bluedroid's side up; its INIT_EVT starts the server. With L2CAP
+// up, the serial port has to bring up the layer the two share itself
+// (btc_bluedroid.h), so L2CAP steps down around it.
+static esp_err_t sdk_up(void) {
+    bool l2cap = btc_l2cap_up();
+    if (l2cap) {
+        btc_l2cap_pause();
+    }
+    esp_err_t err = esp_spp_register_callback(spp_cb);
+    if (err == ESP_OK) {
+        esp_spp_cfg_t cfg = {.mode = ESP_SPP_MODE_CB, .enable_l2cap_ertm = true, .tx_buffer_size = 0};
+        err = esp_spp_enhanced_init(&cfg);
+    }
+    if (l2cap) {
+        for (int i = 0; i < 50 && err == ESP_OK && !p.initialised; i++) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        btc_l2cap_resume();
+    }
+    return err;
+}
+
+static void sdk_down(void) {
+    if (p.initialised) {
+        esp_spp_deinit();   // closes the link and the server
+        for (int i = 0; i < 50 && p.initialised; i++) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
+}
+
+// Close the link and stop serving, but leave SPP up: what a stop does while
+// L2CAP runs, since taking SPP down would take L2CAP's layer down too.
+static void park(void) {
+    if (p.handle) {
+        esp_spp_disconnect(p.handle);
+    }
+    if (p.server) {
+        p.srv_stopped = false;
+        if (esp_spp_stop_srv() == ESP_OK) {
+            for (int i = 0; i < 50 && !p.srv_stopped; i++) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+        }
+    }
+    p.parked = true;
+}
+
 int btc_spp_start(const char *name, size_t rx_bytes) {
     if (p.started) {
         return BTC_ERR_STATE;
@@ -246,14 +303,18 @@ int btc_spp_start(const char *name, size_t rx_bytes) {
         free(tx);
         return BTC_ERR_NOMEM;
     }
+    // A parked SPP is still up underneath: serve again on it.
+    bool parked = p.parked && p.initialised;
     memset(&p, 0, sizeof(p));
     strncpy(p.name, name && *name ? name : "Serial Port", sizeof(p.name) - 1);
     p.rx = (bytes_ring_t){.buf = rx, .size = (uint32_t)rx_bytes};
     p.tx = (bytes_ring_t){.buf = tx, .size = TX_SIZE};
-    esp_err_t err = esp_spp_register_callback(spp_cb);
-    if (err == ESP_OK) {
-        esp_spp_cfg_t cfg = {.mode = ESP_SPP_MODE_CB, .enable_l2cap_ertm = true, .tx_buffer_size = 0};
-        err = esp_spp_enhanced_init(&cfg);
+    esp_err_t err = ESP_OK;
+    if (parked) {
+        p.initialised = true;
+        err = esp_spp_start_srv(sec_mask(), ESP_SPP_ROLE_SLAVE, 0, p.name);
+    } else {
+        err = sdk_up();
     }
     if (err != ESP_OK) {
         free(rx);
@@ -270,11 +331,13 @@ void btc_spp_stop(void) {
     if (!p.started) {
         return;
     }
-    if (p.initialised) {
-        esp_spp_deinit();   // closes the link and the server
-        for (int i = 0; i < 50 && p.initialised; i++) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-        }
+    // Taking SPP down takes L2CAP's layer down too: with L2CAP running,
+    // SPP only parks.
+    if (btc_l2cap_started()) {
+        park();
+    } else {
+        sdk_down();
+        btc_l2cap_unpark();
     }
     btc_radio_profile(BTC_PROFILE_SERIAL, false, 0);
     BTC_LOCK();
@@ -288,6 +351,14 @@ void btc_spp_stop(void) {
     vTaskDelay(pdMS_TO_TICKS(20));  // let a callback that read the rings finish
     free(rx);
     free(tx);
+}
+
+// L2CAP stopped for good: a parked SPP comes down with it.
+void btc_spp_unpark(void) {
+    if (p.parked && !p.started) {
+        sdk_down();
+    }
+    p.parked = false;
 }
 
 bool btc_spp_started(void) {

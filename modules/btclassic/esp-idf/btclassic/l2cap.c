@@ -30,6 +30,9 @@ static struct {
     bool started;
     bool initialised;       // ESP_BT_L2CAP_INIT_EVT came
     bool vfs;               // the VFS is registered
+    bool paused;            // Bluedroid's side is down while the serial port starts
+    bool parked;            // stopped, but left up underneath for the serial port
+    bool srv_stopped;       // ESP_BT_L2CAP_SRV_STOP_EVT came
     uint16_t psm;           // the server's PSM, 0 for none
     int fd;                 // the open channel, -1 with none
     bool calling;
@@ -43,7 +46,7 @@ static struct {
 #define SEC_MASK (ESP_BT_L2CAP_SEC_AUTHENTICATE | ESP_BT_L2CAP_SEC_ENCRYPT)
 
 static void serve(void) {
-    if (l.psm && l.vfs) {
+    if (l.psm && l.vfs && !l.paused) {
         esp_bt_l2cap_start_srv(SEC_MASK, l.psm);
     }
 }
@@ -77,6 +80,7 @@ static void l2cap_cb(esp_bt_l2cap_cb_event_t event, esp_bt_l2cap_cb_param_t *par
             break;
         case ESP_BT_L2CAP_SRV_STOP_EVT:
             l.st.listening = false;
+            l.srv_stopped = true;
             break;
         case ESP_BT_L2CAP_CL_INIT_EVT:
             if (param->cl_init.status != ESP_BT_L2CAP_SUCCESS) {
@@ -145,45 +149,18 @@ static void pull(void) {
     }
 }
 
-int btc_l2cap_start(uint16_t psm, size_t rx_bytes) {
-    if (!btc_radio_active()) {
-        return BTC_ERR_STATE;
-    }
-    if (l.started) {
-        return BTC_OK;
-    }
-    uint8_t *rx = heap_caps_malloc(rx_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (rx == NULL) {
-        rx = malloc(rx_bytes);
-    }
-    if (rx == NULL) {
-        return BTC_ERR_NOMEM;
-    }
-    memset(&l, 0, sizeof(l));
-    l.fd = -1;
-    l.psm = psm;
-    l.rx = rx;
-    l.rx_size = (uint32_t)rx_bytes;
-    l.st.psm = psm;
+// Bring Bluedroid's side up: its INIT_EVT registers the VFS, and that serves
+// the PSM.
+static esp_err_t sdk_up(void) {
     esp_err_t err = esp_bt_l2cap_register_callback(l2cap_cb);
     if (err == ESP_OK) {
         err = esp_bt_l2cap_init();
     }
-    if (err != ESP_OK) {
-        free(rx);
-        memset(&l, 0, sizeof(l));
-        l.fd = -1;
-        return btc_err(err);
-    }
-    l.started = true;
-    return BTC_OK;
+    return err;
 }
 
-void btc_l2cap_stop(void) {
-    if (!l.started) {
-        return;
-    }
-    l.started = false;     // so a close doesn't serve again
+// Take Bluedroid's side down: the channel, the VFS and L2CAP itself.
+static void sdk_down(void) {
     if (l.fd >= 0) {
         close(l.fd);
     }
@@ -201,14 +178,136 @@ void btc_l2cap_stop(void) {
         }
     }
     BTC_LOCK();
-    uint8_t *rx = l.rx;
-    l.rx = NULL;
-    l.rx_count = 0;
+    if (l.fd >= 0 || l.st.connected) {
+        l.changes |= BTC_CHANGED_CONNECTION;
+    }
     l.fd = -1;
+    l.calling = false;
     l.st.connected = false;
     l.st.listening = false;
     BTC_UNLOCK();
+}
+
+// Close the channel and stop serving, but leave L2CAP and its VFS up: what
+// a stop does while the serial port runs, since taking L2CAP down would
+// take the serial port's layer down too (btc_bluedroid.h).
+static void park(void) {
+    if (l.fd >= 0) {
+        close(l.fd);
+    }
+    if (l.psm) {
+        l.srv_stopped = false;
+        if (esp_bt_l2cap_stop_srv(l.psm) == ESP_OK) {
+            for (int i = 0; i < 50 && !l.srv_stopped; i++) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+        }
+    }
+    BTC_LOCK();
+    l.fd = -1;
+    l.calling = false;
+    l.st.connected = false;
+    l.st.listening = false;
+    BTC_UNLOCK();
+    l.parked = true;
+}
+
+int btc_l2cap_start(uint16_t psm, size_t rx_bytes) {
+    if (!btc_radio_active()) {
+        return BTC_ERR_STATE;
+    }
+    if (l.started) {
+        return BTC_OK;
+    }
+    uint8_t *rx = heap_caps_malloc(rx_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (rx == NULL) {
+        rx = malloc(rx_bytes);
+    }
+    if (rx == NULL) {
+        return BTC_ERR_NOMEM;
+    }
+    // A parked L2CAP is still up underneath: serve the new PSM on it.
+    bool parked = l.parked, initialised = l.initialised, vfs = l.vfs;
+    memset(&l, 0, sizeof(l));
+    l.fd = -1;
+    l.psm = psm;
+    l.rx = rx;
+    l.rx_size = (uint32_t)rx_bytes;
+    l.st.psm = psm;
+    if (parked && initialised) {
+        l.initialised = true;
+        l.vfs = vfs;
+        l.started = true;
+        serve();
+        return BTC_OK;
+    }
+    esp_err_t err = sdk_up();
+    if (err != ESP_OK) {
+        free(rx);
+        memset(&l, 0, sizeof(l));
+        l.fd = -1;
+        return btc_err(err);
+    }
+    l.started = true;
+    return BTC_OK;
+}
+
+void btc_l2cap_stop(void) {
+    if (!l.started) {
+        return;
+    }
+    l.started = false;     // so a close doesn't serve again
+    if (btc_spp_started()) {
+        park();
+    } else {
+        sdk_down();
+        btc_spp_unpark();
+    }
+    BTC_LOCK();
+    uint8_t *rx = l.rx;
+    l.rx = NULL;
+    l.rx_count = 0;
+    BTC_UNLOCK();
     free(rx);
+    l.paused = false;
+}
+
+// See btc_bluedroid.h: the serial port is starting, and has to bring up the
+// layer the two share itself.
+void btc_l2cap_pause(void) {
+    if (l.parked) {
+        sdk_down();
+        l.parked = false;
+    }
+    if (!l.started || l.paused) {
+        return;
+    }
+    l.paused = true;
+    sdk_down();
+}
+
+void btc_l2cap_resume(void) {
+    if (!l.started || !l.paused) {
+        l.paused = false;
+        return;
+    }
+    l.paused = false;
+    esp_err_t err = sdk_up();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "l2cap: restart failed: %d", err);
+    }
+}
+
+// The serial port stopped for good: a parked L2CAP comes down with it.
+void btc_l2cap_unpark(void) {
+    if (l.parked && !l.started) {
+        sdk_down();
+    }
+    l.parked = false;
+}
+
+bool btc_l2cap_up(void) {
+    return l.started || l.parked;
 }
 
 bool btc_l2cap_started(void) {
