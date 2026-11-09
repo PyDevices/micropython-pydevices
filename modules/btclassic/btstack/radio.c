@@ -320,6 +320,23 @@ void btc_rfcomm_init_once(void) {
 static bool host_started;
 static char radio_name[249] = "PicoW-BT";
 static char radio_pin[17] = "0000";
+// Pairing: the IO capability, and the step waiting on the program.
+static int radio_io = BTC_IO_NONE;
+static btc_passkey_t radio_passkey;
+
+static void passkey_step(const bd_addr_t addr, int action, uint32_t passkey) {
+    memcpy(radio_passkey.addr, addr, 6);
+    radio_passkey.action = action;
+    radio_passkey.passkey = passkey;
+    radio_changed |= BTC_CHANGED_PASSKEY;
+}
+
+static void apply_io(void) {
+    // BTstack's SSP_IO_CAPABILITY_* are HCI's values, as BTC_IO_* are.
+    gap_ssp_set_io_capability(radio_io);
+    // "Just works" and a display-only board answer by themselves.
+    gap_ssp_set_auto_accept(radio_io == BTC_IO_NONE || radio_io == BTC_IO_DISPLAY_ONLY);
+}
 static bool discoverable = true, connectable = true;
 static btstack_packet_callback_registration_t hci_cb;
 
@@ -548,11 +565,29 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
             btc_log("legacy pairing with %s: pin", bd_addr_to_str(addr));
             gap_pin_code_response(addr, radio_pin);
             break;
-        case HCI_EVENT_USER_CONFIRMATION_REQUEST:
-            btc_log("ssp confirm %06u, accepted",
-                (unsigned)hci_event_user_confirmation_request_get_numeric_value(packet));
+        case HCI_EVENT_USER_CONFIRMATION_REQUEST: {
+            uint32_t n = hci_event_user_confirmation_request_get_numeric_value(packet);
+            hci_event_user_confirmation_request_get_bd_addr(packet, addr);
+            if (radio_io == BTC_IO_DISPLAY_YESNO) {
+                passkey_step(addr, BTC_PASSKEY_COMPARE, n);
+            } else if (radio_io == BTC_IO_DISPLAY_ONLY) {
+                passkey_step(addr, BTC_PASSKEY_DISPLAY, n);
+            } else if (radio_io == BTC_IO_KEYBOARD_ONLY) {
+                gap_ssp_confirmation_response(addr);
+            }
+            btc_log("ssp confirm %06u", (unsigned)n);
+            break;
+        }
+        case HCI_EVENT_USER_PASSKEY_REQUEST:
+            hci_event_user_passkey_request_get_bd_addr(packet, addr);
+            passkey_step(addr, BTC_PASSKEY_INPUT, 0);
+            break;
+        case HCI_EVENT_USER_PASSKEY_NOTIFICATION:
+            hci_event_user_passkey_notification_get_bd_addr(packet, addr);
+            passkey_step(addr, BTC_PASSKEY_DISPLAY, hci_event_user_passkey_notification_get_numeric_value(packet));
             break;
         case GAP_EVENT_PAIRING_COMPLETE:
+            radio_passkey.action = 0;
             gap_event_pairing_complete_get_bd_addr(packet, addr);
             btc_log("pairing with %s status 0x%02x", bd_addr_to_str(addr),
                 gap_event_pairing_complete_get_status(packet));
@@ -637,8 +672,7 @@ int btc_radio_start(void) {
     inquiry_mode_pending = true;
     send_inquiry_mode();
     gap_ssp_set_enable(1);
-    gap_ssp_set_io_capability(SSP_IO_CAPABILITY_NO_INPUT_NO_OUTPUT);
-    gap_ssp_set_auto_accept(1);
+    apply_io();
     gap_set_bondable_mode(1);
     gap_set_default_link_policy_settings(LM_LINK_POLICY_ENABLE_ROLE_SWITCH | LM_LINK_POLICY_ENABLE_SNIFF_MODE);
     gap_set_allow_role_switch(true);
@@ -731,6 +765,42 @@ int btc_radio_set_visibility(bool disc, bool conn) {
 void btc_radio_visibility(bool *disc, bool *conn) {
     *disc = discoverable;
     *conn = connectable;
+}
+
+int btc_radio_set_io(int io) {
+    if (io < BTC_IO_DISPLAY_ONLY || io > BTC_IO_NONE) {
+        return BTC_ERR_ARG;
+    }
+    radio_io = io;
+    if (btc_radio_active()) {
+        apply_io();
+    }
+    return BTC_OK;
+}
+
+int btc_radio_io(void) {
+    return radio_io;
+}
+
+void btc_radio_passkey(btc_passkey_t *out) {
+    *out = radio_passkey;
+}
+
+int btc_radio_passkey_reply(bool accept, uint32_t passkey) {
+    btc_passkey_t p = radio_passkey;
+    if (p.action != BTC_PASSKEY_INPUT && p.action != BTC_PASSKEY_COMPARE) {
+        return BTC_ERR_STATE;
+    }
+    radio_passkey.action = 0;
+    bd_addr_t a;
+    memcpy(a, p.addr, 6);
+    uint8_t s;
+    if (p.action == BTC_PASSKEY_INPUT) {
+        s = accept ? gap_ssp_passkey_response(a, passkey) : gap_ssp_passkey_negative(a);
+    } else {
+        s = accept ? gap_ssp_confirmation_response(a) : gap_ssp_confirmation_negative(a);
+    }
+    return s == ERROR_CODE_SUCCESS ? BTC_OK : BTC_ERR_FAIL;
 }
 
 int btc_radio_set_pin(const char *pin) {
