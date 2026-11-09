@@ -84,6 +84,25 @@ PAIRED: int
 """`Bluetooth.changes` bit: a device paired, or a pairing was removed."""
 FOUND: int
 """`Bluetooth.changes` bit: an inquiry found a device, or finished."""
+PASSKEY: int
+"""`Bluetooth.changes` bit: pairing has a passkey to show, type or check;
+`Bluetooth.passkey` says which."""
+IO_DISPLAY_ONLY: int
+"""`config(io=...)`: the board can show a number but not answer yes or no."""
+IO_DISPLAY_YESNO: int
+"""`config(io=...)`: the board can show a number and answer yes or no."""
+IO_KEYBOARD_ONLY: int
+"""`config(io=...)`: the board can take a number typed, and show none."""
+IO_NONE: int
+"""`config(io=...)`: neither, so pairing is "just works". The default."""
+PASSKEY_INPUT: int
+"""`Bluetooth.passkey` action: type the passkey the other device shows."""
+PASSKEY_DISPLAY: int
+"""`Bluetooth.passkey` action: show the passkey for the other side to type
+or check. Nothing to answer."""
+PASSKEY_COMPARE: int
+"""`Bluetooth.passkey` action: show the number and say whether the other
+device shows the same."""
 SERIAL: int
 """`Serial.changes` bit: bytes arrived."""
 REMOTE: int
@@ -200,6 +219,12 @@ class Bluetooth:
           response, a 2-byte company ID (little-endian) then up to 62 bytes.
         - eir_url (str or None): a URI in the inquiry response, up to 64
           bytes.
+        - io (int): what the board has for pairing, one of `IO_NONE` (the
+          default: "just works", nothing to show or type),
+          `IO_DISPLAY_ONLY`, `IO_DISPLAY_YESNO` or `IO_KEYBOARD_ONLY`. With
+          anything but `IO_NONE`, pairing asks for a passkey or a number
+          check through `passkey`, and a `Serial` link asks the other side
+          for one too. Set it before starting the profiles.
 
         Raises:
             ValueError: an unknown setting, or a value it doesn't take.
@@ -257,6 +282,20 @@ class Bluetooth:
         Raises:
             OSError: the radio is off, another search is running, the device
                 didn't answer, or ETIMEDOUT.
+        """
+    def passkey(self) -> tuple[bytes, int, int | None] | None:
+        """The pairing step waiting, after `changes` has had `PASSKEY`:
+        (address, action, passkey), or None. The action is
+        `PASSKEY_COMPARE`, `PASSKEY_DISPLAY` or `PASSKEY_INPUT`; the passkey
+        is the six-digit number to show, and None for `PASSKEY_INPUT`."""
+    def passkey_reply(self, accept: bool, passkey: int | None = None) -> None:
+        """Answer the step waiting: for `PASSKEY_COMPARE` whether the
+        numbers match, for `PASSKEY_INPUT` the passkey typed (0 to 999999).
+        `accept` False refuses the pairing.
+
+        Raises:
+            OSError: no step waits for an answer.
+            ValueError: the passkey is out of range.
         """
     def inquiring(self) -> bool:
         """An inquiry is running."""
