@@ -78,6 +78,8 @@ static inline uint8_t btc_sbc_subbands_bits(uint8_t subbands) {
 
 void btc_hid_radio_stopping(void);
 void btc_hid_radio_lost(void);
+void btc_tether_radio_stopping(void);
+void btc_tether_radio_lost(void);
 void btc_pb_radio_stopping(void);
 void btc_pb_radio_lost(void);
 

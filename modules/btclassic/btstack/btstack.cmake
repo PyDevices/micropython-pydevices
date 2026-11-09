@@ -37,6 +37,7 @@ if(MICROPY_BLUETOOTH_BTSTACK AND NOT TARGET usermod_btclassic_btstack)
         ${BTCLASSIC_BTSTACK_DIR}/spp.c
         ${BTCLASSIC_BTSTACK_DIR}/hid.c
         ${BTCLASSIC_BTSTACK_DIR}/pbap.c
+        ${BTCLASSIC_BTSTACK_DIR}/pan.c
         ${BTCLASSIC_BTSTACK_DIR}/../esp-idf/btclassic/ring.c
         ${BTCLASSIC_BTSTACK_DIR}/mp_host.c
 
@@ -45,6 +46,7 @@ if(MICROPY_BLUETOOTH_BTSTACK AND NOT TARGET usermod_btclassic_btstack)
         ${BTCLASSIC_BTSTACK_LIB}/src/btstack_hid.c
 
         ${_c}/a2dp.c
+        ${_c}/bnep.c
         ${_c}/a2dp_sink.c
         ${_c}/a2dp_source.c
         ${_c}/avdtp.c
