@@ -38,6 +38,7 @@ FRAMES = 512  # frames per write; 512 is about 12 ms
 # Wi-Fi and Bluetooth share the ESP32's radio. Turn Wi-Fi off for audio.
 network.WLAN(network.STA_IF).active(False)
 bt = btclassic.Bluetooth()
+bt.active(True)
 
 # Look for an audio device. Major class 4 is audio and video, which
 # headphones, speakers and car stereos report.
