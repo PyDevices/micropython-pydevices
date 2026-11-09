@@ -72,9 +72,12 @@ size_t btc_get_text(const char *field, char *dst, size_t size);
 
 // ---- the radio, for the profiles ----
 
-// A profile that takes one device at a time hides the board while it has
-// one, and shows it again (as the settings say) when it leaves.
+// A profile that takes one device at a time keeps the board out of searches
+// while it has one (unlisted), and lists it again, as the settings say, when
+// it leaves; other devices can still connect. A profile that is stopping
+// hides the board completely, so no link starts while it goes.
 void btc_radio_hold_hidden(bool hidden);
+void btc_radio_hold_unlisted(bool unlisted);
 
 // The profiles running, for the Class of Device. Each profile says when it
 // starts and stops; the HID device also gives its subclass.
