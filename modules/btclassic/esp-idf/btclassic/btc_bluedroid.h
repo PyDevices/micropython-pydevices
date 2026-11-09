@@ -30,6 +30,19 @@
 #define BTC_CALL_AUDIO 0
 #endif
 
+#if CONFIG_BT_HFP_AG_ENABLE
+#define BTC_AG 1
+#else
+#define BTC_AG 0
+#endif
+
+// The gateway's call audio, over HCI with Bluedroid's codecs, as above.
+#if BTC_AG && CONFIG_BT_HFP_AUDIO_DATA_PATH_HCI && !CONFIG_BT_HFP_USE_EXTERNAL_CODEC
+#define BTC_AG_AUDIO 1
+#else
+#define BTC_AG_AUDIO 0
+#endif
+
 #if CONFIG_BT_AVRCP_CT_COVER_ART_ENABLED
 #define BTC_COVER 1
 #else
@@ -70,6 +83,7 @@ void btc_radio_hold_hidden(bool hidden);
 #define BTC_PROFILE_HF 0x04
 #define BTC_PROFILE_SERIAL 0x08
 #define BTC_PROFILE_HID_DEVICE 0x10
+#define BTC_PROFILE_AG 0x20
 void btc_radio_profile(uint32_t profile, bool running, uint8_t hid_subclass);
 
 // Set radio changes() bits, from another part of the backend.

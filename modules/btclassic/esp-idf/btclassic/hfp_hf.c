@@ -282,7 +282,8 @@ static void hf_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *para
 // ---- start and stop ----
 
 int btc_hf_start(uint32_t ring_ms, uint8_t channels) {
-    if (h.started || !btc_radio_active()) {
+    // Bluedroid runs one HFP role at a time.
+    if (h.started || !btc_radio_active() || btc_ag_started()) {
         return BTC_ERR_STATE;
     }
     uint32_t frames = MAX_RATE * ring_ms / 1000;

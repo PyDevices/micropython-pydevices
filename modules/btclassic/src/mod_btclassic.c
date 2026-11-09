@@ -1281,6 +1281,13 @@ extern const mp_obj_type_t btc_hid_device_type;
 extern const mp_obj_type_t btc_hid_host_type;
 #endif
 
+// PhoneBook and AudioGateway, in mod_btclassic_phone.c, where the backend
+// has them.
+#if BTC_HAS_PHONE
+extern const mp_obj_type_t btc_phonebook_type;
+extern const mp_obj_type_t btc_gateway_type;
+#endif
+
 // =========================================================================
 // the module
 // =========================================================================
@@ -1292,6 +1299,12 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_HandsFree), MP_ROM_PTR(&btc_hf_type) },
     { MP_ROM_QSTR(MP_QSTR_AudioSource), MP_ROM_PTR(&btc_source_type) },
     { MP_ROM_QSTR(MP_QSTR_Serial), MP_ROM_PTR(&btc_serial_type) },
+    #if BTC_HAS_PHONE
+    { MP_ROM_QSTR(MP_QSTR_PhoneBook), MP_ROM_PTR(&btc_phonebook_type) },
+    { MP_ROM_QSTR(MP_QSTR_AudioGateway), MP_ROM_PTR(&btc_gateway_type) },
+    { MP_ROM_QSTR(MP_QSTR_PHONEBOOK), MP_ROM_INT(BTC_CHANGED_PHONEBOOK) },
+    { MP_ROM_QSTR(MP_QSTR_REQUEST), MP_ROM_INT(BTC_CHANGED_REQUEST) },
+    #endif
     #if BTC_HAS_HID
     { MP_ROM_QSTR(MP_QSTR_HIDDevice), MP_ROM_PTR(&btc_hid_device_type) },
     { MP_ROM_QSTR(MP_QSTR_HIDHost), MP_ROM_PTR(&btc_hid_host_type) },

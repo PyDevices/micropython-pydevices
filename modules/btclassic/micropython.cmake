@@ -17,6 +17,7 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_source.c
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_serial.c
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_hid.c
+        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_phone.c
         ${CMAKE_CURRENT_LIST_DIR}/src/modbluetooth_bluedroid.c
         ${BTCLASSIC_IDF}/radio.c
         ${BTCLASSIC_IDF}/a2dp_sink.c
@@ -27,7 +28,9 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
         ${BTCLASSIC_IDF}/avrcp_tg.c
         ${BTCLASSIC_IDF}/inquiry.c
         ${BTCLASSIC_IDF}/spp.c
-        ${BTCLASSIC_IDF}/hid.c)
+        ${BTCLASSIC_IDF}/hid.c
+        ${BTCLASSIC_IDF}/pbap.c
+        ${BTCLASSIC_IDF}/hfp_ag.c)
     target_include_directories(usermod_btclassic INTERFACE ${BTCLASSIC_IDF}/include ${BTCLASSIC_IDF})
     # The source's track metadata for a remote, through link-time hooks into
     # Bluedroid (avrcp_tg.c); off where they aren't known to fit.
@@ -63,8 +66,8 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
         MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING=1
         MICROPY_PY_BLUETOOTH_BACKEND_STORES_KEYS=1
         MICROPY_PY_BLUETOOTH_RINGBUF_SIZE=1024)
-    # Through MICROPY_DEF_BOARD, so the qstr scan sees the HID entries too.
-    list(APPEND MICROPY_DEF_BOARD BTC_HAS_HID=1)
+    # Through MICROPY_DEF_BOARD, so the qstr scan sees the HID and phone entries too.
+    list(APPEND MICROPY_DEF_BOARD BTC_HAS_HID=1 BTC_HAS_PHONE=1)
 elseif(MICROPY_BLUETOOTH_BTSTACK)
     # Ports that build BTstack for the `bluetooth` module (rp2 boards with a
     # CYW43 radio): the BTstack backend in btstack/ turns Classic on in the

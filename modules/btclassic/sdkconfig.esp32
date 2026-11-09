@@ -30,12 +30,13 @@ CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST=y
 CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY=y
 # AVRCP 1.6 cover art: the album image, over OBEX (GOEP client).
 CONFIG_BT_AVRCP_CT_COVER_ART_ENABLED=y
-# Hands-free unit (HFP), for the phone's battery, signal, carrier and calls.
+# Hands-free unit (HFP), for the phone's battery, signal, carrier and calls,
+# and the audio gateway, the board as the phone. One role runs at a time.
 # Call audio both ways goes over HCI as PCM, which Bluedroid codes as CVSD
 # or wideband mSBC; the controller keeps one link for it.
 CONFIG_BT_HFP_ENABLE=y
 CONFIG_BT_HFP_CLIENT_ENABLE=y
-CONFIG_BT_HFP_AG_ENABLE=n
+CONFIG_BT_HFP_AG_ENABLE=y
 CONFIG_BT_HFP_AUDIO_DATA_PATH_HCI=y
 CONFIG_BTDM_CTRL_BR_EDR_SCO_DATA_PATH_HCI=y
 CONFIG_BTDM_CTRL_BR_EDR_MAX_SYNC_CONN=1
@@ -52,3 +53,5 @@ CONFIG_BT_HID_DEVICE_ENABLED=y
 # SDP records of our own: the Device ID record an HIDDevice gives a host so
 # it knows the product.
 CONFIG_BT_SDP_COMMON_ENABLED=y
+# Phone book access (PBAP client, over OBEX): contacts and call history.
+CONFIG_BT_PBAC_ENABLED=y
