@@ -158,6 +158,48 @@ int btc_radio_rssi(int *delta);
 int btc_radio_set_page_timeout(uint32_t ms);
 uint32_t btc_radio_page_timeout(void);
 
+// The smallest encryption key a link may use, in bytes (7 to 16): the
+// controller refuses to encrypt with a shorter one. 7 by default, the
+// controller's own. BTC_ERR_UNSUPPORTED where the controller has no command
+// for it.
+#define BTC_KEY_SIZE_MIN 7
+#define BTC_KEY_SIZE_MAX 16
+int btc_radio_set_min_key_size(int bytes);
+// After a set while the radio is on: 1 once the controller has accepted it,
+// 0 while it's on its way, or BTC_ERR_FAIL if it refused.
+int btc_radio_min_key_result(void);
+int btc_radio_min_key_size(void);
+
+// Two settings of one connected device's ACL link, each answered by the
+// controller. Both return BTC_ERR_STATE without a link to that device.
+// btc_radio_tune_result() then gives 1 with the value the controller reports,
+// 0 while it's on its way, or a negative BTC_ERR_* (BTC_ERR_FAIL: refused).
+//
+// The poll interval is the longest the master may go without sending to the
+// slave, in ms (BTC_POLL_MIN to BTC_POLL_MAX); shorter means lower latency
+// and more air time. The controller reports it back in slots of 0.625 ms,
+// which this converts to ms (rounded).
+#define BTC_POLL_MIN 4
+#define BTC_POLL_MAX 2560
+int btc_radio_set_poll(const uint8_t *addr, uint32_t ms);
+// The packet types the link may use, as BTC_PKT_* bits. DM1 is always
+// allowed: Bluetooth needs it for control traffic.
+#define BTC_PKT_DM1   (1 << 0)
+#define BTC_PKT_DH1   (1 << 1)
+#define BTC_PKT_DM3   (1 << 2)
+#define BTC_PKT_DH3   (1 << 3)
+#define BTC_PKT_DM5   (1 << 4)
+#define BTC_PKT_DH5   (1 << 5)
+#define BTC_PKT_2DH1  (1 << 6)
+#define BTC_PKT_3DH1  (1 << 7)
+#define BTC_PKT_2DH3  (1 << 8)
+#define BTC_PKT_3DH3  (1 << 9)
+#define BTC_PKT_2DH5  (1 << 10)
+#define BTC_PKT_3DH5  (1 << 11)
+#define BTC_PKT_ALL   0xfff
+int btc_radio_set_packet_types(const uint8_t *addr, uint32_t types);
+int btc_radio_tune_result(uint32_t *value);
+
 // The channels the board may hop on, as 79 bits, channel 0 in bit 0 of the
 // first byte; at least 20 must be set. All of them by default.
 #define BTC_CHANNEL_MAP_LEN 10

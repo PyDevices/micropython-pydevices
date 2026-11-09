@@ -46,7 +46,7 @@ per profile that takes it.
 
 | Object | What it does |
 |---|---|
-| `Bluetooth()` | The radio. `active()` turns it on and off; `config()` reads and sets `name`, `discoverable`, `connectable`, `pin`, `mac`, the channels it hops on and what a search sees; `paired()` and `unpair()` manage pairings; `inquiry()` finds devices, `services()` asks one what it offers, and `rssi()` reads a link's signal. |
+| `Bluetooth()` | The radio. `active()` turns it on and off; `config()` reads and sets `name`, `discoverable`, `connectable`, `pin`, `mac`, the channels it hops on, the shortest encryption key it accepts and what a search sees; `paired()` and `unpair()` manage pairings; `inquiry()` finds devices, `services()` asks one what it offers, `rssi()` reads a link's signal and `tune()` sets its packet types and poll interval. |
 | `AudioSink(bt)` | Receives audio (A2DP sink) and talks to the sender's player (AVRCP): `readinto()`, the track, `cover`, `position`, `play()`, `next()`, `seek()`, the `volume` shared with the sender's slider, and more. |
 | `HandsFree(bt)` | Follows a phone (HFP hands-free): `battery`, `signal`, `operator`, the `call` and its `caller`, `answer()`, `hangup()`, `dial()`, and the call's audio through its own `readinto()` and `write()`. |
 | `AudioSource(bt)` | Sends audio to headphones, a speaker or a car stereo (A2DP source) and acts as their remote's target (AVRCP): `write()`, the receiver's keys through `key()`, the `volume`, and the `track()` and `status` its display shows. `Bluetooth.inquiry()` and `found()` find the receiver. |
@@ -382,6 +382,19 @@ bt.config(channel_map=m)
 `config(page_timeout=3000)` makes `connect()` to a device that's away give
 up after 3 s rather than 5 to 15.
 
+Once a device is connected, `Bluetooth.tune(addr)` changes how its link is
+run. `packet_types` limits the packets the link may use, so a link in a noisy
+band can keep to short, error-corrected ones, and `poll_ms` sets the longest
+the master waits before sending to the slave. `tune` returns what the
+controller reports in force. `config(min_key_size=16)` makes the board refuse
+a link that would encrypt with a shorter key. These are ESP32 only.
+
+```python
+sink = btclassic.AudioSink(bt)
+# ... once sink.connected ...
+bt.tune(sink.peer, packet_types=btclassic.PKT_DH1 | btclassic.PKT_DM3, poll_ms=10)
+```
+
 A device searching with an inquiry gets the board's name. `eir_uuids=True`
 adds the services running, so it sees a speaker or a serial port before it
 connects, and `eir_manufacturer` and `eir_url` carry data of your own.
@@ -561,6 +574,7 @@ Each runs as it is with `mpftp run`; its docstring says what it needs.
 | [btclassic_settings.py](examples/btclassic_settings.py) | Sets the name, PIN and inquiry response, and lists pairings |
 | [btclassic_pairing.py](examples/btclassic_pairing.py) | Pairs with a number check, then echoes a serial link |
 | [btclassic_signal.py](examples/btclassic_signal.py) | Keeps off a Wi-Fi channel and prints a link's signal |
+| [btclassic_link_tuning.py](examples/btclassic_link_tuning.py) | Limits a link's packet types, sets its poll interval and minimum key size |
 | [btclassic_serial_echo.py](examples/btclassic_serial_echo.py) | A serial port that echoes in upper case |
 | [btclassic_serial_client.py](examples/btclassic_serial_client.py) | Calls another board's serial port and talks to it |
 | [btclassic_with_ble.py](examples/btclassic_with_ble.py) | A Classic serial port beside BLE advertising and scanning |

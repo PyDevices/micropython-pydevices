@@ -164,6 +164,36 @@ uint32_t btc_radio_page_timeout(void) {
     return 5120;
 }
 
+int btc_radio_set_min_key_size(int bytes) {
+    (void)bytes;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_min_key_result(void) {
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_min_key_size(void) {
+    return BTC_KEY_SIZE_MIN;
+}
+
+int btc_radio_set_poll(const uint8_t *addr, uint32_t ms) {
+    (void)addr;
+    (void)ms;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_set_packet_types(const uint8_t *addr, uint32_t types) {
+    (void)addr;
+    (void)types;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_tune_result(uint32_t *value) {
+    *value = 0;
+    return BTC_ERR_UNSUPPORTED;
+}
+
 int btc_radio_set_channels(const uint8_t *map) {
     (void)map;
     return BTC_ERR_UNSUPPORTED;

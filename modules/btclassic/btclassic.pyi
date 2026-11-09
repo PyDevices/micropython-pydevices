@@ -95,6 +95,33 @@ IO_KEYBOARD_ONLY: int
 """`config(io=...)`: the board can take a number typed, and show none."""
 IO_NONE: int
 """`config(io=...)`: neither, so pairing is "just works". The default."""
+PKT_DM1: int
+"""`Bluetooth.tune` packet type: 1-slot, forward-error-corrected. Always
+allowed, whether it is in the set or not."""
+PKT_DH1: int
+"""`Bluetooth.tune` packet type: 1-slot."""
+PKT_DM3: int
+"""`Bluetooth.tune` packet type: 3-slot, error-corrected."""
+PKT_DH3: int
+"""`Bluetooth.tune` packet type: 3-slot."""
+PKT_DM5: int
+"""`Bluetooth.tune` packet type: 5-slot, error-corrected."""
+PKT_DH5: int
+"""`Bluetooth.tune` packet type: 5-slot, the longest basic-rate packet."""
+PKT_2DH1: int
+"""`Bluetooth.tune` packet type: 1-slot at 2 Mbit/s."""
+PKT_3DH1: int
+"""`Bluetooth.tune` packet type: 1-slot at 3 Mbit/s."""
+PKT_2DH3: int
+"""`Bluetooth.tune` packet type: 3-slot at 2 Mbit/s."""
+PKT_3DH3: int
+"""`Bluetooth.tune` packet type: 3-slot at 3 Mbit/s."""
+PKT_2DH5: int
+"""`Bluetooth.tune` packet type: 5-slot at 2 Mbit/s."""
+PKT_3DH5: int
+"""`Bluetooth.tune` packet type: 5-slot at 3 Mbit/s."""
+PKT_ALL: int
+"""`Bluetooth.tune` packet types: every one, which is how a link starts."""
 PASSKEY_INPUT: int
 """`Bluetooth.passkey` action: type the passkey the other device shows."""
 PASSKEY_DISPLAY: int
@@ -220,6 +247,11 @@ class Bluetooth:
           channel 78 (2480 MHz). At least 20 must be set; all 79 are by
           default. Clear the channels a Wi-Fi network sits on to keep out of
           its way.
+        - min_key_size (int): the shortest encryption key, in bytes, 7 to
+          16, the board lets a link use. 7 by default, the controller's own.
+          Raise it to refuse a device that encrypts with a weak key. Waits
+          for the controller to accept it, and raises OSError if it refuses.
+          ESP32 only.
         - eir_uuids (bool): list the services running in the board's
           inquiry response, so a device searching sees what it offers before
           connecting. Off by default: the response has the name alone.
@@ -278,6 +310,33 @@ class Bluetooth:
 
         Raises:
             OSError: no link to that device is up.
+        """
+    def tune(self, addr: bytes, *, poll_ms: int | None = None, packet_types: int | None = None) -> dict[str, int]:
+        """Set how one connected device's link is run, and say what the
+        controller reports back for each setting given. A link starts with
+        every packet type allowed and a poll interval the two devices agree.
+        Waits up to two seconds for each answer. ESP32 only.
+
+        Args:
+            addr: the device's address.
+            poll_ms: the longest the master may go without sending to the
+                slave, 4 to 2560 ms. A shorter one keeps a keyboard or a
+                game pad responsive and costs air time; a longer one saves
+                power. Either end of the link can ask.
+            packet_types: the packet types the link may use, `PKT_` bits
+                added together: `PKT_DH1 | PKT_DH3` keeps to 1- and 3-slot
+                packets. Short, error-corrected ones (`PKT_DM1`, `PKT_DM3`)
+                ride out interference; the long 3 Mbit/s ones carry the most.
+                `PKT_DM1` is allowed whether it is listed or not.
+
+        Returns:
+            A dict with `"poll_ms"` and `"packet_types"` for the settings
+            given: the values the controller reports in force.
+
+        Raises:
+            OSError: no link to that device is up, the controller refused,
+                or this firmware doesn't have the command.
+            ValueError: a value out of range.
         """
     def services(self, addr: bytes, *, timeout_ms: int = 20000) -> list[int | bytes]:
         """The services a device offers, read from its SDP server: each
