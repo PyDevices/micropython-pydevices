@@ -21,7 +21,8 @@ Run it:
 Pair your phone with the board's hostname and call it. The caller hears
 the tone.
 
-Tested on:
+Tested on: Adafruit QT Py ESP32 Pico, MicroPython 1.30.0-preview with
+btclassic, called by an ESP32 Audio Kit running btclassic_audio_gateway.py.
 """
 
 import math

@@ -19,7 +19,8 @@ Run it:
 
 Pair your phone with the board's hostname, then have someone call you.
 
-Tested on:
+Tested on: Adafruit QT Py ESP32 Pico, MicroPython 1.30.0-preview with
+btclassic, called by an ESP32 Audio Kit running btclassic_audio_gateway.py.
 """
 
 import time
