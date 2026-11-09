@@ -337,6 +337,35 @@ class Bluetooth:
             OSError: no link to that device is up, the controller refused,
                 or this firmware doesn't have the command.
             ValueError: a value out of range.
+    def sniff(self, addr: bytes, enable: bool = True, *, min_ms: int = 250, max_ms: int = 500,
+        attempt: int = 4, timeout: int = 1) -> int:
+        """Put a connected device's idle link into sniff mode, where it wakes
+        only every `min_ms` to `max_ms`, or with `enable` False wake it
+        again. `attempt` and `timeout` are baseband slots (0.625 ms) spent
+        listening at each wake-up. Returns the interval the link now wakes
+        at, in ms, or 0 when it's active. Waits up to 3 s, and up to 8 s to
+        wake a link that is subrating. Pico W only.
+
+        Raises:
+            OSError: no link to that device is up, the controller or the
+                other side refused, or the board can't ask (ESP32).
+        """
+    def subrate(self, addr: bytes, *, max_latency_ms: int = 2000, remote_timeout_ms: int = 0,
+        local_timeout_ms: int = 0) -> int:
+        """Let a sniffing link skip wake-ups while it's quiet, up to
+        `max_latency_ms`. Returns the latency the two sides agreed on, in
+        ms. Pico W only.
+
+        Raises:
+            OSError: no link, or the other side doesn't do subrating.
+        """
+    def link_mode(self, addr: bytes) -> tuple[str, int]:
+        """A connected device's link mode, "active", "hold" or "sniff", and
+        the sniff interval in ms (0 when it isn't sniffing). Either side
+        can start sniff, so this tells you where a link stands.
+
+        Raises:
+            OSError: no link to that device is up (Pico W).
         """
     def services(self, addr: bytes, *, timeout_ms: int = 20000) -> list[int | bytes]:
         """The services a device offers, read from its SDP server: each

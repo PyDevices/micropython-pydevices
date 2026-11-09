@@ -47,6 +47,7 @@ per profile that takes it.
 | Object | What it does |
 |---|---|
 | `Bluetooth()` | The radio. `active()` turns it on and off; `config()` reads and sets `name`, `discoverable`, `connectable`, `pin`, `mac`, the channels it hops on, the shortest encryption key it accepts and what a search sees; `paired()` and `unpair()` manage pairings; `inquiry()` finds devices, `services()` asks one what it offers, `rssi()` reads a link's signal and `tune()` sets its packet types and poll interval. |
+| `Bluetooth()` | The radio. `active()` turns it on and off; `config()` reads and sets `name`, `discoverable`, `connectable`, `pin`, `mac`, the channels it hops on and what a search sees; `paired()` and `unpair()` manage pairings; `inquiry()` finds devices, `services()` asks one what it offers, `rssi()` reads a link's signal, and `sniff()` puts an idle link to sleep on the Pico W. |
 | `AudioSink(bt)` | Receives audio (A2DP sink) and talks to the sender's player (AVRCP): `readinto()`, the track, `cover`, `position`, `play()`, `next()`, `seek()`, the `volume` shared with the sender's slider, and more. |
 | `HandsFree(bt)` | Follows a phone (HFP hands-free): `battery`, `signal`, `operator`, the `call` and its `caller`, `answer()`, `hangup()`, `dial()`, and the call's audio through its own `readinto()` and `write()`. |
 | `AudioSource(bt)` | Sends audio to headphones, a speaker or a car stereo (A2DP source) and acts as their remote's target (AVRCP): `write()`, the receiver's keys through `key()`, the `volume`, and the `track()` and `status` its display shows. `Bluetooth.inquiry()` and `found()` find the receiver. |
@@ -351,6 +352,30 @@ leaves it in the phone's drafts instead.
 A moment after `notify()`, the phone connects back to deliver its reports,
 and `notify_connected` turns True. If it stays False, poll
 `list("inbox", unread=True)` instead.
+
+## Sniff mode
+
+A link that has nothing to say can sleep and wake every so often, which
+saves the radio's power. On the Pico W, `Bluetooth.sniff(addr)` asks for it
+and returns the interval the link now wakes at, in ms; `sniff(addr, False)`
+wakes it again and returns 0:
+
+```python
+import btclassic
+
+bt = btclassic.Bluetooth()
+source = btclassic.AudioSource(bt)
+# ... once source.connected ...
+print(bt.sniff(source.peer, min_ms=250, max_ms=500))   # 498
+print(bt.link_mode(source.peer))                       # ("sniff", 498)
+bt.sniff(source.peer, False)
+```
+
+`subrate(addr, max_latency_ms=...)` lets a sniffing link skip wake-ups while
+it stays quiet, if the other side allows it. Either side can start sniff, so
+`link_mode(addr)` tells you where a link stands, on any board. Only the Pico
+W can ask: on the ESP32, Bluedroid decides when a link sniffs and has no call
+to request it, so `sniff()` and `subrate()` raise OSError there.
 
 ## Signal, channels and what a search sees
 

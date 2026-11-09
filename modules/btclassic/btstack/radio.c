@@ -446,6 +446,35 @@ static void found_name(const uint8_t *packet) {
 // have done already. So it's sent once the radio is on, when HCI is free.
 static bool inquiry_mode_pending;
 
+// Whether the controller does sniff subrating: asked once the radio is on.
+// A controller that doesn't may not answer the command at all, and an
+// unanswered command holds up every one behind it.
+static bool features_pending;
+static bool subrating_ok;
+
+// Sniff subrating goes out by hand: BTstack's gap_sniff_subrating_configure()
+// keeps a link's request armed after it sends it, so the command repeats
+// without end and holds up the ones behind it.
+static bool subrate_pending;
+static uint16_t subrate_args[3];
+static hci_con_handle_t subrate_handle = HCI_CON_HANDLE_INVALID;
+static int subrate_state = BTC_ERR_STATE;   // 0 waiting, 1 answered, BTC_ERR_*
+static uint32_t subrate_latency_ms;
+
+static void send_subrate(void) {
+    if (subrate_pending && hci_can_send_command_packet_now()) {
+        subrate_pending = false;
+        hci_send_cmd(&hci_sniff_subrating, subrate_handle, subrate_args[0], subrate_args[1], subrate_args[2]);
+    }
+}
+
+static void send_features(void) {
+    if (features_pending && hci_can_send_command_packet_now()) {
+        features_pending = false;
+        hci_send_cmd(&hci_read_local_supported_features);
+    }
+}
+
 static void send_inquiry_mode(void) {
     if (inquiry_mode_pending && hci_can_send_command_packet_now()) {
         inquiry_mode_pending = false;
@@ -463,6 +492,46 @@ static uint8_t eir_data[240];               // BTstack reads it from here
 static hci_con_handle_t rssi_handle = HCI_CON_HANDLE_INVALID;
 static int rssi_state = BTC_ERR_STATE;      // 0 waiting, 1 answered, BTC_ERR_*
 static int rssi_delta;
+
+// Sniff mode: the mode each link is in, from the controller's mode change
+// events (the other side can start it too), and the answer to our request.
+#define SNIFF_LINKS 4
+static struct {
+    bool used;
+    hci_con_handle_t handle;
+    uint8_t mode;               // BTC_LINK_*
+    uint32_t interval_ms;
+} link_modes[SNIFF_LINKS];
+static hci_con_handle_t sniff_handle = HCI_CON_HANDLE_INVALID;
+static int sniff_state = BTC_ERR_STATE;     // 0 waiting, 1 answered, BTC_ERR_*
+static int sniff_status;                    // the controller's error code
+static void link_mode_set(hci_con_handle_t handle, uint8_t mode, uint32_t interval_ms) {
+    int free_at = -1;
+    for (int i = 0; i < SNIFF_LINKS; i++) {
+        if (link_modes[i].used && link_modes[i].handle == handle) {
+            free_at = i;
+            break;
+        }
+        if (free_at < 0 && !link_modes[i].used) {
+            free_at = i;
+        }
+    }
+    if (free_at < 0) {
+        return;
+    }
+    if (mode == BTC_LINK_ACTIVE) {
+        link_modes[free_at].used = false;
+        return;
+    }
+    link_modes[free_at].used = true;
+    link_modes[free_at].handle = handle;
+    link_modes[free_at].mode = mode;
+    link_modes[free_at].interval_ms = interval_ms;
+}
+
+static void link_mode_forget(hci_con_handle_t handle) {
+    link_mode_set(handle, BTC_LINK_ACTIVE, 0);
+}
 
 // Set AFH Host Channel Classification, which BTstack has no command for.
 static void send_channels(void) {
@@ -540,6 +609,10 @@ static void apply_eir(void) {
     gap_set_extended_inquiry_response(eir_data);
 }
 
+
+static uint16_t ms_to_slots(uint32_t ms);
+static hci_connection_t *link_for(const uint8_t *addr);
+
 static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
     (void)channel;
     (void)size;
@@ -547,6 +620,8 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
         return;
     }
     send_inquiry_mode();
+    send_features();
+    send_subrate();
     send_channels();
     bd_addr_t addr;
     switch (hci_event_packet_get_type(packet)) {
@@ -561,7 +636,56 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
                 hci_event_connection_complete_get_status(packet),
                 hci_event_connection_complete_get_connection_handle(packet));
             break;
+        case HCI_EVENT_COMMAND_COMPLETE:
+            if (hci_event_command_complete_get_command_opcode(packet) == hci_sniff_subrating.opcode
+                && subrate_state == 0 && packet[5] != ERROR_CODE_SUCCESS) {
+                subrate_state = BTC_ERR_FAIL;
+            }
+            if (hci_event_command_complete_get_command_opcode(packet) == hci_read_local_supported_features.opcode
+                && packet[5] == ERROR_CODE_SUCCESS) {
+                subrating_ok = (packet[6 + 5] & 0x02) != 0;      // LMP features, byte 5 bit 1
+                btc_log("controller sniff subrating: %d", subrating_ok);
+            }
+            break;
+        case HCI_EVENT_MODE_CHANGE: {
+            hci_con_handle_t h = hci_event_mode_change_get_handle(packet);
+            uint8_t status = hci_event_mode_change_get_status(packet);
+            uint8_t mode = hci_event_mode_change_get_mode(packet);
+            uint32_t ms = hci_event_mode_change_get_interval(packet) * 5 / 8;
+            btc_log("mode change handle %u status 0x%02x mode %u interval %u ms", h, status, mode, (unsigned)ms);
+            if (status == ERROR_CODE_SUCCESS) {
+                link_mode_set(h, mode, ms);
+            }
+            if (sniff_state == 0 && h == sniff_handle) {
+                sniff_status = status;
+                sniff_state = status == ERROR_CODE_SUCCESS ? 1 : BTC_ERR_FAIL;
+            }
+            break;
+        }
+        case HCI_EVENT_COMMAND_STATUS: {
+            uint16_t op = hci_event_command_status_get_command_opcode(packet);
+            uint8_t status = hci_event_command_status_get_status(packet);
+            if (status != ERROR_CODE_SUCCESS) {
+                if (sniff_state == 0 && (op == hci_sniff_mode.opcode || op == hci_exit_sniff_mode.opcode)) {
+                    sniff_status = status;
+                    sniff_state = BTC_ERR_FAIL;
+                } else if (subrate_state == 0 && op == hci_sniff_subrating.opcode) {
+                    subrate_state = BTC_ERR_FAIL;
+                }
+            }
+            break;
+        }
+        case HCI_EVENT_SNIFF_SUBRATING: {
+            // status, handle, max transmit latency, max receive latency,
+            // min remote timeout, min local timeout (slots of 0.625 ms)
+            if (subrate_state == 0 && little_endian_read_16(packet, 3) == subrate_handle) {
+                subrate_latency_ms = little_endian_read_16(packet, 5) * 5 / 8;
+                subrate_state = packet[2] == ERROR_CODE_SUCCESS ? 1 : BTC_ERR_FAIL;
+            }
+            break;
+        }
         case HCI_EVENT_DISCONNECTION_COMPLETE:
+            link_mode_forget(hci_event_disconnection_complete_get_connection_handle(packet));
             btc_log("disconnected handle %u reason 0x%02x",
                 hci_event_disconnection_complete_get_connection_handle(packet),
                 hci_event_disconnection_complete_get_reason(packet));
@@ -697,6 +821,8 @@ int btc_radio_start(void) {
     hci_set_inquiry_mode(INQUIRY_MODE_RSSI_AND_EIR);
     inquiry_mode_pending = true;
     send_inquiry_mode();
+    features_pending = true;
+    send_features();
     gap_ssp_set_enable(1);
     apply_io();
     gap_set_bondable_mode(1);
@@ -1139,6 +1265,93 @@ int btc_radio_set_packet_types(const uint8_t *addr, uint32_t types) {
 int btc_radio_tune_result(uint32_t *value) {
     *value = 0;
     return BTC_ERR_UNSUPPORTED;
+}
+
+// ---- sniff mode ----
+
+static uint16_t ms_to_slots(uint32_t ms) {
+    uint32_t slots = (ms * 8 + 4) / 5 & ~1u;        // 0.625 ms each, even
+    return slots < 2 ? 2 : slots > 0xfffe ? 0xfffe : (uint16_t)slots;
+}
+
+static hci_connection_t *link_for(const uint8_t *addr) {
+    bd_addr_t a;
+    memcpy(a, addr, 6);
+    return hci_connection_for_bd_addr_and_type(a, BD_ADDR_TYPE_ACL);
+}
+
+int btc_radio_sniff(const uint8_t *addr, bool enable, uint32_t min_ms, uint32_t max_ms,
+    uint16_t attempt, uint16_t timeout) {
+    if (!btc_radio_active()) {
+        return BTC_ERR_STATE;
+    }
+    hci_connection_t *c = link_for(addr);
+    if (c == NULL) {
+        return BTC_ERR_STATE;
+    }
+    if (enable && (min_ms > max_ms || attempt < 1 || attempt > 0x7fff || timeout > 0x7fff)) {
+        return BTC_ERR_ARG;
+    }
+    sniff_handle = c->con_handle;
+    sniff_state = 0;
+    uint8_t err = enable
+        ? gap_sniff_mode_enter(sniff_handle, ms_to_slots(min_ms), ms_to_slots(max_ms), attempt, timeout)
+        : gap_sniff_mode_exit(sniff_handle);
+    if (err != ERROR_CODE_SUCCESS) {
+        sniff_state = BTC_ERR_FAIL;
+        return BTC_ERR_FAIL;
+    }
+    return BTC_OK;
+}
+
+int btc_radio_sniff_state(int *status) {
+    *status = sniff_status;
+    return sniff_state;
+}
+
+int btc_radio_link_mode(const uint8_t *addr, uint32_t *interval_ms) {
+    *interval_ms = 0;
+    if (!btc_radio_active()) {
+        return BTC_ERR_STATE;
+    }
+    hci_connection_t *c = link_for(addr);
+    if (c == NULL) {
+        return BTC_ERR_STATE;
+    }
+    for (int i = 0; i < SNIFF_LINKS; i++) {
+        if (link_modes[i].used && link_modes[i].handle == c->con_handle) {
+            *interval_ms = link_modes[i].interval_ms;
+            return link_modes[i].mode;
+        }
+    }
+    return BTC_LINK_ACTIVE;
+}
+
+int btc_radio_sniff_subrating(const uint8_t *addr, uint32_t max_latency_ms,
+    uint32_t remote_timeout_ms, uint32_t local_timeout_ms) {
+    if (!btc_radio_active()) {
+        return BTC_ERR_STATE;
+    }
+    if (!subrating_ok) {
+        return BTC_ERR_UNSUPPORTED;
+    }
+    hci_connection_t *c = link_for(addr);
+    if (c == NULL) {
+        return BTC_ERR_STATE;
+    }
+    subrate_handle = c->con_handle;
+    subrate_state = 0;
+    subrate_args[0] = ms_to_slots(max_latency_ms);
+    subrate_args[1] = ms_to_slots(remote_timeout_ms);
+    subrate_args[2] = ms_to_slots(local_timeout_ms);
+    subrate_pending = true;
+    send_subrate();
+    return BTC_OK;
+}
+
+int btc_radio_sniff_subrating_state(uint32_t *latency_ms) {
+    *latency_ms = subrate_latency_ms;
+    return subrate_state;
 }
 
 int btc_radio_set_page_timeout(uint32_t ms) {
