@@ -22,6 +22,7 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_tether.c
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_push.c
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_l2cap.c
+        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_service.c
         ${CMAKE_CURRENT_LIST_DIR}/src/modbluetooth_bluedroid.c
         ${BTCLASSIC_IDF}/radio.c
         ${BTCLASSIC_IDF}/a2dp_sink.c
@@ -38,7 +39,8 @@ if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
         ${BTCLASSIC_IDF}/hfp_ag.c
         ${BTCLASSIC_IDF}/map.c
         ${BTCLASSIC_IDF}/opp.c
-        ${BTCLASSIC_IDF}/sdp_shared.c)
+        ${BTCLASSIC_IDF}/sdp_shared.c
+        ${BTCLASSIC_IDF}/service.c)
     target_include_directories(usermod_btclassic INTERFACE ${BTCLASSIC_IDF}/include ${BTCLASSIC_IDF})
     # The source's track metadata for a remote, through link-time hooks into
     # Bluedroid (avrcp_tg.c); off where they aren't known to fit.
@@ -106,7 +108,8 @@ elseif(MICROPY_BLUETOOTH_BTSTACK)
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_library.c
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_tether.c
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_push.c
-        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_l2cap.c)
+        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_l2cap.c
+        ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_service.c)
     # Through MICROPY_DEF_BOARD, so the qstr scan sees the HID and phone book
     # entries too.
     list(APPEND MICROPY_DEF_BOARD BTC_HAS_HID=1 BTC_HAS_PHONEBOOK=1 BTC_HAS_LIBRARY=1 BTC_HAS_TETHER=1

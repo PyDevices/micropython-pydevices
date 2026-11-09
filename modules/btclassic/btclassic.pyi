@@ -982,6 +982,49 @@ class L2CAP:
     def __exit__(self, *args: object) -> None:
         """`deinit`."""
 
+class Service:
+    """An SDP record of your own, so a `Serial` port or an `L2CAP` channel
+    shows up under a UUID and a name you choose.
+
+    A device that searches a board's services, as `Bluetooth.services` does,
+    lists what the board's profiles offer. A `Serial` port is listed as
+    the standard serial port, 0x1101, under the name given to `Serial`.
+    A `Service` adds a record beside that one, for a program that wants to be
+    found by a UUID of its own: a phone app or a computer asks for it, then
+    connects to the channel the record names. The record is dropped by
+    `deinit`, and when the radio turns off. Up to four at once. ESP32 only.
+
+    A record with a `channel` lists RFCOMM as its protocol, which is what
+    computers and phones look for. One with only a `psm` carries the PSM in
+    the record's "GOEP L2CAP PSM" attribute, 0x0200, and lists no RFCOMM
+    channel, so a computer's serial port lookup skips it.
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+        uuid: what the service is: an int for a 16- or 32-bit UUID, or 16
+            bytes, most significant first, for a 128-bit one. Make your own
+            128-bit UUID rather than borrowing an assigned one.
+        name: the service name devices list, 1 to 31 bytes.
+        channel: the RFCOMM channel to point at, 1 to 30: a `Serial`
+            port's `channel`.
+        psm: the L2CAP PSM to point at: an `L2CAP` channel's `psm`.
+
+    Raises:
+        OSError: the stack couldn't make the record, there are four already,
+            or this firmware doesn't have it.
+        ValueError: neither `channel` nor `psm`, or a value out of range.
+    """
+
+    active: bool
+    """The record is being served."""
+
+    def __init__(self, bt: Bluetooth, uuid: int | bytes, name: str, *, channel: int | None = None, psm: int | None = None) -> None: ...
+    def deinit(self) -> None:
+        """Remove the record. The channel it pointed at stays up."""
+    def __enter__(self) -> Service: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
+
 class Library:
     """The media library of the phone `AudioSink` plays from (AVRCP
     browsing): its players, a player's folders and tracks, its queue and a

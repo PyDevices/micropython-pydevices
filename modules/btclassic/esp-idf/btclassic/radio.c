@@ -631,6 +631,7 @@ void btc_radio_stop(void) {
     if (!r.on) {
         return;
     }
+    btc_service_stop();
     btc_msg_stop();
     btc_opp_stop();
     btc_pb_stop();
