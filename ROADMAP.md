@@ -68,7 +68,7 @@ Bluetooth Classic:
 - **btclassic on the ESP32-S31.** The S31 has Bluetooth Classic too, and
   btclassic's C already builds for it on ESP-IDF 6.1; the module follows once
   MicroPython builds for the chip.
-- **The phone book and the phone side of hands-free on the Pico W.** Call
+- **The phone side of hands-free on the Pico W.** Call
   audio there waits on the CYW43439's firmware, which never brings the call's
   audio link up.
 - **Link quality.** Signal strength for any connected device, the channels
@@ -81,6 +81,9 @@ Bluetooth Classic:
 - **Several devices at once:** a keyboard beside the phone, or two phones.
 - **btclassic alongside Wi-Fi.** Today Wi-Fi has to be off while it plays.
 - **Sending a file or contact card** (OBEX Object Push).
+- **More profiles on the Pico W.** Its Bluetooth stack has more to offer:
+  internet through a phone without Wi-Fi (PAN) and browsing a phone's music
+  library (AVRCP browsing).
 
 Every module, the same kit:
 

@@ -47,12 +47,23 @@ void btc_av_source_init_once(void) {
     }
 }
 
+// GOEP, under cover art and the phone book: its init resets the one
+// connection the phone book uses, so it runs once while the radio is on.
+static bool goep_up;
+
+void btc_goep_init_once(void) {
+    if (!goep_up) {
+        goep_client_init();
+        goep_up = true;
+    }
+}
+
 void btc_av_avrcp_use(const btc_av_handlers_t *handlers) {
     if (!avrcp_up) {
         avrcp_init();
         avrcp_controller_init();
         avrcp_target_init();
-        goep_client_init();
+        btc_goep_init_once();
         avrcp_cover_art_client_init();
         avrcp_register_packet_handler(&on_avrcp);
         avrcp_controller_register_packet_handler(&on_avrcp_ct);
@@ -70,7 +81,10 @@ void btc_av_radio_lost(void) {
         avrcp_target_deinit();
         avrcp_controller_deinit();
         avrcp_deinit();
+    }
+    if (goep_up) {
         goep_client_deinit();
+        goep_up = false;
     }
     if (sink_up) {
         a2dp_sink_deinit();
