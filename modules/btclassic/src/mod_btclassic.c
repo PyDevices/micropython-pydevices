@@ -1390,11 +1390,14 @@ MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &hf_locals
     );
 
-// AudioSource and Serial, in mod_btclassic_source.c and
-// mod_btclassic_serial.c; the unix port's loopback backend has neither.
+// AudioSource, Serial and Library, in mod_btclassic_source.c,
+// mod_btclassic_serial.c and mod_btclassic_library.c; the unix port's
+// loopback backend has none of them. Library is on every radio backend,
+// raising where it can't browse.
 #if !BTC_HOST
 extern const mp_obj_type_t btc_source_type;
 extern const mp_obj_type_t btc_serial_type;
+extern const mp_obj_type_t btc_library_type;
 #endif
 
 // HIDDevice and HIDHost, in mod_btclassic_hid.c, where the backend has HID.
@@ -1405,8 +1408,10 @@ extern const mp_obj_type_t btc_hid_host_type;
 
 // PhoneBook, AudioGateway and Messages, in mod_btclassic_phone.c, where the
 // backend has them.
-#if BTC_HAS_PHONE
+#if BTC_HAS_PHONEBOOK
 extern const mp_obj_type_t btc_phonebook_type;
+#endif
+#if BTC_HAS_PHONE
 extern const mp_obj_type_t btc_gateway_type;
 extern const mp_obj_type_t btc_messages_type;
 #endif
@@ -1423,11 +1428,15 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     #if !BTC_HOST
     { MP_ROM_QSTR(MP_QSTR_AudioSource), MP_ROM_PTR(&btc_source_type) },
     { MP_ROM_QSTR(MP_QSTR_Serial), MP_ROM_PTR(&btc_serial_type) },
+    { MP_ROM_QSTR(MP_QSTR_Library), MP_ROM_PTR(&btc_library_type) },
+    { MP_ROM_QSTR(MP_QSTR_LIBRARY), MP_ROM_INT(BTC_CHANGED_LIBRARY) },
+    #endif
+    #if BTC_HAS_PHONEBOOK
+    { MP_ROM_QSTR(MP_QSTR_PhoneBook), MP_ROM_PTR(&btc_phonebook_type) },
+    { MP_ROM_QSTR(MP_QSTR_PHONEBOOK), MP_ROM_INT(BTC_CHANGED_PHONEBOOK) },
     #endif
     #if BTC_HAS_PHONE
-    { MP_ROM_QSTR(MP_QSTR_PhoneBook), MP_ROM_PTR(&btc_phonebook_type) },
     { MP_ROM_QSTR(MP_QSTR_AudioGateway), MP_ROM_PTR(&btc_gateway_type) },
-    { MP_ROM_QSTR(MP_QSTR_PHONEBOOK), MP_ROM_INT(BTC_CHANGED_PHONEBOOK) },
     { MP_ROM_QSTR(MP_QSTR_REQUEST), MP_ROM_INT(BTC_CHANGED_REQUEST) },
     { MP_ROM_QSTR(MP_QSTR_Messages), MP_ROM_PTR(&btc_messages_type) },
     { MP_ROM_QSTR(MP_QSTR_MESSAGES), MP_ROM_INT(BTC_CHANGED_MESSAGES) },

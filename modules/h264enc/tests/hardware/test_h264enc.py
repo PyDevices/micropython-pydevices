@@ -11,12 +11,22 @@ what the board can: every encode returns bytes, the first frame and every
 while this one is open raises OSError "busy" without disturbing it.
 check_h264_ffmpeg.py then has ffmpeg decode the file on the PC.
 
+Then the same frames through a pipelined Encoder: the first encode() returns
+b"", every later one the frame before, flush() the last; the access units
+match the plain Encoder's byte for byte up to the forced IDR; and the time a
+frame keeps its caller (wall_us) is printed beside the plain one's.
+
     run on the board with h264_frames.py beside it (mpftp probe; see the README),
     MicroPython or CircuitPython, with a /jt folder for the stream
 """
 
 import sys
 import time
+
+try:
+    from hashlib import sha256
+except ImportError:
+    sha256 = None
 
 import h264enc
 
@@ -54,6 +64,8 @@ def main():
     keys = []
     total = 0
     enc_us = 0
+    wall_us = 0
+    digests = []
     with open(OUT + "/h264enc.h264", "wb") as f:
         for k in range(N):
             frames.frame(bg, k, buf)
@@ -66,6 +78,8 @@ def main():
                 keys.append(k)
             total += len(au)
             enc_us += enc.stats()["enc_us"] + enc.stats()["ppa_us"]
+            wall_us += enc.stats()["wall_us"]
+            digests.append(sha256(au).digest() if sha256 else len(au))
             f.write(au)
     st = enc.stats()
     print("frames", st["frames"], "keyframes at", keys, "bytes", total,
@@ -85,7 +99,36 @@ def main():
     except ValueError:
         pass
     print("after close(): a new Encoder opens; the closed one refuses encode()")
+    pipelined(bg, buf, digests, wall_us // N)
     print("h264enc board test passed, %d frames, %.1f s" % (N, ticks_diff(ticks_ms(), t0) / 1000))
+
+
+def pipelined(bg, buf, digests, plain_wall_us):
+    # The same frames, pipelined, without the forced IDR: up to frame 44 the
+    # two streams must be the same bytes.
+    enc = h264enc.Encoder(frames.W, frames.H, 30, 30, 3_000_000, pipeline=True)
+    assert enc.pipeline
+    aus = []
+    wall_us = 0
+    for k in range(N):
+        frames.frame(bg, k, buf)
+        au = enc.encode(buf)
+        wall_us += enc.stats()["wall_us"]
+        if k == 0:
+            assert au == b"", "the first pipelined encode() returned %d bytes" % len(au)
+        else:
+            assert len(au) > 0 and au[:3] in (b"\x00\x00\x00", b"\x00\x00\x01"), au[:8]
+            aus.append(au)
+    aus.append(enc.flush())
+    assert enc.flush() == b"", "a second flush() returned bytes"
+    st = enc.stats()
+    assert len(aus) == N and st["frames"] == N and st["errors"] == 0, (len(aus), st)
+    for k in range(45):
+        got = sha256(aus[k]).digest() if sha256 else len(aus[k])
+        assert got == digests[k], "pipelined frame %d differs from the plain encode" % k
+    assert enc.close() == b""
+    print("pipelined: %d frames, the same bytes as the plain Encoder up to frame 44" % N)
+    print("mean wall per frame: plain %d us, pipelined %d us" % (plain_wall_us, wall_us // N))
 
 
 main()

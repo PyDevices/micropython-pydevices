@@ -103,6 +103,8 @@ MESSAGES: int
 """`Messages.changes` bit: a request finished, whether or not it worked."""
 NOTIFY: int
 """`Messages.changes` bit: the phone reported a change; read `event()`."""
+LIBRARY: int
+"""`Library.changes` bit: a request finished, whether or not it worked."""
 
 HID_KEYBOARD: int
 """`HIDDevice` subclass: a keyboard."""
@@ -785,6 +787,70 @@ class Serial:
     def __exit__(self, *args: object) -> None:
         """`deinit`."""
 
+class Library:
+    """The media library of the phone `AudioSink` plays from (AVRCP
+    browsing): its players, a player's folders and tracks, its queue and a
+    search, and a track to play.
+
+    Items are dicts. A folder has "uid", "name", "folder" (True) and
+    "playable"; a track has "uid", "name", "folder" (False), "video", and
+    "artist" and "album" when the phone sends them. A player has "id",
+    "name", "playing" and "browsable". Pass a uid to `enter` or `play`.
+
+    Only the Pico W has it. On the ESP32 the class is there, and making one
+    raises OSError: its Bluetooth stack can't browse.
+
+    Args:
+        bt: the radio, `Bluetooth()`. It is turned on if it's off.
+        max_bytes: the most one reply may take; a reply past it is cut, and
+            `truncated` says so.
+    """
+
+    connected: bool
+    """The browsing link to the phone is up."""
+    peer: bytes | None
+    """The phone's address, or None."""
+    depth: int | None
+    """Folders below the browsed player's root, or None before `browse`."""
+    truncated: bool
+    """The last reply outgrew `max_bytes`; ask for fewer items at a time."""
+
+    def __init__(self, bt: Bluetooth, *, max_bytes: int = 16384) -> None: ...
+    def connect(self, *, timeout: int = 10000) -> None:
+        """Open browsing to the phone `AudioSink` is connected to.
+
+        Raises:
+            OSError: no `AudioSink` link, or the phone refused.
+        """
+    def disconnect(self) -> None: ...
+    def players(self, *, timeout: int = 5000) -> list[dict]:
+        """The phone's media players: the apps it can play from."""
+    def browse(self, player: int, *, timeout: int = 5000) -> list[str]:
+        """Browse a player by its "id": returns the names of the folders
+        down to where it is. Some apps can be browsed only while they're
+        open on the phone."""
+    def items(self, offset: int = 0, count: int = 20, *, scope: str = "folder", timeout: int = 10000) -> list[dict]:
+        """A page of items. `scope` is "folder" (the current folder),
+        "search" (the last search's results) or "queue" (what's lined up
+        to play). Past the end, the list is empty."""
+    def enter(self, uid: bytes) -> None:
+        """Go into a folder."""
+    def up(self) -> None:
+        """Go up one folder."""
+    def search(self, text: str) -> None:
+        """Search the browsed player; read the results with
+        `items(scope="search")`."""
+    def play(self, uid: bytes, *, scope: str = "folder") -> None:
+        """Play an item, from the scope it was listed in."""
+    def changes(self) -> int:
+        """The bits (`CONNECTION`, `LIBRARY`) for what changed since the
+        last call, which clears them."""
+    def deinit(self) -> None:
+        """Drop the browsing link. The radio and the sink stay on."""
+    def __enter__(self) -> Library: ...
+    def __exit__(self, *args: object) -> None:
+        """`deinit`."""
+
 
 class HIDDevice:
     """The board as a Bluetooth keyboard, mouse or gamepad.
@@ -1052,7 +1118,8 @@ class PhoneBook:
     """The phone's PBAP feature bits."""
     new_missed: int | None
     """Missed calls the phone hasn't shown yet, from the last pull of a
-    call history, or None."""
+    call history, or None. Always None on the Pico W, whose Bluetooth
+    stack doesn't pass the count on."""
     truncated: bool
     """The last reply was longer than `max_bytes` and was cut."""
 
