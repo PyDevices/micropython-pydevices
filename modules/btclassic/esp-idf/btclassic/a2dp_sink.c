@@ -41,6 +41,8 @@ static volatile bool s_calling_back;
 static int s_tries;
 // The program dropped the sender itself: don't call it back.
 static volatile bool s_dropped;
+// Bluedroid has finished taking A2DP down (ESP_A2D_DEINIT_SUCCESS).
+static volatile bool s_deinit_done;
 
 #define CALL_BACK_TRIES 12
 #define CALL_BACK_US 6000000        // apart, longer than a page times out: 72 s in all
@@ -179,6 +181,8 @@ static void a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
         case ESP_A2D_PROF_STATE_EVT:
             if (param->a2d_prof_stat.init_state == ESP_A2D_INIT_SUCCESS && s.reconnect) {
                 reconnect_last_sender();
+            } else if (param->a2d_prof_stat.init_state == ESP_A2D_DEINIT_SUCCESS) {
+                s_deinit_done = true;
             }
             break;
         case ESP_A2D_CONNECTION_STATE_EVT: {
@@ -363,14 +367,24 @@ void btc_sink_stop(void) {
         esp_timer_delete(s_retry);
         s_retry = NULL;
     }
+    // Every A2DP and AVRCP link event runs through Bluedroid's A2DP state
+    // machine, which deinit frees: one still queued then reads freed memory
+    // and panics the board. So close both links first and let their events
+    // drain, then deinit and wait for Bluedroid to finish.
     if (s.connected) {
         btc_sink_disconnect();
-        for (int i = 0; i < 100 && s.connected; i++) {
+        for (int i = 0; i < 400 && (s.connected || s.avrc_connected); i++) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    s.started = false;
+    s_deinit_done = false;
+    if (esp_a2d_sink_deinit() == ESP_OK) {
+        for (int i = 0; i < 400 && !s_deinit_done; i++) {
             vTaskDelay(pdMS_TO_TICKS(10));
         }
     }
-    s.started = false;
-    esp_a2d_sink_deinit();
     btc_avrcp_stop();
     btc_radio_hold_hidden(false);
     btc_radio_profile(BTC_PROFILE_SINK, false, 0);
