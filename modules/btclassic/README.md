@@ -547,6 +547,11 @@ Each runs as it is with `mpftp run`; its docstring says what it needs.
 | [btclassic_cover_art.py](examples/btclassic_cover_art.py) | Saves the cover art of each track as a JPEG |
 | [btclassic_library.py](examples/btclassic_library.py) | Lists the music on a phone and plays a track (Pico W) |
 | [btclassic_speakerphone.py](examples/btclassic_speakerphone.py) | A speakerphone for your phone's calls |
+| [btclassic_phone_status.py](examples/btclassic_phone_status.py) | Follows a phone's signal, battery and calls, and answers them |
+| [btclassic_call_tone.py](examples/btclassic_call_tone.py) | Sends a tone into a call and measures the caller |
+| [btclassic_audio_gateway.py](examples/btclassic_audio_gateway.py) | Rings a headset as a phone does, and talks to it |
+| [btclassic_phonebook.py](examples/btclassic_phonebook.py) | Reads a phone's contacts and recent calls |
+| [btclassic_messages.py](examples/btclassic_messages.py) | Reads a phone's texts and hears about new ones |
 | [btclassic_source_tone.py](examples/btclassic_source_tone.py) | Plays a tone on Bluetooth headphones or a speaker |
 | [btclassic_transmitter.py](examples/btclassic_transmitter.py) | Sends the line in to headphones or a speaker |
 | [btclassic_scan.py](examples/btclassic_scan.py) | Lists the devices nearby and their inquiry responses |
