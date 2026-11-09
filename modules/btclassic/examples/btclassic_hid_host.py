@@ -17,7 +17,8 @@ Run it:
 
     mpftp run btclassic_hid_host.py
 
-Tested on:
+Tested on: ESP32 Audio Kit, MicroPython 1.30.0-preview with btclassic,
+reading an Adafruit QT Py ESP32 Pico running btclassic_hid_gamepad.py.
 """
 
 import time
@@ -49,7 +50,8 @@ if address is None:
                 break
     bt.inquiry(0)
 if address is None:
-    raise SystemExit("No device found.")
+    print("No device found.")
+    raise SystemExit
 
 # Connect. The device reconnects by itself after this, when it wakes.
 host.connect(address)
