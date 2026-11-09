@@ -629,6 +629,7 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
 static void sync_host(void) {
     if (active && !btc_btstack_host_active()) {
         btc_spp_radio_lost();
+        btc_l2cap_radio_lost();
         btc_hf_radio_lost();
         btc_sink_radio_lost();
         btc_source_radio_lost();
@@ -710,6 +711,7 @@ void btc_radio_stop(void) {
         return;
     }
     btc_spp_radio_stopping();
+    btc_l2cap_radio_stopping();
     btc_hf_radio_stopping();
     btc_sink_radio_stopping();
     btc_source_radio_stopping();
