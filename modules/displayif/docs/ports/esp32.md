@@ -8,6 +8,7 @@ ESP-IDF display interfaces for MicroPython `esp32` port / CircuitPython `espress
 |----------|---------------|-----|-------------------|
 | `mod_dotclockframebuffer.c` | `dotclockframebuffer.DotClockFramebuffer` | RGB LCD (`SOC_LCD_RGB_SUPPORTED`) | **FBDisplay** |
 | `mod_i80bus.c` | `i80bus.I80Bus` | S3 (`SOC_LCD_I80_SUPPORTED`) | bus driver |
+| `mod_spibus.c` | `spibus.SPIBus` | every ESP32 (`esp_lcd` SPI, DMA) | bus driver |
 | `mod_qspibus.c` | `qspibus.QSPIBus` | S3 (`esp_lcd` SPI `quad_mode`) | bus driver |
 | `mod_mipidsi.c` | `mipidsi.Bus` / `mipidsi.Display` | P4 (`SOC_MIPI_DSI_SUPPORTED`) | **FBDisplay** |
 | `rgbmatrix_pm.c` + common `rgbmatrix` | `rgbmatrix.RGBMatrix` | S3 (Protomatter + LCD_CAM) | **FBDisplay** |
@@ -22,6 +23,112 @@ wires `read` into FlexIO `RDPinIndex`.
 On SoCs without the matching peripheral, modules import but constructors raise `NotImplementedError`.
 
 Pin arguments accept `machine.Pin` objects, integers, or port pin-name strings (via `displayif_pin_resolve`).
+
+### `spibus.SPIBus` (DMA)
+
+On ESP32 targets `spibus.SPIBus` is built on ESP-IDF's `esp_lcd` SPI panel IO
+and sends pixel data by DMA. The constructor takes the same keywords as the
+common bus, so a board config written for any port runs unchanged:
+
+```python
+spibus.SPIBus(
+    *, id=2, baudrate=24_000_000, polarity=0, phase=0, bits=8,
+    lsb_first=False, soft=False, sck=-1, mosi=-1, miso=-1,
+    command=-1, chip_select=-1, reset=-1, dma=None,
+)
+```
+
+`send(command, data)` puts the same bytes on the wire as the blocking bus: the
+command byte with D/C low, then the data with D/C high, chip select held across
+both, most significant bit first unless `lsb_first`. Reset is pulsed on
+construct and by `reset()`, as before. What changes is when `send()` returns:
+
+| Data | What `send()` does |
+|------|--------------------|
+| None, or up to 64 bytes | Waits for any transfer still going, then sends at once and returns when it's out |
+| More than 64 bytes | Waits for any transfer still going, copies the data into the bus's DMA buffer, queues it and returns. The panel keeps receiving while your program runs |
+| More than the DMA buffer holds | Streams through the buffer a chunk at a time, and returns once the last chunk is queued |
+
+The DMA buffer is internal RAM: 128 KB on the ESP32-P4, which holds a
+240x240 RGB565 frame (115,200 bytes) whole, and 32 KB on other chips. It is
+halved while internal RAM is short. The constructor prints the size it got.
+Data that fits goes as one transfer with chip select held. Larger data goes in
+16 KB chunks, and chip select is released between them; ST7789 and ILI9341
+panels resume the pixel write when it's asserted again.
+
+Your buffer is yours again as soon as `send()` returns, so you can draw the
+next frame into it straight away. Three methods report on the transfer:
+
+| Method | Returns |
+|--------|---------|
+| `busy()` | True while a queued transfer is still going |
+| `wait()` | None, once every queued transfer is done. Raises `OSError(ETIMEDOUT)` after a second without progress |
+| `register_callback(fn)` | Calls `fn()` after every `send()` that carried data, when your buffer is free. `None` removes it |
+
+LVGL needs nothing new. `display_driver` marks a flush ready when
+`blit_rect()` returns, which is when the bus has its own copy, and LVGL renders
+the next area while the DMA sends this one. The next flush's window command
+waits for the transfer ahead of it. `DisplayDriver(..., blocking=False)` works
+too: it registers `flush_ready` with `register_callback`, which the bus calls
+at the same moment. A callback scheduled from the transfer-done interrupt was
+the other choice, and it would hang LVGL: LVGL waits for a flush in a C loop
+that never lets a scheduled Python callback run.
+
+The bus uses the blocking `machine.SPI` bus instead, with the same methods
+(`busy()` is always False and `wait()` returns at once), when:
+
+- `soft=True`, there's no `command` pin (9-bit mode), or `bits` isn't 8;
+- `sck` or `mosi` isn't given;
+- `miso` is given, because a display bus with MISO is usually shared through
+  `machine.SPI` with a touch controller or an SD card, and `machine.SPI` can't
+  share a host that `esp_lcd` owns;
+- `machine.SPI` already holds the host, or internal RAM can't hold the buffer.
+
+`dma=True` asks for DMA whatever `miso` says, and raises if it can't have it;
+`dma=False` keeps the blocking bus. `dma=<bytes>` asks for DMA with a buffer no
+bigger than that (16 KB chunks, a power of two, at least 32 KB): a board that
+needs its internal RAM for something else, such as a 1080p H.264 encoder's
+155 KB on the ESP32-P4, asks for `dma=32768` and gives up nothing but how much
+of a frame is queued at once. While waiting for a transfer the bus
+releases the GIL, so other threads run. `deinit()`, `__del__` and a soft reset
+wait for queued transfers (up to a second), then free the panel IO, the SPI
+host and the buffers.
+
+#### Measuring it
+
+Frames per second of a full-panel `blit_rect` loop, and how long each call
+holds your program, with no other work and with 30 ms of work per frame. Run
+it once on firmware with the blocking bus and once with this one. With
+`display_drv` from the board config:
+
+```python
+import time
+from board_config import display_drv as d
+
+buf = memoryview(bytearray(d.width * d.height * 2))
+w = getattr(d.display_bus, "wait", lambda: None)
+
+def run(n=50, work_ms=0):
+    held = 0
+    t0 = time.ticks_us()
+    for _ in range(n):
+        t = time.ticks_us()
+        d.blit_rect(buf, 0, 0, d.width, d.height)
+        held += time.ticks_diff(time.ticks_us(), t)
+        if work_ms:
+            time.sleep_ms(work_ms)
+    w()
+    total = time.ticks_diff(time.ticks_us(), t0)
+    print("work %d ms: %.1f fps, blit_rect %.1f ms, free %.1f ms per frame"
+          % (work_ms, n * 1e6 / total, held / n / 1000, (total - held) / n / 1000))
+
+run(); run(work_ms=30)
+```
+
+On a 240x240 panel at 20 MHz the blocking bus holds your program for the whole
+frame, about 46 ms, so 30 ms of work drops it to about 13 fps. With DMA,
+`blit_rect` holds it only for the copy, and the frame rate stays near the wire
+limit until the work per frame passes the wire time.
 
 ### `qspibus.QSPIBus` (ESP32-S3)
 

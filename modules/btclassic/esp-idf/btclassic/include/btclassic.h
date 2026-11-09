@@ -62,7 +62,8 @@ extern "C" {
 #define BTC_CHANGED_REQUEST    (1u << 18)   // ag: the headset dialed, sent a DTMF digit or a command
 #define BTC_CHANGED_MESSAGES   (1u << 19)   // msg: a request finished, or the link came or went
 #define BTC_CHANGED_NOTIFY     (1u << 20)   // msg: the phone reported a new, sent, deleted or changed message
-#define BTC_CHANGED_PASSKEY    (1u << 21)   // radio: pairing wants a passkey shown, typed or checked
+#define BTC_CHANGED_LIBRARY    (1u << 22)   // lib: a request finished
+#define BTC_CHANGED_PASSKEY    (1u << 24)   // radio: pairing wants a passkey shown, typed or checked
 
 typedef uint8_t btc_addr_t[6];  // most significant byte first
 
@@ -624,6 +625,65 @@ size_t btc_pb_data(uint8_t *dst, size_t size);
 void btc_pb_release(void);
 void btc_pb_status(btc_pb_status_t *out);
 uint32_t btc_pb_changes(void);
+
+// ---- the library: AVRCP browsing -------------------------------------------
+//
+// Browses the media players on the phone the sink plays from: the players,
+// a player's folders and tracks, its queue and a search, and plays an item.
+// One request runs at a time: it returns at once, and BTC_CHANGED_LIBRARY
+// (with `busy` false) says it finished; btc_lib_data() then holds its items,
+// each as AVRCP sent it, after a type byte and a length byte: 1 a player,
+// 2 a folder, 3 a track or video, 4 a folder name from btc_lib_set_player.
+// A long item is cut at 129 bytes. Backends without browsing return
+// BTC_ERR_UNSUPPORTED.
+// Changes: BTC_CHANGED_CONNECTION, BTC_CHANGED_LIBRARY.
+
+#define BTC_LIB_SCOPE_PLAYERS 0
+#define BTC_LIB_SCOPE_FOLDER  1     // the browsed player's current folder
+#define BTC_LIB_SCOPE_SEARCH  2     // the last search's results
+#define BTC_LIB_SCOPE_QUEUE   3     // the player's now-playing list
+
+#define BTC_LIB_OP_NONE   0
+#define BTC_LIB_OP_LIST   1
+#define BTC_LIB_OP_PLAYER 2
+#define BTC_LIB_OP_PATH   3
+#define BTC_LIB_OP_SEARCH 4
+
+typedef struct {
+    bool started;
+    bool connecting;
+    bool connected;
+    btc_addr_t peer;
+    bool busy;
+    int result;             // the last request's: BTC_OK, a negative BTC_ERR_*, or AVRCP's browsing status
+    uint32_t length;        // bytes in its reply
+    uint16_t items;         // items in its reply
+    bool truncated;         // the reply outgrew the buffer; ask for fewer at a time
+    uint16_t player;        // the browsed player
+    int depth;              // folders below the player's root, or BTC_UNKNOWN
+    uint16_t uid_counter;   // the player's, from its last reply
+} btc_lib_status_t;
+
+// `max_bytes` caps the buffer one reply is gathered in.
+int btc_lib_start(size_t max_bytes);
+void btc_lib_stop(void);
+bool btc_lib_started(void);
+// Open browsing to the phone the sink is connected to.
+int btc_lib_connect(void);
+int btc_lib_disconnect(void);
+// Items `start` to `start + count - 1` of a scope.
+int btc_lib_list(uint8_t scope, uint32_t start, uint32_t count);
+// Browse a player: its reply holds the names of the folders down to where it is.
+int btc_lib_set_player(uint16_t player);
+// Into a folder by its 8-byte uid, or up one.
+int btc_lib_enter(const uint8_t *uid);
+int btc_lib_up(void);
+int btc_lib_search(const char *text);
+// Play an item of a scope by its uid; acts at once, over the sink's link.
+int btc_lib_play(uint8_t scope, const uint8_t *uid);
+size_t btc_lib_data(uint8_t *dst, size_t size);
+void btc_lib_status(btc_lib_status_t *out);
+uint32_t btc_lib_changes(void);
 
 // ---- the audio gateway: HFP AG, the board as the phone ----------------------
 //

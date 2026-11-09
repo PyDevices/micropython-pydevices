@@ -45,6 +45,8 @@ endif
 USER_ESP_IDF_COMPONENTS += esp_driver_cam esp_driver_isp esp_hal_cam esp_cam_sensor esp_sccb_intf
 # Sensors described in Python data (Camera(sensor=...)).
 SRC_USERMOD_C += $(CAMERAIF_MOD_DIR)/src/sensor_table.c
+# Each sensor's colour tuning, as data.
+SRC_USERMOD_C += $(CAMERAIF_MOD_DIR)/src/sensor_tuning.c
 
 # CircuitPython compiles modules outside ESP-IDF's CMake, so the components'
 # include directories are named here.

@@ -606,7 +606,8 @@ int btc_sink_start(size_t ring_frames, bool reconnect) {
     sdp_register_service(sdp_a2dp);
     memset(sdp_avrcp_ct, 0, sizeof(sdp_avrcp_ct));
     uint16_t ct_features = (1 << AVRCP_CONTROLLER_SUPPORTED_FEATURE_CATEGORY_PLAYER_OR_RECORDER)
-        | (1 << AVRCP_CONTROLLER_SUPPORTED_FEATURE_COVER_ART_GET_LINKED_THUMBNAIL);
+        | (1 << AVRCP_CONTROLLER_SUPPORTED_FEATURE_COVER_ART_GET_LINKED_THUMBNAIL)
+        | (1 << AVRCP_CONTROLLER_SUPPORTED_FEATURE_BROWSING);
     avrcp_controller_create_sdp_record(sdp_avrcp_ct, sdp_create_service_record_handle(), ct_features, NULL, NULL);
     sdp_register_service(sdp_avrcp_ct);
     memset(sdp_avrcp_tg, 0, sizeof(sdp_avrcp_tg));
@@ -828,4 +829,8 @@ void btc_sink_radio_lost(void) {
     ring_buf = NULL;
     cover = NULL;
     cover_len = 0;
+}
+
+uint16_t btc_sink_avrcp_cid(void) {
+    return started ? avrcp_cid : 0;
 }
