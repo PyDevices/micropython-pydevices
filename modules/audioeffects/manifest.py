@@ -19,9 +19,14 @@ _picked = [n.strip() for n in os.environ.get("AUDIOEFFECTS", "").split(",") if n
 if not _picked:
     require("audioeffects", library="omnipython-lib", opt=3)
 else:
-    # A manifest runs with its own folder as the working directory.
-    sys.path.insert(0, os.getcwd())
-    import selection
+    # A manifest runs with its own folder as the working directory. Loaded by
+    # path under its own name: the other package's selection.py has the same
+    # file name, and a plain import would find whichever came first.
+    import importlib.util
+
+    _spec = importlib.util.spec_from_file_location("audioeffects_selection", os.path.join(os.getcwd(), "selection.py"))
+    selection = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(selection)
 
     _library = os.environ["PYDEVICES_LIBRARY"]
     _out = os.path.join(os.path.dirname(_library), "audioeffects-selected")
