@@ -571,6 +571,21 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
             btc_log("legacy pairing with %s: pin", bd_addr_to_str(addr));
             gap_pin_code_response(addr, radio_pin);
             break;
+        case HCI_EVENT_LINK_KEY_NOTIFICATION: {
+            // BTstack keeps a new key only when the other side asked for
+            // bonding. A device the user paired the board with is paired
+            // whatever it asked, so keep the key either way, or paired()
+            // and the next connection would not know it.
+            hci_event_link_key_request_get_bd_addr(packet, addr);
+            link_key_type_t type = (link_key_type_t)packet[24];
+            if (type != CHANGED_COMBINATION_KEY && !btstack_is_null(&packet[8], 16)) {
+                int i = key_find(addr);
+                if (i < 0 || memcmp(store.keys[i].key, &packet[8], 16) != 0) {
+                    db_put_link_key(addr, &packet[8], type);
+                }
+            }
+            break;
+        }
         case HCI_EVENT_USER_CONFIRMATION_REQUEST: {
             uint32_t n = hci_event_user_confirmation_request_get_numeric_value(packet);
             hci_event_user_confirmation_request_get_bd_addr(packet, addr);
@@ -1062,7 +1077,9 @@ int btc_radio_read_rssi(const uint8_t *addr) {
     }
     rssi_handle = c->con_handle;
     rssi_state = 0;
-    if (gap_read_rssi(rssi_handle) != ERROR_CODE_SUCCESS) {
+    // gap_read_rssi() answers 1 when it queued the command and 0 when it
+    // knows no such link, not an ERROR_CODE_ status.
+    if (!gap_read_rssi(rssi_handle)) {
         rssi_state = BTC_ERR_FAIL;
         return BTC_ERR_FAIL;
     }
