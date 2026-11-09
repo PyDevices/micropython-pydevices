@@ -23,5 +23,7 @@ function(btclassic_a2dp_guard target file)
         set(scope PUBLIC)
         target_sources(${target} PRIVATE ${file})
     endif()
-    target_link_libraries(${target} ${scope} "-Wl,--wrap=btc_a2dp_cb_handler")
+    # -u pulls the wrapper in from a component's archive, which nothing else
+    # in it would otherwise reach.
+    target_link_libraries(${target} ${scope} "-Wl,--wrap=btc_a2dp_cb_handler" "-Wl,-u,__wrap_btc_a2dp_cb_handler")
 endfunction()
