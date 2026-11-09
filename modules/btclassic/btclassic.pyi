@@ -793,7 +793,9 @@ class Serial:
     One link at a time.
 
     There is one serial port. A second `Serial` takes over the running one,
-    link and all; its `name` and `rxbuf` then change nothing.
+    link and all; its `name` and `rxbuf` then change nothing. It runs
+    beside an `L2CAP` channel; on a classic ESP32, start it first (see
+    `L2CAP`).
 
     Args:
         bt: the radio, `Bluetooth()`. It is turned on if it's off.
@@ -860,7 +862,9 @@ class L2CAP:
 
     There is one channel. A second `L2CAP` with the same `psm` takes over
     the running one, link and all; one with another `psm` closes it first.
-    ESP32 and Pico W.
+    It runs beside a `Serial` port. On a classic ESP32, starting the
+    `Serial` port drops an open channel, which is then served again, so
+    start the `Serial` port first. ESP32 and Pico W.
 
     Args:
         bt: the radio, `Bluetooth()`. It is turned on if it's off.

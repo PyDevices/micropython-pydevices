@@ -203,3 +203,18 @@ void btc_tg_metadata_changed(uint8_t event_id);
 esp_err_t btc_sdp_open(esp_sdp_cb_t cb);
 void btc_sdp_close(esp_sdp_cb_t cb);
 #endif
+
+// The serial port (spp.c) and L2CAP channels (l2cap.c) share one Bluedroid
+// layer underneath, JV. Whichever starts first owns it and gets its events,
+// and either one's deinit tears it down for both, leaving the other's server
+// registered with nothing behind it. The serial port needs those events to
+// serve, and L2CAP doesn't, so the serial port always brings the layer up:
+// L2CAP steps down around its start (pause and resume, which drop an open
+// channel). And neither deinits while the other runs: a stop then only
+// closes its link and server and parks, and the last one to stop takes both
+// down (unpark).
+void btc_l2cap_pause(void);
+void btc_l2cap_resume(void);
+void btc_l2cap_unpark(void);
+bool btc_l2cap_up(void);
+void btc_spp_unpark(void);
