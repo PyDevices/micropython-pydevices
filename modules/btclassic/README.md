@@ -192,7 +192,9 @@ of 471 contacts without photos is 68 KB, so page with `count` on a Pico W.
 `answer()`, `hangup()`, the signal, battery and operator a headset shows,
 and its volume. The CYW43439 can't carry call audio, so `audio` stays False
 and `connect_audio()` raises OSError, as it does on `HandsFree`.
-`Messages` is ESP32-only. `Library` and `Tether` are
+`Messages` works as it does on the ESP32 except that `notify()` raises
+OSError, since the phone's change reports would need a server on the board:
+poll `list()` instead. `Library` and `Tether` are
 the other way round: only the Pico W has them (see
 [A phone's music library](#a-phones-music-library) and
 [The internet through a phone](#the-internet-through-a-phone)).

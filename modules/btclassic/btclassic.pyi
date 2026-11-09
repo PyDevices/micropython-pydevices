@@ -1781,7 +1781,7 @@ class Messages:
 
         Raises:
             OSError: the board couldn't advertise where the phone should
-                send its reports."""
+                send its reports, or it can't at all (the Pico W)."""
     def event(self) -> dict | None:
         """The oldest waiting report from the phone, or None. A dict of its
         fields as strings: "type" ("NewMessage", "MessageDeleted",

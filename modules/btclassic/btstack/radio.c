@@ -786,6 +786,7 @@ static void sync_host(void) {
         btc_source_radio_lost();
         btc_hid_radio_lost();
         btc_pb_radio_lost();
+        btc_map_radio_lost();
         btc_lib_radio_lost();
         btc_tether_radio_lost();
         btc_opp_radio_lost();
@@ -871,6 +872,7 @@ void btc_radio_stop(void) {
     btc_source_radio_stopping();
     btc_hid_radio_stopping();
     btc_pb_radio_stopping();
+    btc_map_radio_stopping();
     btc_lib_radio_stopping();
     btc_tether_radio_stopping();
     btc_opp_radio_stopping();

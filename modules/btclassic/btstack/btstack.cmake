@@ -35,6 +35,7 @@ if(MICROPY_BLUETOOTH_BTSTACK AND NOT TARGET usermod_btclassic_btstack)
         ${BTCLASSIC_BTSTACK_DIR}/source.c
         ${BTCLASSIC_BTSTACK_DIR}/hf.c
         ${BTCLASSIC_BTSTACK_DIR}/ag.c
+        ${BTCLASSIC_BTSTACK_DIR}/map.c
         ${BTCLASSIC_BTSTACK_DIR}/spp.c
         ${BTCLASSIC_BTSTACK_DIR}/l2cap.c
         ${BTCLASSIC_BTSTACK_DIR}/hid.c
