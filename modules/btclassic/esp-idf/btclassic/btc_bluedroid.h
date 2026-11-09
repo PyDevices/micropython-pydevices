@@ -195,6 +195,9 @@ void btc_tg_metadata_reset(void);
 void btc_tg_metadata_changed(uint8_t event_id);
 #endif
 
+// The program's own SDP records (service.c), dropped when the radio stops.
+void btc_service_stop(void);
+
 // Bluedroid's SDP API, shared (sdp_shared.c): open it with your callback,
 // which then sees every SDP event, and close it when done; it stops when the
 // last user closes. Open waits until SDP is running.

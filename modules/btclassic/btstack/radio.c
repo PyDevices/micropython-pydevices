@@ -1091,6 +1091,24 @@ int btc_radio_rssi(int *delta) {
     return rssi_state;
 }
 
+// SDP records of the program's own are Bluedroid's for now too.
+int btc_service_add(const btc_uuid_t *uuid, const char *name, int channel, int psm) {
+    (void)uuid;
+    (void)name;
+    (void)channel;
+    (void)psm;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+bool btc_service_active(int slot) {
+    (void)slot;
+    return false;
+}
+
+void btc_service_remove(int slot) {
+    (void)slot;
+}
+
 // Link tuning is Bluedroid's for now: BTstack has the HCI commands but
 // nothing here has run them on a CYW43439.
 int btc_radio_set_min_key_size(int bytes) {

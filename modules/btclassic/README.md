@@ -51,6 +51,7 @@ per profile that takes it.
 | `HandsFree(bt)` | Follows a phone (HFP hands-free): `battery`, `signal`, `operator`, the `call` and its `caller`, `answer()`, `hangup()`, `dial()`, and the call's audio through its own `readinto()` and `write()`. |
 | `AudioSource(bt)` | Sends audio to headphones, a speaker or a car stereo (A2DP source) and acts as their remote's target (AVRCP): `write()`, the receiver's keys through `key()`, the `volume`, and the `track()` and `status` its display shows. `Bluetooth.inquiry()` and `found()` find the receiver. |
 | `Serial(bt)` | A serial port (SPP), as a stream like `machine.UART`: a computer gets a Bluetooth COM port to the board, or `connect()` calls another device's port. |
+| `Service(bt, uuid, name, channel=)` | An SDP record of your own for a `Serial` port or `L2CAP` channel, so other devices find it by its UUID and name. |
 | `L2CAP(bt, psm)` | A raw L2CAP channel, as a stream: a protocol of your own between two boards, with no serial port framing in the way. Serves a PSM, or `connect()` calls another device's. |
 | `HIDDevice(bt)` | The board as a keyboard, mouse or game controller (HID device): `type()`, `keyboard()`, `mouse()`, `gamepad()`, or `send()` with your own report descriptor, and the keyboard `leds` the computer sends back. |
 | `HIDHost(bt)` | The board reads a keyboard, mouse or controller (HID host): `connect()`, `read()` its reports, `decode()` them, and `send()` its output reports. |
@@ -464,6 +465,23 @@ It reads and writes as a stream, as `Serial` does. `mtu` says how much one
 packet carries; `write` splits longer writes. Pairing comes first, as for a
 serial link. `examples/btclassic_l2cap.py` runs both ends.
 
+A serial port is listed under the standard serial port UUID, 0x1101. A
+program that wants to be found by a UUID of its own, a phone app asking for
+"my sensor feed" or a computer filtering for it, adds a record with
+`Service`:
+
+```python
+FEED = bytes.fromhex("6f3a9c12b4d14e5aa7c10d2e5f8b9a01")
+port = btclassic.Serial(bt, name="Sensor feed")
+feed = btclassic.Service(bt, FEED, "Sensor feed", channel=port.channel)
+# another device's bt.services(addr) now lists FEED, and a computer's
+# lookup of the UUID finds the port's channel and name
+```
+
+The same works for an `L2CAP` channel with `psm=`. `feed.deinit()` removes
+the record, and so does turning the radio off. ESP32 only.
+`examples/btclassic_service.py` is the whole program.
+
 While an `AudioSink` has a sender connected, the board can't be called, on
 any channel: hang the sender up first, or call out from that board instead.
 
@@ -579,6 +597,7 @@ Each runs as it is with `mpftp run`; its docstring says what it needs.
 | [btclassic_serial_client.py](examples/btclassic_serial_client.py) | Calls another board's serial port and talks to it |
 | [btclassic_with_ble.py](examples/btclassic_with_ble.py) | A Classic serial port beside BLE advertising and scanning |
 | [btclassic_l2cap.py](examples/btclassic_l2cap.py) | Two boards talking over an L2CAP channel of their own |
+| [btclassic_service.py](examples/btclassic_service.py) | Lists a serial port under a UUID and name of your own |
 | [btclassic_hid_keyboard.py](examples/btclassic_hid_keyboard.py) | Types a line as a keyboard and moves the pointer |
 | [btclassic_hid_media_keys.py](examples/btclassic_hid_media_keys.py) | Presses media keys on a phone or computer |
 | [btclassic_hid_gamepad.py](examples/btclassic_hid_gamepad.py) | A gamepad, with a setting the host reads and changes |

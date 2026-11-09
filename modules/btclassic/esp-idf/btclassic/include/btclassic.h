@@ -559,6 +559,18 @@ typedef struct {
 
 int btc_l2cap_start(uint16_t psm, size_t rx_bytes);
 void btc_l2cap_stop(void);
+
+// ---- SDP records of the program's own ----
+
+// Advertise a service: a service class UUID and a name, pointing at an RFCOMM
+// channel (1 to 30, or -1) and/or an L2CAP PSM (or -1); at least one. Returns
+// a slot number (0 or more) once the stack has made the record, or a negative
+// BTC_ERR_*. The record stays until btc_service_remove() or the radio stops.
+// The name is 1 to 31 bytes. BTC_ERR_UNSUPPORTED where the backend has none.
+#define BTC_SERVICE_NAME_MAX 31
+int btc_service_add(const btc_uuid_t *uuid, const char *name, int channel, int psm);
+bool btc_service_active(int slot);
+void btc_service_remove(int slot);
 bool btc_l2cap_started(void);
 bool btc_l2cap_connected(void);
 int btc_l2cap_connect(const uint8_t *addr, uint16_t psm);

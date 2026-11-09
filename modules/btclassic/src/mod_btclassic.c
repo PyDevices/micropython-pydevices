@@ -1590,6 +1590,8 @@ extern const mp_obj_type_t btc_tether_type;
 // ObjectPush, in mod_btclassic_push.c: on every backend, raising where there's no OPP.
 extern const mp_obj_type_t btc_push_type;
 extern const mp_obj_type_t btc_l2cap_type;
+// Service, in mod_btclassic_service.c: on every backend, raising where it can't make a record.
+extern const mp_obj_type_t btc_service_type;
 #endif
 
 // HIDDevice and HIDHost, in mod_btclassic_hid.c, where the backend has HID.
@@ -1627,6 +1629,7 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_ObjectPush), MP_ROM_PTR(&btc_push_type) },
     { MP_ROM_QSTR(MP_QSTR_PUSH), MP_ROM_INT(BTC_CHANGED_PUSH) },
     { MP_ROM_QSTR(MP_QSTR_L2CAP), MP_ROM_PTR(&btc_l2cap_type) },
+    { MP_ROM_QSTR(MP_QSTR_Service), MP_ROM_PTR(&btc_service_type) },
     { MP_ROM_QSTR(MP_QSTR_DATA), MP_ROM_INT(BTC_CHANGED_L2CAP) },
     #endif
     #if BTC_HAS_PHONEBOOK
