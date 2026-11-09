@@ -1,0 +1,73 @@
+--- a/modules/py_espdl.cpp
++++ b/modules/py_espdl.cpp
+@@ -109,6 +109,16 @@
+     float score_thr;
+ } espdl_imagenet_cls_obj_t;
+ 
++// Inference runs without the GIL, so other threads keep running while the
++// model works. It touches only the model's own buffers; use one model object
++// from one thread at a time, and don't deinit() it while detect() runs.
++static void espdl_run(dl::Model *model)
++{
++    MP_THREAD_GIL_EXIT();
++    model->run();
++    MP_THREAD_GIL_ENTER();
++}
++
+ static void espdl_free_model_data(espdl_model_data_t *model_data)
+ {
+     if (model_data->data == nullptr) {
+@@ -627,7 +637,7 @@
+     dl::image::img_t dl_img = espdl_make_dl_image(img);
+ 
+     self->image_preprocessor->preprocess(dl_img);
+-    self->model->run();
++    espdl_run(self->model);
+ 
+     return espdl_tensor_map_info_to_dict(self->model->get_outputs(), true);
+ }
+@@ -830,7 +840,7 @@
+     dl::image::img_t dl_img = espdl_make_dl_image(img);
+ 
+     self->image_preprocessor->preprocess(dl_img);
+-    self->model->run();
++    espdl_run(self->model);
+     self->postprocessor->clear_result();
+     self->postprocessor->postprocess();
+ 
+@@ -979,7 +989,7 @@
+     dl::image::img_t dl_img = espdl_make_dl_image(img);
+ 
+     self->image_preprocessor->preprocess(dl_img);
+-    self->model->run();
++    espdl_run(self->model);
+     self->postprocessor->clear_result();
+     self->postprocessor->postprocess();
+ 
+@@ -1139,7 +1149,7 @@
+     dl::image::img_t dl_img = espdl_make_dl_image(img);
+ 
+     self->image_preprocessor->preprocess(dl_img);
+-    self->model->run();
++    espdl_run(self->model);
+     self->postprocessor->clear_result();
+     self->postprocessor->postprocess();
+ 
+@@ -1296,7 +1306,7 @@
+     dl::image::img_t dl_img = espdl_make_dl_image(img);
+ 
+     self->image_preprocessor->preprocess(dl_img);
+-    self->model->run();
++    espdl_run(self->model);
+     self->postprocessor->clear_result();
+     self->postprocessor->postprocess();
+ 
+@@ -1447,7 +1457,7 @@
+     dl::image::img_t dl_img = espdl_make_dl_image(img);
+ 
+     self->image_preprocessor->preprocess(dl_img);
+-    self->model->run();
++    espdl_run(self->model);
+ 
+     std::vector<dl::cls::result_t> &results = self->postprocessor->postprocess();
+     mp_obj_t classifications = mp_obj_new_list(0, nullptr);

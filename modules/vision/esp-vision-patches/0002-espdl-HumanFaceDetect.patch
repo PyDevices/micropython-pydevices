@@ -1,0 +1,19 @@
+--- a/modules/py_espdl.cpp
++++ b/modules/py_espdl.cpp
+@@ -43,6 +43,8 @@
+ extern const mp_obj_type_t espdl_yolo11n_pose_type;
+ extern const mp_obj_type_t espdl_imagenet_cls_type;
+ extern const mp_obj_type_t espdl_model_type;
++// The face detector with landmarks, in its own file beside this one.
++extern "C" const mp_obj_type_t espdl_human_face_detect_type;
+ 
+ typedef struct {
+     uint8_t *data;
+@@ -1538,6 +1540,7 @@
+     {MP_ROM_QSTR(MP_QSTR_YOLO11), MP_ROM_PTR(&espdl_yolo11_type)},
+     {MP_ROM_QSTR(MP_QSTR_YOLO11nPose), MP_ROM_PTR(&espdl_yolo11n_pose_type)},
+     {MP_ROM_QSTR(MP_QSTR_ImageNetCls), MP_ROM_PTR(&espdl_imagenet_cls_type)},
++    {MP_ROM_QSTR(MP_QSTR_HumanFaceDetect), MP_ROM_PTR(&espdl_human_face_detect_type)},
+     {MP_ROM_QSTR(MP_QSTR_load_model), MP_ROM_PTR(&espdl_load_model_obj)},
+ };
+ static MP_DEFINE_CONST_DICT(espdl_module_globals, espdl_module_globals_table);

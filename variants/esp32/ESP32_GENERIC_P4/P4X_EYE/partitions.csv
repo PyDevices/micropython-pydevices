@@ -1,8 +1,8 @@
-# Espressif ESP32-P4X-EYE, 16 MB flash. A 7 MB app slot: the whole stack with
-# vision is about 6 MB, and the camera app is frozen in. The rest is the
-# filesystem; the SD card holds the photos and videos.
+# Espressif ESP32-P4X-EYE, 16 MB flash. A 9 MB app slot: the whole stack with
+# vision and the frozen apps is 8.5 MB. The rest is the filesystem; the SD
+# card holds the photos and videos.
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x6000,
 phy_init, data, phy,     0xf000,   0x1000,
-factory,  app,  factory, 0x10000,  0x700000,
-vfs,      data, fat,     0x710000, 0x8F0000,
+factory,  app,  factory, 0x10000,  0x900000,
+vfs,      data, fat,     0x910000, 0x6F0000,
