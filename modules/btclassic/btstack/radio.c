@@ -258,6 +258,10 @@ static uint32_t auto_class(void) {
     if (profiles & BTC_PROFILE_HF) {
         service |= COD_SRVC_AUDIO | COD_SRVC_TELEPHONY;
     }
+    if (profiles & BTC_PROFILE_PUSH) {
+        // Object Transfer: a phone's share sheet lists only devices with it.
+        service |= 0x100000;
+    }
     if (profiles & (BTC_PROFILE_SINK | BTC_PROFILE_SOURCE | BTC_PROFILE_HF)) {
         // Audio/Video, even with a keyboard: a computer offers audio by it.
         major = COD_MAJOR_AV;
@@ -632,6 +636,8 @@ static void sync_host(void) {
         btc_hid_radio_lost();
         btc_pb_radio_lost();
         btc_lib_radio_lost();
+        btc_tether_radio_lost();
+        btc_opp_radio_lost();
         btc_av_radio_lost();
         active = false;
         host_started = false;
@@ -712,6 +718,8 @@ void btc_radio_stop(void) {
     btc_hid_radio_stopping();
     btc_pb_radio_stopping();
     btc_lib_radio_stopping();
+    btc_tether_radio_stopping();
+    btc_opp_radio_stopping();
     gap_discoverable_control(0);
     gap_connectable_control(0);
     hci_remove_event_handler(&hci_cb);
