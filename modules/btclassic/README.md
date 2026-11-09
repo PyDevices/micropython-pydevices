@@ -503,6 +503,7 @@ print(requests.get("http://example.com").status_code)
 The tether is a network interface of its own beside the Wi-Fi's. While it's
 up it's the default route, so `socket` and `requests` go through the phone;
 when it drops, the route goes back to the Wi-Fi if that's connected.
+
 ## Files and contact cards
 
 On a Pico W, `ObjectPush` sends a file to a paired phone or computer, and
@@ -546,6 +547,8 @@ Each runs as it is with `mpftp run`; its docstring says what it needs.
 | [btclassic_remote.py](examples/btclassic_remote.py) | Drives a phone's music player: play, skip, volume, pause |
 | [btclassic_cover_art.py](examples/btclassic_cover_art.py) | Saves the cover art of each track as a JPEG |
 | [btclassic_library.py](examples/btclassic_library.py) | Lists the music on a phone and plays a track (Pico W) |
+| [btclassic_object_push.py](examples/btclassic_object_push.py) | Sends a file to a phone and takes the files it shares (Pico W) |
+| [btclassic_tether.py](examples/btclassic_tether.py) | Reaches the internet through a phone's tethering (Pico W) |
 | [btclassic_speakerphone.py](examples/btclassic_speakerphone.py) | A speakerphone for your phone's calls |
 | [btclassic_phone_status.py](examples/btclassic_phone_status.py) | Follows a phone's signal, battery and calls, and answers them |
 | [btclassic_call_tone.py](examples/btclassic_call_tone.py) | Sends a tone into a call and measures the caller |
