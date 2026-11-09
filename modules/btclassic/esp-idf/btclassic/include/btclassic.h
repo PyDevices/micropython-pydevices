@@ -114,6 +114,39 @@ int btc_radio_paired(btc_addr_t *addrs, int max);
 int btc_radio_unpair(const uint8_t *addr);
 uint32_t btc_radio_changes(void);
 
+// ---- link quality, on the radio ----
+
+// Ask how far a connected device's signal is from the controller's ideal
+// range. btc_radio_rssi() then gives 1 with the answer in dB (0 inside the
+// range, below 0 weaker, above 0 stronger), 0 while it's on its way, or a
+// negative BTC_ERR_*: BTC_ERR_STATE when no link to that device is up.
+int btc_radio_read_rssi(const uint8_t *addr);
+int btc_radio_rssi(int *delta);
+
+// How long a connection attempt pages for before giving up, in ms
+// (1 to 40959). Reads back what's set, or the stack's default.
+int btc_radio_set_page_timeout(uint32_t ms);
+uint32_t btc_radio_page_timeout(void);
+
+// The channels the board may hop on, as 79 bits, channel 0 in bit 0 of the
+// first byte; at least 20 must be set. All of them by default.
+#define BTC_CHANNEL_MAP_LEN 10
+int btc_radio_set_channels(const uint8_t *map);
+void btc_radio_channels(uint8_t *map);
+
+// What the board sends in its inquiry response besides its name.
+#define BTC_EIR_DATA_MAX 64
+typedef struct {
+    bool uuids;             // the 16-bit UUIDs of the services running
+    bool tx_power;          // the inquiry transmit power
+    uint8_t manufacturer_len;
+    uint8_t manufacturer[BTC_EIR_DATA_MAX];   // company ID first, little-endian
+    uint8_t url_len;
+    uint8_t url[BTC_EIR_DATA_MAX];
+} btc_eir_t;
+int btc_radio_set_eir(const btc_eir_t *eir);
+void btc_radio_eir(btc_eir_t *eir);
+
 // ---- the audio sink: A2DP sink and AVRCP controller ----
 
 typedef enum {
@@ -304,6 +337,24 @@ int btc_radio_inquiry(uint32_t duration_ms);
 bool btc_radio_inquiring(void);
 // Copy up to `max` of the devices found so far; returns how many there are.
 int btc_radio_found(btc_found_t *out, int max);
+// The extended inquiry response a found device sent, as it came: copies up
+// to `size` bytes and returns its length, 0 if it sent none, or BTC_ERR_ARG
+// if the last inquiry didn't find it.
+#define BTC_EIR_MAX 240
+int btc_radio_found_eir(const uint8_t *addr, uint8_t *dst, size_t size);
+
+// The services a device offers, read from its SDP server: each one's
+// service class, as a 16-, 32- or 128-bit UUID in big-endian order. Start a
+// search with btc_radio_query_services(); btc_radio_services() then returns
+// 1 with `*count` set when it has ended, 0 while it runs, or BTC_ERR_*.
+// The board pages the device if there's no link to it yet.
+#define BTC_SERVICES_MAX 32
+typedef struct {
+    uint8_t len;        // 2, 4 or 16
+    uint8_t uuid[16];
+} btc_uuid_t;
+int btc_radio_query_services(const uint8_t *addr);
+int btc_radio_services(btc_uuid_t *out, int max, int *count);
 
 // ---- the audio source: A2DP source and AVRCP target ----
 //

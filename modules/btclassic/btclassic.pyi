@@ -187,6 +187,24 @@ class Bluetooth:
           to the default. Reading it gives the class in use.
         - mac (bytes): the board's Bluetooth address. Read only, and only
           while the radio is on.
+        - page_timeout (int): how long `connect` calls a device before it
+          gives up, in milliseconds, 1 to 40959. Shorter finds out sooner
+          that a device is away; 5120 by default on the ESP32, 15360 on the
+          Pico W.
+        - channel_map (bytes): the channels the board may hop on, 10 bytes
+          with channel 0 (2402 MHz) in bit 0 of the first byte, through
+          channel 78 (2480 MHz). At least 20 must be set; all 79 are by
+          default. Clear the channels a Wi-Fi network sits on to keep out of
+          its way.
+        - eir_uuids (bool): list the services running in the board's
+          inquiry response, so a device searching sees what it offers before
+          connecting. Off by default: the response has the name alone.
+        - eir_tx_power (bool): add the transmit power, for a searching
+          device to judge distance by. Off by default; ESP32 only.
+        - eir_manufacturer (bytes or None): your own data in the inquiry
+          response, a 2-byte company ID (little-endian) then up to 62 bytes.
+        - eir_url (str or None): a URI in the inquiry response, up to 64
+          bytes.
 
         Raises:
             ValueError: an unknown setting, or a value it doesn't take.
@@ -212,6 +230,38 @@ class Bluetooth:
 
         Raises:
             OSError: the radio is off.
+        """
+    def eir(self, addr: bytes) -> bytes | None:
+        """The extended inquiry response a device sent when the last
+        `inquiry` found it, as it came: length, type and data fields, as in
+        the Bluetooth Core Specification. None when it sent none. ESP32
+        only.
+
+        Raises:
+            ValueError: the last inquiry didn't find that device.
+        """
+    def rssi(self, addr: bytes) -> int:
+        """How far a connected device's signal is from the range the
+        controller wants, in dB: 0 inside it, negative weaker, positive
+        stronger. Any profile's link counts. Waits up to a second for the
+        answer.
+
+        Raises:
+            OSError: no link to that device is up.
+        """
+    def services(self, addr: bytes, *, timeout_ms: int = 20000) -> list[int | bytes]:
+        """The services a device offers, read from its SDP server: each
+        one's service class UUID, an int for a 16- or 32-bit one (0x110B is
+        an audio sink, 0x1101 a serial port) and 16 bytes, most significant
+        first, for a 128-bit one. The board calls the device if no link is
+        up, which can take the page timeout. Waits up to `timeout_ms`.
+        On the ESP32 the 16-bit services listed are the profiles Bluedroid
+        knows, which take in audio, calls, serial, HID, PAN, OBEX, the
+        phone book and messages; Pico W lists every one.
+
+        Raises:
+            OSError: the radio is off, another search is running, the device
+                didn't answer, or ETIMEDOUT.
         """
     def inquiring(self) -> bool:
         """An inquiry is running."""

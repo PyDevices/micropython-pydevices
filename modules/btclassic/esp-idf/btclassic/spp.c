@@ -39,6 +39,7 @@ static struct {
     uint32_t handle;        // the link, 0 with none
     btc_addr_t connecting;  // a client call waiting for SDP
     bool calling;
+    uint32_t call_handle;   // the client call's handle, once the stack gives one
     bytes_ring_t rx, tx;
     uint32_t in_flight;     // bytes handed to esp_spp_write, not yet done
     bool congested;
@@ -136,8 +137,22 @@ static void spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
                 mark(BTC_CHANGED_CONNECTION);
             }
             break;
+        case ESP_SPP_CL_INIT_EVT:
+            // A call that fails (the device is away) ends with a close on
+            // this handle, not an open.
+            if (p.calling) {
+                if (param->cl_init.status == ESP_SPP_SUCCESS) {
+                    p.call_handle = param->cl_init.handle;
+                } else {
+                    ESP_LOGW(TAG, "spp: call failed: %d", param->cl_init.status);
+                    p.calling = false;
+                    mark(BTC_CHANGED_CONNECTION);
+                }
+            }
+            break;
         case ESP_SPP_OPEN_EVT:
             p.calling = false;
+            p.call_handle = 0;
             if (param->open.status != ESP_SPP_SUCCESS) {
                 ESP_LOGW(TAG, "spp: call failed: %d", param->open.status);
                 mark(BTC_CHANGED_CONNECTION);
@@ -151,6 +166,11 @@ static void spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
             break;
         case ESP_SPP_CLOSE_EVT:
             BTC_LOCK();
+            if (p.calling && p.call_handle && param->close.handle == p.call_handle) {
+                p.calling = false;
+                p.call_handle = 0;
+                p.changes |= BTC_CHANGED_CONNECTION;
+            }
             if (param->close.handle == p.handle) {
                 p.handle = 0;
                 p.st.connected = false;
@@ -281,6 +301,7 @@ int btc_spp_connect(const uint8_t *addr, int channel) {
     }
     memcpy(p.connecting, addr, sizeof(btc_addr_t));
     p.calling = true;
+    p.call_handle = 0;
     esp_err_t err = channel > 0
         ? esp_spp_connect(ESP_SPP_SEC_AUTHENTICATE, ESP_SPP_ROLE_MASTER, (uint8_t)channel, p.connecting)
         : esp_spp_start_discovery(p.connecting);

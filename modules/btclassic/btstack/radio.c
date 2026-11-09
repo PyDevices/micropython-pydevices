@@ -282,6 +282,9 @@ uint32_t btc_radio_class(void) {
     return class_set ? class_set : auto_class();
 }
 
+static btc_eir_t eir_set;
+static void apply_eir(void);
+
 static void apply_class(void) {
     if (active) {
         gap_set_class_of_device(btc_radio_class());
@@ -298,6 +301,9 @@ void btc_radio_profile(uint32_t profile, bool running, uint8_t subclass) {
         profiles &= ~profile;
     }
     apply_class();
+    if (eir_set.uuids) {
+        apply_eir();
+    }
 }
 
 int btc_radio_set_class(uint32_t cod) {
@@ -428,6 +434,93 @@ static void send_inquiry_mode(void) {
     }
 }
 
+// ---- link quality ----
+
+static uint32_t page_timeout_ms = 15360;    // BTstack's own, 0x6000 slots
+static uint8_t channels[BTC_CHANNEL_MAP_LEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f};
+static bool channels_pending;               // to send when HCI is free
+static uint8_t eir_data[240];               // BTstack reads it from here
+
+static hci_con_handle_t rssi_handle = HCI_CON_HANDLE_INVALID;
+static int rssi_state = BTC_ERR_STATE;      // 0 waiting, 1 answered, BTC_ERR_*
+static int rssi_delta;
+
+// Set AFH Host Channel Classification, which BTstack has no command for.
+static void send_channels(void) {
+    if (channels_pending && hci_can_send_command_packet_now()) {
+        channels_pending = false;
+        uint8_t cmd[3 + BTC_CHANNEL_MAP_LEN] = {0x3f, 0x0c, BTC_CHANNEL_MAP_LEN};
+        memcpy(cmd + 3, channels, BTC_CHANNEL_MAP_LEN);
+        hci_send_cmd_packet(cmd, sizeof(cmd));
+    }
+}
+
+static int eir_field(int at, uint8_t type, const uint8_t *data, int len) {
+    if (at + 2 + len > (int)sizeof(eir_data)) {
+        return at;
+    }
+    eir_data[at] = (uint8_t)(len + 1);
+    eir_data[at + 1] = type;
+    memcpy(eir_data + at + 2, data, len);
+    return at + 2 + len;
+}
+
+// The inquiry response: the name, then what config() added. BTstack sends
+// the name alone while none is set.
+static void apply_eir(void) {
+    if (!active) {
+        return;
+    }
+    if (!eir_set.uuids && !eir_set.manufacturer_len && !eir_set.url_len) {
+        gap_set_extended_inquiry_response(NULL);
+        return;
+    }
+    memset(eir_data, 0, sizeof(eir_data));
+    int at = 0;
+    if (eir_set.uuids) {
+        uint16_t uuids[8];
+        int n = 0;
+        if (profiles & BTC_PROFILE_SINK) {
+            uuids[n++] = BLUETOOTH_SERVICE_CLASS_AUDIO_SINK;
+        }
+        if (profiles & BTC_PROFILE_SOURCE) {
+            uuids[n++] = BLUETOOTH_SERVICE_CLASS_AUDIO_SOURCE;
+        }
+        if (profiles & (BTC_PROFILE_SINK | BTC_PROFILE_SOURCE)) {
+            uuids[n++] = BLUETOOTH_SERVICE_CLASS_AV_REMOTE_CONTROL;
+            uuids[n++] = BLUETOOTH_SERVICE_CLASS_AV_REMOTE_CONTROL_TARGET;
+        }
+        if (profiles & BTC_PROFILE_HF) {
+            uuids[n++] = BLUETOOTH_SERVICE_CLASS_HANDSFREE;
+        }
+        if (profiles & BTC_PROFILE_SERIAL) {
+            uuids[n++] = BLUETOOTH_SERVICE_CLASS_SERIAL_PORT;
+        }
+        if (profiles & BTC_PROFILE_HID_DEVICE) {
+            uuids[n++] = BLUETOOTH_SERVICE_CLASS_HUMAN_INTERFACE_DEVICE_SERVICE;
+        }
+        uint8_t le[16];
+        for (int i = 0; i < n; i++) {
+            little_endian_store_16(le, 2 * i, uuids[i]);
+        }
+        at = eir_field(at, BLUETOOTH_DATA_TYPE_COMPLETE_LIST_OF_16_BIT_SERVICE_CLASS_UUIDS, le, 2 * n);
+    }
+    if (eir_set.manufacturer_len) {
+        at = eir_field(at, BLUETOOTH_DATA_TYPE_MANUFACTURER_SPECIFIC_DATA, eir_set.manufacturer, eir_set.manufacturer_len);
+    }
+    if (eir_set.url_len) {
+        at = eir_field(at, BLUETOOTH_DATA_TYPE_URI, eir_set.url, eir_set.url_len);
+    }
+    // The name last, shortened to what room is left.
+    int room = (int)sizeof(eir_data) - at - 2;
+    int n = (int)strlen(radio_name);
+    if (room > 0) {
+        eir_field(at, n > room ? BLUETOOTH_DATA_TYPE_SHORTENED_LOCAL_NAME : BLUETOOTH_DATA_TYPE_COMPLETE_LOCAL_NAME,
+            (const uint8_t *)radio_name, n > room ? room : n);
+    }
+    gap_set_extended_inquiry_response(eir_data);
+}
+
 static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
     (void)channel;
     (void)size;
@@ -435,6 +528,7 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
         return;
     }
     send_inquiry_mode();
+    send_channels();
     bd_addr_t addr;
     switch (hci_event_packet_get_type(packet)) {
         case HCI_EVENT_CONNECTION_REQUEST:
@@ -481,6 +575,12 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
             break;
         case HCI_EVENT_REMOTE_NAME_REQUEST_COMPLETE:
             found_name(packet);
+            break;
+        case GAP_EVENT_RSSI_MEASUREMENT:
+            if (rssi_state == 0 && gap_event_rssi_measurement_get_con_handle(packet) == rssi_handle) {
+                rssi_delta = (int8_t)gap_event_rssi_measurement_get_rssi(packet);
+                rssi_state = 1;
+            }
             break;
         default:
             break;
@@ -553,6 +653,12 @@ int btc_radio_start(void) {
     sdp_init();
 
     active = true;
+    gap_set_page_timeout((uint16_t)((page_timeout_ms * 8 + 4) / 5));
+    if (memcmp(channels, (const uint8_t[]){0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f}, BTC_CHANNEL_MAP_LEN) != 0) {
+        channels_pending = true;
+        send_channels();
+    }
+    apply_eir();
     gap_connectable_control(connectable);
     gap_discoverable_control(discoverable);
     bd_addr_t addr;
@@ -604,6 +710,7 @@ int btc_radio_set_name(const char *name) {
     memcpy(radio_name, name, n + 1);
     if (active) {
         gap_set_local_name(radio_name);
+        apply_eir();
     }
     return BTC_OK;
 }
@@ -762,4 +869,192 @@ int btc_radio_found(btc_found_t *out, int max) {
         memcpy(out, found, n * sizeof(*out));
     }
     return found_count;
+}
+
+// ---- services ----
+
+// One SDP query for every record that runs over L2CAP (that is, every
+// service), asking for each one's ServiceClassIDList. Its first UUID is
+// the record's most specific class.
+static int sdp_state = BTC_ERR_STATE;   // 0 searching, 1 ended, BTC_ERR_*
+static int sdp_count;
+static btc_uuid_t sdp_found[BTC_SERVICES_MAX];
+static uint8_t sdp_attr[64];            // the attribute value being received
+static bd_addr_t sdp_addr;
+
+static void sdp_take_class(void) {
+    if (sdp_count >= BTC_SERVICES_MAX || de_get_element_type(sdp_attr) != DE_DES) {
+        return;
+    }
+    des_iterator_t it;
+    for (des_iterator_init(&it, sdp_attr); des_iterator_has_more(&it); des_iterator_next(&it)) {
+        if (des_iterator_get_type(&it) != DE_UUID) {
+            continue;
+        }
+        const uint8_t *e = des_iterator_get_element(&it);
+        btc_uuid_t *o = &sdp_found[sdp_count];
+        switch (de_get_size_type(e)) {
+            case DE_SIZE_16:
+                o->len = 2;
+                break;
+            case DE_SIZE_32:
+                o->len = 4;
+                break;
+            case DE_SIZE_128:
+                o->len = 16;
+                break;
+            default:
+                return;
+        }
+        memcpy(o->uuid, e + 1, o->len);
+        // The same class from two records is listed once.
+        for (int i = 0; i < sdp_count; i++) {
+            if (sdp_found[i].len == o->len && memcmp(sdp_found[i].uuid, o->uuid, o->len) == 0) {
+                return;
+            }
+        }
+        sdp_count++;
+        return;
+    }
+}
+
+static void on_sdp_services(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
+    (void)channel;
+    (void)size;
+    if (packet_type != HCI_EVENT_PACKET || sdp_state != 0) {
+        return;
+    }
+    switch (hci_event_packet_get_type(packet)) {
+        case SDP_EVENT_QUERY_ATTRIBUTE_VALUE: {
+            uint16_t len = sdp_event_query_attribute_byte_get_attribute_length(packet);
+            uint16_t at = sdp_event_query_attribute_byte_get_data_offset(packet);
+            if (len > sizeof(sdp_attr)) {
+                break;
+            }
+            sdp_attr[at] = sdp_event_query_attribute_byte_get_data(packet);
+            if (at + 1 == len) {
+                sdp_take_class();
+            }
+            break;
+        }
+        case SDP_EVENT_QUERY_COMPLETE:
+            sdp_state = sdp_event_query_complete_get_status(packet) == ERROR_CODE_SUCCESS ? 1 : BTC_ERR_FAIL;
+            break;
+        default:
+            break;
+    }
+}
+
+int btc_radio_query_services(const uint8_t *addr) {
+    static const uint8_t pattern[] = { 0x35, 0x03, 0x19, 0x01, 0x00 };     // L2CAP
+    static const uint8_t attributes[] = { 0x35, 0x03, 0x09, 0x00, 0x01 };  // ServiceClassIDList
+    if (!btc_radio_active()) {
+        return BTC_ERR_STATE;
+    }
+    // The SDP client takes one query at a time, and says so.
+    memcpy(sdp_addr, addr, 6);
+    sdp_count = 0;
+    sdp_state = 0;
+    if (sdp_client_query(on_sdp_services, sdp_addr, pattern, attributes) != ERROR_CODE_SUCCESS) {
+        // A search still running, or Serial's own lookup, holds the client.
+        sdp_state = BTC_ERR_STATE;
+        return BTC_ERR_STATE;
+    }
+    return BTC_OK;
+}
+
+int btc_radio_services(btc_uuid_t *out, int max, int *count) {
+    int n = sdp_count < max ? sdp_count : max;
+    *count = 0;
+    if (sdp_state == 1) {
+        memcpy(out, sdp_found, n * sizeof(btc_uuid_t));
+        *count = n;
+    }
+    return sdp_state;
+}
+
+int btc_radio_read_rssi(const uint8_t *addr) {
+    if (!btc_radio_active()) {
+        return BTC_ERR_STATE;
+    }
+    bd_addr_t a;
+    memcpy(a, addr, 6);
+    hci_connection_t *c = hci_connection_for_bd_addr_and_type(a, BD_ADDR_TYPE_ACL);
+    if (c == NULL) {
+        rssi_state = BTC_ERR_STATE;
+        return BTC_ERR_STATE;
+    }
+    rssi_handle = c->con_handle;
+    rssi_state = 0;
+    if (gap_read_rssi(rssi_handle) != ERROR_CODE_SUCCESS) {
+        rssi_state = BTC_ERR_FAIL;
+        return BTC_ERR_FAIL;
+    }
+    return BTC_OK;
+}
+
+int btc_radio_rssi(int *delta) {
+    *delta = rssi_delta;
+    return rssi_state;
+}
+
+int btc_radio_set_page_timeout(uint32_t ms) {
+    if (ms < 1 || ms > 40959) {
+        return BTC_ERR_ARG;
+    }
+    page_timeout_ms = ms;
+    if (btc_radio_active()) {
+        gap_set_page_timeout((uint16_t)((ms * 8 + 4) / 5));
+    }
+    return BTC_OK;
+}
+
+uint32_t btc_radio_page_timeout(void) {
+    return page_timeout_ms;
+}
+
+int btc_radio_set_channels(const uint8_t *map) {
+    int count = 0;
+    for (int ch = 0; ch < 79; ch++) {
+        count += (map[ch / 8] >> (ch % 8)) & 1;
+    }
+    if (count < 20 || (map[BTC_CHANNEL_MAP_LEN - 1] & 0x80)) {
+        return BTC_ERR_ARG;
+    }
+    memcpy(channels, map, BTC_CHANNEL_MAP_LEN);
+    if (btc_radio_active()) {
+        channels_pending = true;
+        send_channels();
+    }
+    return BTC_OK;
+}
+
+void btc_radio_channels(uint8_t *map) {
+    memcpy(map, channels, BTC_CHANNEL_MAP_LEN);
+}
+
+int btc_radio_set_eir(const btc_eir_t *eir) {
+    if (eir->tx_power) {
+        return BTC_ERR_UNSUPPORTED;
+    }
+    if (eir->manufacturer_len > BTC_EIR_DATA_MAX || eir->url_len > BTC_EIR_DATA_MAX
+        || (eir->manufacturer_len && eir->manufacturer_len < 2)) {
+        return BTC_ERR_ARG;
+    }
+    eir_set = *eir;
+    if (btc_radio_active()) {
+        apply_eir();
+    }
+    return BTC_OK;
+}
+
+void btc_radio_eir(btc_eir_t *eir) {
+    *eir = eir_set;
+}
+
+int btc_radio_found_eir(const uint8_t *addr, uint8_t *dst, size_t size) {
+    (void)addr;
+    (void)dst;
+    (void)size;
+    return BTC_ERR_UNSUPPORTED;
 }

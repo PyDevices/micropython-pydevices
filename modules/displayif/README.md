@@ -27,7 +27,7 @@ failure modes (P4 `mipidsi`, Qualia `dotclockframebuffer.DotClockFramebuffer`):
 
 | Module              | Port tree                                                                                       | `displaydev` backend |
 | ------------------- | ----------------------------------------------------------------------------------------------- | ----------------- |
-| `spibus` / `i2cbus` | `common`                                                                                        | **BusDisplay**    |
+| `spibus` / `i2cbus` | `common`; `spibus` on `esp32` is the DMA bus below                                              | **BusDisplay**    |
 | `dotclockframebuffer` | `esp32` (RGB LCD), `mimxrt` (1062 eLCDIF)                                              | **FBDisplay**     |
 | `i80bus`            | `esp32` (S3), `rp2` (PIO+DMA), `mimxrt` (1062 FlexIO), `samd` (SAMD51 GPIO)                     | **BusDisplay**    |
 | `qspibus`           | `esp32` (S3 esp_lcd SPI quad_mode); stubs elsewhere                                             | **BusDisplay**    |
@@ -39,6 +39,20 @@ failure modes (P4 `mipidsi`, Qualia `dotclockframebuffer.DotClockFramebuffer`):
 
 
 Parallel dot-clock RGB uses **`dotclockframebuffer.DotClockFramebuffer`** (same module name as CircuitPython) — no `RGBDisplay`.
+
+## ESP32 SPI displays
+
+On ESP32 targets `spibus.SPIBus` sends pixels by DMA. `send()` copies the data
+into the bus's own buffers and returns while the panel is still being written,
+so your program keeps running during the transfer. A 240x240 RGB565 frame at
+20 MHz takes about 46 ms on the wire. Board configs don't change: the class,
+its keywords and `send()` are the same as on other ports. Two methods are new:
+`busy()` says whether a transfer is still going, and `wait()` returns once
+it's done. With LVGL nothing changes either, because its buffer is free as soon
+as `send()` returns.
+
+What the bus does, when it falls back to the blocking bus, and how to measure
+the difference: [docs/ports/esp32.md](docs/ports/esp32.md#spibusspibus-dma).
 
 ## ESP32 large framebuffers
 

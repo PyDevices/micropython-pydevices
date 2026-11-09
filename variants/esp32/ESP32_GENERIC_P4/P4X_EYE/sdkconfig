@@ -1,0 +1,25 @@
+# Espressif ESP32-P4X-EYE, after variants/esp32/sdkconfig.esp32p4 and the
+# selected modules' fragments.
+
+# The C6 is wired to SDMMC slot 1 on GPIO 27 (CMD), 28 (CLK), 29..32 (D0..D3),
+# with its reset on GPIO 9. Upstream's p4_wifi_common picks the Function EV
+# board's pins (14..19), which on this board are the LCD and I2C SDA.
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=n
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_NONE=y
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_CMD_SLOT_1=27
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_CLK_SLOT_1=28
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D0_SLOT_1=29
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D1_4BIT_BUS_SLOT_1=30
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D2_4BIT_BUS_SLOT_1=31
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D3_4BIT_BUS_SLOT_1=32
+CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=9
+
+# The OV2710 on the MIPI-CSI connector, beside cameraif's OV5647: the driver
+# and its probe (the AUTO_DETECT option keeps the probe out of --gc-sections'
+# reach, see cameraif/sdkconfig.esp32p4), both of its modes, 1920x1080 as the
+# default because the factory firmware streams the whole sensor and crops.
+CONFIG_CAMERA_OV2710=y
+CONFIG_CAMERA_OV2710_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
+CONFIG_CAMERA_OV2710_MIPI_RAW10_1280X720_25FPS=y
+CONFIG_CAMERA_OV2710_MIPI_RAW10_1920X1080_25FPS=y
+CONFIG_CAMERA_OV2710_MIPI_DEFAULT_FMT_RAW10_1920X1080_25FPS=y
