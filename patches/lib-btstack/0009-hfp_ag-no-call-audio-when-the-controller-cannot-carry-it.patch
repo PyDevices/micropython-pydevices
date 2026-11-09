@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 00:00:00 -0500
+Subject: [PATCH] hfp_ag: no call audio with ENABLE_HFP_DECLINE_SCO
+
+The gateway ties a call's start to its audio link: an answered call waits
+for SCO before it reports call=1, and answering opens one. On a controller
+that can't carry SCO the call never goes active, and the request drops the
+ACL link (raspberrypi/pico-sdk#1461). With ENABLE_HFP_DECLINE_SCO the
+gateway never asks for audio and a call goes active as soon as it is
+answered.
+
+diff --git a/src/classic/hfp_ag.c b/src/classic/hfp_ag.c
+--- a/src/classic/hfp_ag.c
++++ b/src/classic/hfp_ag.c
+@@ -1400,7 +1400,11 @@
+         if ((hfp_connection->call_state != HFP_CALL_INCOMING_RINGING) &&
+             (hfp_connection->call_state != HFP_CALL_W4_AUDIO_CONNECTION_FOR_IN_BAND_RING)) continue;
+ 
++#ifdef ENABLE_HFP_DECLINE_SCO
++        hfp_connection->call_state = HFP_CALL_ACTIVE;
++#else
+         hfp_connection->call_state = HFP_CALL_TRIGGER_AUDIO_CONNECTION;
++#endif
+ 
+         hfp_connection->ag_indicators_status_update_bitmap = store_bit(hfp_connection->ag_indicators_status_update_bitmap, call_indicator_index, 1);
+         hfp_connection->ag_indicators_status_update_bitmap = store_bit(hfp_connection->ag_indicators_status_update_bitmap, callsetup_indicator_index, 1);
+@@ -1508,7 +1512,10 @@
+             hfp_connection->call_state = HFP_CALL_INCOMING_RINGING;
+             break;
+         case HFP_CALL_W4_AUDIO_CONNECTION_FOR_ACTIVE:
++#ifndef ENABLE_HFP_DECLINE_SCO
++            // with no call audio the call is active without waiting for it
+             if (hfp_connection->state != HFP_AUDIO_CONNECTION_ESTABLISHED) return 0;
++#endif
+             // we got event: audio hfp_connection established
+             hfp_connection->call_state = HFP_CALL_ACTIVE;
+             break;    
+@@ -2735,6 +2742,11 @@
+ }
+ 
+ uint8_t hfp_ag_establish_audio_connection(hci_con_handle_t acl_handle){
++#ifdef ENABLE_HFP_DECLINE_SCO
++    // the controller can't carry SCO: a request would drop the ACL link
++    (void) acl_handle;
++    return ERROR_CODE_COMMAND_DISALLOWED;
++#endif
+     hfp_connection_t * hfp_connection = get_hfp_ag_connection_context_for_acl_handle(acl_handle);
+     if (!hfp_connection){
+         return ERROR_CODE_UNKNOWN_CONNECTION_IDENTIFIER;

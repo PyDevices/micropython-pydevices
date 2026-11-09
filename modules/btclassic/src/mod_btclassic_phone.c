@@ -7,7 +7,7 @@
 // board as a phone. They wrap those parts of btclassic.h and nothing else;
 // mod_btclassic.c registers the types. PhoneBook is here wherever this file
 // is built (BTC_HAS_PHONEBOOK); the gateway and messages where the backend
-// has them too (BTC_HAS_PHONE).
+// has them too (BTC_HAS_GATEWAY, BTC_HAS_MESSAGES).
 //
 // The vCard and listing parsers here are plain C over the reply's bytes, so
 // every backend gets the same records.
@@ -492,7 +492,7 @@ static mp_obj_t xml_attr(const char *el, size_t n, const char *attr) {
     return f.found == MP_OBJ_NULL ? MP_OBJ_NEW_QSTR(MP_QSTR_) : f.found;
 }
 
-#if BTC_HAS_PHONE
+#if BTC_HAS_MESSAGES
 static void attr_store(void *ctx, const char *name, size_t nn, const char *value, size_t vn) {
     mp_obj_dict_store(*(mp_obj_t *)ctx, mp_obj_new_str(name, nn), xml_decode(value, vn));
 }
@@ -952,7 +952,7 @@ MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &pb_locals
     );
 
-#if BTC_HAS_PHONE
+#if BTC_HAS_GATEWAY
 
 // =========================================================================
 // AudioGateway: HFP audio gateway, the board as the phone
@@ -1097,6 +1097,19 @@ static mp_obj_t ag_dtmf(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(ag_dtmf_obj, ag_dtmf);
 
 static mp_obj_t ag_deinit(mp_obj_t self_in) {
+    // Let the headset's link close before the gateway goes: a stack that
+    // still holds it would refuse the next connection.
+    btc_ag_status_t st;
+    btc_ag_status(&st);
+    if (st.connected && btc_ag_disconnect() == BTC_OK) {
+        for (int waited = 0; waited < 1000; waited += 10) {
+            btc_ag_status(&st);
+            if (!st.connected) {
+                break;
+            }
+            mp_event_wait_ms(10);
+        }
+    }
     btc_ag_stop();
     return mp_const_none;
 }
@@ -1251,6 +1264,10 @@ MP_DEFINE_CONST_OBJ_TYPE(
     attr, ag_attr,
     locals_dict, &ag_locals
     );
+
+#endif // BTC_HAS_GATEWAY
+
+#if BTC_HAS_MESSAGES
 
 // =========================================================================
 // Messages: MAP client
@@ -1821,4 +1838,4 @@ MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &msg_locals
     );
 
-#endif // BTC_HAS_PHONE
+#endif // BTC_HAS_MESSAGES

@@ -1704,8 +1704,10 @@ extern const mp_obj_type_t btc_hid_host_type;
 #if BTC_HAS_PHONEBOOK
 extern const mp_obj_type_t btc_phonebook_type;
 #endif
-#if BTC_HAS_PHONE
+#if BTC_HAS_GATEWAY
 extern const mp_obj_type_t btc_gateway_type;
+#endif
+#if BTC_HAS_MESSAGES
 extern const mp_obj_type_t btc_messages_type;
 #endif
 
@@ -1735,9 +1737,13 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_PhoneBook), MP_ROM_PTR(&btc_phonebook_type) },
     { MP_ROM_QSTR(MP_QSTR_PHONEBOOK), MP_ROM_INT(BTC_CHANGED_PHONEBOOK) },
     #endif
-    #if BTC_HAS_PHONE
+    #if BTC_HAS_GATEWAY
     { MP_ROM_QSTR(MP_QSTR_AudioGateway), MP_ROM_PTR(&btc_gateway_type) },
+    #endif
+    #if BTC_HAS_GATEWAY || BTC_HAS_MESSAGES
     { MP_ROM_QSTR(MP_QSTR_REQUEST), MP_ROM_INT(BTC_CHANGED_REQUEST) },
+    #endif
+    #if BTC_HAS_MESSAGES
     { MP_ROM_QSTR(MP_QSTR_Messages), MP_ROM_PTR(&btc_messages_type) },
     { MP_ROM_QSTR(MP_QSTR_MESSAGES), MP_ROM_INT(BTC_CHANGED_MESSAGES) },
     { MP_ROM_QSTR(MP_QSTR_NOTIFY), MP_ROM_INT(BTC_CHANGED_NOTIFY) },

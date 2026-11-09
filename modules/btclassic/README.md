@@ -188,7 +188,11 @@ service and operator, and answers, dials, hangs up and sends tones.
 `PhoneBook` works as it does on the ESP32, except that `new_missed` is
 always None. Its reply comes into the heap and grows with it: a phone book
 of 471 contacts without photos is 68 KB, so page with `count` on a Pico W.
-`AudioGateway` and `Messages` are ESP32-only. `Library` and `Tether` are
+`AudioGateway` works on the Pico W for control only: `ring()`, `dial()`,
+`answer()`, `hangup()`, the signal, battery and operator a headset shows,
+and its volume. The CYW43439 can't carry call audio, so `audio` stays False
+and `connect_audio()` raises OSError, as it does on `HandsFree`.
+`Messages` is ESP32-only. `Library` and `Tether` are
 the other way round: only the Pico W has them (see
 [A phone's music library](#a-phones-music-library) and
 [The internet through a phone](#the-internet-through-a-phone)).
