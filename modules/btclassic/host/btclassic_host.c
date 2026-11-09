@@ -133,6 +133,83 @@ uint32_t btc_radio_changes(void) {
     return c;
 }
 
+// No radio here, so nothing to find, measure or tune: these say so with the
+// module's "not in this firmware" error, and the readers give defaults.
+
+int btc_radio_set_class(uint32_t cod) {
+    (void)cod;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+uint32_t btc_radio_class(void) {
+    return 0;
+}
+
+int btc_radio_read_rssi(const uint8_t *addr) {
+    (void)addr;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_rssi(int *delta) {
+    *delta = 0;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+int btc_radio_set_page_timeout(uint32_t ms) {
+    (void)ms;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+uint32_t btc_radio_page_timeout(void) {
+    return 5120;
+}
+
+int btc_radio_set_channels(const uint8_t *map) {
+    (void)map;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+void btc_radio_channels(uint8_t *map) {
+    memset(map, 0xff, BTC_CHANNEL_MAP_LEN - 1);
+    map[BTC_CHANNEL_MAP_LEN - 1] = 0x7f;
+}
+
+int btc_radio_set_eir(const btc_eir_t *eir) {
+    (void)eir;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+void btc_radio_eir(btc_eir_t *eir) {
+    memset(eir, 0, sizeof(*eir));
+}
+
+int btc_radio_inquiry(uint32_t duration_ms) {
+    (void)duration_ms;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+bool btc_radio_inquiring(void) {
+    return false;
+}
+
+int btc_radio_found(btc_found_t *out, int max) {
+    (void)out;
+    (void)max;
+    return 0;
+}
+
+int btc_radio_found_eir(const uint8_t *addr, uint8_t *dst, size_t size) {
+    (void)addr;
+    (void)dst;
+    (void)size;
+    return BTC_ERR_UNSUPPORTED;
+}
+
+// No A2DP source here either: AudioSource and Serial aren't in this build.
+bool btc_source_started(void) {
+    return false;
+}
+
 // ---- the sink ----
 
 static const btc_addr_t phone = { 0x02, 0x00, 0x00, 0x00, 0x00, 0x02 };
@@ -544,7 +621,8 @@ static MP_DEFINE_CONST_FUN_OBJ_1(host_sent_obj, host_sent);
 static uint8_t cap[CAP_BYTES];
 static volatile uint32_t cap_w, cap_r;
 
-static uint32_t cap_pull(uint8_t *dst, uint32_t want) {
+// Only the audio pump's uplink pulls it, in a build with audiodsp.
+__attribute__((unused)) static uint32_t cap_pull(uint8_t *dst, uint32_t want) {
     uint32_t r = cap_r;
     uint32_t avail = __atomic_load_n(&cap_w, __ATOMIC_ACQUIRE) - r;
     uint32_t n = want < avail ? want : avail;
