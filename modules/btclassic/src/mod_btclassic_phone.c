@@ -2,10 +2,12 @@
 //
 // SPDX-License-Identifier: MIT
 
-// btclassic.PhoneBook (PBAP client) and btclassic.AudioGateway (HFP audio
-// gateway): the phone's data, and the board as a phone. They wrap the
-// phone book and gateway halves of btclassic.h and nothing else;
-// mod_btclassic.c registers the types.
+// btclassic.PhoneBook (PBAP client), btclassic.AudioGateway (HFP audio
+// gateway) and btclassic.Messages (MAP client): the phone's data, and the
+// board as a phone. They wrap those parts of btclassic.h and nothing else;
+// mod_btclassic.c registers the types. PhoneBook is here wherever this file
+// is built (BTC_HAS_PHONEBOOK); the gateway and messages where the backend
+// has them too (BTC_HAS_PHONE).
 //
 // The vCard and listing parsers here are plain C over the reply's bytes, so
 // every backend gets the same records.
@@ -490,6 +492,7 @@ static mp_obj_t xml_attr(const char *el, size_t n, const char *attr) {
     return f.found == MP_OBJ_NULL ? MP_OBJ_NEW_QSTR(MP_QSTR_) : f.found;
 }
 
+#if BTC_HAS_PHONE
 static void attr_store(void *ctx, const char *name, size_t nn, const char *value, size_t vn) {
     mp_obj_dict_store(*(mp_obj_t *)ctx, mp_obj_new_str(name, nn), xml_decode(value, vn));
 }
@@ -517,6 +520,7 @@ static mp_obj_t xml_elements(const char *data, size_t size, const char *tag) {
     }
     return out;
 }
+#endif
 
 static mp_obj_t listing_parse(const char *data, size_t size) {
     mp_obj_t out = mp_obj_new_list(0, NULL);
@@ -947,6 +951,8 @@ MP_DEFINE_CONST_OBJ_TYPE(
     attr, pb_attr,
     locals_dict, &pb_locals
     );
+
+#if BTC_HAS_PHONE
 
 // =========================================================================
 // AudioGateway: HFP audio gateway, the board as the phone
@@ -1814,3 +1820,5 @@ MP_DEFINE_CONST_OBJ_TYPE(
     attr, msg_attr,
     locals_dict, &msg_locals
     );
+
+#endif // BTC_HAS_PHONE

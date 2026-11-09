@@ -5,6 +5,10 @@
 //   au = enc.encode(framebuffer)        # bytes: Annex B NAL units
 //   enc.keyframe; enc.force_idr(); enc.set_bitrate(n); enc.stats(); enc.close()
 //
+//   enc = h264enc.Encoder(1920, 1072, fps=25, pipeline=True)
+//   au = enc.encode(frame)              # the previous frame's access unit (b"" at first)
+//   au = enc.flush()                    # the last one
+//
 // ppa's C API (the PPA) converts each frame to the packed YUV420 the encoder reads (the only
 // raw format the pre-revision-3 P4 takes), placed on a canvas that may be
 // larger than the frame; esp_h264 encodes it. Limited-range BT.601, which is
@@ -13,6 +17,13 @@
 // The same session is available to C (h264enc.h): castif's cast task encodes
 // through it on core 0. The P4 has one encoder, so one session at a time; a
 // second open gets "busy" and the first carries on.
+//
+// With pipeline=True the session has two canvases and a worker task. encode()
+// converts this frame on the PPA (on the caller's thread, so the frame is free
+// again when encode() returns) while the worker encodes the previous one, then
+// hands the worker this frame and returns the previous frame's access unit.
+// The PPA and the encoder are separate engines, so a frame costs about the
+// longer of the two rather than their sum.
 
 #include <string.h>
 
@@ -23,7 +34,12 @@
 // IDF's: the IDF headers stay out of it.
 #ifndef NO_QSTR
 #include "esp_heap_caps.h"
+#include "esp_task.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
+#include "freertos/idf_additions.h"
 #include "esp_h264_enc_single_hw.h"
 #include "esp_h264_alloc.h"
 #endif
@@ -69,7 +85,15 @@ struct h264enc_session {
     bool enc_open;
     ppa_mod_client_t *ppa;
     uint8_t *yuv;
+    uint8_t *yuv2;              // the second canvas, pipeline only
     uint32_t yuv_len;
+    bool pipeline;
+    uint8_t *next;              // the canvas the next frame is converted into
+    bool busy;                  // the worker has a frame
+    bool ready;                 // out holds an access unit nobody has taken yet
+    int job_err;                // the worker's result for the frame it finished
+    uint32_t job_len;
+    bool job_idr;
     uint32_t in_len;            // the packed YUV420 canvas the encoder reads
     uint8_t *out;
     uint32_t out_cap;
@@ -81,12 +105,73 @@ struct h264enc_session {
 // The one session the hardware can hold.
 static h264enc_session_t *h264enc_owner;
 
+// --- the pipeline's worker ---------------------------------------------------
+//
+// One task for the life of the firmware, made by the first pipelined open:
+// there is one encoder, so there is never more than one session to serve, and
+// a task that is never deleted can't be freed under a session that is closing.
+
+static TaskHandle_t h264enc_worker_task;
+static SemaphoreHandle_t h264enc_go, h264enc_done;
+static h264enc_session_t *volatile h264enc_job;
+
+static int h264enc_run(h264enc_session_t *s, uint8_t *yuv, uint32_t *len, bool *idr);
+
+static void h264enc_worker(void *arg) {
+    (void)arg;
+    for (;;) {
+        xSemaphoreTake(h264enc_go, portMAX_DELAY);
+        h264enc_session_t *s = h264enc_job;
+        s->job_err = h264enc_run(s, s->next == s->yuv ? s->yuv2 : s->yuv, &s->job_len, &s->job_idr);
+        xSemaphoreGive(h264enc_done);
+    }
+}
+
+static const char *h264enc_worker_start(void) {
+    if (h264enc_worker_task != NULL) {
+        return NULL;
+    }
+    if (h264enc_go == NULL) {
+        h264enc_go = xSemaphoreCreateBinary();
+        h264enc_done = xSemaphoreCreateBinary();
+        if (h264enc_go == NULL || h264enc_done == NULL) {
+            return "no memory for the pipeline's semaphores";
+        }
+    }
+    // The encoder call blocks on its interrupt for nearly all of a frame; the
+    // stack is for its rate control and its error log.
+    if (xTaskCreatePinnedToCore(h264enc_worker, "h264enc", 8192, NULL, ESP_TASK_PRIO_MIN + 2,
+        &h264enc_worker_task, tskNO_AFFINITY) != pdPASS) {
+        h264enc_worker_task = NULL;
+        return "no memory for the pipeline's task";
+    }
+    return NULL;
+}
+
+// Waits for the frame with the worker, if any; its access unit is then in out.
+static void h264enc_wait(h264enc_session_t *s) {
+    if (s->busy) {
+        xSemaphoreTake(h264enc_done, portMAX_DELAY);
+        s->busy = false;
+        s->ready = true;
+    }
+}
+
+// Hands the canvas just converted (s->next) to the worker and flips canvases.
+static void h264enc_submit(h264enc_session_t *s) {
+    s->next = s->next == s->yuv ? s->yuv2 : s->yuv;
+    s->busy = true;
+    h264enc_job = s;
+    xSemaphoreGive(h264enc_go);
+}
+
 // --- C API -------------------------------------------------------------------
 
 void h264enc_close(h264enc_session_t *s) {
     if (s == NULL) {
         return;
     }
+    h264enc_wait(s);
     if (s->enc_open) {
         esp_h264_enc_close(s->enc);
     }
@@ -99,6 +184,9 @@ void h264enc_close(h264enc_session_t *s) {
     if (s->yuv) {
         esp_h264_free(s->yuv);
     }
+    if (s->yuv2) {
+        esp_h264_free(s->yuv2);
+    }
     if (s->out) {
         esp_h264_free(s->out);
     }
@@ -108,8 +196,33 @@ void h264enc_close(h264enc_session_t *s) {
     heap_caps_free(s);
 }
 
+// A canvas whose border is limited-range black (packed U Y Y / V Y Y).
+static uint8_t *h264enc_canvas(h264enc_session_t *s) {
+    uint32_t got;
+    uint8_t *p = esp_h264_aligned_calloc(128, 1, (s->in_len + 127) & ~127u, &got, ESP_H264_MEM_SPIRAM);
+    if (p == NULL) {
+        return NULL;
+    }
+    s->yuv_len = got;
+    for (uint32_t i = 0; i + 2 < s->in_len; i += 3) {
+        p[i] = 0x80;
+        p[i + 1] = 0x10;
+        p[i + 2] = 0x10;
+    }
+    return p;
+}
+
+static const char *h264enc_open_pipelined(h264enc_session_t **out, int width, int height, int canvas_w,
+    int canvas_h, int fps, int gop, int bitrate, int qp_min, int qp_max, uint32_t out_size, bool pipeline);
+
 const char *h264enc_open(h264enc_session_t **out, int width, int height, int canvas_w, int canvas_h,
     int fps, int gop, int bitrate, int qp_min, int qp_max, uint32_t out_size) {
+    return h264enc_open_pipelined(out, width, height, canvas_w, canvas_h, fps, gop, bitrate, qp_min, qp_max,
+        out_size, false);
+}
+
+static const char *h264enc_open_pipelined(h264enc_session_t **out, int width, int height, int canvas_w,
+    int canvas_h, int fps, int gop, int bitrate, int qp_min, int qp_max, uint32_t out_size, bool pipeline) {
     *out = NULL;
     if (h264enc_owner != NULL) {
         return "busy";
@@ -145,16 +258,18 @@ const char *h264enc_open(h264enc_session_t **out, int width, int height, int can
         why = "no memory for a ppa client";
         goto fail;
     }
-    s->yuv = esp_h264_aligned_calloc(128, 1, (s->in_len + 127) & ~127u, &s->yuv_len, ESP_H264_MEM_SPIRAM);
+    s->yuv = h264enc_canvas(s);
     if (s->yuv == NULL) {
         why = "no memory for the YUV canvas";
         goto fail;
     }
-    // The canvas border stays limited-range black (packed U Y Y / V Y Y).
-    for (uint32_t i = 0; i + 2 < s->in_len; i += 3) {
-        s->yuv[i] = 0x80;
-        s->yuv[i + 1] = 0x10;
-        s->yuv[i + 2] = 0x10;
+    s->next = s->yuv;
+    if (pipeline) {
+        s->yuv2 = h264enc_canvas(s);
+        if (s->yuv2 == NULL) {
+            why = "no memory for the second YUV canvas";
+            goto fail;
+        }
     }
     esp_h264_enc_cfg_hw_t cfg = {0};
     cfg.pic_type = ESP_H264_RAW_FMT_O_UYY_E_VYY;
@@ -196,6 +311,15 @@ const char *h264enc_open(h264enc_session_t **out, int width, int height, int can
         why = "no memory for the output buffer";
         goto fail;
     }
+    // After the encoder, whose reference rows want the largest piece of
+    // internal RAM: the task's stack comes from what is left.
+    if (pipeline) {
+        why = h264enc_worker_start();
+        if (why != NULL) {
+            goto fail;
+        }
+        s->pipeline = true;
+    }
     h264enc_owner = s;
     *out = s;
     return NULL;
@@ -205,38 +329,55 @@ fail:
     return why;
 }
 
-int h264enc_encode(h264enc_session_t *s, const uint8_t *rgb565, const uint8_t **data, uint32_t *len, bool *idr) {
+// RGB565 to the packed YUV420 the encoder reads, placed centred on the
+// canvas; studio range, which is what H.264 decoders assume.
+static int h264enc_convert(h264enc_session_t *s, const uint8_t *rgb565, uint8_t *yuv) {
     int64_t t0 = esp_timer_get_time();
-    // RGB565 to the packed YUV420 the encoder reads, placed centred on the
-    // canvas; studio range, which is what H.264 decoders assume
     ppa_mod_srm_t op = {
         .src = rgb565, .src_w = s->w, .src_h = s->h, .src_fmt = H264ENC_PPA_RGB565,
-        .dst = s->yuv, .dst_len = s->yuv_len, .dst_w = s->cw, .dst_h = s->ch, .dst_fmt = H264ENC_PPA_YUV420,
+        .dst = yuv, .dst_len = s->yuv_len, .dst_w = s->cw, .dst_h = s->ch, .dst_fmt = H264ENC_PPA_YUV420,
         .x = ((s->cw - s->w) / 2) & ~1u, .y = ((s->ch - s->h) / 2) & ~1u, .w = s->w, .h = s->h,
         .yuv_limited = true,
     };
     const char *perr = ppa_mod_srm(s->ppa, &op);
-    int64_t t1 = esp_timer_get_time();
-    s->ppa_us = (uint32_t)(t1 - t0);
-    if (perr != NULL) {
-        return -1;
-    }
+    s->ppa_us = (uint32_t)(esp_timer_get_time() - t0);
+    return perr != NULL ? -1 : 0;
+}
+
+// One canvas through the encoder into out.
+static int h264enc_run(h264enc_session_t *s, uint8_t *yuv, uint32_t *len, bool *idr) {
+    int64_t t0 = esp_timer_get_time();
     esp_h264_enc_in_frame_t inf = {0};
-    inf.raw_data.buffer = s->yuv;
+    inf.raw_data.buffer = yuv;
     inf.raw_data.len = s->in_len;
     inf.pts = s->frames;
     esp_h264_enc_out_frame_t outf = {0};
     outf.raw_data.buffer = s->out;
     outf.raw_data.len = s->out_cap;
     esp_h264_err_t err = esp_h264_enc_process(s->enc, &inf, &outf);
-    s->enc_us = (uint32_t)(esp_timer_get_time() - t1);
+    s->enc_us = (uint32_t)(esp_timer_get_time() - t0);
     if (err != ESP_H264_ERR_OK) {
         return (int)err;
     }
     s->frames++;
-    *data = s->out;
     *len = outf.length;
     *idr = outf.frame_type == ESP_H264_FRAME_TYPE_IDR;
+    return 0;
+}
+
+int h264enc_encode(h264enc_session_t *s, const uint8_t *rgb565, const uint8_t **data, uint32_t *len, bool *idr) {
+    if (s->pipeline) {
+        return -2;
+    }
+    int err = h264enc_convert(s, rgb565, s->yuv);
+    if (err != 0) {
+        return err;
+    }
+    err = h264enc_run(s, s->yuv, len, idr);
+    if (err != 0) {
+        return err;
+    }
+    *data = s->out;
     return 0;
 }
 
@@ -260,6 +401,7 @@ typedef struct _h264enc_encoder_obj_t {
     h264enc_session_t *s;
     bool keyframe;              // the last encode() was an IDR frame
     uint32_t frames, keyframes, errors;
+    uint32_t wall_us;           // how long the last encode() kept its caller
     uint64_t bytes;
 } h264enc_encoder_obj_t;
 
@@ -271,7 +413,8 @@ static h264enc_session_t *h264enc_get(h264enc_encoder_obj_t *self) {
 }
 
 static mp_obj_t h264enc_encoder_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
-    enum { ARG_width, ARG_height, ARG_fps, ARG_gop, ARG_bitrate, ARG_qp_min, ARG_qp_max, ARG_canvas_w, ARG_canvas_h, ARG_out_size };
+    enum { ARG_width, ARG_height, ARG_fps, ARG_gop, ARG_bitrate, ARG_qp_min, ARG_qp_max, ARG_canvas_w, ARG_canvas_h, ARG_out_size,
+           ARG_pipeline };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_width, MP_ARG_REQUIRED | MP_ARG_INT, {.u_int = 0} },
         { MP_QSTR_height, MP_ARG_REQUIRED | MP_ARG_INT, {.u_int = 0} },
@@ -283,13 +426,15 @@ static mp_obj_t h264enc_encoder_make_new(const mp_obj_type_t *type, size_t n_arg
         { MP_QSTR_canvas_w, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
         { MP_QSTR_canvas_h, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
         { MP_QSTR_out_size, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_pipeline, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed), allowed, args);
     h264enc_session_t *s;
-    const char *why = h264enc_open(&s, args[ARG_width].u_int, args[ARG_height].u_int,
+    const char *why = h264enc_open_pipelined(&s, args[ARG_width].u_int, args[ARG_height].u_int,
         args[ARG_canvas_w].u_int, args[ARG_canvas_h].u_int, args[ARG_fps].u_int, args[ARG_gop].u_int,
-        args[ARG_bitrate].u_int, args[ARG_qp_min].u_int, args[ARG_qp_max].u_int, (uint32_t)args[ARG_out_size].u_int);
+        args[ARG_bitrate].u_int, args[ARG_qp_min].u_int, args[ARG_qp_max].u_int, (uint32_t)args[ARG_out_size].u_int,
+        args[ARG_pipeline].u_bool);
     if (why != NULL) {
         if (strcmp(why, "busy") == 0) {
             mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("h264enc: the H.264 encoder is busy (a cast or another Encoder has it)"));
@@ -300,11 +445,36 @@ static mp_obj_t h264enc_encoder_make_new(const mp_obj_type_t *type, size_t n_arg
     self->s = s;
     self->keyframe = false;
     self->frames = self->keyframes = self->errors = 0;
+    self->wall_us = 0;
     self->bytes = 0;
     return MP_OBJ_FROM_PTR(self);
 }
 
-// encode(frame) -> bytes: one access unit, Annex B.
+// Counts an access unit handed to Python, and makes its bytes.
+static mp_obj_t h264enc_encoder_take(h264enc_encoder_obj_t *self, const uint8_t *data, uint32_t len, bool idr) {
+    self->keyframe = idr;
+    self->frames++;
+    self->keyframes += idr;
+    self->bytes += len;
+    return mp_obj_new_bytes(data, len);
+}
+
+// The pipeline's finished access unit, or b"" when there is none; raises if
+// the encoder failed on it.
+static mp_obj_t h264enc_encoder_collect(h264enc_encoder_obj_t *self, h264enc_session_t *s) {
+    if (!s->ready) {
+        return mp_const_empty_bytes;
+    }
+    s->ready = false;
+    if (s->job_err != 0) {
+        self->errors++;
+        mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("h264enc: encode failed (%d)"), s->job_err);
+    }
+    return h264enc_encoder_take(self, s->out, s->job_len, s->job_idr);
+}
+
+// encode(frame) -> bytes: one access unit, Annex B. Pipelined, the previous
+// frame's (b"" for the first frame).
 static mp_obj_t h264enc_encoder_encode(mp_obj_t self_in, mp_obj_t frame) {
     h264enc_encoder_obj_t *self = MP_OBJ_TO_PTR(self_in);
     h264enc_session_t *s = h264enc_get(self);
@@ -313,6 +483,40 @@ static mp_obj_t h264enc_encoder_encode(mp_obj_t self_in, mp_obj_t frame) {
     if (buf.len < (size_t)s->w * s->h * 2) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("h264enc: a %dx%d frame is %d bytes, got %d"),
             s->w, s->h, s->w * s->h * 2, (int)buf.len);
+    }
+    int64_t t0 = esp_timer_get_time();
+    if (s->pipeline) {
+        // Convert this frame while the worker encodes the last one, then wait
+        // for it. The GIL is out for both, as below.
+        MP_THREAD_GIL_EXIT();
+        int perr = h264enc_convert(s, buf.buf, s->next);
+        h264enc_wait(s);
+        MP_THREAD_GIL_ENTER();
+        if (perr != 0) {
+            // Nothing goes to the worker, so frames still come out one for one:
+            // the access unit waiting now comes out of the next encode().
+            self->wall_us = (uint32_t)(esp_timer_get_time() - t0);
+            self->errors++;
+            mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("h264enc: the PPA could not convert the frame"));
+        }
+        // The access unit is copied out before the worker may write the next.
+        mp_obj_t au = mp_const_empty_bytes;
+        int jerr = 0;
+        if (s->ready) {
+            s->ready = false;
+            jerr = s->job_err;
+            if (jerr == 0) {
+                au = h264enc_encoder_take(self, s->out, s->job_len, s->job_idr);
+            } else {
+                self->errors++;
+            }
+        }
+        h264enc_submit(s);
+        self->wall_us = (uint32_t)(esp_timer_get_time() - t0);
+        if (jerr != 0) {
+            mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("h264enc: encode failed (%d)"), jerr);
+        }
+        return au;
     }
     const uint8_t *data;
     uint32_t len;
@@ -324,17 +528,25 @@ static mp_obj_t h264enc_encoder_encode(mp_obj_t self_in, mp_obj_t frame) {
     MP_THREAD_GIL_EXIT();
     int err = h264enc_encode(s, buf.buf, &data, &len, &idr);
     MP_THREAD_GIL_ENTER();
+    self->wall_us = (uint32_t)(esp_timer_get_time() - t0);
     if (err != 0) {
         self->errors++;
         mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("h264enc: encode failed (%d)"), err);
     }
-    self->keyframe = idr;
-    self->frames++;
-    self->keyframes += idr;
-    self->bytes += len;
-    return mp_obj_new_bytes(data, len);
+    return h264enc_encoder_take(self, data, len, idr);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(h264enc_encoder_encode_obj, h264enc_encoder_encode);
+
+// flush() -> bytes: the frame still in the pipeline, or b"".
+static mp_obj_t h264enc_encoder_flush(mp_obj_t self_in) {
+    h264enc_encoder_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    h264enc_session_t *s = h264enc_get(self);
+    MP_THREAD_GIL_EXIT();
+    h264enc_wait(s);
+    MP_THREAD_GIL_ENTER();
+    return h264enc_encoder_collect(self, s);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(h264enc_encoder_flush_obj, h264enc_encoder_flush);
 
 static mp_obj_t h264enc_encoder_force_idr(mp_obj_t self_in) {
     h264enc_force_idr(h264enc_get(MP_OBJ_TO_PTR(self_in)));
@@ -363,22 +575,51 @@ static mp_obj_t h264enc_encoder_stats(mp_obj_t self_in) {
     PUT(MP_QSTR_errors, self->errors);
     PUT(MP_QSTR_ppa_us, s->ppa_us);
     PUT(MP_QSTR_enc_us, s->enc_us);
+    PUT(MP_QSTR_wall_us, self->wall_us);
     #undef PUT
     return d;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(h264enc_encoder_stats_obj, h264enc_encoder_stats);
 
-static mp_obj_t h264enc_encoder_close(mp_obj_t self_in) {
-    h264enc_encoder_obj_t *self = MP_OBJ_TO_PTR(self_in);
+static void h264enc_encoder_release(h264enc_encoder_obj_t *self) {
     h264enc_close(self->s);
     self->s = NULL;
-    return mp_const_none;
+}
+
+// close() -> bytes or None: pipelined, the last frame's access unit (b"" when
+// there is none), as flush() would have returned it.
+static mp_obj_t h264enc_encoder_close(mp_obj_t self_in) {
+    h264enc_encoder_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (self->s == NULL) {
+        return mp_const_none;
+    }
+    mp_obj_t last = mp_const_none;
+    if (self->s->pipeline) {
+        nlr_buf_t nlr;
+        if (nlr_push(&nlr) == 0) {
+            last = h264enc_encoder_flush(self_in);
+            nlr_pop();
+        } else {
+            h264enc_encoder_release(self);
+            nlr_jump(nlr.ret_val);
+        }
+    }
+    h264enc_encoder_release(self);
+    return last;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(h264enc_encoder_close_obj, h264enc_encoder_close);
 
+// The finaliser and __exit__ give the encoder back without allocating: the
+// collector can't make bytes, and __exit__ must not return a true value.
+static mp_obj_t h264enc_encoder_del(mp_obj_t self_in) {
+    h264enc_encoder_release(MP_OBJ_TO_PTR(self_in));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(h264enc_encoder_del_obj, h264enc_encoder_del);
+
 static mp_obj_t h264enc_encoder_exit(size_t n_args, const mp_obj_t *args) {
     (void)n_args;
-    return h264enc_encoder_close(args[0]);
+    return h264enc_encoder_del(args[0]);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(h264enc_encoder_exit_obj, 4, 4, h264enc_encoder_exit);
 
@@ -389,6 +630,8 @@ static void h264enc_encoder_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     h264enc_encoder_obj_t *self = MP_OBJ_TO_PTR(self_in);
     if (attr == MP_QSTR_keyframe) {
         dest[0] = mp_obj_new_bool(self->keyframe);
+    } else if (attr == MP_QSTR_pipeline) {
+        dest[0] = mp_obj_new_bool(h264enc_get(self)->pipeline);
     } else if (attr == MP_QSTR_width || attr == MP_QSTR_height) {
         h264enc_session_t *s = h264enc_get(self);
         dest[0] = MP_OBJ_NEW_SMALL_INT(attr == MP_QSTR_width ? s->w : s->h);
@@ -403,7 +646,8 @@ static const mp_rom_map_elem_t h264enc_encoder_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_bitrate), MP_ROM_PTR(&h264enc_encoder_set_bitrate_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&h264enc_encoder_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&h264enc_encoder_close_obj) },
-    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&h264enc_encoder_close_obj) },
+    { MP_ROM_QSTR(MP_QSTR_flush), MP_ROM_PTR(&h264enc_encoder_flush_obj) },
+    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&h264enc_encoder_del_obj) },
     { MP_ROM_QSTR(MP_QSTR___enter__), MP_ROM_PTR(&mp_identity_obj) },
     { MP_ROM_QSTR(MP_QSTR___exit__), MP_ROM_PTR(&h264enc_encoder_exit_obj) },
 };

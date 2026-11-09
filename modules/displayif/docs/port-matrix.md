@@ -24,6 +24,7 @@ names (`mipidsi`, `i80bus`, `picodvi`, …).
 | [`src/ports/common`](../src/ports/common) | `spibus` / `i2cbus` | **BusDisplay** | shipped |
 | [`src/ports/esp32`](../src/ports/esp32) | `dotclockframebuffer` | **FBDisplay** | esp_lcd RGB scanout |
 | `src/ports/esp32` | `i80bus` | bus driver | esp_lcd I80 (S3) |
+| `src/ports/esp32` | `spibus` | **BusDisplay** | esp_lcd SPI with DMA; machine.SPI where DMA doesn't apply |
 | `src/ports/esp32` | `qspibus` | bus driver | esp_lcd SPI quad_mode (S3) |
 | `src/ports/esp32` | `mipidsi` | **FBDisplay** | ESP32-P4 MIPI DSI |
 | `src/ports/esp32` / `mimxrt` / `samd` / `rp2` | `rgbmatrix` | **FBDisplay** | Protomatter backends |
