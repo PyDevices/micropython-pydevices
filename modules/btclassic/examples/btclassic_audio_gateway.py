@@ -40,6 +40,7 @@ CALL_S = 20  # seconds before the board ends the call
 # Wi-Fi and Bluetooth share the radio. Turn Wi-Fi off for calls.
 network.WLAN(network.STA_IF).active(False)
 bt = btclassic.Bluetooth()
+bt.active(True)
 
 # Look for a headset. Major class 4 is audio and video.
 address = ADDRESS
