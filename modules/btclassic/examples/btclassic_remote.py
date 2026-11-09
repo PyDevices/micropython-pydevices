@@ -21,7 +21,8 @@ Run it:
 Pair your phone with the board's hostname and open a music app. The board
 plays, skips, turns the volume to VOLUME and pauses, a few seconds apart.
 
-Tested on:
+Tested on: ESP32 Audio Kit, MicroPython 1.30.0-preview with btclassic,
+with a Galaxy S21 playing Spotify.
 """
 
 import time
