@@ -21,7 +21,8 @@ Run it:
 Then pair your phone or computer with the board. The board prints the new
 address.
 
-Tested on:
+Tested on: Adafruit QT Py ESP32 Pico, MicroPython 1.30.0-preview with
+btclassic, paired with a Windows 11 PC that found its serial port.
 """
 
 import time
