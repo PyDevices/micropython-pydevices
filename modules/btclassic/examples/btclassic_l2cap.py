@@ -16,7 +16,8 @@ Run it:
     mpftp run --follow btclassic_l2cap.py
 
 Tested on: an Adafruit QT Py ESP32 Pico and an ESP32 Audio Kit, each in both
-roles, MicroPython 1.30.0-preview.
+roles, and a Pimoroni Pico Plus 2 W with the QT Py, each in both roles,
+MicroPython 1.30.0-preview.
 """
 
 import time
