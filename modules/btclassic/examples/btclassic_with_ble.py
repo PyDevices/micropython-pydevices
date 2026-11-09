@@ -19,7 +19,8 @@ Run it:
 A phone's BLE scanner app lists the board under its hostname; a serial
 terminal on your computer or phone connects to the Classic port.
 
-Tested on:
+Tested on: Adafruit QT Py ESP32 Pico, MicroPython 1.30.0-preview with
+btclassic, with a Windows 11 PC on its serial port and BLE devices nearby.
 """
 
 import time
