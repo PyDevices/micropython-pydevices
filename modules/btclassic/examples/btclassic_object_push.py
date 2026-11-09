@@ -16,8 +16,8 @@ Run it:
 
     mpftp run btclassic_object_push.py
 
-Tested on: Pimoroni Pico Plus 2 W, MicroPython 1.30.0-preview with
-btclassic, with a Galaxy S21.
+Tested on: Pimoroni Pico Plus 2 W and Adafruit QT Py ESP32 Pico,
+MicroPython 1.30.0-preview with btclassic, with a Galaxy S21.
 """
 
 import time
