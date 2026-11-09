@@ -565,6 +565,7 @@ Each runs as it is with `mpftp run`; its docstring says what it needs.
 | [btclassic_serial_echo.py](examples/btclassic_serial_echo.py) | A serial port that echoes in upper case |
 | [btclassic_serial_client.py](examples/btclassic_serial_client.py) | Calls another board's serial port and talks to it |
 | [btclassic_with_ble.py](examples/btclassic_with_ble.py) | A Classic serial port beside BLE advertising and scanning |
+| [btclassic_l2cap.py](examples/btclassic_l2cap.py) | Two boards talking over an L2CAP channel of their own |
 | [btclassic_hid_keyboard.py](examples/btclassic_hid_keyboard.py) | Types a line as a keyboard and moves the pointer |
 | [btclassic_hid_media_keys.py](examples/btclassic_hid_media_keys.py) | Presses media keys on a phone or computer |
 | [btclassic_hid_gamepad.py](examples/btclassic_hid_gamepad.py) | A gamepad, with a setting the host reads and changes |
