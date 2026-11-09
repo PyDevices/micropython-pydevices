@@ -10,7 +10,7 @@ upper case.
 
 Needs: two boards with firmware built with the btclassic module (a classic
 ESP32, or a Pico W or Pico 2 W), one running btclassic_serial_echo.py. Set
-ADDRESS to that board's address; btclassic_pairing.py prints it.
+ADDRESS to that board's address; btclassic_settings.py prints it.
 
 Run it:
 
