@@ -22,6 +22,14 @@
 
 static const char *TAG = "btclassic";
 
+// The controller's command for the shortest encryption key: the classic
+// ESP32 has it, the S31's controller doesn't (ESP-IDF 6.1 leaves the call out).
+#if defined(CONFIG_BT_ENC_KEY_SIZE_CTRL_STD) || defined(CONFIG_BT_ENC_KEY_SIZE_CTRL_VSC)
+#define BTC_HAVE_KEY_SIZE 1
+#else
+#define BTC_HAVE_KEY_SIZE 0
+#endif
+
 portMUX_TYPE btc_lock = portMUX_INITIALIZER_UNLOCKED;
 
 #define BT_NAME_MAX 248    // ESP_BT_GAP_MAX_BDNAME_LEN
@@ -608,9 +616,11 @@ int btc_radio_start(void) {
     if (!channels_default()) {
         apply_channels();
     }
+#if BTC_HAVE_KEY_SIZE
     if (r.min_key_size != BTC_KEY_SIZE_MIN) {
         esp_bt_gap_set_min_enc_key_size((uint8_t)r.min_key_size);
     }
+#endif
     if (!eir_default()) {
         apply_eir();
     }
@@ -886,6 +896,7 @@ int btc_radio_set_min_key_size(int bytes) {
     if (bytes < BTC_KEY_SIZE_MIN || bytes > BTC_KEY_SIZE_MAX) {
         return BTC_ERR_ARG;
     }
+#if BTC_HAVE_KEY_SIZE
     r.min_key_size = bytes;
     if (r.on) {
         r.key_state = 0;
@@ -896,6 +907,9 @@ int btc_radio_set_min_key_size(int bytes) {
         return err;
     }
     return BTC_OK;
+#else
+    return BTC_ERR_UNSUPPORTED;
+#endif
 }
 
 int btc_radio_min_key_result(void) {
