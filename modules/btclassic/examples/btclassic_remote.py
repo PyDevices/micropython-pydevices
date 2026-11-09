@@ -54,13 +54,14 @@ due = None
 while True:
     changed = music.changes()
 
-    # When the phone connects, print the link and start the steps.
     if changed & btclassic.CONNECTION:
         print("Connected to", music.peer_name if music.connected else "nothing")
-        if music.connected:
-            link = music.link()
-            print("Codec %s, %s Hz, signal %s dB" % (link["codec"], link["sample_rate"], link["rssi_delta"]))
-            due = time.ticks_add(time.ticks_ms(), STEP_MS)
+
+    # Once the phone is connected, print the link and start the steps.
+    if music.connected and due is None:
+        link = music.link()
+        print("Codec %s, %s Hz, signal %s dB" % (link["codec"], link["sample_rate"], link["rssi_delta"]))
+        due = time.ticks_add(time.ticks_ms(), STEP_MS)
 
     # Print what the phone reports.
     if changed & btclassic.TRACK:
