@@ -322,8 +322,24 @@ static uint32_t auto_class(void) {
            | minor << ESP_BT_COD_MINOR_DEV_BIT_OFFSET;
 }
 
-uint32_t btc_radio_class(void) {
+static uint32_t wanted_class(void) {
     return r.class_set ? r.class_set : auto_class();
+}
+
+static uint32_t cod_bits(const esp_bt_cod_t *cod) {
+    return (uint32_t)cod->service << ESP_BT_COD_SRVC_BIT_OFFSET
+           | (uint32_t)cod->major << ESP_BT_COD_MAJOR_DEV_BIT_OFFSET
+           | (uint32_t)cod->minor << ESP_BT_COD_MINOR_DEV_BIT_OFFSET;
+}
+
+// The class the stack holds now, which is what an inquiry answers with;
+// the one wanted while the radio is off.
+uint32_t btc_radio_class(void) {
+    esp_bt_cod_t cod;
+    if (r.on && esp_bt_gap_get_cod(&cod) == ESP_OK) {
+        return cod_bits(&cod);
+    }
+    return wanted_class();
 }
 
 static void apply_class(void *arg) {
@@ -331,12 +347,20 @@ static void apply_class(void *arg) {
     if (!r.on) {
         return;
     }
-    uint32_t c = btc_radio_class();
+    uint32_t c = wanted_class();
     esp_bt_cod_t cod = {0};
     cod.minor = (c & ESP_BT_COD_MINOR_DEV_BIT_MASK) >> ESP_BT_COD_MINOR_DEV_BIT_OFFSET;
     cod.major = (c & ESP_BT_COD_MAJOR_DEV_BIT_MASK) >> ESP_BT_COD_MAJOR_DEV_BIT_OFFSET;
     cod.service = (c & ESP_BT_COD_SRVC_BIT_MASK) >> ESP_BT_COD_SRVC_BIT_OFFSET;
     esp_bt_gap_set_cod(cod, ESP_BT_INIT_COD);
+    // The controller answers inquiries with the class it had when inquiry
+    // scan was last turned on, so a new class reaches a scanning phone only
+    // once scanning restarts. Restart it here, while the board is found.
+    bool connectable = r.connectable && !r.hidden;
+    if (connectable && r.discoverable && !r.unlisted) {
+        esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
+        apply_scan_mode();
+    }
 }
 
 static void schedule_class(void) {
