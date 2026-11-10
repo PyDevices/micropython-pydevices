@@ -61,7 +61,7 @@ RGB and DSI framebuffers prefer **PSRAM** (`MALLOC_CAP_SPIRAM`). Ensure `CONFIG_
 ## 🚀 Build
 
 Tested against the MicroPython this repository pins ([UPSTREAM](../../UPSTREAM)), the CircuitPython
-11.0.0-alpha.2 oracle, and SDL2 >= 2.0 (desktop `usdl2`) — see [this module's UPSTREAM](UPSTREAM) for the
+11.0.0-alpha.2 oracle, and SDL2 >= 2.0 (desktop `usdl2`) — see [this module's DEPENDENCIES.lock](DEPENDENCIES.lock) for the
 other pins and how to verify them locally.
 
 On MicroPython 1.29 or later, clone micropython-pydevices anywhere (displayif is
@@ -154,10 +154,11 @@ Then run the lifecycle API test under the same interpreter:
 
 ## Third-party
 
-[`src/ports/common/rgbmatrix/protomatter/`](src/ports/common/rgbmatrix/protomatter/) vendors
+[`third_party/protomatter/`](third_party/protomatter/) vendors
 [adafruit/Adafruit_Protomatter](https://github.com/adafruit/Adafruit_Protomatter)
-(BSD). See [UPSTREAM](UPSTREAM) and
-[the protomatter/ README](src/ports/common/rgbmatrix/protomatter/README.md)
+(BSD). See [DEPENDENCIES.lock](DEPENDENCIES.lock),
+[ORIGIN.txt](third_party/protomatter/ORIGIN.txt) and
+[the protomatter/ README](third_party/protomatter/README.md)
 for the identified upstream revision and license text.
 
 The JPEG decoder, `jpegio`, moved to micropython-pydevices'

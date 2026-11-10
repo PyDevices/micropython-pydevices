@@ -3,7 +3,7 @@
 `core.c`, `core.h`, and `arch/` in this directory are vendored from
 [adafruit/Adafruit_Protomatter](https://github.com/adafruit/Adafruit_Protomatter),
 Adafruit's portable HUB75 RGB-matrix driving core. `mod_rgbmatrix.c` and
-`protomatter_mp.c` (one directory up) are displayif's own MicroPython
+`protomatter_mp.c` (in `src/ports/common/rgbmatrix/`) are displayif's own MicroPython
 binding on top of it — those are not vendored and may be edited freely.
 **Do not edit the files in this directory** (`core.c`, `core.h`, `arch/*.h`);
 patch at the binding layer or re-vendor instead.
@@ -45,5 +45,6 @@ time vs. accumulated since are unrecorded. Re-vendoring cleanly at a pinned
 tag (with the local arch/*.h deltas captured as an explicit patch set
 instead of baked-in edits) is tracked work, not done here.
 
-See [`../../../../../UPSTREAM`](../../../../../UPSTREAM) for how this fits with
-the rest of displayif's pinned dependencies.
+[`ORIGIN.txt`](ORIGIN.txt) names the upstream commit, and
+[`../../DEPENDENCIES.lock`](../../DEPENDENCIES.lock) pins it with the rest of
+displayif's dependencies.

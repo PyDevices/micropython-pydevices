@@ -5,6 +5,7 @@ Firmware built from this repository can contain code from other projects.
 Modules that vendor code keep it under their own third_party/ folder and
 list it in a NOTICE of their own:
 
+  modules/displayif/NOTICE  Adafruit_Protomatter (BSD)
   modules/jpegio/NOTICE   TJpgDec (ChaN) and stb_image_write's JPEG writer
   modules/picotts/NOTICE  the SVOX Pico text-to-speech engine (Apache-2.0)
 
