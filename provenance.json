@@ -151,6 +151,9 @@
   },
   "0050-micropython-extmod-btstack-ble-irq-skips-classic-links.patch": {
    "sha256": "58394115f42aa906c3e6a5f31efec8b8d23bf2d2e2c4da9c76421ad65c3e9852"
+  },
+  "0051-micropython-stm32-h7-i2c-timing-from-the-kernel-clock.patch": {
+   "sha256": "a759f8b47b99dfbb06a93cfa29e890cf3b5dfe350aca7634925e80cba2448ef5"
   }
  },
  "tinyusb_patches": {

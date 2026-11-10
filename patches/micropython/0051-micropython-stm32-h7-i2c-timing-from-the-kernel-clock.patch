@@ -1,0 +1,167 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 00:00:00 -0500
+Subject: [PATCH] stm32/i2c: Work out H7 I2C timing from the kernel clock.
+
+On an STM32H7, machine.I2C took its TIMINGR from a table written for a
+54 MHz I2C kernel clock. At the 120 MHz an Arduino GIGA R1 runs its I2C
+from, freq=400_000 programmed 0x70330309: tLOW 667 ns and tHIGH 267 ns,
+against Fast-mode minima of 1300 ns and 600 ns, and an SCL near 1 MHz.
+Anything under 100 kHz was refused.
+
+Read the kernel clock from the source RCC selects for the peripheral
+(PCLK1 or PCLK4, PLL3 R, HSI or CSI) and work out TIMINGR from it with the
+reference manual's formulas and the I2C specification's minimum times for
+the mode the frequency falls in. SCL low and high split the period in the
+ratio of their minima, SCLDEL covers the worst-case rise time plus data
+setup, and SDADEL the worst-case fall time for data hold. At 120 MHz,
+400 kHz gives 0x20F91F44: tLOW 1725 ns, tHIGH 800 ns, 396 kHz nominal.
+The printed freq= uses the same kernel clock, so it is right for I2C4,
+which runs from PCLK4 and not PCLK1.
+
+Other families keep their tables.
+
+diff --git a/ports/stm32/i2c.c b/ports/stm32/i2c.c
+--- a/ports/stm32/i2c.c
++++ b/ports/stm32/i2c.c
+@@ -292,6 +292,99 @@
+     return ((uint32_t)i2c - I2C1_BASE) / (I2C2_BASE - I2C1_BASE);
+ }
+ 
++#if defined(STM32H7)
++
++// The I2C kernel clock of this peripheral, from the source RCC selects for it.
++uint32_t i2c_get_kernel_freq(i2c_t *i2c) {
++    uint32_t src;
++    if (i2c == I2C4) {
++        src = __HAL_RCC_GET_I2C4_SOURCE();
++        if (src == RCC_I2C4CLKSOURCE_D3PCLK1) {
++            return HAL_RCCEx_GetD3PCLK1Freq();
++        }
++        src = src == RCC_I2C4CLKSOURCE_PLL3 ? 1 : src == RCC_I2C4CLKSOURCE_HSI ? 2 : 3;
++    } else {
++        src = __HAL_RCC_GET_I2C123_SOURCE();
++        if (src == RCC_I2C123CLKSOURCE_D2PCLK1) {
++            return HAL_RCC_GetPCLK1Freq();
++        }
++        src = src == RCC_I2C123CLKSOURCE_PLL3 ? 1 : src == RCC_I2C123CLKSOURCE_HSI ? 2 : 3;
++    }
++    if (src == 1) {
++        PLL3_ClocksTypeDef pll3;
++        HAL_RCCEx_GetPLL3ClockFreq(&pll3);
++        return pll3.PLL3_R_Frequency;
++    } else if (src == 2) {
++        return HSI_VALUE >> ((RCC->CR & RCC_CR_HSIDIV) >> RCC_CR_HSIDIV_Pos);
++    } else {
++        return CSI_VALUE;
++    }
++}
++
++// Minimum SCL low and high times, data setup time, and maximum rise and fall
++// times, in ns, from the I2C specification (UM10204) for each bus mode.
++static const struct {
++    uint16_t low, high, su_dat, rise, fall;
++} i2c_mode_timing[3] = {
++    {4700, 4000, 250, 1000, 300}, // Standard-mode, up to 100 kHz
++    {1300, 600, 100, 300, 300}, // Fast-mode, up to 400 kHz
++    {500, 260, 50, 120, 120}, // Fast-mode Plus, up to 1 MHz
++};
++
++// Shortest spike the analog filter (on by default) suppresses, in ns.
++#define I2C_ANALOG_FILTER_MIN_NS (50)
++
++static uint32_t i2c_ns_to_cycles(uint32_t clk, uint32_t ns) {
++    return ((uint64_t)ns * clk + 999999999) / 1000000000;
++}
++
++// Work out TIMINGR for an SCL frequency from the kernel clock, following the
++// reference manual's formulas: SCL low and high take the period in the ratio
++// of the mode's minimum times, so neither falls below its minimum, SCLDEL
++// covers rise time plus data setup, and SDADEL covers fall time for the data
++// hold. The smallest prescaler that fits all four fields gives the finest
++// resolution. The bus runs a little slower than asked, because each SCL edge
++// also takes its rise or fall time and a few kernel clocks to synchronise.
++static int i2c_compute_timingr(uint32_t clk, uint32_t freq, uint32_t *timingr) {
++    if (freq == 0) {
++        return -MP_EINVAL;
++    }
++    unsigned int mode = freq <= 100000 ? 0 : freq <= 400000 ? 1 : 2;
++    uint32_t min_low = i2c_mode_timing[mode].low;
++    uint32_t min_high = i2c_mode_timing[mode].high;
++    uint32_t period = (1000000000 + freq - 1) / freq;
++    if (period < min_low + min_high) {
++        period = min_low + min_high;
++    }
++    uint32_t low_ns = (uint64_t)period * min_low / (min_low + min_high);
++    uint32_t low = i2c_ns_to_cycles(clk, low_ns);
++    uint32_t high = i2c_ns_to_cycles(clk, period - low_ns);
++    uint32_t scldel = i2c_ns_to_cycles(clk, i2c_mode_timing[mode].rise + i2c_mode_timing[mode].su_dat);
++    uint32_t sdadel = i2c_ns_to_cycles(clk, i2c_mode_timing[mode].fall - I2C_ANALOG_FILTER_MIN_NS);
++    sdadel = sdadel > 3 ? sdadel - 3 : 0;
++    for (uint32_t div = 1; div <= 16; ++div) {
++        uint32_t l = (low + div - 1) / div;
++        uint32_t h = (high + div - 1) / div;
++        uint32_t sc = (scldel + div - 1) / div;
++        uint32_t sd = (sdadel + div - 1) / div;
++        if (l > 256 || h > 256 || ((sc > 16 || sd > 15) && div < 16)) {
++            continue;
++        }
++        // A kernel clock too fast for the delays to fit even at the largest
++        // prescaler gets the longest delays there are.
++        sc = MIN(sc, 16);
++        sd = MIN(sd, 15);
++        if (sc + sd <= l) {
++            *timingr = (div - 1) << I2C_TIMINGR_PRESC_Pos | (sc - 1) << I2C_TIMINGR_SCLDEL_Pos
++                | sd << I2C_TIMINGR_SDADEL_Pos | (h - 1) << I2C_TIMINGR_SCLH_Pos | (l - 1) << I2C_TIMINGR_SCLL_Pos;
++            return 0;
++        }
++    }
++    return -MP_EINVAL;
++}
++
++#endif
++
+ int i2c_init(i2c_t *i2c, mp_hal_pin_obj_t scl, mp_hal_pin_obj_t sda, uint32_t freq, uint16_t timeout_ms) {
+     uint32_t i2c_id = i2c_get_id(i2c);
+ 
+@@ -337,6 +430,13 @@
+     } else {
+         return -MP_EINVAL;
+     }
++    #elif defined(STM32H7)
++    uint32_t timingr;
++    int ret = i2c_compute_timingr(i2c_get_kernel_freq(i2c), freq, &timingr);
++    if (ret < 0) {
++        return ret;
++    }
++    i2c->TIMINGR = timingr;
+     #elif defined(STM32U5)
+     if (freq >= 1000000) {
+         i2c->TIMINGR = 0x30909DEC;
+diff --git a/ports/stm32/i2c.h b/ports/stm32/i2c.h
+--- a/ports/stm32/i2c.h
++++ b/ports/stm32/i2c.h
+@@ -67,4 +67,8 @@
+ 
+ int i2c_find_peripheral(mp_obj_t id);
+ 
++#if defined(STM32H7)
++uint32_t i2c_get_kernel_freq(i2c_t *i2c);
++#endif
++
+ #endif // MICROPY_INCLUDED_STM32_I2C_H
+diff --git a/ports/stm32/machine_i2c.c b/ports/stm32/machine_i2c.c
+--- a/ports/stm32/machine_i2c.c
++++ b/ports/stm32/machine_i2c.c
+@@ -84,7 +84,11 @@
+     uint32_t presc = timingr >> 28;
+     uint32_t sclh = timingr >> 8 & 0xff;
+     uint32_t scll = timingr & 0xff;
++    #if defined(STM32H7)
++    uint32_t freq = i2c_get_kernel_freq(self->i2c) / (presc + 1) / (sclh + scll + 2);
++    #else
+     uint32_t freq = HAL_RCC_GetPCLK1Freq() / (presc + 1) / (sclh + scll + 2);
++    #endif
+     mp_printf(print, "I2C(%u, scl=%q, sda=%q, freq=%u, timingr=0x%08x)",
+         self - &machine_hard_i2c_obj[0] + 1,
+         mp_hal_pin_name(self->scl), mp_hal_pin_name(self->sda),
