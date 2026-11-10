@@ -46,8 +46,7 @@ per profile that takes it.
 
 | Object | What it does |
 |---|---|
-| `Bluetooth()` | The radio. `active()` turns it on and off; `config()` reads and sets `name`, `discoverable`, `connectable`, `pin`, `mac`, the channels it hops on, the shortest encryption key it accepts and what a search sees; `paired()` and `unpair()` manage pairings; `inquiry()` finds devices, `services()` asks one what it offers, `rssi()` reads a link's signal and `tune()` sets its packet types and poll interval. |
-| `Bluetooth()` | The radio. `active()` turns it on and off; `config()` reads and sets `name`, `discoverable`, `connectable`, `pin`, `mac`, the channels it hops on and what a search sees; `paired()` and `unpair()` manage pairings; `inquiry()` finds devices, `services()` asks one what it offers, `rssi()` reads a link's signal, and `sniff()` puts an idle link to sleep on the Pico W. |
+| `Bluetooth()` | The radio. `active()` turns it on and off; `config()` reads and sets `name`, `discoverable`, `connectable`, `pin`, `mac`, the channels it hops on, the shortest encryption key it accepts and what a search sees; `paired()` and `unpair()` manage pairings; `inquiry()` finds devices, `services()` asks one what it offers, `rssi()` reads a link's signal, `tune()` sets its packet types and poll interval, and `sniff()` puts an idle link to sleep on the Pico W. |
 | `AudioSink(bt)` | Receives audio (A2DP sink) and talks to the sender's player (AVRCP): `readinto()`, the track, `cover`, `position`, `play()`, `next()`, `seek()`, the `volume` shared with the sender's slider, and more. |
 | `HandsFree(bt)` | Follows a phone (HFP hands-free): `battery`, `signal`, `operator`, the `call` and its `caller`, `answer()`, `hangup()`, `dial()`, and the call's audio through its own `readinto()` and `write()`. |
 | `AudioSource(bt)` | Sends audio to headphones, a speaker or a car stereo (A2DP source) and acts as their remote's target (AVRCP): `write()`, the receiver's keys through `key()`, the `volume`, and the `track()` and `status` its display shows. `Bluetooth.inquiry()` and `found()` find the receiver. |
@@ -131,9 +130,10 @@ garbage and stalls.
 
 ## Before you start
 
-Wi-Fi and Bluetooth share the ESP32's one radio. With Wi-Fi connected, audio
-arrives slower than it plays and in bursts, so the speaker runs dry; turn
-Wi-Fi off while listening, as the examples do.
+Wi-Fi and Bluetooth share the ESP32's one radio. Music on the classic ESP32
+stays clean with Wi-Fi up, even under a steady download, though Wi-Fi gets
+only a small share of the air while it plays. If you hear gaps, or for calls,
+turn Wi-Fi off, as the examples do.
 
 On ESP32, it's the classic ESP32: the chip in that family with Bluetooth
 Classic and MicroPython support. The Pico W and Pico 2 W are covered below.
