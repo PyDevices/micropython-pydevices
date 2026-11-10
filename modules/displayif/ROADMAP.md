@@ -20,6 +20,7 @@ letting a drawing layer work with the panel's own memory rather than around it.
   Pico DVI soak on a full panel.
 - mimxrt `i80bus`: a board config in pydevices, and an optional DMA path for
   bulk transfers.
+
 ## Housekeeping
 
 - Adafruit's Protomatter source moves under `third_party/protomatter/` with
