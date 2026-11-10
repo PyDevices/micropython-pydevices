@@ -292,8 +292,17 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 
 // --- the module ----------------------------------------------------------------
 
+// mdns.__revision__: which mdns this firmware was built from. The build
+// passes MDNS_REVISION (git describe) as a compile definition; a build with no
+// git says "unknown" rather than guessing.
+#ifndef MDNS_REVISION
+#define MDNS_REVISION "unknown"
+#endif
+static const MP_DEFINE_STR_OBJ(mdns_revision_obj, MDNS_REVISION);
+
 static const mp_rom_map_elem_t mdns_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_mdns) },
+    { MP_ROM_QSTR(MP_QSTR___revision__), MP_ROM_PTR(&mdns_revision_obj) },
     { MP_ROM_QSTR(MP_QSTR_Server), MP_ROM_PTR(&mdns_server_type) },
     { MP_ROM_QSTR(MP_QSTR_RemoteService), MP_ROM_PTR(&mdns_remoteservice_type) },
 };

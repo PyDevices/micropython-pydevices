@@ -15,6 +15,7 @@
 #include "py/obj.h"
 #include "py/runtime.h"
 #include "py/stream.h"
+#include "py/objstr.h"
 
 #include "pngio_core.h"
 
@@ -372,8 +373,17 @@ MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &pngio_decoder_locals
     );
 
+// pngio.__revision__: which pngio this firmware was built from. The build
+// passes PNGIO_REVISION (git describe) as a compile definition; a build with no
+// git says "unknown" rather than guessing.
+#ifndef PNGIO_REVISION
+#define PNGIO_REVISION "unknown"
+#endif
+static const MP_DEFINE_STR_OBJ(pngio_revision_obj, PNGIO_REVISION);
+
 static const mp_rom_map_elem_t pngio_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_pngio) },
+    { MP_ROM_QSTR(MP_QSTR___revision__), MP_ROM_PTR(&pngio_revision_obj) },
     { MP_ROM_QSTR(MP_QSTR_PngEncoder), MP_ROM_PTR(&pngio_encoder_type) },
     { MP_ROM_QSTR(MP_QSTR_PngDecoder), MP_ROM_PTR(&pngio_decoder_type) },
     { MP_ROM_QSTR(MP_QSTR_RGB565), MP_ROM_INT(PNGIO_RGB565) },

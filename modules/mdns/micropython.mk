@@ -8,6 +8,10 @@ MDNS_PORT_DIR := $(abspath $(CURDIR))
 ifneq ($(findstring /ports/unix,$(MDNS_PORT_DIR))$(findstring /ports/windows,$(MDNS_PORT_DIR)),)
 
 CFLAGS_USERMOD += -I$(MDNS_DIR)
+
+# Which mdns this firmware was built from: mdns.__revision__.
+MDNS_REVISION := $(shell git -C $(USERMOD_DIR) describe --always --dirty --abbrev=7 2>/dev/null || echo unknown)
+CFLAGS_USERMOD += -DMDNS_REVISION='"$(MDNS_REVISION)"'
 SRC_USERMOD_C += $(MDNS_DIR)/mod_mdns.c
 # No qstrs: they stay out of the QSTR scan.
 SRC_USERMOD_LIB_C += $(MDNS_DIR)/mdns_posix.c

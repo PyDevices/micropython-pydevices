@@ -16,6 +16,7 @@
 
 #include "py/obj.h"
 #include "py/runtime.h"
+#include "py/objstr.h"
 
 #include "ppa_mod.h"
 #include "ppa_sw.h"
@@ -205,8 +206,17 @@ static mp_obj_t ppa_py_size(mp_obj_t fmt, mp_obj_t w, mp_obj_t h) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ppa_py_size_obj, ppa_py_size);
 
+// ppa.__revision__: which ppa this firmware was built from. The build
+// passes PPA_REVISION (git describe) as a compile definition; a build with no
+// git says "unknown" rather than guessing.
+#ifndef PPA_REVISION
+#define PPA_REVISION "unknown"
+#endif
+static const MP_DEFINE_STR_OBJ(ppa_revision_obj, PPA_REVISION);
+
 static const mp_rom_map_elem_t ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_ppa) },
+    { MP_ROM_QSTR(MP_QSTR___revision__), MP_ROM_PTR(&ppa_revision_obj) },
     { MP_ROM_QSTR(MP_QSTR_srm), MP_ROM_PTR(&ppa_py_srm_obj) },
     { MP_ROM_QSTR(MP_QSTR_convert), MP_ROM_PTR(&ppa_py_convert_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill), MP_ROM_PTR(&ppa_py_fill_obj) },

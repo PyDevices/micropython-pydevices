@@ -34,6 +34,10 @@ else
 
 CFLAGS_USERMOD += -I$(JPEGIO_THIRD_PARTY)/tjpgd -I$(JPEGIO_THIRD_PARTY)/jpegenc
 
+# Which jpegio this firmware was built from: jpegio.__revision__.
+JPEGIO_REVISION := $(shell git -C $(USERMOD_DIR) describe --always --dirty --abbrev=7 2>/dev/null || echo unknown)
+CFLAGS_USERMOD += -DJPEGIO_REVISION='"$(JPEGIO_REVISION)"'
+
 SRC_USERMOD_C += $(JPEGIO_DIR)/jpegio.c
 SRC_USERMOD_C += $(JPEGIO_DIR)/jpegio_enc.c
 

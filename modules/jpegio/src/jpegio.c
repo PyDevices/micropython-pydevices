@@ -16,6 +16,7 @@
 #include "py/stream.h"
 #include "py/builtin.h"
 #include "py/mperrno.h"
+#include "py/objstr.h"
 
 #include "tjpgd.h"
 #include "jpegio.h"
@@ -592,8 +593,17 @@ static MP_DEFINE_CONST_FUN_OBJ_0(jpegio___init___obj, jpegio___init__);
 
 extern const mp_obj_type_t jpegio_jpegencoder_type;     // jpegio_enc.c
 
+// jpegio.__revision__: which jpegio this firmware was built from. The build
+// passes JPEGIO_REVISION (git describe) as a compile definition; a build with no
+// git says "unknown" rather than guessing.
+#ifndef JPEGIO_REVISION
+#define JPEGIO_REVISION "unknown"
+#endif
+static const MP_DEFINE_STR_OBJ(jpegio_revision_obj, JPEGIO_REVISION);
+
 static const mp_rom_map_elem_t jpegio_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_jpegio) },
+    { MP_ROM_QSTR(MP_QSTR___revision__), MP_ROM_PTR(&jpegio_revision_obj) },
     { MP_ROM_QSTR(MP_QSTR_JpegDecoder), MP_ROM_PTR(&jpegio_jpegdecoder_type) },
     { MP_ROM_QSTR(MP_QSTR_JpegEncoder), MP_ROM_PTR(&jpegio_jpegencoder_type) },
     { MP_ROM_QSTR(MP_QSTR_RGB565), MP_ROM_INT(JPEGIO_FORMAT_RGB565) },
