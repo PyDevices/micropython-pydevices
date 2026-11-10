@@ -68,11 +68,12 @@ ours to port.
 Call audio on the Pico W's hands-free side isn't planned: the CYW43439's
 firmware never brings the call's audio link up.
 
-## Every module
+## vision
 
-- **Type stubs and `__revision__` everywhere.** castif, h264enc, jpegio, mdns,
-  pngio, ppa, tsmux, tflite and vision get a `.pyi` for your editor and a
-  `__revision__`; tflite and vision a README.
+- **Every `image` method in the stub.** `image.pyi` lists the methods
+  esp-vision documents; the module has more OpenMV ones (`blend`,
+  `find_edges`, `flood_fill`, `lens_corr` and others) that your editor doesn't
+  complete yet.
 
 ## Module roadmaps
 

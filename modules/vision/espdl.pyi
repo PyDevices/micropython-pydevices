@@ -1,0 +1,256 @@
+# SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+# SPDX-FileCopyrightText: 2026 Brad Barnett
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Derived from esp-vision's stubs (Apache-2.0), with HumanFaceDetect added.
+
+from __future__ import annotations
+
+from typing import Sequence
+
+from image import Image
+
+#: Which source this firmware was built from, from ``git describe``: a release
+#: tag, or the nearest one and the commit. "unknown" when the build had no git.
+__revision__: str
+
+#: Three-channel value in RGB order.
+Float3 = tuple[float, float, float] | Sequence[float]
+#: Detection result tuple: (x, y, w, h, score, category).
+Detection = tuple[int, int, int, int, float, int]
+#: COCO pose keypoint tuple: (x, y). Missing keypoints are returned as (0, 0).
+PoseKeypoint = tuple[int, int]
+#: Pose result tuple: (x, y, w, h, score, category, keypoints).
+PoseDetection = tuple[int, int, int, int, float, int, list[PoseKeypoint]]
+#: Classification result tuple: (label, score).
+Classification = tuple[str, float]
+#: Raw ESP-DL tensor tuple: (name, shape, dtype, exponent, raw bytes).
+RawTensor = tuple[str, tuple[int, ...], int, int, bytes]
+#: Raw ESP-DL tensor metadata tuple: (name, shape, dtype, exponent).
+TensorInfo = tuple[str, tuple[int, ...], int, int]
+
+
+#: Preload an ESP-DL model file.
+#: path: model path, for example "/sdcard/model.espdl" or "/flash/model.espdl".
+#: profile: True enables ESP-DL profiling output when supported.
+def load_model(path: str, *, profile: bool = False) -> bool: ...
+
+
+#: Generic ESP-DL model runner for examples that implement model-specific decoding in Python.
+class Model:
+    #: Create a raw model runner from an .espdl model.
+    #: path: model path.
+    #: mean: optional RGB mean values for image preprocessing.
+    #: std: optional RGB standard deviation values for image preprocessing.
+    #: rgb_swap: True converts RGB input to BGR before model inference.
+    #: letterbox: True keeps aspect ratio and pads the model input.
+    #: pad: optional RGB padding values used when letterbox is enabled.
+    def __init__(
+        self,
+        path: str,
+        *,
+        mean: Float3 | None = None,
+        std: Float3 | None = None,
+        rgb_swap: bool = False,
+        letterbox: bool = True,
+        pad: Float3 | None = None,
+    ) -> None: ...
+    def __del__(self) -> None: ...
+    #: Release model resources.
+    def deinit(self) -> None: ...
+    #: Return model input metadata keyed by tensor name.
+    def inputs(self) -> dict[str, TensorInfo]: ...
+    #: Return model output metadata keyed by tensor name.
+    def outputs(self) -> dict[str, TensorInfo]: ...
+    #: Run model inference on an image and return raw output tensors keyed by tensor name.
+    #: image: RGB565 or grayscale image.
+    def predict(self, image: Image) -> dict[str, RawTensor]: ...
+
+
+#: ESP-DL object detection wrapper for ESPDet models.
+class ESPDet:
+    #: Create a detector from an .espdl model.
+    #: path: model path.
+    #: score: optional confidence threshold.
+    #: nms: optional non-maximum suppression threshold.
+    #: mean: optional RGB mean values for preprocessing.
+    #: std: optional RGB standard deviation values for preprocessing.
+    def __init__(
+        self,
+        path: str,
+        *,
+        score: float | None = None,
+        nms: float | None = None,
+        mean: Float3 | None = None,
+        std: Float3 | None = None,
+    ) -> None: ...
+    def __del__(self) -> None: ...
+    #: Release model resources.
+    def deinit(self) -> None: ...
+    #: Run object detection on an image.
+    #: image: RGB565 or grayscale image.
+    def detect(self, image: Image) -> list[Detection]: ...
+    #: Update detector thresholds.
+    #: score: new confidence threshold, or None to keep current value.
+    #: nms: new NMS threshold, or None to keep current value.
+    def set_thresholds(self, *, score: float | None = None, nms: float | None = None) -> ESPDet: ...
+
+
+#: ESP-DL PicoDet pedestrian detection wrapper.
+class PedestrianDetect:
+    #: Create a pedestrian detector from the bundled ESP-DL model.
+    #: path: model path.
+    #: score: optional confidence threshold; defaults to the upstream model's 0.7.
+    #: nms: optional non-maximum suppression threshold; defaults to the upstream model's 0.5.
+    #: topk: maximum number of detections returned per frame.
+    def __init__(
+        self,
+        path: str,
+        *,
+        score: float | None = None,
+        nms: float | None = None,
+        topk: int = 10,
+    ) -> None: ...
+    def __del__(self) -> None: ...
+    #: Release model resources.
+    def deinit(self) -> None: ...
+    #: Run pedestrian detection on an RGB565 or grayscale image.
+    def detect(self, image: Image) -> list[Detection]: ...
+    #: Update detector thresholds.
+    #: score: new confidence threshold, or None to keep current value.
+    #: nms: new NMS threshold, or None to keep current value.
+    def set_thresholds(self, *, score: float | None = None, nms: float | None = None) -> PedestrianDetect: ...
+
+
+#: ESP-DL YOLO11 object detection wrapper.
+class YOLO11:
+    #: Create a YOLO11 detector from an .espdl model.
+    #: path: model path.
+    #: score: optional confidence threshold.
+    #: nms: optional non-maximum suppression threshold.
+    #: topk: maximum number of detections returned per frame.
+    #: mean: optional RGB mean values for preprocessing.
+    #: std: optional RGB standard deviation values for preprocessing.
+    def __init__(
+        self,
+        path: str,
+        *,
+        score: float | None = None,
+        nms: float | None = None,
+        topk: int = 10,
+        mean: Float3 | None = None,
+        std: Float3 | None = None,
+    ) -> None: ...
+    def __del__(self) -> None: ...
+    #: Release model resources.
+    def deinit(self) -> None: ...
+    #: Run object detection on an image.
+    #: image: RGB565 or grayscale image.
+    def detect(self, image: Image) -> list[Detection]: ...
+    #: Update detector thresholds.
+    #: score: new confidence threshold, or None to keep current value.
+    #: nms: new NMS threshold, or None to keep current value.
+    def set_thresholds(self, *, score: float | None = None, nms: float | None = None) -> YOLO11: ...
+
+
+#: ESP-DL YOLO11n COCO pose wrapper.
+class YOLO11nPose:
+    #: Create a YOLO11n pose detector from an .espdl model.
+    #: path: model path.
+    #: score: optional confidence threshold.
+    #: nms: optional non-maximum suppression threshold.
+    #: topk: maximum number of pose results returned per frame.
+    #: mean: optional RGB mean values for preprocessing.
+    #: std: optional RGB standard deviation values for preprocessing.
+    def __init__(
+        self,
+        path: str,
+        *,
+        score: float | None = None,
+        nms: float | None = None,
+        topk: int = 10,
+        mean: Float3 | None = None,
+        std: Float3 | None = None,
+    ) -> None: ...
+    def __del__(self) -> None: ...
+    #: Release model resources.
+    def deinit(self) -> None: ...
+    #: Run COCO pose detection on an image.
+    #: image: RGB565 or grayscale image.
+    #: Returns 17 COCO keypoints for each person.
+    def detect(self, image: Image) -> list[PoseDetection]: ...
+    #: Update detector thresholds.
+    #: score: new confidence threshold, or None to keep current value.
+    #: nms: new NMS threshold, or None to keep current value.
+    def set_thresholds(self, *, score: float | None = None, nms: float | None = None) -> YOLO11nPose: ...
+
+
+#: ESP-DL ImageNet classification wrapper.
+class ImageNetCls:
+    #: Create a classifier from an .espdl model.
+    #: path: model path.
+    #: topk: maximum number of classes returned.
+    #: score: optional minimum score threshold.
+    #: mean: optional RGB mean values for preprocessing.
+    #: std: optional RGB standard deviation values for preprocessing.
+    #: softmax: True applies softmax to output scores.
+    def __init__(
+        self,
+        path: str,
+        *,
+        topk: int = 5,
+        score: float | None = None,
+        mean: Float3 | None = None,
+        std: Float3 | None = None,
+        softmax: bool = True,
+    ) -> None: ...
+    def __del__(self) -> None: ...
+    #: Release model resources.
+    def deinit(self) -> None: ...
+    #: Run image classification on an image.
+    #: image: RGB565 or grayscale image.
+    def classify(self, image: Image) -> list[Classification]: ...
+    #: Update classifier thresholds.
+    #: topk: new maximum result count, or None to keep current value.
+    #: score: new minimum score, or None to keep current value.
+    def set_thresholds(self, *, topk: int | None = None, score: float | None = None) -> ImageNetCls: ...
+
+
+#: Faces with five landmarks, from ESP-DL's two-stage human_face_detect models:
+#: the MSR model finds candidates over the whole picture, and the MNP model
+#: refines each one and places the eyes, nose and mouth corners. Both models are
+#: read from the filesystem. Detection runs without the GIL.
+class HumanFaceDetect:
+    #: msr_path: path to the MSR model, for example "/models/human_face_detect_msr_s8_v1.espdl".
+    #: mnp_path: path to the MNP model, for example "/models/human_face_detect_mnp_s8_v1.espdl".
+    #: score: MSR score threshold (default 0.5).
+    #: nms: MSR non-maximum-suppression threshold (default 0.5).
+    #: mnp_score: MNP score threshold (default 0.5).
+    #: mnp_nms: MNP non-maximum-suppression threshold (default 0.5).
+    def __init__(
+        self,
+        msr_path: str,
+        mnp_path: str,
+        *,
+        score: float | None = None,
+        nms: float | None = None,
+        mnp_score: float | None = None,
+        mnp_nms: float | None = None,
+    ) -> None: ...
+    def __del__(self) -> None: ...
+    #: Release both models.
+    def deinit(self) -> None: ...
+    #: Find faces in an RGB565 image. Each result is (x, y, w, h, score,
+    #: keypoints), where keypoints is a tuple of ten ints: five (x, y) pairs in
+    #: the order left eye, left mouth corner, nose, right eye, right mouth corner.
+    def detect(self, image: Image) -> list[tuple[int, int, int, int, float, tuple[int, ...]]]: ...
+    #: Change thresholds; the arguments left out keep their values. Returns self.
+    def set_thresholds(
+        self,
+        *,
+        score: float | None = None,
+        nms: float | None = None,
+        mnp_score: float | None = None,
+        mnp_nms: float | None = None,
+    ) -> HumanFaceDetect: ...
