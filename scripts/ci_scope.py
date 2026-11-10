@@ -95,6 +95,12 @@ FIRMWARE = "scripts/release_firmware.py"
 FIRMWARE_WORKFLOW = ".github/workflows/release-firmware.yml"
 # The pins every build fetches: a change to one can break any board.
 FIRMWARE_PINS = ("modules.lock", "deps.lock")
+# build_mp.py builds every board, and the btclassic, h264enc and circuitpython
+# workflows already build esp32, rp2 and CircuitPython boards through it on a
+# change. Nothing else builds an stm32 image, whose layout build_mp.py checks
+# (the GIGA's M4 pad), so a change to it builds those cells here.
+BUILD_MP = "build_mp.py"
+BUILD_MP_CELLS = ("mp-giga-shield",)
 
 
 def cells_of(source):
@@ -117,18 +123,19 @@ def firmware_scope(files, show_base, show_head):
     The workflow, or anything in release_firmware.py besides CELLS, builds the
     whole set. A change to CELLS builds the cells whose row changed, and the
     whole set when a cell is added or removed. A pin in modules.lock or
-    deps.lock builds the whole set too. Everything else the workflow watches is
-    read by the unit tests its gate job runs and by no build."""
+    deps.lock builds the whole set too, and build_mp.py the cells nothing else
+    builds through it. Everything else the workflow watches is read by the unit
+    tests its gate job runs and by no build."""
     if FIRMWARE_WORKFLOW in files or any(p in files for p in FIRMWARE_PINS):
         return True, True, []
-    if FIRMWARE not in files:
-        return False, False, []
-    old, old_rest = cells_of(show_base())
-    new, new_rest = cells_of(show_head())
-    if old_rest != new_rest or set(old) != set(new):
-        return True, True, []
-    changed = sorted(i for i in new if old[i] != new[i] and not new[i].get("optional"))
-    return bool(changed), False, changed
+    changed = set(BUILD_MP_CELLS) if BUILD_MP in files else set()
+    if FIRMWARE in files:
+        old, old_rest = cells_of(show_base())
+        new, new_rest = cells_of(show_head())
+        if old_rest != new_rest or set(old) != set(new):
+            return True, True, []
+        changed |= {i for i in new if old[i] != new[i] and not new[i].get("optional")}
+    return bool(changed), False, sorted(changed)
 
 
 # ---- git -------------------------------------------------------------------
