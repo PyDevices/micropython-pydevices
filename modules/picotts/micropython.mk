@@ -17,6 +17,10 @@ CFLAGS_USERMOD += -I$(PICOTTS_SVOX) -DPICO_PLATFORM=PICO_CIRCUITPY
 
 SRC_USERMOD_C += $(PICOTTS_MOD_DIR)/src/modpicotts.c
 
+# Which picotts this firmware was built from: picotts.__revision__.
+PICOTTS_REVISION := $(shell git -C $(PICOTTS_MOD_DIR) describe --always --dirty --abbrev=7 2>/dev/null || echo unknown)
+CFLAGS_USERMOD += -DPICOTTS_REVISION='"$(PICOTTS_REVISION)"'
+
 PICOTTS_SVOX_SRC := $(wildcard $(PICOTTS_SVOX)/*.c)
 SRC_USERMOD_LIB_C += $(PICOTTS_SVOX_SRC)
 

@@ -10,6 +10,10 @@ SRC_USERMOD_C += $(BTCLASSIC_MOD_DIR)/esp-idf/btclassic/ring.c
 SRC_USERMOD_C += $(BTCLASSIC_MOD_DIR)/host/btclassic_host.c
 CFLAGS_USERMOD += -I$(BTCLASSIC_MOD_DIR)/esp-idf/btclassic/include -I$(BTCLASSIC_MOD_DIR)/esp-idf/btclassic -DBTC_HOST=1
 
+# Which btclassic this firmware was built from: btclassic.__revision__.
+BTCLASSIC_REVISION := $(shell git -C $(BTCLASSIC_MOD_DIR) describe --always --dirty --abbrev=7 2>/dev/null || echo unknown)
+CFLAGS_USERMOD += -DBTCLASSIC_REVISION='"$(BTCLASSIC_REVISION)"'
+
 # With audiodsp in the build, AudioSink and HandsFree are also sources the
 # audio pump pulls, as on a board.
 BTCLASSIC_AUDIODSP_DIR := $(patsubst %/src/audiocore/__init__.h,%,$(firstword $(foreach _d,$(USER_C_MODULES),\

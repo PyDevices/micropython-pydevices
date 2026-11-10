@@ -26,6 +26,8 @@ import sys
 
 import _picotts as _native
 
+__revision__ = _native.__revision__  # which source the firmware was built from
+
 _SAMPLE_RATE = 16000
 _NATURAL_WPM = 206  # Pico's speaking rate at <speed level="100">, measured
 # Pico's markup accepts 20 to 500 % speed and 50 to 200 % pitch (svox/picotok.c).

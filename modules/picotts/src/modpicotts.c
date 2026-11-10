@@ -293,8 +293,17 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &picotts_engine_locals_dict
     );
 
+// _picotts.__revision__: which picotts this firmware was built from. The build
+// passes PICOTTS_REVISION (git describe) as a compile definition; a build with
+// no git says "unknown" rather than guessing. picotts.py passes it on.
+#ifndef PICOTTS_REVISION
+#define PICOTTS_REVISION "unknown"
+#endif
+static const MP_DEFINE_STR_OBJ(picotts_revision_obj, PICOTTS_REVISION);
+
 static const mp_rom_map_elem_t picotts_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR__picotts) },
+    { MP_ROM_QSTR(MP_QSTR___revision__), MP_ROM_PTR(&picotts_revision_obj) },
     { MP_ROM_QSTR(MP_QSTR_Engine), MP_ROM_PTR(&picotts_engine_type) },
     { MP_ROM_QSTR(MP_QSTR_psram), MP_ROM_PTR(&picotts_psram_obj) },
     { MP_ROM_QSTR(MP_QSTR_samples), MP_ROM_PTR(&picotts_samples_obj) },

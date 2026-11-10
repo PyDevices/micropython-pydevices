@@ -46,6 +46,10 @@ them.
 
 import builtins
 
+__revision__: str
+"""Which source this firmware was built from, from `git describe`: a release
+tag, or the nearest one and the commit. "unknown" when the build had no git."""
+
 # -- changes() bits ---------------------------------------------------------
 
 CONNECTION: int
