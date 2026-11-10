@@ -17,8 +17,10 @@ Run it:
 
     mpremote run usbhost_simpletest.py
 
-Tested on: Waveshare ESP32-P4-WIFI6-DEV-KIT, MicroPython
-v1.30.0-preview.160.gb70ae1aca6, with nothing plugged in: the host started,
+Tested on: Arduino GIGA R1 WiFi with the GIGA Display Shield, MicroPython
+v1.30.0-preview.160.gb70ae1aca6, with a PNY USB flash drive in the USB-A
+port: it printed `1 USB device(s) found` and `154b:009f`. Waveshare
+ESP32-P4-WIFI6-DEV-KIT, the same MicroPython, with nothing plugged in: it
 printed `0 USB device(s) found` and stopped cleanly.
 """
 

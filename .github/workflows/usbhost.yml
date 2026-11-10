@@ -94,6 +94,39 @@ jobs:
             fi
             echo "planted fault $fault caught:"; grep FAIL /tmp/planted.log | head -3
           done
+      - name: TinyUSB's root-port enumeration (the GIGA's USB-A port), and its planted fault
+        # TinyUSB at the commit MicroPython's lib/tinyusb points at, for the
+        # pinned MicroPython. With patches/lib-tinyusb/ applied, a drive that
+        # misses its first requests has to mount; with only 0001, the patch
+        # before the root-port retry, the test has to fail.
+        run: |
+          MP=$(python3 ../../scripts/pins.py micropython)
+          git init -q /tmp/mp
+          git -C /tmp/mp fetch -q --depth 1 --filter=blob:none https://github.com/micropython/micropython "$MP"
+          TUSB=$(git -C /tmp/mp ls-tree FETCH_HEAD lib/tinyusb | awk '{print $3}')
+          git init -q /tmp/tinyusb
+          git -C /tmp/tinyusb fetch -q --depth 1 https://github.com/hathach/tinyusb "$TUSB"
+          git -C /tmp/tinyusb checkout -q FETCH_HEAD
+          build() {
+            cc -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined \
+               -Itests/tinyusb_host -I/tmp/tinyusb/src -o "$1" tests/test_tuh_enum_retry.c \
+               /tmp/tinyusb/src/tusb.c /tmp/tinyusb/src/common/tusb_fifo.c \
+               /tmp/tinyusb/src/host/usbh.c /tmp/tinyusb/src/host/hub.c
+          }
+          PATCHES=$(realpath ../../patches/lib-tinyusb)
+          git -C /tmp/tinyusb apply "$PATCHES"/0001-*.patch
+          build /tmp/test_tuh_enum_planted
+          if /tmp/test_tuh_enum_planted > /tmp/planted.log 2>&1; then
+            cat /tmp/planted.log
+            echo "a root port that gives up after one attempt was NOT caught"; exit 1
+          fi
+          echo "planted fault caught:"; grep FAIL /tmp/planted.log | head -3
+          for patch in "$PATCHES"/*.patch; do
+            case "$patch" in */0001-*) continue ;; esac
+            git -C /tmp/tinyusb apply "$patch"
+          done
+          build /tmp/test_tuh_enum_retry
+          /tmp/test_tuh_enum_retry
       - name: The sound card pump block (the meter reads what plays), and its planted fault
         run: |
           cc -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -Isrc \

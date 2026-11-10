@@ -25,7 +25,9 @@ Run it:
 
 Tested on: an ESP32-P4-WIFI6-DEV-KIT on MicroPython
 v1.30.0-preview.160.gb70ae1aca6 (built 2026-10-21),
-hosting a PNY 8 GB FAT flash drive behind its onboard hub.
+hosting a PNY 8 GB FAT flash drive behind its onboard hub; an Arduino GIGA
+R1 WiFi with the GIGA Display Shield on the same MicroPython, with a PNY 8 GB
+FAT flash drive in its USB-A port.
 """
 
 import os

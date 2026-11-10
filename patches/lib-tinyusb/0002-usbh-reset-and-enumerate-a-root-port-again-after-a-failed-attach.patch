@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 18:00:00 -0600
+Subject: [PATCH] usbh: reset and enumerate a root port again after a failed
+ attach.
+
+A device on a root port gets one enumeration. If its first request fails,
+the stack marks the enumeration complete and nothing tries again: the port
+stays connected and enabled, and the device is never mounted until it is
+unplugged. A USB flash drive plugged straight into a port is still starting
+up when the host resets it 150 ms after the plug: it doesn't answer the
+device descriptor request 10 ms after the reset, and does 20 ms after it.
+
+After a failed enumeration on a root port that still has a device, the
+attach is posted again, up to three times, so the port is debounced, reset
+and enumerated anew. The count goes back to zero when an enumeration
+succeeds, the device goes, or the retries run out, so the next attach gets
+its own. An attach event that tears down an enumeration in flight doesn't
+ask for a retry: it is about to enumerate the new device itself. A failure
+before the device has an address also closes dev0's control endpoint, which
+was left open and taken again by every later attempt.
+
+Upstream TinyUSB has the same root-port retry (USBH_ENUM_ROOT_RETRY_MAX) in
+a later release; this is the part of it this version needs.
+---
+--- a/src/host/usbh.c
++++ b/src/host/usbh.c
+@@ -54,6 +54,7 @@
+ 
+ enum {
+   USBH_CONTROL_RETRY_MAX = 3,
++  USBH_ENUM_ROOT_RETRY_MAX = 3, // re-reset and re-enumerate the root port after a failed attach
+ };
+ 
+ //--------------------------------------------------------------------+
+@@ -224,6 +225,8 @@ TU_FIFO_DEF(_usbh_pending_ctrl_q, CFG_TUH_CONTROL_PENDING_QUEUE_SZ * sizeof(usbh
+ typedef struct {
+   uint8_t enumerating_daddr;  // device address of the device being enumerated
+   uint8_t attach_debouncing_bm;  // bitmask for roothub port attach debouncing
++  uint8_t attach_teardown;    // an attach event is tearing down what was on its port
++  uint8_t root_retry_count;   // root port re-enumerations used for the current attachment
+   tuh_bus_info_t dev0_bus;    // bus info for dev0 in enumeration
+   usbh_ctrl_xfer_info_t ctrl_xfer_info; // control transfer
+   usbh_call_after_t call_after;
+@@ -786,7 +789,11 @@ void tuh_task_ext(uint32_t timeout_ms, bool in_isr) {
+         // Should we miss the hub detach event due to high traffic, Or due to physical debouncing, some devices can
+         // cause multiple attaches (actually reset) without a detached event.
+         // Force remove currently mounted with the same bus info (rhport, hub addr, hub port) if exists
++        // Flagged because this teardown fails any in-flight enumeration, and its completion would
++        // otherwise ask for a roothub retry of the very attach being handled here.
++        _usbh_data.attach_teardown = 1;
+         process_remove_event(&event);
++        _usbh_data.attach_teardown = 0;
+ 
+         // due to the shared control buffer, we must fully complete enumerating one device first.
+         if (_usbh_data.enumerating_daddr == TUSB_INDEX_INVALID_8) {
+@@ -2229,18 +2236,40 @@ void usbh_driver_set_config_complete(uint8_t dev_addr, uint8_t itf_num) {
+ }
+ 
+ static void enum_full_complete(bool success) {
+-  (void)success;
+   TU_LOG_USBH("Enumeration complete: success = %u\r\n", success);
+ 
++  const uint8_t daddr = _usbh_data.enumerating_daddr;
+   _usbh_data.enumerating_daddr = TUSB_INDEX_INVALID_8; // mark enumeration as complete
+   _usbh_data.call_after.func = NULL;
+ 
++  const uint8_t rhport = _usbh_data.dev0_bus.rhport;
++  if (!success && daddr == 0) {
++    // failed before it had an address: dev0's control endpoint is still open
++    hcd_device_close(rhport, 0);
++  }
++
+   #if CFG_TUH_HUB
+   // Hub status is already requested in case of successful enumeration
+   if (!success && _usbh_data.dev0_bus.hub_addr != 0) {
+     hub_edpt_status_xfer(_usbh_data.dev0_bus.hub_addr);
+   }
+   #endif
++
++  if (success || _usbh_data.attach_teardown || _usbh_data.dev0_bus.hub_addr != 0 ||
++      !hcd_port_connect_status(rhport)) {
++    // The budget covers one attachment: give it back when that attachment ends.
++    _usbh_data.root_retry_count = 0;
++  } else if (_usbh_data.root_retry_count < USBH_ENUM_ROOT_RETRY_MAX) {
++    // A device behind a hub gets another chance from the hub's next port status change, but nothing
++    // retries the root port: the device stays connected and unenumerated until it is unplugged. A
++    // device that is still starting up after power-on (a flash drive) misses the first requests, so
++    // post the attach again: the port is debounced, reset and enumerated anew.
++    _usbh_data.root_retry_count++;
++    TU_LOG_USBH("Retry root port enumeration %u/%u\r\n", _usbh_data.root_retry_count, USBH_ENUM_ROOT_RETRY_MAX);
++    hcd_event_device_attach(rhport, false);
++  } else {
++    _usbh_data.root_retry_count = 0; // give up on this attach, but let a later one retry again
++  }
+ }
+ 
+ #endif
