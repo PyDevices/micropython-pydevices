@@ -4,8 +4,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Derived from esp-vision's stubs (Apache-2.0), with ImageIO folded in from its
-# imageio stub. This lists the names esp-vision documents; the module also has
-# further OpenMV methods that are not described here.
+# imageio stub, and the methods and constants esp-vision's stub leaves out added
+# from the C source. It lists what the vision module builds in: functions whose
+# feature is switched off (barcodes, descriptors, features, HOG and others) are
+# left out.
 
 from __future__ import annotations
 
@@ -34,12 +36,6 @@ PNG: int
 PALETTE_RAINBOW: int
 #: "Ironbow" thermal palette.
 PALETTE_IRONBOW: int
-#: Depth-map palette.
-PALETTE_DEPTH: int
-#: Event-camera dark palette.
-PALETTE_EVT_DARK: int
-#: Event-camera light palette.
-PALETTE_EVT_LIGHT: int
 
 #: Scaling/geometry hint flags for copy()/crop()/scale()/draw_image(): area-average downscaling.
 AREA: int
@@ -95,23 +91,6 @@ EDGE_SIMPLE: int
 CORNER_FAST: int
 #: AGAST corner detector for find_keypoints().
 CORNER_AGAST: int
-#: Barcode symbology constants returned by barcode.type() / accepted by find_barcodes().
-EAN2: int
-EAN5: int
-EAN8: int
-UPCE: int
-ISBN10: int
-UPCA: int
-EAN13: int
-ISBN13: int
-I25: int
-DATABAR: int
-DATABAR_EXP: int
-CODABAR: int
-CODE39: int
-PDF417: int
-CODE93: int
-CODE128: int
 #: AprilTag family constants accepted by find_apriltags().
 TAG16H5: int
 TAG25H7: int
@@ -293,28 +272,6 @@ class qrcode:
     def is_kanji(self) -> bool: ...
 
 
-#: A decoded 1D/2D barcode found by find_barcodes().
-class barcode:
-    #: The four corner points.
-    def corners(self) -> tuple[Point, Point, Point, Point]: ...
-    #: Bounding box as (x, y, w, h).
-    def rect(self) -> Rect: ...
-    #: Bounding-box top-left x.
-    def x(self) -> int: ...
-    #: Bounding-box top-left y.
-    def y(self) -> int: ...
-    #: Bounding-box width.
-    def w(self) -> int: ...
-    #: Bounding-box height.
-    def h(self) -> int: ...
-    #: Decoded payload string.
-    def payload(self) -> str: ...
-    #: Symbology type constant (e.g. EAN13, CODE128).
-    def type(self) -> int: ...
-    #: Rotation of the barcode in degrees.
-    def rotation(self) -> int: ...
-    #: Decode quality (number of agreeing scan lines).
-    def quality(self) -> int: ...
 
 
 #: A detected AprilTag with optional 6-DoF pose. Attributes are fields, not methods.
@@ -1049,9 +1006,6 @@ class Image:
     #: Find and decode QR codes.
     #: roi: region of interest.
     def find_qrcodes(self, *, roi: RectLike | None = None) -> list[qrcode]: ...
-    #: Find and decode 1D/2D barcodes (requires the barcode backend).
-    #: roi: region of interest.
-    def find_barcodes(self, *, roi: RectLike | None = None) -> list[barcode]: ...
     #: Find and decode AprilTags, optionally estimating 6-DoF pose.
     #: roi: region of interest; families: OR of TAG* family constants.
     #: fx, fy, cx, cy: camera intrinsics for pose estimation.
@@ -1067,7 +1021,306 @@ class Image:
         cy: float = ...,
         pose: bool = True,
     ) -> list[apriltag]: ...
-
+    #: Add another image or color to this one, pixel by pixel.
+    def add(
+        self,
+        image: Image | Color | int,
+        x: int = 0,
+        y: int = 0,
+        *,
+        x_scale: float | None = None,
+        y_scale: float | None = None,
+        roi: RectLike | None = None,
+        rgb_channel: int = -1,
+        alpha: int = 255,
+        color_palette: int | Sequence[int] | Image | None = None,
+        alpha_palette: Sequence[int] | Image | None = None,
+        hint: int = 0,
+        transform: Any = None,
+        mask: Image | None = None,
+    ) -> Image: ...
+    #: Subtract another image or color from this one.
+    def sub(
+        self,
+        image: Image | Color | int,
+        x: int = 0,
+        y: int = 0,
+        *,
+        x_scale: float | None = None,
+        y_scale: float | None = None,
+        roi: RectLike | None = None,
+        rgb_channel: int = -1,
+        alpha: int = 255,
+        color_palette: int | Sequence[int] | Image | None = None,
+        alpha_palette: Sequence[int] | Image | None = None,
+        hint: int = 0,
+        transform: Any = None,
+        mask: Image | None = None,
+    ) -> Image: ...
+    #: Subtract this image from another image or color, replacing this one.
+    def rsub(
+        self,
+        image: Image | Color | int,
+        x: int = 0,
+        y: int = 0,
+        *,
+        x_scale: float | None = None,
+        y_scale: float | None = None,
+        roi: RectLike | None = None,
+        rgb_channel: int = -1,
+        alpha: int = 255,
+        color_palette: int | Sequence[int] | Image | None = None,
+        alpha_palette: Sequence[int] | Image | None = None,
+        hint: int = 0,
+        transform: Any = None,
+        mask: Image | None = None,
+    ) -> Image: ...
+    #: Keep the smaller of each pixel and another image or color.
+    def min(
+        self,
+        image: Image | Color | int,
+        x: int = 0,
+        y: int = 0,
+        *,
+        x_scale: float | None = None,
+        y_scale: float | None = None,
+        roi: RectLike | None = None,
+        rgb_channel: int = -1,
+        alpha: int = 255,
+        color_palette: int | Sequence[int] | Image | None = None,
+        alpha_palette: Sequence[int] | Image | None = None,
+        hint: int = 0,
+        transform: Any = None,
+        mask: Image | None = None,
+    ) -> Image: ...
+    #: Keep the larger of each pixel and another image or color.
+    def max(
+        self,
+        image: Image | Color | int,
+        x: int = 0,
+        y: int = 0,
+        *,
+        x_scale: float | None = None,
+        y_scale: float | None = None,
+        roi: RectLike | None = None,
+        rgb_channel: int = -1,
+        alpha: int = 255,
+        color_palette: int | Sequence[int] | Image | None = None,
+        alpha_palette: Sequence[int] | Image | None = None,
+        hint: int = 0,
+        transform: Any = None,
+        mask: Image | None = None,
+    ) -> Image: ...
+    #: Bitwise AND with another image or color. Also available as `and`, which is a Python keyword and so can only be reached with getattr.
+    def b_and(
+        self,
+        image: Image | Color | int,
+        x: int = 0,
+        y: int = 0,
+        *,
+        x_scale: float | None = None,
+        y_scale: float | None = None,
+        roi: RectLike | None = None,
+        rgb_channel: int = -1,
+        alpha: int = 255,
+        color_palette: int | Sequence[int] | Image | None = None,
+        alpha_palette: Sequence[int] | Image | None = None,
+        hint: int = 0,
+        transform: Any = None,
+        mask: Image | None = None,
+    ) -> Image: ...
+    #: Bitwise OR with another image or color. Also available as `or`.
+    def b_or(
+        self,
+        image: Image | Color | int,
+        x: int = 0,
+        y: int = 0,
+        *,
+        x_scale: float | None = None,
+        y_scale: float | None = None,
+        roi: RectLike | None = None,
+        rgb_channel: int = -1,
+        alpha: int = 255,
+        color_palette: int | Sequence[int] | Image | None = None,
+        alpha_palette: Sequence[int] | Image | None = None,
+        hint: int = 0,
+        transform: Any = None,
+        mask: Image | None = None,
+    ) -> Image: ...
+    #: Bitwise NAND with another image or color.
+    def b_nand(
+        self,
+        image: Image | Color | int,
+        x: int = 0,
+        y: int = 0,
+        *,
+        x_scale: float | None = None,
+        y_scale: float | None = None,
+        roi: RectLike | None = None,
+        rgb_channel: int = -1,
+        alpha: int = 255,
+        color_palette: int | Sequence[int] | Image | None = None,
+        alpha_palette: Sequence[int] | Image | None = None,
+        hint: int = 0,
+        transform: Any = None,
+        mask: Image | None = None,
+    ) -> Image: ...
+    #: Same as b_nand().
+    def nand(
+        self,
+        image: Image | Color | int,
+        x: int = 0,
+        y: int = 0,
+        *,
+        x_scale: float | None = None,
+        y_scale: float | None = None,
+        roi: RectLike | None = None,
+        rgb_channel: int = -1,
+        alpha: int = 255,
+        color_palette: int | Sequence[int] | Image | None = None,
+        alpha_palette: Sequence[int] | Image | None = None,
+        hint: int = 0,
+        transform: Any = None,
+        mask: Image | None = None,
+    ) -> Image: ...
+    #: Bitwise NOR with another image or color.
+    def b_nor(
+        self,
+        image: Image | Color | int,
+        x: int = 0,
+        y: int = 0,
+        *,
+        x_scale: float | None = None,
+        y_scale: float | None = None,
+        roi: RectLike | None = None,
+        rgb_channel: int = -1,
+        alpha: int = 255,
+        color_palette: int | Sequence[int] | Image | None = None,
+        alpha_palette: Sequence[int] | Image | None = None,
+        hint: int = 0,
+        transform: Any = None,
+        mask: Image | None = None,
+    ) -> Image: ...
+    #: Same as b_nor().
+    def nor(
+        self,
+        image: Image | Color | int,
+        x: int = 0,
+        y: int = 0,
+        *,
+        x_scale: float | None = None,
+        y_scale: float | None = None,
+        roi: RectLike | None = None,
+        rgb_channel: int = -1,
+        alpha: int = 255,
+        color_palette: int | Sequence[int] | Image | None = None,
+        alpha_palette: Sequence[int] | Image | None = None,
+        hint: int = 0,
+        transform: Any = None,
+        mask: Image | None = None,
+    ) -> Image: ...
+    #: Bitwise XOR with another image or color.
+    def b_xor(
+        self,
+        image: Image | Color | int,
+        x: int = 0,
+        y: int = 0,
+        *,
+        x_scale: float | None = None,
+        y_scale: float | None = None,
+        roi: RectLike | None = None,
+        rgb_channel: int = -1,
+        alpha: int = 255,
+        color_palette: int | Sequence[int] | Image | None = None,
+        alpha_palette: Sequence[int] | Image | None = None,
+        hint: int = 0,
+        transform: Any = None,
+        mask: Image | None = None,
+    ) -> Image: ...
+    #: Same as b_xor().
+    def xor(
+        self,
+        image: Image | Color | int,
+        x: int = 0,
+        y: int = 0,
+        *,
+        x_scale: float | None = None,
+        y_scale: float | None = None,
+        roi: RectLike | None = None,
+        rgb_channel: int = -1,
+        alpha: int = 255,
+        color_palette: int | Sequence[int] | Image | None = None,
+        alpha_palette: Sequence[int] | Image | None = None,
+        hint: int = 0,
+        transform: Any = None,
+        mask: Image | None = None,
+    ) -> Image: ...
+    #: Bitwise XNOR with another image or color.
+    def b_xnor(
+        self,
+        image: Image | Color | int,
+        x: int = 0,
+        y: int = 0,
+        *,
+        x_scale: float | None = None,
+        y_scale: float | None = None,
+        roi: RectLike | None = None,
+        rgb_channel: int = -1,
+        alpha: int = 255,
+        color_palette: int | Sequence[int] | Image | None = None,
+        alpha_palette: Sequence[int] | Image | None = None,
+        hint: int = 0,
+        transform: Any = None,
+        mask: Image | None = None,
+    ) -> Image: ...
+    #: Same as b_xnor().
+    def xnor(
+        self,
+        image: Image | Color | int,
+        x: int = 0,
+        y: int = 0,
+        *,
+        x_scale: float | None = None,
+        y_scale: float | None = None,
+        roi: RectLike | None = None,
+        rgb_channel: int = -1,
+        alpha: int = 255,
+        color_palette: int | Sequence[int] | Image | None = None,
+        alpha_palette: Sequence[int] | Image | None = None,
+        hint: int = 0,
+        transform: Any = None,
+        mask: Image | None = None,
+    ) -> Image: ...
+    #: Same as draw_image(); `assign` is OpenMV's name for it.
+    def assign(self, image: Image | Color | int, x: int = 0, y: int = 0, **kwargs: Any) -> Image: ...
+    #: Same as draw_image(); `replace` is OpenMV's name for it.
+    def replace(self, image: Image | Color | int, x: int = 0, y: int = 0, **kwargs: Any) -> Image: ...
+    #: Same as draw_image(); `set` is OpenMV's name for it.
+    def set(self, image: Image | Color | int, x: int = 0, y: int = 0, **kwargs: Any) -> Image: ...
+    #: Same as draw_image(); `blend` is OpenMV's name for it.
+    def blend(self, image: Image | Color | int, x: int = 0, y: int = 0, **kwargs: Any) -> Image: ...
+    #: Same as invert().
+    def negate(self) -> Image: ...
+    #: Morphological top-hat: the image minus its opening. See erode() for parameters.
+    def top_hat(self, ksize: int, *, threshold: int = 0, mask: Image | None = None) -> Image: ...
+    #: Morphological black-hat: the closing minus the image. See erode() for parameters.
+    def black_hat(self, ksize: int, *, threshold: int = 0, mask: Image | None = None) -> Image: ...
+    #: Black out everything outside a circle (cx, cy, r); no argument masks the largest circle centred in the image. Returns self.
+    def mask_circle(self, circle: Sequence[int] | None = None) -> Image: ...
+    #: Black out everything outside an ellipse (cx, cy, rx, ry, rotation); no argument masks the ellipse filling the image. Returns self.
+    def mask_ellipse(self, ellipse: Sequence[int] | None = None) -> Image: ...
+    #: Black out everything outside a rectangle (x, y, w, h); no argument masks the centred half-size rectangle. Returns self.
+    def mask_rectangle(self, rect: Sequence[int] | None = None) -> Image: ...
+    #: Edge detection on a grayscale image, in place.
+    #: edge_type: EDGE_SIMPLE or EDGE_CANNY. roi: region. threshold: (low, high), default (100, 200).
+    def find_edges(self, edge_type: int, *, roi: RectLike | None = None, threshold: tuple[int, int] = (100, 200)) -> Image: ...
+    #: Find the iris centre (x, y) in an eye region of a grayscale image.
+    def find_eye(self, roi: RectLike | None = None) -> tuple[int, int]: ...
+    #: Find a template in a grayscale image.
+    #: template: grayscale Image. threshold: minimum correlation, 0..1. roi: region at least as big as the template.
+    #: step: pixels to skip between tries (EX search). search: SEARCH_EX or SEARCH_DS.
+    #: Returns the match (x, y, w, h), or None.
+    def find_template(self, template: Image, threshold: float, *, roi: RectLike | None = None, step: int = 2, search: int = ...) -> Rect | None: ...
 
 #: Convert a 1-bpp binary pixel to a grayscale value.
 def binary_to_grayscale(pixel: int) -> int: ...
