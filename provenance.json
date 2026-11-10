@@ -157,6 +157,12 @@
   },
   "0052-micropython-esp32-sdcard-recover-the-slot-and-retry-a-failed-transfer.patch": {
    "sha256": "f9bc5decda52c2ea5835b74288042d8cbad23b884a8f877526d4ce10ead3d28f"
+  },
+  "0053-micropython-esp32-sdcard-let-a-board-set-the-sdmmc-pin-drive-strength.patch": {
+   "sha256": "5fdf42c9ed1b857d5a0173aa44c28d51f5e7b3ffb0725554b8a7891f8e65a7c4"
+  },
+  "0054-micropython-esp32-sdcard-stop-a-failed-transfer-before-resetting-the-host.patch": {
+   "sha256": "385435b571aa0114a4ed091f0e7c4c49d0f8994998d3ff3e2804c6d7ca76eefe"
   }
  },
  "tinyusb_patches": {
