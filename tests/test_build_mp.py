@@ -781,45 +781,117 @@ class Stm32M4Slot(unittest.TestCase):
     def test_the_m7s_tightly_coupled_memory_is_out_of_the_m4s_reach(self):
         self.assertFalse(build_mp.m4_reaches_memory(0x20010000, 0x00000101, 0, 0x20004791))
 
+    # Where the padding function sits in the fake images below, well before the
+    # M4's address, as it does in a real GIGA image.
+    PAD_AT = 0x080405ED
+
+    def _code(self, windows):
+        """An image whose code before the M4's address is *windows*, 16-byte
+        vector tables in order, the last one at the address."""
+        off = build_mp.STM32_M4_BOOT_DEFAULT - 0x08040000
+        body = b"".join(struct.pack("<IIII", *w) for w in windows)
+        image = self.build / "firmware0.bin"
+        self.build.mkdir(parents=True, exist_ok=True)
+        image.write_bytes(bytes(off + 16 - len(body)) + body + bytes(64))
+        return image
+
     def test_a_refused_image_is_padded_until_one_passes(self):
         ulab = self.IMAGES["ulab, hung at the DAC"][0]
         moved = self.IMAGES["ulab moved 16 bytes, ran"][0]
-        image = self._image(ulab)
+        # 64 bytes of literal pool full of flash addresses, and code before it.
+        pool = (0x081F3C58, 0x081DF094, 0x081DD7B0, 0x081DCF18)
+        windows = [moved] + [pool] * 4 + [ulab]
+        image = self._code(windows)
         links = []
 
         def relink(pad):
             links.append(pad)
-            stm32 = moved if pad == 32 else ulab  # 16 still refused, 32 passes
-            image.write_bytes(bytes(build_mp.STM32_M4_BOOT_DEFAULT - 0x08040000) + struct.pack("<IIII", *stm32))
+            # Each 16 bytes of padding brings the window before to the address.
+            self._code(windows[:len(windows) - pad // 16])
             return 0
 
-        pad, words, refused = build_mp.stm32_m4_settle(image, 0x08040000, 0, relink)
-        self.assertEqual((pad, words, refused), (32, moved, ulab))
+        pad, words, refused = build_mp.stm32_m4_settle(image, 0x08040000, 0, lambda: self.PAD_AT, relink)
+        self.assertEqual((pad, words, refused), (80, moved, ulab))
+        self.assertEqual(links, [80])  # read off the image: one relink, not five
+
+    def test_a_prediction_the_relink_doesnt_bear_out_is_tried_again(self):
+        ulab = self.IMAGES["ulab, hung at the DAC"][0]
+        moved = self.IMAGES["ulab moved 16 bytes, ran"][0]
+        image = self._code([moved, moved, ulab])
+        links = []
+
+        def relink(pad):
+            links.append(pad)
+            # The first relink moves the code less than the image said it would.
+            self._code([moved, ulab] if pad == 16 else [ulab, moved])
+            return 0
+
+        pad, words, _refused = build_mp.stm32_m4_settle(image, 0x08040000, 0, lambda: self.PAD_AT, relink)
         self.assertEqual(links, [16, 32])
+        self.assertEqual((pad, words), (32, moved))
 
     def test_an_image_that_passes_is_not_relinked(self):
         image = self._image(self.IMAGES["lean, ran"][0])
-        pad, _words, refused = build_mp.stm32_m4_settle(image, 0x08040000, 0, lambda p: self.fail("relinked"))
+        pad, _words, refused = build_mp.stm32_m4_settle(image, 0x08040000, 0, lambda: self.PAD_AT,
+                                                        lambda p: self.fail("relinked"))
         self.assertEqual((pad, refused), (0, None))
 
-    def test_every_size_refused_leaves_the_image_refused(self):
+    def test_a_smaller_padding_is_taken_when_it_passes(self):
         ulab = self.IMAGES["ulab, hung at the DAC"][0]
-        image = self._image(ulab)
-        links = []
-        pad, words, _refused = build_mp.stm32_m4_settle(image, 0x08040000, 0, lambda p: links.append(p) or 0)
-        self.assertEqual(links, list(build_mp.M4_PAD_SIZES))
+        lean = self.IMAGES["lean, ran"][0]
+        # Linked with 48 bytes; with 32 the window after the address comes back.
+        off = build_mp.STM32_M4_BOOT_DEFAULT - 0x08040000
+        image = self.build / "firmware0.bin"
+        self.build.mkdir(parents=True, exist_ok=True)
+        after = [ulab, lean, ulab, ulab, ulab]
+        image.write_bytes(bytes(off) + b"".join(struct.pack("<IIII", *w) for w in after) + bytes(64))
+        self.assertEqual(build_mp.stm32_m4_pad_candidates(image, 0x08040000, 48, self.PAD_AT)[0], 32)
+
+    def test_no_padding_that_passes_leaves_the_image_refused(self):
+        ulab = self.IMAGES["ulab, hung at the DAC"][0]
+        image = self._code([ulab] * (build_mp.M4_PAD_MAX // 16 + 1))
+        pad, words, _refused = build_mp.stm32_m4_settle(image, 0x08040000, 0, lambda: self.PAD_AT,
+                                                        lambda p: self.fail("relinked"))
+        self.assertEqual(pad, 0)
         self.assertTrue(build_mp.m4_reaches_memory(*words))
+
+    def test_padding_after_the_m4s_address_cant_move_it(self):
+        image = self._code([self.IMAGES["lean, ran"][0], self.IMAGES["ulab, hung at the DAC"][0]])
+        self.assertIsNone(build_mp.stm32_m4_pad_candidates(image, 0x08040000, 0, 0x08100101))
+        self.assertIsNone(build_mp.stm32_m4_pad_candidates(image, 0x08040000, 0, None))
 
     def test_the_padding_module(self):
         d = build_mp.stm32_m4_pad_module(self.build, 0)
-        self.assertNotIn("SRC_USERMOD_C", (d / "micropython.mk").read_text())
-        self.assertEqual(build_mp.stm32_m4_pad_now(self.build), 0)
-        build_mp.stm32_m4_pad_module(self.build, 48)
         mk = (d / "micropython.mk").read_text()
+        # Compiled even when empty, so the next build can find where it is.
         self.assertIn("SRC_USERMOD_C += $(USERMOD_DIR)/m4pad.c", mk)
         self.assertIn("-Wl,-u," + build_mp.M4_PAD_SYMBOL, mk)
+        self.assertIn(".rept 0", (d / "m4pad.c").read_text())
+        self.assertEqual(build_mp.stm32_m4_pad_now(self.build), 0)
+        build_mp.stm32_m4_pad_module(self.build, 48)
         self.assertIn(".rept 24", (d / "m4pad.c").read_text())
         self.assertEqual(build_mp.stm32_m4_pad_now(self.build), 48)
+
+    def test_a_symbol_is_read_from_an_elf_file(self):
+        names = b"\0" + build_mp.M4_PAD_SYMBOL.encode() + b"\0other\0"
+        syms = struct.pack("<IIIBBH", 0, 0, 0, 0, 0, 0) + struct.pack("<IIIBBH", 1, self.PAD_AT, 8, 0x12, 0, 1)
+        shstr = b"\0"
+        head = bytearray(52)
+        head[:6] = b"\x7fELF\x01\x01"
+        strtab_off = 52
+        symtab_off = strtab_off + len(names)
+        shoff = symtab_off + len(syms)
+        struct.pack_into("<I", head, 0x20, shoff)
+        struct.pack_into("<HH", head, 0x2E, 40, 3)
+        sh = (bytes(40)
+              + struct.pack("<IIIIIIIIII", 0, 3, 0, 0, strtab_off, len(names), 0, 0, 1, 0)
+              + struct.pack("<IIIIIIIIII", 0, 2, 0, 0, symtab_off, len(syms), 1, 1, 4, 16))
+        elf = self.build / "firmware.elf"
+        self.build.mkdir(parents=True, exist_ok=True)
+        elf.write_bytes(bytes(head) + names + syms + sh + shstr)
+        self.assertEqual(build_mp.elf_symbol(elf, build_mp.M4_PAD_SYMBOL), self.PAD_AT)
+        self.assertIsNone(build_mp.elf_symbol(elf, "missing"))
+        self.assertIsNone(build_mp.elf_symbol(self.build / "nothing.elf", "x"))
 
 
 class Stm32BoardDir(unittest.TestCase):
