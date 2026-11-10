@@ -68,12 +68,6 @@ ours to port.
 Call audio on the Pico W's hands-free side isn't planned: the CYW43439's
 firmware never brings the call's audio link up.
 
-## Every module
-
-- **Type stubs and `__revision__` everywhere.** castif, h264enc, jpegio, mdns,
-  pngio, ppa, tsmux, tflite and vision get a `.pyi` for your editor and a
-  `__revision__`; tflite and vision a README.
-
 ## Module roadmaps
 
 The modules plan their own work; each roadmap is next to its code.

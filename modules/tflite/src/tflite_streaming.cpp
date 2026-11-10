@@ -81,3 +81,23 @@ public:
 #define MicroMutableOpResolver pydevices::StreamingOpResolver
 
 #include "py_tflite.cpp"
+
+#include "py/objstr.h"
+
+// tflite.__revision__: which tflite this firmware was built from. The module
+// is esp-vision's, compiled as it is, so its globals table can't carry the
+// attribute; the module's attribute delegation answers for it instead. The
+// build passes TFLITE_REVISION (git describe) as a compile definition; a build
+// with no git says "unknown" rather than guessing.
+#ifndef TFLITE_REVISION
+#define TFLITE_REVISION "unknown"
+#endif
+static const MP_DEFINE_STR_OBJ(tflite_revision_obj, TFLITE_REVISION);
+
+extern "C" void tflite_module_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    (void)self_in;
+    if (dest[0] == MP_OBJ_NULL && attr == MP_QSTR___revision__) {
+        dest[0] = MP_OBJ_FROM_PTR(&tflite_revision_obj);
+    }
+}
+MP_REGISTER_MODULE_DELEGATION(tflite_module, tflite_module_attr);

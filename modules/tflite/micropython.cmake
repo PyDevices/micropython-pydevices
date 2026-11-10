@@ -32,7 +32,21 @@ if(ESP_PLATFORM AND (IDF_TARGET STREQUAL "esp32p4" OR IDF_TARGET STREQUAL "esp32
         ${_tflm_dir}/third_party/flatbuffers/include ${_tflm_dir}/third_party/ruy
         ${_tflm_dir}/third_party/kissfft)
 
+    # --- which tflite this firmware was built from ------------------------
+    # Computed at build time from this repo's own git, never stored; "unknown"
+    # when there is no git (a tarball). Read on a target as
+    # tflite.__revision__.
+    execute_process(
+        COMMAND git -C ${CMAKE_CURRENT_LIST_DIR} describe --always --dirty --abbrev=7
+        OUTPUT_VARIABLE TFLITE_REVISION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if(NOT TFLITE_REVISION)
+        set(TFLITE_REVISION "unknown")
+    endif()
+
     add_library(usermod_tflite INTERFACE)
+    target_compile_definitions(usermod_tflite INTERFACE TFLITE_REVISION=\"${TFLITE_REVISION}\")
     target_sources(usermod_tflite INTERFACE ${CMAKE_CURRENT_LIST_DIR}/src/tflite_streaming.cpp)
     target_include_directories(usermod_tflite INTERFACE ${ESP_VISION_SRC}/modules ${_tflite_ulab_parent} ${_tflm_inc})
     target_link_libraries(usermod_tflite INTERFACE idf::espressif__esp-tflite-micro idf::esp_hw_support)
