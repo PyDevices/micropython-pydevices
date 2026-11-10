@@ -49,6 +49,7 @@ on:
       - 'scripts/pin_lvgl_ref.sh'
       - 'scripts/stage_firmware_page.py'
       - 'scripts/ci_scope.py'
+      - 'build_mp.py'
       - 'modules.lock'
       - 'deps.lock'
       - 'tests/test_release_firmware.py'

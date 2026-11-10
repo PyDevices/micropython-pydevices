@@ -77,6 +77,12 @@ class FirmwareCells(unittest.TestCase):
         self.assertEqual(self.scope(["modules.lock"]), (True, True, []))
         self.assertEqual(self.scope(["deps.lock"]), (True, True, []))
 
+    def test_build_mp_builds_the_stm32_cells(self):
+        self.assertEqual(self.scope(["build_mp.py"]), (True, False, ["mp-giga-shield"]))
+        head = with_cell(SOURCE, "mp-s3-lcd43", 'flash="8MB"', 'flash="16MB"')
+        self.assertEqual(self.scope(["build_mp.py", ci_scope.FIRMWARE], head),
+                         (True, False, ["mp-giga-shield", "mp-s3-lcd43"]))
+
     def test_one_cells_row_builds_that_cell(self):
         head = with_cell(SOURCE, "mp-s3-lcd43", 'flash="8MB"', 'flash="16MB"')
         self.assertEqual(self.scope([ci_scope.FIRMWARE], head), (True, False, ["mp-s3-lcd43"]))
