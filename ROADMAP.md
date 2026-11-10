@@ -52,8 +52,8 @@ ours to port.
 - **Speech that starts sooner.** `say()` renders a whole sentence before it
   plays, which on an ESP32-S3 is 1 to 4 s of silence first; the engine runs at
   twice real time there, so a short lead would do.
-- **picotts on the ESP32-P4 panels.** It speaks on the ESP32-S3 T-Embed and
-  the P4 WIFI6 DEV-KIT.
+- **picotts on the ESP32-P4 touch panels.** It already speaks on the ESP32-S3
+  T-Embed and the P4 WIFI6 DEV-KIT; the panels with a built-in screen are next.
 
 ## Bluetooth Classic
 

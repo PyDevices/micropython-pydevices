@@ -16,9 +16,9 @@ to [issues](https://github.com/PyDevices/micropython-pydevices/issues).
   CircuitPython 11. `I2SIn` already records with `record()`.
 - `audiobusio.PDMIn` on an ESP32, through its I2S peripheral's PDM mode, as
   an STM32H7 already records one through DFSDM.
-- A one-channel read from a multi-mic codec returns the average of the
-  enabled mics, with a way to ask for a single mic; boards state which mics
-  are live.
+- `I2SIn` takes `take=` to pick one mic of a multi-mic codec, as
+  `_audioif.rx_open` already does (left, right, average or both); boards state
+  which mics are live.
 
 ## Examples
 
