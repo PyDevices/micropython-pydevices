@@ -29,7 +29,7 @@ target_sources(displayif_common INTERFACE
 
 if(DISPLAYIF_RGBMATRIX_USE_PROTOMATTER)
     target_include_directories(displayif_common INTERFACE
-        ${DISPLAYIF_MOD_DIR}/src/ports/common/rgbmatrix/protomatter
+        ${DISPLAYIF_MOD_DIR}/third_party/protomatter
     )
     target_compile_definitions(displayif_common INTERFACE
         DISPLAYIF_RGBMATRIX_USE_PROTOMATTER=1

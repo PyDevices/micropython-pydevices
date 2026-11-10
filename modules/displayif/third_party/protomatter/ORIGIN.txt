@@ -1,0 +1,12 @@
+Adafruit_Protomatter, Adafruit's portable HUB75 RGB-matrix driving core.
+Upstream: https://github.com/adafruit/Adafruit_Protomatter
+Tag: 1.7.1
+Commit: 629d5007f0dfeba244ae81759ce2ba568224cd8a
+Files: core.c, core.h, arch/*.h
+License: BSD, stated in the header of each file ("BSD license, all text here
+must be included in any redistribution"). The files carry their own notice;
+upstream keeps no separate license file in src/.
+
+core.c and core.h match that commit apart from formatting (pointer spacing,
+brace style, include order). Several arch/*.h files carry local changes
+for building under MicroPython and CircuitPython; README.md lists them.

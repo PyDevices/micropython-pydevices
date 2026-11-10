@@ -19,7 +19,7 @@
 // core.h gates _PM_convert_565 behind CIRCUITPY/ARDUINO. Scope the define to
 // this include only — do not set CIRCUITPY for the whole MicroPython firmware.
 #define CIRCUITPY 1
-#include "protomatter/core.h"
+#include "core.h"
 #undef CIRCUITPY
 #endif
 

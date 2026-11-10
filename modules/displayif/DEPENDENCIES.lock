@@ -1,0 +1,28 @@
+# Pins for displayif's vendored code and its other build inputs.
+# <name> <clone-url> <full 40-character commit>
+#
+# displayif is source-integrated: it has no versioned releases of its own
+# (see README "Status"). This file records what a build is tested against
+# and where the one vendored third-party source tree came from.
+#
+# MicroPython: the one this module builds against is pinned for the whole
+# repository, in the repository's UPSTREAM (a full commit). CI builds the
+# unix port from that pin; nothing here repeats it, so it can't go stale.
+# Check yours with: git -C <your micropython checkout> rev-parse HEAD
+#
+# SDL2 (desktop usdl2 backend): needs >= 2.0 (the SDL_* API used by
+# src/ports/desktop/usdl2/); tested locally against 2.30.0
+# (`pkg-config --modversion sdl2`). CI installs Ubuntu's libsdl2-dev package
+# (see ../../.github/workflows/displayif.yml).
+#
+# circuitpython: usdl2 desktop path only, as a user C module. Tested against
+# 11.0.0-alpha.2, the first line whose USER_C_MODULES block matches
+# MicroPython 1.29's.
+circuitpython https://github.com/adafruit/circuitpython d53b2277cfad71589028e5da77c984c045db990d
+#
+# protomatter: vendored in third_party/protomatter/ (BSD), tag 1.7.1.
+# core.c and core.h are byte-identical to that revision once whitespace and
+# formatting are normalized (pointer spacing and brace style differ only; no
+# logic differences). third_party/protomatter/README.md says how that was
+# verified and what is not yet known.
+protomatter https://github.com/adafruit/Adafruit_Protomatter 629d5007f0dfeba244ae81759ce2ba568224cd8a

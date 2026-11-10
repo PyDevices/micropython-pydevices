@@ -1,0 +1,9 @@
+Copyright (c) 2026 PyDevices, MIT License (see the repository's LICENSE).
+
+This module includes code from other projects. Each folder under
+third_party/ carries an ORIGIN.txt naming the upstream commit and every
+change made.
+
+third_party/protomatter/
+  Adafruit_Protomatter, Copyright Adafruit Industries, written by Phil
+  Burgess and Jeff Epler. BSD license; every source file's header carries it.
