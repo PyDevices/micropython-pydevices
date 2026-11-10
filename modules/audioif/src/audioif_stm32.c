@@ -12,14 +12,29 @@
 // service mode and this driver is what calls service(). The DAC plays a ring
 // of 32-bit words, both channels at once through DHR12RD, fed by a circular
 // DMA and paced by TIM6. A soft timer looks at the DMA every few milliseconds
-// from the PendSV interrupt; when a block's worth of the ring has been played
-// it schedules a callback, and that callback, on the interpreter, runs the
-// pump until the ring is full again. The pump therefore renders between
-// bytecodes, and while the interpreter waits in sleep() or a blocking read,
-// never inside an interrupt: a graph may allocate and may raise, and neither
-// is allowed there. What that costs is that a C call that holds the
-// interpreter longer than the ring (about 93 ms at any rate) underruns, and the
-// ring plays silence until the pump catches up.
+// from the PendSV interrupt, and when a block's worth of the ring has been
+// played it has the pump run until the ring is full again. Where the pump
+// runs is the render mode:
+//
+//   - "irq", the default: in an interrupt of its own, on a stack of its own.
+//     Nothing the interpreter does can hold it up: not a garbage collection,
+//     not a Python callback, not a C call that keeps the interpreter for
+//     longer than the ring (about 93 ms at any rate). The interrupt sits at
+//     AUDIOIF_RENDER_PRI, below the priority the QSPI flash code masks while
+//     it holds the bus (IRQ_PRI_FLASH), so a render never reads a buffer in
+//     memory-mapped flash (ROMFS) while that flash is unmapped. The flash
+//     code masks one block operation at a time, so the render catches up
+//     between them: 32 KB written to /flash every 20 s, each write taking
+//     over a second, starved nothing. The engine treats the interrupt as its
+//     pump thread: a pull there doesn't raise or allocate, a file-backed
+//     source is refused, and the interpreter's side of the pump lock masks
+//     this one interrupt rather than waiting on a mutex.
+//   - "interpreter": a scheduled callback runs the pump between bytecodes,
+//     and while the interpreter waits in sleep() or a blocking read. A graph
+//     may allocate and may raise there, but anything that holds the
+//     interpreter longer than the ring underruns, and the ring plays silence
+//     until the pump catches up. _audioif.render_mode() switches between the
+//     two at any time.
 //
 // The hook table is in this file, with MP_REGISTER_MODULE, so that a static
 // archive can't let the engine's weak default win (audiodsp's
@@ -30,6 +45,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "py/gc.h"
 #include "py/mperrno.h"
 #include "py/mphal.h"
 #include "py/obj.h"
@@ -38,6 +54,7 @@
 
 #include "adc.h"
 #include "dma.h"
+#include "irq.h"
 #include "pin.h"
 #include "timer.h"
 
@@ -61,6 +78,24 @@
 #define AUDIOIF_KICK_MS (4)
 // DAC midscale, the silence of an unsigned 12-bit output, on both channels.
 #define AUDIOIF_SILENCE (0x08000800u)
+
+// The render interrupt: a peripheral's vector this board doesn't use, raised
+// by software. A board that uses SWPMI1 names another.
+#ifndef AUDIOIF_RENDER_IRQN
+#define AUDIOIF_RENDER_IRQN SWPMI1_IRQn
+#define AUDIOIF_RENDER_IRQ_HANDLER SWPMI1_IRQHandler
+#endif
+// Its priority: below IRQ_PRI_FLASH, so the QSPI flash code masks it while
+// the memory-mapped flash (ROMFS) is unavailable, and below USB, DMA and SPI,
+// which preempt it; above I2C, the general timers, pin interrupts and PendSV.
+#ifndef AUDIOIF_RENDER_PRI
+#define AUDIOIF_RENDER_PRI NVIC_EncodePriority(NVIC_PRIORITYGROUP_4, 7, 0)
+#endif
+// Its stack, in bytes. The interpreter's is 16 KB and may be nearly full when
+// the interrupt arrives, so the render doesn't stack on top of it.
+#ifndef AUDIOIF_RENDER_STACK
+#define AUDIOIF_RENDER_STACK (12288)
+#endif
 
 // In .bss, which the H7 boards' linker scripts put in AXI SRAM, where DMA1
 // can read it; DMA1 can't reach the DTCM, and audiopump_i2s_open() refuses a
@@ -166,12 +201,24 @@ static uint32_t audioif_space(void) {
     return (uint32_t)(AUDIOIF_RING_FRAMES - (audioif_written - audioif_played));
 }
 
-// --- the kick: the pump runs here, on the interpreter ---------------------
+// --- the kick: where the pump runs ----------------------------------------
+
+enum { AUDIOIF_MODE_INTERPRETER, AUDIOIF_MODE_IRQ };
+// The interrupt renders only with an engine that can share the pump with it
+// (AUDIODSP_PORT_IRQ_HOOKS): one that hands audiopump.service() to the
+// interrupt, and holds it off while the interpreter changes the pump.
+#ifdef AUDIODSP_PORT_IRQ_HOOKS
+#define AUDIOIF_HAVE_IRQ (1)
+static uint8_t audioif_mode = AUDIOIF_MODE_IRQ;
+#else
+#define AUDIOIF_HAVE_IRQ (0)
+static uint8_t audioif_mode = AUDIOIF_MODE_INTERPRETER;
+#endif
 
 // Run the pump only while the ring has a block's room, so the sink write
 // never waits for the DMA. Bounded, so a pump that stopped writing can't hold
-// the interpreter.
-void audiopump_i2s_service(void) {
+// the interpreter, or the interrupt.
+static void audioif_fill(void) {
     for (int i = 0; i < 32; i++) {
         audioif_poll();
         if (audioif_space() < audioif_block) {
@@ -183,6 +230,41 @@ void audiopump_i2s_service(void) {
             break;
         }
     }
+}
+
+// The render interrupt is armed while the DAC is open in "irq" mode. The
+// interpreter's side of the pump lock disables it, counting, and the last
+// release enables it again if it is still armed; a render asked for in
+// between is left pending and runs then.
+static bool audioif_render_armed;
+static uint32_t audioif_lock_depth;
+
+static void audioif_render_arm(bool on) {
+    audioif_render_armed = on;
+    if (on) {
+        NVIC_SetPriority(AUDIOIF_RENDER_IRQN, AUDIOIF_RENDER_PRI);
+        if (audioif_lock_depth == 0) {
+            NVIC_EnableIRQ(AUDIOIF_RENDER_IRQN);
+        }
+    } else {
+        NVIC_DisableIRQ(AUDIOIF_RENDER_IRQN);
+        NVIC_ClearPendingIRQ(AUDIOIF_RENDER_IRQN);
+    }
+}
+
+static inline bool audioif_in_render(void) {
+    return __get_IPSR() == (uint32_t)AUDIOIF_RENDER_IRQN + 16u;
+}
+
+void audiopump_i2s_service(void) {
+    if (audioif_mode == AUDIOIF_MODE_IRQ) {
+        // From the interpreter (a `playing` read): the interrupt renders.
+        if (audioif_render_armed) {
+            NVIC_SetPendingIRQ(AUDIOIF_RENDER_IRQN);
+        }
+        return;
+    }
+    audioif_fill();
 }
 
 static void audioif_kick_cb(mp_sched_node_t *node) {
@@ -200,9 +282,127 @@ static void audioif_kick_timer_cb(soft_timer_entry_t *self) {
     (void)self;
     audioif_poll();
     if (audioif_space() >= audioif_block && audiopump_c_service_mode()) {
-        mp_sched_schedule_node(&audioif_kick_node, audioif_kick_cb);
+        if (audioif_mode == AUDIOIF_MODE_IRQ) {
+            if (audioif_render_armed) {
+                NVIC_SetPendingIRQ(AUDIOIF_RENDER_IRQN);
+            }
+        } else {
+            mp_sched_schedule_node(&audioif_kick_node, audioif_kick_cb);
+        }
     }
 }
+
+// What the render interrupt has done, for _audioif.render_stats().
+static uint32_t audioif_renders;
+static uint32_t audioif_render_us_max;
+
+// The render, on its own stack. The heap is locked, so a pull that tried to
+// allocate gets a MemoryError rather than a heap the interpreter was in the
+// middle of changing, and the error is caught here and counted. Nothing in the
+// engine's pull raises; this is the net under it.
+void audioif_render_irq(void);
+void audioif_render_irq(void) {
+    if (!audioif_open || !audioif_render_armed || !audiopump_c_service_mode()) {
+        return;
+    }
+    const uint32_t t0 = mp_hal_ticks_us();
+    gc_lock();
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        audioif_fill();
+        nlr_pop();
+    } else {
+        audioif_service_errors++;
+    }
+    gc_unlock();
+    const uint32_t dt = mp_hal_ticks_us() - t0;
+    if (dt > audioif_render_us_max) {
+        audioif_render_us_max = dt;
+    }
+    audioif_renders++;
+}
+
+// The interrupt's stack, painted at boot so render_stats() can say how much
+// of it the deepest render used.
+#define AUDIOIF_STACK_WORDS (AUDIOIF_RENDER_STACK / 4)
+#define AUDIOIF_STACK_PAINT (0x5a5aa5a5u)
+uint32_t audioif_render_stack[AUDIOIF_STACK_WORDS] __attribute__((aligned(8)));
+static bool audioif_stack_painted;
+
+static void audioif_stack_paint(void) {
+    if (!audioif_stack_painted) {
+        for (uint32_t i = 0; i < AUDIOIF_STACK_WORDS; i++) {
+            audioif_render_stack[i] = AUDIOIF_STACK_PAINT;
+        }
+        audioif_stack_painted = true;
+    }
+}
+
+static uint32_t audioif_stack_used(void) {
+    uint32_t i = 0;
+    while (i < AUDIOIF_STACK_WORDS && audioif_render_stack[i] == AUDIOIF_STACK_PAINT) {
+        i++;
+    }
+    return (AUDIOIF_STACK_WORDS - i) * 4u;
+}
+
+#define AUDIOIF_STR_(x) #x
+#define AUDIOIF_STR(x) AUDIOIF_STR_(x)
+
+// Move to the render's stack, render, and move back. The exception frame stays
+// on the stack the interrupt arrived on, which is where the return finds it;
+// anything that preempts the render stacks on the render's own.
+__attribute__((naked)) void AUDIOIF_RENDER_IRQ_HANDLER(void) {
+    __asm volatile (
+        "mov   r0, sp\n"
+        "movw  r1, #:lower16:(audioif_render_stack + " AUDIOIF_STR(AUDIOIF_RENDER_STACK) ")\n"
+        "movt  r1, #:upper16:(audioif_render_stack + " AUDIOIF_STR(AUDIOIF_RENDER_STACK) ")\n"
+        "mov   sp, r1\n"
+        "push  {r0, lr}\n"
+        "bl    audioif_render_irq\n"
+        "pop   {r0, lr}\n"
+        "mov   sp, r0\n"
+        "bx    lr\n"
+        );
+}
+
+// --- the engine's thread hooks, in "irq" mode -----------------------------
+//
+// The interrupt is the pump's thread and the interpreter is the control side.
+// The control side takes the lock by disabling the render interrupt, which
+// can't be in the middle of a pull while the interpreter runs; the render
+// itself, and any interrupt above it, never waits.
+
+static void audioif_lock_take(void) {
+    if (__get_IPSR() != 0) {
+        return;
+    }
+    if (audioif_lock_depth++ == 0) {
+        NVIC_DisableIRQ(AUDIOIF_RENDER_IRQN);
+    }
+}
+
+static void audioif_lock_give(void) {
+    if (__get_IPSR() != 0 || audioif_lock_depth == 0) {
+        return;
+    }
+    if (--audioif_lock_depth == 0 && audioif_render_armed) {
+        NVIC_EnableIRQ(AUDIOIF_RENDER_IRQN);
+    }
+}
+
+static uintptr_t audioif_self_id(void) {
+    return audioif_in_render() ? 2 : 1;
+}
+
+#ifdef AUDIODSP_PORT_IRQ_HOOKS
+// audiopump.service() on the interpreter: the interrupt renders instead.
+static void audioif_render_kick(void) {
+    if (audioif_render_armed) {
+        NVIC_SetPendingIRQ(AUDIOIF_RENDER_IRQN);
+    }
+}
+#endif
 
 // --- the hardware ----------------------------------------------------------
 
@@ -223,6 +423,7 @@ static int audioif_dac_channel(int id) {
 
 static void audioif_hw_stop(void) {
     soft_timer_remove(&audioif_kick_timer);
+    audioif_render_arm(false);
     AUDIOIF_DMA_STREAM->CR &= ~DMA_SxCR_EN;
     while (AUDIOIF_DMA_STREAM->CR & DMA_SxCR_EN) {
     }
@@ -273,6 +474,13 @@ static void audioif_hw_start(int left, int right, uint32_t rate) {
     HAL_TIM_Base_Start(tim);
 
     audioif_open = true;
+    audioif_stack_paint();
+    // A lock a raise left held would keep the render off for good; nothing
+    // holds it while a channel opens.
+    audioif_lock_depth = 0;
+    if (audioif_mode == AUDIOIF_MODE_IRQ) {
+        audioif_render_arm(true);
+    }
     soft_timer_static_init(&audioif_kick_timer, SOFT_TIMER_MODE_PERIODIC, AUDIOIF_KICK_MS,
         audioif_kick_timer_cb);
     soft_timer_insert(&audioif_kick_timer, AUDIOIF_KICK_MS);
@@ -881,12 +1089,17 @@ uint32_t audiopump_i2s_rx_begin(const audiopump_i2s_cfg_t *cfg, uint32_t ring, i
 static uint64_t audioif_now_us(void) {
     static uint32_t last;
     static uint64_t high;
+    // Read from the interpreter and from the render interrupt, so the wrap
+    // is counted once whichever of them sees it.
+    mp_uint_t state = MICROPY_BEGIN_ATOMIC_SECTION();
     uint32_t now = mp_hal_ticks_us();
     if (now < last) {
         high += (uint64_t)1 << 32;
     }
     last = now;
-    return high | now;
+    uint64_t t = high | now;
+    MICROPY_END_ATOMIC_SECTION(state);
+    return t;
 }
 
 static void audioif_sleep_us(uint64_t us) {
@@ -924,11 +1137,12 @@ static uint32_t audioif_sink_write(const uint8_t *buffer, uint32_t length,
         audioif_starved_pending = false;
         audioif_starved_counting = true;
     }
-    // What fits, at once. The pump runs on the interpreter here, so waiting
-    // for the DMA to make room would hold everything else up for as long as
-    // the block is longer than the ring: a one-shot RawSample is one block,
-    // however long. The engine keeps what isn't taken and offers it again on
-    // the next service, so nothing is lost and nothing waits.
+    // What fits, at once. The pump runs on the interpreter or in an
+    // interrupt here, and neither may wait for the DMA to make room: that
+    // would hold everything else up for as long as the block is longer than
+    // the ring, and a one-shot RawSample is one block, however long. The
+    // engine keeps what isn't taken and offers it again on the next service,
+    // so nothing is lost and nothing waits.
     (void)timeout_ms;
     uint32_t space = audioif_space();
     if (frames > space) {
@@ -968,17 +1182,51 @@ static void audioif_teardown(void) {
     if (audioif_open) {
         audioif_hw_stop();
     }
+    audioif_lock_depth = 0;
 }
 
-static const audiodsp_port_ops_t audioif_stm32_ops = {
+// Not const: the thread hooks are there only in "irq" mode, and
+// audioif_mode_set() takes them out for "interpreter". With them out, the
+// pump runs on the interpreter exactly as it does on a port with no driver
+// thread, and nothing is locked.
+static audiodsp_port_ops_t audioif_stm32_ops = {
     .name = "stm32",
+    #if AUDIOIF_HAVE_IRQ
+    .lock_take = audioif_lock_take,
+    .lock_give = audioif_lock_give,
+    .self_id = audioif_self_id,
+    #endif
     .now_us = audioif_now_us,
     .sleep_us = audioif_sleep_us,
     .sink_ready = audioif_sink_ready,
     .sink_write = audioif_sink_write,
     .sink_dma_bytes = audioif_sink_dma_bytes,
     .teardown = audioif_teardown,
+    #ifdef AUDIODSP_PORT_IRQ_HOOKS
+    .render_kick = audioif_render_kick,
+    #endif
 };
+
+static void audioif_mode_set(uint8_t mode) {
+    if (mode == audioif_mode) {
+        return;
+    }
+    // From the interpreter, so no render is under way: the switch lands
+    // between two of them.
+    audioif_render_arm(false);
+    audioif_lock_depth = 0;
+    audioif_mode = mode;
+    const bool irq = mode == AUDIOIF_MODE_IRQ;
+    audioif_stm32_ops.lock_take = irq ? audioif_lock_take : NULL;
+    audioif_stm32_ops.lock_give = irq ? audioif_lock_give : NULL;
+    audioif_stm32_ops.self_id = irq ? audioif_self_id : NULL;
+    #ifdef AUDIODSP_PORT_IRQ_HOOKS
+    audioif_stm32_ops.render_kick = irq ? audioif_render_kick : NULL;
+    #endif
+    if (irq && audioif_open) {
+        audioif_render_arm(true);
+    }
+}
 
 const audiodsp_port_ops_t *audiodsp_port_driver(void) {
     return &audioif_stm32_ops;
@@ -999,6 +1247,50 @@ static mp_obj_t audioif_stm32_stats(void) {
     return mp_obj_new_tuple(5, items);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(audioif_stm32_stats_obj, audioif_stm32_stats);
+
+// render_mode() -> "irq" or "interpreter"; render_mode(mode) switches, at any
+// time, and the choice lasts until the board is reset. "interpreter" is the
+// fallback: the pump renders on the interpreter, as on builds before the
+// render interrupt.
+static mp_obj_t audioif_stm32_render_mode(size_t n_args, const mp_obj_t *args) {
+    if (n_args == 1) {
+        const char *want = mp_obj_str_get_str(args[0]);
+        if (strcmp(want, "irq") == 0) {
+            if (!AUDIOIF_HAVE_IRQ) {
+                mp_raise_ValueError(MP_ERROR_TEXT("this audiodsp can't render from an interrupt"));
+            }
+            audioif_mode_set(AUDIOIF_MODE_IRQ);
+        } else if (strcmp(want, "interpreter") == 0) {
+            audioif_mode_set(AUDIOIF_MODE_INTERPRETER);
+        } else {
+            mp_raise_ValueError(MP_ERROR_TEXT("render mode is 'irq' or 'interpreter'"));
+        }
+    }
+    return MP_OBJ_NEW_QSTR(audioif_mode == AUDIOIF_MODE_IRQ ? MP_QSTR_irq : MP_QSTR_interpreter);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(audioif_stm32_render_mode_obj, 0, 1,
+    audioif_stm32_render_mode);
+
+// (renders, longest render in us, render stack used in bytes, render stack
+// size, lock depth, priority). render_stats(True) zeroes the first two after
+// reading them.
+static mp_obj_t audioif_stm32_render_stats(size_t n_args, const mp_obj_t *args) {
+    mp_obj_t items[6] = {
+        mp_obj_new_int_from_uint(audioif_renders),
+        mp_obj_new_int_from_uint(audioif_render_us_max),
+        mp_obj_new_int_from_uint(audioif_stack_painted ? audioif_stack_used() : 0),
+        MP_OBJ_NEW_SMALL_INT(AUDIOIF_RENDER_STACK),
+        mp_obj_new_int_from_uint(audioif_lock_depth),
+        MP_OBJ_NEW_SMALL_INT(NVIC_GetPriority(AUDIOIF_RENDER_IRQN)),
+    };
+    if (n_args == 1 && mp_obj_is_true(args[0])) {
+        audioif_renders = 0;
+        audioif_render_us_max = 0;
+    }
+    return mp_obj_new_tuple(6, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(audioif_stm32_render_stats_obj, 0, 1,
+    audioif_stm32_render_stats);
 
 static mp_obj_t audioif_stm32_driver(void) {
     return MP_OBJ_NEW_QSTR(qstr_from_str(audioif_stm32_ops.name));
@@ -1097,6 +1389,8 @@ static const mp_rom_map_elem_t audioif_stm32_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR__audioif) },
     { MP_ROM_QSTR(MP_QSTR_driver), MP_ROM_PTR(&audioif_stm32_driver_obj) },
     { MP_ROM_QSTR(MP_QSTR_dac_stats), MP_ROM_PTR(&audioif_stm32_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_render_mode), MP_ROM_PTR(&audioif_stm32_render_mode_obj) },
+    { MP_ROM_QSTR(MP_QSTR_render_stats), MP_ROM_PTR(&audioif_stm32_render_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_pdm_open), MP_ROM_PTR(&audioif_stm32_pdm_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_adc_open), MP_ROM_PTR(&audioif_stm32_adc_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_rx_read), MP_ROM_PTR(&audioif_stm32_rx_read_obj) },
