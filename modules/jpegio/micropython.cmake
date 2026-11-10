@@ -3,7 +3,20 @@
 set(JPEGIO_DIR ${CMAKE_CURRENT_LIST_DIR}/src)
 set(JPEGIO_THIRD_PARTY ${CMAKE_CURRENT_LIST_DIR}/third_party)
 
+# --- which jpegio this firmware was built from ---------------------------
+# Computed at build time from this repo's own git, never stored; "unknown" when
+# there is no git (a tarball). Read on a target as <module>.__revision__.
+execute_process(
+    COMMAND git -C ${CMAKE_CURRENT_LIST_DIR} describe --always --dirty --abbrev=7
+    OUTPUT_VARIABLE JPEGIO_REVISION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+if(NOT JPEGIO_REVISION)
+    set(JPEGIO_REVISION "unknown")
+endif()
+
 add_library(usermod_jpegio INTERFACE)
+target_compile_definitions(usermod_jpegio INTERFACE JPEGIO_REVISION=\"${JPEGIO_REVISION}\")
 target_include_directories(usermod_jpegio INTERFACE
     ${JPEGIO_THIRD_PARTY}/tjpgd
     ${JPEGIO_THIRD_PARTY}/jpegenc

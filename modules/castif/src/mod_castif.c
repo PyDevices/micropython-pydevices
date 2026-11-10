@@ -728,8 +728,17 @@ MP_DEFINE_CONST_OBJ_TYPE(
 
 extern const mp_obj_type_t castif_hls_type;     // castif_hls.c: live HLS from a framebuffer
 
+// castif.__revision__: which castif this firmware was built from. The build
+// passes CASTIF_REVISION (git describe) as a compile definition; a build with no
+// git says "unknown" rather than guessing.
+#ifndef CASTIF_REVISION
+#define CASTIF_REVISION "unknown"
+#endif
+static const MP_DEFINE_STR_OBJ(castif_revision_obj, CASTIF_REVISION);
+
 static const mp_rom_map_elem_t castif_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_castif) },
+    { MP_ROM_QSTR(MP_QSTR___revision__), MP_ROM_PTR(&castif_revision_obj) },
     { MP_ROM_QSTR(MP_QSTR_Cast), MP_ROM_PTR(&castif_cast_type) },
     { MP_ROM_QSTR(MP_QSTR_Hls), MP_ROM_PTR(&castif_hls_type) },
 };

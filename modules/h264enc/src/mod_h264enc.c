@@ -29,6 +29,7 @@
 
 #include "py/runtime.h"
 #include "py/mperrno.h"
+#include "py/objstr.h"
 
 // The QSTR pass only preprocesses, with this module's include paths, not
 // IDF's: the IDF headers stay out of it.
@@ -662,8 +663,17 @@ MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &h264enc_encoder_locals_dict
     );
 
+// h264enc.__revision__: which h264enc this firmware was built from. The build
+// passes H264ENC_REVISION (git describe) as a compile definition; a build with no
+// git says "unknown" rather than guessing.
+#ifndef H264ENC_REVISION
+#define H264ENC_REVISION "unknown"
+#endif
+static const MP_DEFINE_STR_OBJ(h264enc_revision_obj, H264ENC_REVISION);
+
 static const mp_rom_map_elem_t h264enc_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_h264enc) },
+    { MP_ROM_QSTR(MP_QSTR___revision__), MP_ROM_PTR(&h264enc_revision_obj) },
     { MP_ROM_QSTR(MP_QSTR_Encoder), MP_ROM_PTR(&h264enc_encoder_type) },
 };
 static MP_DEFINE_CONST_DICT(h264enc_module_globals, h264enc_module_globals_table);
