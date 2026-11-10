@@ -17,6 +17,15 @@ CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 # No core dump to flash in a standard build; ./build_mp.py --coredump makes a
 # troubleshooting build that has one (sdkconfig.coredump beside this file).
 
+# The CPU at 240 MHz, the rating of every ESP32-S3. Upstream's octal-PSRAM
+# variant already sets it, but its generic S3 build (quad PSRAM) runs at 160.
+# Audio runs out of time first: a 48 kHz synth with a reverb needs about 5 ms
+# of each 5.3 ms block on a classic ESP32 at 160 MHz and clicks, and about
+# 3.5 ms at 240.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=n
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
+
 # More lwIP sockets. spremote alone holds the AP session, the dealer's TLS
 # websocket, mDNS and the pairing listener, and every pairing-HTTP client, DNS
 # lookup and phone poll takes one more. With the default 10, the pairing server

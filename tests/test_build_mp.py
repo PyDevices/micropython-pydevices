@@ -79,7 +79,8 @@ class OffPin(unittest.TestCase):
 
 
 class Esp32Speed(unittest.TestCase):
-    """A build that leaves flash or PSRAM below 80 MHz says so after it."""
+    """A build that leaves the CPU below its chip's rating, or flash or PSRAM
+    below 80 MHz, says so after it."""
 
     def note(self, sdk):
         out = io.StringIO()
@@ -104,6 +105,40 @@ class Esp32Speed(unittest.TestCase):
         out = self.note(sdk)
         self.assertIn("flash at 40 MHz.", out)
         self.assertNotIn("PSRAM at 40", out)
+
+    def test_cpu_below_rating_is_named_with_the_lines_to_set(self):
+        sdk = 'CONFIG_IDF_TARGET="esp32s3"\nCONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=160\nCONFIG_ESPTOOLPY_FLASHFREQ_80M=y\n'
+        out = self.note(sdk)
+        self.assertIn("the CPU at 160 MHz (rated for 240).", out)
+        self.assertIn("CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y", out)
+        self.assertIn("CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240", out)
+        self.assertNotIn("FLASHFREQ_80M", out)
+
+    def test_cpu_with_slow_flash_and_psram(self):
+        sdk = ('CONFIG_IDF_TARGET="esp32"\nCONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=160\n'
+               "CONFIG_ESPTOOLPY_FLASHFREQ_40M=y\nCONFIG_SPIRAM=y\nCONFIG_SPIRAM_SPEED_40M=y\n")
+        self.assertIn("the CPU at 160 MHz (rated for 240), flash at 40 MHz and PSRAM at 40 MHz.", self.note(sdk))
+
+    def test_cpu_at_rating_is_quiet(self):
+        for target, mhz in (("esp32", 240), ("esp32s3", 240), ("esp32c3", 160), ("esp32c6", 160),
+                            ("esp32c2", 120), ("esp32h2", 96), ("esp32p4", 400)):
+            sdk = f'CONFIG_IDF_TARGET="{target}"\nCONFIG_ESP_DEFAULT_CPU_FREQ_MHZ={mhz}\nCONFIG_ESPTOOLPY_FLASHFREQ_80M=y\n'
+            self.assertEqual(self.note(sdk), "", target)
+
+    def test_p4_before_revision_3_is_rated_360(self):
+        sdk = 'CONFIG_IDF_TARGET="esp32p4"\nCONFIG_ESP32P4_SELECTS_REV_LESS_V3=y\nCONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=360\n'
+        self.assertEqual(self.note(sdk), "")
+        sdk = 'CONFIG_IDF_TARGET="esp32p4"\nCONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=360\n'
+        self.assertIn("the CPU at 360 MHz (rated for 400)", self.note(sdk))
+
+    def test_p4_image_for_revision_0_keeps_flash_at_40(self):
+        sdk = ('CONFIG_IDF_TARGET="esp32p4"\nCONFIG_ESP32P4_REV_MIN_0=y\nCONFIG_ESP32P4_SELECTS_REV_LESS_V3=y\n'
+               "CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=360\nCONFIG_ESPTOOLPY_FLASHFREQ_40M=y\nCONFIG_SPIRAM=y\nCONFIG_SPIRAM_SPEED_200M=y\n")
+        self.assertEqual(self.note(sdk), "")
+
+    def test_single_core_esp32_is_rated_160(self):
+        sdk = 'CONFIG_IDF_TARGET="esp32"\nCONFIG_FREERTOS_UNICORE=y\nCONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=160\n'
+        self.assertEqual(self.note(sdk), "")
 
 
 class ModulesMoved(unittest.TestCase):
