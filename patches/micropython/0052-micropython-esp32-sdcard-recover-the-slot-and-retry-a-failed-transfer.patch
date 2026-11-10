@@ -1,0 +1,108 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 00:00:00 -0500
+Subject: [PATCH] esp32/machine_sdcard: Recover the slot and retry a failed transfer.
+
+On an ESP32-P4, long runs of 4 KB writes to a microSD card fail now and
+then, every 10 to 60 MB while the card is served over USB mass storage.
+Either the card stays busy past the 5 s ready timeout, or the
+controller's DMA stops partway through a block and leaves its data path
+busy. After that every command times out and the card won't initialise
+again, so each later write failed too and the host gave up on the disk.
+
+When a transfer fails on an SDMMC host, reset the controller's DMA
+engine, the controller, its DMA and its FIFO, set the slot up again,
+initialise the card again and repeat the transfer once. Resetting the
+controller and initialising the card is not enough on its own: card
+initialisation still fails until the slot is set up again. Recovery
+takes about 45 ms. A second slot on the same controller keeps its
+settings. SPI hosts are unchanged.
+
+diff --git a/ports/esp32/machine_sdcard.c b/ports/esp32/machine_sdcard.c
+--- a/ports/esp32/machine_sdcard.c
++++ b/ports/esp32/machine_sdcard.c
+@@ -36,6 +36,7 @@
+ 
+ #if SOC_SDMMC_HOST_SUPPORTED
+ #include "driver/sdmmc_host.h"
++#include "soc/sdmmc_periph.h"
+ #if SOC_SDMMC_IO_POWER_EXTERNAL
+ #include "sd_pwr_ctrl_by_on_chip_ldo.h"
+ #endif
+@@ -72,6 +73,10 @@ typedef struct _sdcard_obj_t {
+     // DMA-capable staging for buffers the host can't DMA into directly,
+     // allocated on first need and freed by deinit().
+     uint8_t *bounce;
++    #if SOC_SDMMC_HOST_SUPPORTED
++    // Kept to set the slot up again after a failed transfer.
++    sdmmc_slot_config_t slot_config;
++    #endif
+ } sdcard_card_obj_t;
+ 
+ // Sectors staged per transfer when the caller's buffer isn't DMA-capable.
+@@ -469,6 +474,7 @@ static mp_obj_t machine_sdcard_make_new(const mp_obj_type_t *type, size_t n_args
+ 
+         DEBUG_printf("  Calling init_slot()");
+         check_esp_err(sdmmc_host_init_slot(self->host.slot, &slot_config));
++        self->slot_config = slot_config;
+     }
+     #endif // SOC_SDMMC_HOST_SUPPORTED
+ 
+@@ -530,7 +536,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(sd_info_obj, sd_info);
+ // Read or write whole sectors. A buffer the host can DMA into goes straight
+ // through; anything else is staged through a DMA-capable buffer a few
+ // sectors at a time, so the card still sees multi-sector transfers.
+-static esp_err_t sdcard_transfer(sdcard_card_obj_t *self, uint8_t *buf, size_t block, size_t count, bool write) {
++static esp_err_t sdcard_transfer_once(sdcard_card_obj_t *self, uint8_t *buf, size_t block, size_t count, bool write) {
+     size_t sector = _SECTOR_SIZE(self);
+     bool direct = self->card.host.check_buffer_alignment == NULL
+         || self->card.host.check_buffer_alignment(self->card.host.slot, buf, sector * count);
+@@ -569,6 +575,48 @@ static esp_err_t sdcard_transfer(sdcard_card_obj_t *self, uint8_t *buf, size_t b
+     return ESP_OK;
+ }
+ 
++#if SOC_SDMMC_HOST_SUPPORTED
++// Not in ESP-IDF's public headers: resets the SDMMC controller, its DMA and
++// its FIFO.
++esp_err_t sdmmc_host_reset(void);
++
++// Bring an SDMMC slot back after a failed transfer. The failure can leave the
++// controller's data path stuck mid-block, so that every later command times
++// out, or the card in its programming state. Resetting the controller alone
++// isn't enough: the card won't initialise again until its slot is set up
++// again too. A second slot on the same controller keeps its settings.
++static esp_err_t sdcard_recover(sdcard_card_obj_t *self) {
++    SDMMC.bmod.sw_reset = 1; // the DMA engine
++    esp_err_t err = sdmmc_host_reset();
++    if (err == ESP_OK) {
++        err = self->host.deinit_p(self->host.slot);
++    }
++    if (err == ESP_OK) {
++        // Sets the host up again if that slot was its last one.
++        err = self->host.init();
++    }
++    if (err == ESP_OK) {
++        err = sdmmc_host_init_slot(self->host.slot, &self->slot_config);
++    }
++    if (err == ESP_OK) {
++        err = sdcard_ensure_card_init(self, true);
++    }
++    return err;
++}
++#endif
++
++// Retry a failed transfer once after recovering the slot. Repeating a
++// transfer is safe: it writes or reads the same sectors.
++static esp_err_t sdcard_transfer(sdcard_card_obj_t *self, uint8_t *buf, size_t block, size_t count, bool write) {
++    esp_err_t err = sdcard_transfer_once(self, buf, block, count, write);
++    #if SOC_SDMMC_HOST_SUPPORTED
++    if (err != ESP_OK && !(self->host.flags & SDMMC_HOST_FLAG_SPI) && sdcard_recover(self) == ESP_OK) {
++        err = sdcard_transfer_once(self, buf, block, count, write);
++    }
++    #endif
++    return err;
++}
++
+ static mp_obj_t machine_sdcard_readblocks(mp_obj_t self_in, mp_obj_t block_num, mp_obj_t buf) {
+     sdcard_card_obj_t *self = self_in;
+     mp_buffer_info_t bufinfo;
