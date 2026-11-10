@@ -74,7 +74,7 @@ class OffPin(unittest.TestCase):
         self.assertTrue(self.off(B, self.commits[2])[0].startswith("not at"))
 
     def test_module_without_a_lock_row(self):
-        build_mp.read_lock = lambda name: []
+        build_mp.lock = lambda: {}
         self.assertIsNone(build_mp.off_pin("pydevices", self.repo, self.commits[0]))
 
 
