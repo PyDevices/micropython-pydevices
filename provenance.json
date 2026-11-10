@@ -154,6 +154,9 @@
   },
   "0051-micropython-stm32-h7-i2c-timing-from-the-kernel-clock.patch": {
    "sha256": "a759f8b47b99dfbb06a93cfa29e890cf3b5dfe350aca7634925e80cba2448ef5"
+  },
+  "0052-micropython-esp32-sdcard-recover-the-slot-and-retry-a-failed-transfer.patch": {
+   "sha256": "f9bc5decda52c2ea5835b74288042d8cbad23b884a8f877526d4ce10ead3d28f"
   }
  },
  "tinyusb_patches": {
