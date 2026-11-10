@@ -19,6 +19,7 @@
 
 #include "py/obj.h"
 #include "py/objarray.h"
+#include "py/objstr.h"
 #include "py/runtime.h"
 
 #include "picoapi.h"
