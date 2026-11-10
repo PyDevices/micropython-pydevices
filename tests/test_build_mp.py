@@ -820,6 +820,74 @@ class Esp32Autosize(unittest.TestCase):
         self.assertEqual(parts["factory"][1], 0x7D0000)
 
 
+class Esp32KeepFs(unittest.TestCase):
+    """--keep-fs on esp32 sizes the app partition so the filesystem is the last
+    SIZE of the flash, where a board flashed with the same size has it."""
+
+    TABLE = Esp32Autosize.TABLE
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def keep(self, fs, mb=8, table=None, src=None):
+        if src is None:
+            src = self.dir / "partitions.csv"
+            src.write_text(table or self.TABLE)
+        dest = build_mp.esp32_keep_fs(src, mb * 1024 * 1024, fs, self.dir / "kept.csv")
+        return {r[0]: (int(r[3], 0), int(r[4], 0)) for r in build_mp.esp32_table_rows(dest)}
+
+    def test_the_release_cells_keep_the_tables_their_last_set_had(self):
+        # The app partitions the release workflow's set of 2026-11-09 shipped with,
+        # each grown by autosize but the DEV-KIT's.
+        shipped = {"mp-p4-devkit": 0x600000, "mp-p4-panel": 0x5B0000, "mp-s3-lcd7": 0x540000,
+                   "mp-s3-lcd43": 0x540000, "mp-s3-tembed": 0x540000}
+        for c in rf.CELLS:
+            if c["interpreter"] != "micropython" or c["kind"] != "esp32":
+                continue
+            table = build_mp.esp32_table(c["chip"], c["board"], c["variant"])
+            self.assertIsNotNone(table, f"{c['id']} needs a table build_mp.py knows before it builds")
+            parts = self.keep(rf.size_bytes(c["fs"]), int(c["flash"][:-2]), src=table)
+            self.assertEqual(parts["factory"], (0x10000, shipped[c["id"]]), c["id"])
+
+    def test_a_table_kept_at_its_own_size_is_unchanged(self):
+        for variant, fs, mb in (("ESP32_GENERIC_P4/P4X_EYE", 0x6F0000, 16), ("ESP32_GENERIC/AUDIO_KIT", 0x20000, 4)):
+            src = build_mp.VARIANTS_DIR / "esp32" / variant / "partitions.csv"
+            before = {r[0]: (int(r[3], 0), int(r[4], 0)) for r in build_mp.esp32_table_rows(src)}
+            self.assertEqual(self.keep(fs, mb, src=src), before, variant)
+
+    def test_partitions_after_the_app_follow_it(self):
+        parts = self.keep(2688 * 1024, table=self.TABLE + "coredump, data, coredump, 0x200000, 0x10000\n")
+        self.assertEqual(parts["factory"], (0x10000, 0x540000))
+        self.assertEqual(parts["coredump"], (0x550000, 0x10000))
+
+    def test_a_named_filesystem_is_the_end_of_the_flash(self):
+        parts = self.keep(0x200000, table=self.TABLE + "vfs, data, fat, 0x200000, 0x200000\n")
+        self.assertEqual(parts["vfs"], (0x600000, 0x200000))
+        self.assertEqual(parts["factory"], (0x10000, 0x5F0000))
+
+    def test_an_image_that_outgrows_it_is_told_what_fits(self):
+        table = self.dir / "kept.csv"
+        self.keep(2688 * 1024, table=self.TABLE + "coredump, data, coredump, 0x200000, 0x10000\n")
+        log = "Error: app partition is too small for binary micropython.bin size 0x560000:\n"
+        # 0x560000 of app, the coredump after it: 0x800000 - 0x10000 - 0x560000 - 0x10000 is left.
+        self.assertEqual(build_mp.esp32_keep_fs_fits(log, table, 0x800000), 0x280000)
+        self.assertEqual(build_mp.esp32_keep_fs_fits(log.replace("0x560000", "0x7F0000"), table, 0x800000), 0)
+        self.assertIsNone(build_mp.esp32_keep_fs_fits("error: something else", table, 0x800000))
+
+    def test_tables_it_cannot_size_are_refused(self):
+        ota = self.TABLE.replace("factory, app, factory", "ota_0, app, ota_0") + "ota_1, app, ota_1, 0x200000, 0x1F0000\n"
+        middle = self.TABLE + "vfs, data, fat, 0x200000, 0x100000\ncoredump, data, coredump, 0x300000, 0x10000\n"
+        for table in (ota, middle):
+            with self.assertRaises(SystemExit):
+                self.keep(0x100000, table=table)
+        with self.assertRaises(SystemExit):
+            self.keep(0x7F0000)   # no room left for the app
+
+
 class Stm32M4Slot(unittest.TestCase):
     """An Arduino GIGA firmware that overflows its 1,280 KB region is built
     again over the M4 core's flash, without OpenAMP; and no GIGA image may

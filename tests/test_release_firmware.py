@@ -17,6 +17,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import release_firmware as rf
@@ -27,6 +28,19 @@ COMMIT = "a" * 40
 def put(d, name, data):
     (d / name).write_bytes(data)
     return {"file": name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+
+def table_bin(rows):
+    """A binary ESP32 partition table: (name, type, subtype, offset, size) rows."""
+    return b"".join(struct.pack("<2sBBII16sI", b"\xaa\x50", t, st, off, size, name.encode(), 0)
+                    for name, t, st, off, size in rows) + b"\xff" * 64
+
+
+def kept_table(c):
+    """The table a cell's build makes: the app partition up to the filesystem it keeps."""
+    flash, fs = int(c["flash"][:-2]) * rf.MB, rf.size_bytes(c["fs"])
+    return table_bin([("nvs", 1, 2, 0x9000, 0x6000), ("phy_init", 1, 1, 0xF000, 0x1000),
+                      ("factory", 0, 0, 0x10000, flash - fs - 0x10000)])
 
 
 def fake_cell(root, c, version="v1.30.0-preview"):
@@ -41,7 +55,7 @@ def fake_cell(root, c, version="v1.30.0-preview"):
         merged = b"\xff" * boot + b"\xe9" + b"\x00" * (0x10000 - boot - 1) + app + pad
         files["flash"] = put(d, "flash.bin", merged)
         files["app"] = put(d, "app.bin", app)
-        files["partitions"] = put(d, "partitions.bin", b"\xaaP" + b"\x00" * 100) if c["kind"] == "esp32" else None
+        files["partitions"] = put(d, "partitions.bin", kept_table(c)) if c["kind"] == "esp32" else None
         if files["partitions"] is None:
             del files["partitions"]
     elif c["kind"] == "stm32":
@@ -61,6 +75,8 @@ def fake_cell(root, c, version="v1.30.0-preview"):
                 flash_bytes=int(c["flash"][:-2]) * rf.MB, files=files, build_seconds=61,
                 interpreter_version=version if c["interpreter"] == "micropython" else "11.0.0-alpha.1-dirty",
                 module_revisions={"pydevices": {"commit": COMMIT, "dirty": False}})
+    if c["kind"] == "rp2" and c.get("fs"):
+        meta["rp2_storage_bytes"] = rf.size_bytes(c["fs"])
     (d / "cell.json").write_text(json.dumps(meta))
     return d
 
@@ -96,6 +112,32 @@ class Table(unittest.TestCase):
         self.assertIn("--flash", args)
         self.assertEqual(args[args.index("--variant") + 1], "LCD_7")
         self.assertEqual(args[args.index("--modules") + 1], "all")
+
+    def test_every_micropython_esp32_and_rp2_cell_keeps_its_filesystem(self):
+        rf.check_cells()
+        kept = [c["id"] for c in rf.CELLS if c.get("fs")]
+        self.assertEqual(len(kept), 7)
+        for c in rf.CELLS:
+            args = rf.build_args(c)
+            if c.get("fs"):
+                self.assertEqual(args[args.index("--keep-fs") + 1], c["fs"], c["id"])
+            else:
+                self.assertNotIn("--keep-fs", args, c["id"])
+
+    def test_a_cell_that_names_no_filesystem_is_caught(self):
+        for planted in (None, "2690K", "big"):
+            cells = [dict(c) for c in rf.CELLS]
+            cells[2]["fs"] = planted
+            with mock.patch.object(rf, "CELLS", cells):
+                with self.assertRaises(rf.Failed) as cm:
+                    rf.matrix(False)
+                self.assertIn("mp-s3-lcd7: names no filesystem to keep", str(cm.exception))
+
+    def test_a_filesystem_on_a_cell_that_cannot_keep_one_is_caught(self):
+        cells = [dict(c, fs="1536K") if c["id"] == "cp-feather-rp2040" else c for c in rf.CELLS]
+        with mock.patch.object(rf, "CELLS", cells):
+            with self.assertRaisesRegex(rf.Failed, "cp-feather-rp2040: fs is for"):
+                rf.check_cells()
 
     def test_circuitpython_names_lvgl_like_micropython(self):
         c = rf.cell("cp-s3-lcd7")
@@ -302,6 +344,85 @@ class Assemble(unittest.TestCase):
         (self.indir / "mp-extra").mkdir()
         self.fails_with("no cell")
 
+    def test_firmware_json_says_where_each_filesystem_is(self):
+        doc = self.run_assemble()
+        fs = {b["id"]: (b.get("fs_offset"), b.get("fs_bytes")) for b in doc["builds"]}
+        self.assertEqual(fs["mp-s3-lcd7"], ("0x560000", 2688 * 1024))
+        self.assertEqual(fs["mp-p4-panel"], ("0x5c0000", 26880 * 1024))
+        self.assertEqual(fs["cp-s3-lcd7"], (None, None))
+
+    def rewrite(self, cell_id, role, data):
+        d = self.indir / cell_id
+        meta = json.loads((d / "cell.json").read_text())
+        f = d / meta["files"][role]["file"]
+        f.write_bytes(data)
+        meta["files"][role].update(size=len(data), sha256=rf.sha256(f))
+        (d / "cell.json").write_text(json.dumps(meta))
+
+    def test_a_filesystem_that_moved_is_caught(self):
+        # autosize's table for a bigger image: the app grown by 64 KB, the filesystem after it.
+        self.rewrite("mp-s3-lcd7", "partitions", table_bin([
+            ("nvs", 1, 2, 0x9000, 0x6000), ("phy_init", 1, 1, 0xF000, 0x1000),
+            ("factory", 0, 0, 0x10000, 0x550000), ("coredump", 1, 3, 0x560000, 0x10000)]))
+        self.fails_with("mp-s3-lcd7: the filesystem is 2624 KB at 0x570000, not the 2688K at 0x560000")
+
+    def test_a_named_filesystem_in_the_wrong_place_is_caught(self):
+        self.rewrite("mp-p4-devkit", "partitions", table_bin([
+            ("nvs", 1, 2, 0x9000, 0x6000), ("factory", 0, 0, 0x10000, 0x500000),
+            ("vfs", 1, 0x81, 0x510000, 0xAF0000)]))
+        self.fails_with("mp-p4-devkit: the filesystem is 11200 KB at 0x510000")
+
+    def test_a_flash_image_that_runs_into_the_filesystem_is_caught(self):
+        d = self.indir / "mp-s3-tembed"
+        meta = json.loads((d / "cell.json").read_text())
+        flash = (d / meta["files"]["flash"]["file"]).read_bytes()
+        self.rewrite("mp-s3-tembed", "flash", flash + b"\xff" * (0x560000 - len(flash) + 1))
+        self.fails_with("mp-s3-tembed: flash.bin writes past 0x560000, into the filesystem")
+
+    def pico2_set(self):
+        for c in rf.wanted(True):
+            if c.get("optional"):
+                fake_cell(self.indir, c)
+        return self.indir / "mp-pico2"
+
+    @staticmethod
+    def uf2_block(addr, family=0xE48BFF59):
+        head = struct.pack("<IIIIIIII", 0x0A324655, 0x9E5D5157, 0x2000, addr, 256, 0, 1, family)
+        return head + b"\x00" * 476 + struct.pack("<I", 0x0AB16F30)
+
+    def test_a_pico2_set_keeps_its_filesystems(self):
+        self.pico2_set()
+        doc = self.run_assemble(pico2=True)
+        pico2 = next(b for b in doc["builds"] if b["id"] == "mp-pico2")
+        self.assertEqual((pico2["fs_offset"], pico2["fs_bytes"]), ("0x350000", 704 * 1024))
+
+    def test_an_rp2_filesystem_that_moved_is_caught(self):
+        d = self.pico2_set()
+        meta = json.loads((d / "cell.json").read_text())
+        meta["rp2_storage_bytes"] = 640 * 1024
+        (d / "cell.json").write_text(json.dumps(meta))
+        with self.assertRaisesRegex(rf.Failed, "mp-pico2: the filesystem is 640 KB at 0x360000, not the 704K"):
+            self.run_assemble(pico2=True)
+
+    def test_an_rp2_build_that_recorded_no_filesystem_is_caught(self):
+        d = self.pico2_set()
+        meta = json.loads((d / "cell.json").read_text())
+        del meta["rp2_storage_bytes"]
+        (d / "cell.json").write_text(json.dumps(meta))
+        with self.assertRaisesRegex(rf.Failed, "mp-pico2: the build recorded no filesystem size"):
+            self.run_assemble(pico2=True)
+
+    def test_a_uf2_that_writes_into_the_filesystem_is_caught(self):
+        self.pico2_set()
+        last = rf.XIP_BASE + 0x350000 - 256
+        # The RP2350's errata block past the image is written at an absolute address and doesn't count.
+        good = self.uf2_block(rf.XIP_BASE) * 2000 + self.uf2_block(last) + self.uf2_block(0x10FFFF00, rf.UF2_FAMILY_ABSOLUTE)
+        self.rewrite("mp-pico2", "uf2", good)
+        self.run_assemble(pico2=True)
+        self.rewrite("mp-pico2", "uf2", good + self.uf2_block(last + 256))
+        with self.assertRaisesRegex(rf.Failed, "mp-pico2: firmware.uf2 writes past 0x10350000, into the filesystem"):
+            self.run_assemble(pico2=True)
+
 
 class VersionTag(unittest.TestCase):
     """An image that prints a commit hash instead of a version must not pass."""
@@ -419,6 +540,36 @@ class DraftRelease(unittest.TestCase):
         main = f"dfu-util -a 0 -d 2341:0366 -s 0x08040000:leave -D {stem}.firmware0-at-0x08040000.bin"
         self.assertIn(wifi + "`, then `" + main, text)
         self.assertIn("flash-a-board.md#stm32-arduino-giga-r1-wifi", text)
+
+    def test_the_notes_give_each_micropython_board_its_filesystem(self):
+        text = rf.notes(self.doc)
+        self.assertIn("| ESP32-S3-Touch-LCD-7 | MicroPython v1.30.0-preview | ", text)
+        self.assertIn(" | 2,688 KB at 0x560000 |", text)
+        self.assertIn(" | 26,880 KB at 0x5c0000 |", text)
+        self.assertNotIn("This release moves the filesystem", text)
+
+    def test_a_release_that_moves_a_filesystem_says_which_board(self):
+        previous = json.loads(json.dumps(self.doc))
+        previous["tag"] = "v1.30.0-20261101"
+        self.assertNotIn("moves the filesystem", rf.notes(self.doc, previous))
+        lcd7 = next(b for b in previous["builds"] if b["id"] == "mp-s3-lcd7")
+        lcd7.update(fs_offset="0x5a0000", fs_bytes=2432 * 1024)
+        text = rf.notes(self.doc, previous)
+        self.assertIn("**This release moves the filesystem** on the boards below. Updating one from v1.30.0-20261101", text)
+        self.assertIn("- ESP32-S3-Touch-LCD-7, MicroPython: 2,688 KB at 0x560000, was 2,432 KB at 0x5a0000", text)
+        self.assertNotIn("- ESP32-S3-Touch-LCD-4.3", text)
+
+    def test_the_command_reads_the_previous_set(self):
+        j = self.root / "out" / "firmware.json"
+        previous = json.loads(j.read_text())
+        previous["tag"] = "staged-20261001"
+        next(b for b in previous["builds"] if b["id"] == "mp-p4-panel")["fs_bytes"] = 1
+        p = self.root / "previous.json"
+        p.write_text(json.dumps(previous))
+        out = self.root / "notes.md"
+        self.assertEqual(rf.main(["notes", str(j), "--previous", str(p), "--out", str(out)]), 0)
+        self.assertIn("- ESP32-P4-WIFI6-Touch-LCD-4B, MicroPython: 26,880 KB at 0x5c0000, was 0 KB at 0x5c0000",
+                      out.read_text())
 
     def test_a_final_set_has_no_staged_banner(self):
         self.doc.update(preview=False, preview_reasons=[], tag="v1.30.0-20261101")
