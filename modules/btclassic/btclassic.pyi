@@ -44,6 +44,8 @@ Addresses are 6 bytes, most significant first, as `bluetooth.BLE` gives
 them.
 """
 
+import builtins
+
 # -- changes() bits ---------------------------------------------------------
 
 CONNECTION: int
@@ -337,6 +339,8 @@ class Bluetooth:
             OSError: no link to that device is up, the controller refused,
                 or this firmware doesn't have the command.
             ValueError: a value out of range.
+        """
+
     def sniff(self, addr: bytes, enable: bool = True, *, min_ms: int = 250, max_ms: int = 500,
         attempt: int = 4, timeout: int = 1) -> int:
         """Put a connected device's idle link into sniff mode, where it wakes
@@ -1544,7 +1548,7 @@ class PhoneBook:
         """The contact name for a phone number, or None: what a call screen
         shows for `HandsFree.caller`. The phone does the matching."""
     @staticmethod
-    def parse(data: bytes) -> list[dict]:
+    def parse(data: bytes) -> builtins.list[dict]:
         """Records from vCard text, a .vcf file's for one."""
     def changes(self) -> int:
         """The bits (`CONNECTION`, `PHONEBOOK`) for what changed since the
