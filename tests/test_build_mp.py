@@ -675,6 +675,36 @@ class Rp2BoardDir(unittest.TestCase):
             build_mp.rp2_board_dir(self.gen, self.base, "BOARD", "NOPE")
 
 
+class Rp2KeepFs(unittest.TestCase):
+    """A Pico's filesystem moves when autosize works its size out again for a
+    bigger image; --keep-fs holds it where a board already has it."""
+
+    @staticmethod
+    def overflow(image):
+        # The linker's memory table for a 2 MB Pico at upstream's 1408 KB filesystem.
+        return ("region `FLASH' overflowed by %d bytes\n"
+                "Memory region         Used Size  Region Size  %%age Used\n"
+                "           FLASH:     %d B       640 KB    100.00%%\n"
+                "        FLASH_FS:          0 B      1408 KB      0.00%%\n" % (image - 640 * 1024, image))
+
+    def test_a_bigger_image_moves_the_filesystem(self):
+        # Two RPI_PICO images with the same modules, 62 KB apart, autosized from scratch.
+        self.assertEqual(build_mp.rp2_autosize(self.overflow(1398144)), 576 * 1024)
+        self.assertEqual(build_mp.rp2_autosize(self.overflow(1460560)), 512 * 1024)
+        # The bigger one fits beside the smaller one's 576 KB filesystem all the same.
+        self.assertLess(1460560, 2048 * 1024 - 576 * 1024)
+
+    def test_sizes(self):
+        self.assertEqual(build_mp.fs_size("589824"), 589824)
+        self.assertEqual(build_mp.fs_size("576K"), 589824)
+        self.assertEqual(build_mp.fs_size("576kb"), 589824)
+        self.assertEqual(build_mp.fs_size("1M"), 1 << 20)
+
+    def test_not_sizes(self):
+        for text in ("", "0", "576.5K", "1000", "-4K", "big"):
+            self.assertIsNone(build_mp.fs_size(text), text)
+
+
 class Esp32Autosize(unittest.TestCase):
     """An esp32 app that outgrows its partition gets a table grown to fit, with
     headroom above it, and always leaves the board a filesystem."""
