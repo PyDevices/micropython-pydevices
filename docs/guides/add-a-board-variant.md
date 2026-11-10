@@ -70,9 +70,11 @@ says so when it finishes, with the lines to set.
 
 An rp2 board of ours is a variant of one of upstream's, in
 `variants/rp2/<BOARD>/<VARIANT>/`. The port only knows variants that sit in the
-board's own folder, so `build_mp.py` makes a folder of its own for the build,
-`builds/rp2/<BOARD>/<VARIANT>/<BOARD>/`, links upstream's board into it
-unchanged and adds what the variant holds:
+board's own folder, so `build_mp.py` makes a folder of its own for every rp2
+build, `builds/rp2/<BOARD>/<VARIANT>/<BOARD>/`, links upstream's board into it
+unchanged, adds
+[`variants/rp2/board.cmake`](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/rp2/board.cmake)
+after the board's own settings, and adds what the variant holds:
 
 - `mpconfigvariant.cmake` (required): cmake settings, included after the
   board's own default variant. The board's `PICO_BOARD`, the number of GPIOs,
@@ -84,6 +86,13 @@ unchanged and adds what the variant holds:
 `PIMORONI_PICO_PLUS2_W` is the one rp2 variant of ours. It builds the Pico 2 W for the
 Pimoroni board's 16 MB flash, 8 MB PSRAM, 48 GPIOs and its own pin names, and
 its files say why each setting is there.
+
+Every rp2 build runs the CPU at its chip's rated clock: 200 MHz on an RP2040,
+which `board.cmake` sets where the SDK's default is still 125, and 150 on an
+RP2350. At 200 MHz the SDK raises the RP2040's core voltage to the 1.15 V the
+rating needs. Flash and PSRAM follow the CPU through a divider and stay inside
+their rating, so a variant has nothing to set for them. A build whose CPU
+runs below its chip's rating says so when it finishes.
 
 ## An stm32 board
 
