@@ -14,6 +14,31 @@ the M4.
 
 To refuse the growth and stop instead, add `--no-autosize`.
 
+## Keep a board's files through an update
+
+On rp2, autosize works the filesystem's size out again in each new build
+folder, so a newer image that is a few KB bigger can come out with a smaller
+filesystem than the one already on your board, and flashing it empties the
+board. To keep the board's filesystem where it is, ask the board its size:
+
+```python
+import rp2
+f = rp2.Flash()
+print(f.ioctl(4, 0) * f.ioctl(5, 0))  # 589824 is 576 KB
+```
+
+and build with that size:
+
+```bash
+./build_mp.py --port rp2 --board RPI_PICO --modules displayif,lvgl,pydevices --keep-fs 576K
+```
+
+If the firmware fits beside it, the image keeps that filesystem and your files
+are there after the flash. If it doesn't, the build stops and says what size
+would fit, rather than moving it. A rebuild in the same build folder starts
+from the size that folder used last, so it keeps the filesystem without
+`--keep-fs` unless the image has outgrown it.
+
 On esp32, autosize works only if the flash size is right: the partition table
 tool refuses a table larger than the configured flash, so give `--flash`.
 

@@ -1510,6 +1510,16 @@ def esp32_autosize(log_text, build, port_dir, dest):
     return dest
 
 
+def fs_size(text):
+    """--keep-fs's size in bytes, from "589824", "576K" or "576KB"; None if
+    it isn't one, or isn't whole 4 KB flash sectors."""
+    m = re.fullmatch(r"(\d+)\s*([KM]?)B?", text.strip().upper())
+    if not m:
+        return None
+    n = int(m.group(1)) * {"": 1, "K": 1024, "M": 1024 * 1024}[m.group(2)]
+    return n if n and n % 4096 == 0 else None
+
+
 def rp2_autosize(log_text):
     """MICROPY_HW_FLASH_STORAGE_BYTES that leaves the firmware room to fit, from
     the linker's memory table; None if the log isn't a FLASH overflow."""
@@ -2091,6 +2101,8 @@ def main():
     ap.add_argument("--flash", help="esp32 flash size, e.g. 16MB")
     ap.add_argument("--no-autosize", action="store_true", help="refuse instead of growing the firmware's flash: esp32's app partition, rp2's firmware over its "
                     "filesystem, the Arduino GIGA's over its M4 core's flash")
+    ap.add_argument("--keep-fs", metavar="SIZE", help="rp2: build beside the filesystem a board already has, its size in bytes or KB "
+                    "(576K), and refuse instead of moving it when the firmware doesn't fit")
     ap.add_argument("--coredump", action="store_true",
                     help="esp32: a troubleshooting build that writes a core dump to flash on a crash (standard builds don't)")
     ap.add_argument("--clean", action="store_true", help="delete this target's build dir first")
@@ -2158,6 +2170,11 @@ def main():
         die("--flash is for esp32")
     if args.coredump and port != "esp32":
         die("--coredump is for esp32")
+    if args.keep_fs and port != "rp2":
+        die("--keep-fs is for rp2")
+    keep_fs = fs_size(args.keep_fs) if args.keep_fs else None
+    if args.keep_fs and not keep_fs:
+        die(f"--keep-fs takes a size in whole 4 KB sectors, in bytes or KB (576K), not '{args.keep_fs}'")
     if args.flash and args.flash.upper() not in FLASH_SIZES:
         die(f"--flash takes one of {', '.join(FLASH_SIZES)}")
     flash = args.flash.upper() if args.flash else None
@@ -2345,7 +2362,12 @@ def main():
             if got and Path(got.group(1)) != gen:
                 (build / "Makefile").unlink(missing_ok=True)
             make_submodules(shell, make, mp)
-            storage = None
+            storage = keep_fs
+            if keep_fs:
+                got = re.search(r"^MICROPY_HW_FLASH_STORAGE_BYTES:\w+=(\d+)$", cache.read_text(), re.M) if cache.exists() else None
+                if not got or int(got.group(1)) != keep_fs:
+                    # The port runs CMake only when the build has no Makefile yet.
+                    (build / "Makefile").unlink(missing_ok=True)
             for attempt in (1, 2):
                 extra = [f"MICROPY_HW_FLASH_STORAGE_BYTES={storage}"] if storage else []
                 rc, out = shell(make + extra, log=True)
@@ -2354,6 +2376,12 @@ def main():
                 storage = rp2_autosize(out)
                 if not storage:
                     break
+                if keep_fs:
+                    say(f"\nThe firmware doesn't fit beside a {keep_fs // 1024} KB filesystem. A {storage // 1024} KB one would")
+                    say("  fit it, but that moves the filesystem and a board flashed with it comes up")
+                    say("  with an empty one. (--keep-fs, so nothing was rebuilt: build fewer modules,")
+                    say("  or copy the board's files off and build without --keep-fs.)")
+                    break
                 if args.no_autosize:
                     say(f"\nThe firmware doesn't fit. MICROPY_HW_FLASH_STORAGE_BYTES={storage} would fit it.")
                     say("(--no-autosize, so nothing was rebuilt.)")
@@ -2361,11 +2389,12 @@ def main():
                 say(f"\nautosize: the firmware didn't fit; building once more with a {storage // 1024} KB filesystem.")
                 say("  Shrinking the filesystem moves it: a board flashed with this image comes up")
                 say("  with an empty one. Copy your files back after flashing, or build with")
-                say("  --no-autosize to stop here instead.\n")
+                say("  --no-autosize to stop here instead. To keep a board's filesystem where it")
+                say("  is, build with --keep-fs and its size: on the board, import rp2, then")
+                say("  f = rp2.Flash(); print(f.ioctl(4, 0) * f.ioctl(5, 0)).\n")
                 # The port runs CMake only when the build has no Makefile yet.
                 (build / "Makefile").unlink(missing_ok=True)
             # What the image was built with, grown now or on an earlier run (CMake caches it).
-            cache = build / "CMakeCache.txt"
             got = re.search(r"^MICROPY_HW_FLASH_STORAGE_BYTES:\w+=(\d+)$", cache.read_text(), re.M) if cache.exists() else None
             rp2_storage = int(got.group(1)) if rc == 0 and got else None
             if rc == 0 and cache.exists():
