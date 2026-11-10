@@ -12,9 +12,6 @@ or missing for you, open an
 - **Python packages in a ROMFS partition on a 4 MB ESP32.** Put instruments or
   an app's modules in flash beside the firmware and run them in place, where a
   LittleFS filesystem has no room for that many files.
-- **One pin file.** `UPSTREAM`, `modules.lock`, `deps.lock` and esp-vision's
-  `ESP_VISION.lock` become one `DEPENDENCIES.lock`: a dependency, its URL and
-  its full commit on each line.
 
 ## Watching a board
 

@@ -19,7 +19,7 @@
 # CircuitPython's espressif port builds with, that's Espressif's `usb`
 # component from its registry rather than part of ESP-IDF. CircuitPython builds
 # with the component manager off, so micropython-pydevices' build_mp.py fetches
-# it at the version deps.lock pins and passes it; one of its CircuitPython
+# it at the version DEPENDENCIES.lock pins and passes it; one of its CircuitPython
 # patches has the port build and link a component a module names. The host's
 # settings (hubs, the 4 KB control-transfer buffer in ./sdkconfig) go in the
 # board's own sdkconfig there.

@@ -9,7 +9,8 @@ on:
       - '!modules/cameraif/*.md'
       - '!modules/cameraif/docs/**'
       - 'build_mp.py'
-      - 'modules.lock'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
       - 'patches/**'
       - '.github/workflows/cameraif.yml'
   pull_request:
@@ -18,7 +19,8 @@ on:
       - '!modules/cameraif/*.md'
       - '!modules/cameraif/docs/**'
       - 'build_mp.py'
-      - 'modules.lock'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
       - 'patches/**'
       - '.github/workflows/cameraif.yml'
   # Everything, weekly: the path filters skip what a change can't reach.

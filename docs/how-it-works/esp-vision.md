@@ -6,7 +6,7 @@ build with `tflite` and `vision`. This page says what is behind them.
 ## The pin and the glue
 
 [`modules/.esp-vision`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/.esp-vision)
-pins esp-vision at a full commit in `ESP_VISION.lock`. Its `fetch.sh` links a
+fetches esp-vision at its full commit in `DEPENDENCIES.lock`. Its `fetch.sh` links a
 sibling clone at that commit (`../esp-vision`), or fetches that commit alone.
 The leading dot keeps it out of `--modules` and `all`, because esp-vision's own
 `micropython.cmake` is its whole firmware build, not a module.

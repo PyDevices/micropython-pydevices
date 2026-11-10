@@ -1,6 +1,6 @@
 # The CircuitPython-compatible path from a bare clone, the way a user builds
-# it: build_mp.py fetches CircuitPython at its deps.lock tag and pygraphics at
-# its modules.lock commit, builds the unix port with pygraphics as a user C
+# it: build_mp.py fetches CircuitPython and pygraphics at their
+# DEPENDENCIES.lock commits, builds the unix port with pygraphics as a user C
 # module, and the result has to import it, draw, and read the pixels back.
 # The second job builds the unix port with every C module that builds there
 # and imports and runs each one.
@@ -11,8 +11,8 @@ on:
     branches: [main]
     paths:
       - 'build_mp.py'
-      - 'deps.lock'
-      - 'modules.lock'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
       - 'patches/circuitpython/**'
       - 'modules/**'
       - '!modules/*/*.md'
@@ -23,8 +23,8 @@ on:
   pull_request:
     paths:
       - 'build_mp.py'
-      - 'deps.lock'
-      - 'modules.lock'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
       - 'patches/circuitpython/**'
       - 'modules/**'
       - '!modules/*/*.md'
@@ -105,9 +105,9 @@ jobs:
       # The build names the pinned tag, not the patch series laid on it.
       - name: The version is the pinned tag, not -dirty
         run: |
-          want=$(awk '$1 == "circuitpython" {print $3}' deps.lock)
+          want=$(python3 scripts/pins.py circuitpython tag)
           got=$(./builds/circuitpython/unix/coverage/micropython -c "import os; print(os.uname().version.split(' on ')[0])")
-          echo "version: $got (deps.lock: $want)"
+          echo "version: $got (DEPENDENCIES.lock: $want)"
           test "$got" = "$want"
 
       - name: A looping source that comes back empty does not hang the delay nodes
@@ -280,6 +280,10 @@ jobs:
         id: py
         run: echo "version=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" >> "$GITHUB_OUTPUT"
 
+      - name: The toolchain pins, which the cached deps/ is tied to
+        id: toolchains
+        run: echo "key=$(python3 scripts/pins.py --key toolchains)" >> "$GITHUB_OUTPUT"
+
       - name: Cache the toolchains
         uses: actions/cache@v6
         with:
@@ -287,15 +291,15 @@ jobs:
             deps/circuitpython
             deps/circuitpython-venv
             ~/.espressif
-          key: deps-cp-esp32p4-py${{ steps.py.outputs.version }}-${{ hashFiles('deps.lock', 'patches/circuitpython/**') }}
+          key: deps-cp-esp32p4-py${{ steps.py.outputs.version }}-${{ steps.toolchains.outputs.key }}-${{ hashFiles('patches/circuitpython/**') }}
 
       - name: Cache compiler output
         uses: actions/cache@v6
         with:
           path: /home/runner/.cache/ccache
-          key: ccache-cp-esp32p4-usbhost-${{ hashFiles('UPSTREAM', 'modules.lock') }}-${{ github.run_id }}
+          key: ccache-cp-esp32p4-usbhost-${{ hashFiles('DEPENDENCIES.lock') }}-${{ github.run_id }}
           restore-keys: |
-            ccache-cp-esp32p4-usbhost-${{ hashFiles('UPSTREAM', 'modules.lock') }}-
+            ccache-cp-esp32p4-usbhost-${{ hashFiles('DEPENDENCIES.lock') }}-
             ccache-cp-esp32p4-usbhost-
 
       - name: Build CircuitPython for the WIFI6 DEV-KIT with usbhost

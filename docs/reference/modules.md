@@ -2,7 +2,7 @@
 
 The short names `--modules` takes. Each is a directory in `modules/`, either
 tracked here or linked from a sibling checkout or cloned at the commit in
-`modules.lock`. [Choose modules](../guides/choose-modules.md) says how to pick.
+`DEPENDENCIES.lock`. [Choose modules](../guides/choose-modules.md) says how to pick.
 
 ## C modules that live here
 
@@ -26,8 +26,8 @@ tracked here or linked from a sibling checkout or cloned at the commit in
 
 | Module | Where it comes from |
 |---|---|
-| `audiodsp`, `pygraphics`, `ulab` | Cloned at the commit in `modules.lock` when `modules/<name>` is missing, or linked from a sibling checkout. |
-| `lvgl` | [omnipython-lvgl](https://github.com/PyDevices/omnipython-lvgl), fetched at the commit in `modules.lock` into `modules/.omnipython-lvgl`, or linked from a sibling checkout. A build compiles its `ports/micropython` or `ports/circuitpython`, whichever the interpreter is, and `all` includes it. |
+| `audiodsp`, `pygraphics`, `ulab` | Cloned at the commit in `DEPENDENCIES.lock` when `modules/<name>` is missing, or linked from a sibling checkout. |
+| `lvgl` | [omnipython-lvgl](https://github.com/PyDevices/omnipython-lvgl), fetched at the commit in `DEPENDENCIES.lock` into `modules/.omnipython-lvgl`, or linked from a sibling checkout. A build compiles its `ports/micropython` or `ports/circuitpython`, whichever the interpreter is, and `all` includes it. |
 | `pydevices`, `palettes`, `pdwidgets`, `sayso`, `audioinstruments`, `audioeffects` | Manifests here that require the Python packages from omnipython-lib. `audiocomponents` is the old name for the last two together and still builds both. |
 | `micropython-lib` | MicroPython's own upstream packages, frozen from the checkout the MicroPython tree carries. |
 | `tflite`, `vision` | [esp-vision's modules](../guides/use-esp-vision-modules.md), opt-in: `all` leaves them out. |
@@ -54,11 +54,11 @@ it is. "Unix" is CircuitPython's unix port, built and imported in
 | jpegio | yes | ESP32-P4 | Adds only the encoder's C API: CircuitPython has its own `jpegio` decoder. |
 | cameraif | yes (`available()` is False) | ESP32-P4 | |
 | mdns | yes | no, on purpose | CircuitPython's boards have an `mdns` of their own; its unix port has none. |
-| usbhost | yes, as `_usbhost`, with no host engine | ESP32-P4 | The host engine runs on ESP-IDF's USB host library, which from ESP-IDF 6 is Espressif's `usb` component: [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py) fetches it at the version `deps.lock` pins. The P4's boards leave its high-speed controller to us. Tethering is left out until the port has a network. The S3's one controller is CircuitPython's drive and REPL, so it gets the module without the engine. On the RP2040 and i.MX, CircuitPython's own `usb.core` is the host. |
+| usbhost | yes, as `_usbhost`, with no host engine | ESP32-P4 | The host engine runs on ESP-IDF's USB host library, which from ESP-IDF 6 is Espressif's `usb` component: [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py) fetches it at the version `DEPENDENCIES.lock` pins. The P4's boards leave its high-speed controller to us. Tethering is left out until the port has a network. The S3's one controller is CircuitPython's drive and REPL, so it gets the module without the engine. On the RP2040 and i.MX, CircuitPython's own `usb.core` is the host. |
 | audioif | no | no | Links against audiodsp's audio pump and `cp_compat`, which audiodsp's CircuitPython glue doesn't build. It isn't needed there: audioif gives MicroPython the `audiobusio` and `audioi2sin` that CircuitPython boards already have. |
 | ulab | CircuitPython's own | CircuitPython's own | |
 | castif | no: it is the ESP32-P4's | ESP32-P4, with no network | Talks to lwIP directly, the lwIP under CircuitPython's own `socketpool`. CircuitPython's P4 port has no network until it drives the boards' ESP32-C6, so castif is built without one and `start()` says so. Name tsmux, h264enc and ppa with it. |
-| h264enc | no: it is the ESP32-P4's encoder | ESP32-P4 | Espressif's `esp_h264`, which CircuitPython's port, built with the component manager off, can't fetch itself, is pinned in `deps.lock` and fetched by [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py). Name ppa with it. |
+| h264enc | no: it is the ESP32-P4's encoder | ESP32-P4 | Espressif's `esp_h264`, which CircuitPython's port, built with the component manager off, can't fetch itself, is pinned in `DEPENDENCIES.lock` and fetched by [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py). Name ppa with it. |
 | picotts | no | no, on purpose | CircuitPython has Adafruit's `adafruit_picotts`, the same engine and API as a native `.mpy`. |
 | btclassic | no | no | MicroPython only for now. |
 | tflite, vision | no | no, on purpose | esp-vision's modules, for MicroPython only. |

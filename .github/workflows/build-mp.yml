@@ -8,14 +8,15 @@ on:
     branches: [main]
     paths:
       - 'build_mp.py'
+      - 'scripts/pins.py'
       - 'tests/test_build_mp.py'
+      - 'tests/test_pins.py'
       - 'tests/test_freeze_list.py'
       - 'tests/test_effects_selection.py'
       - 'modules/audioeffects/**'
       - 'scripts/freeze_list.py'
       - 'modules/library.py'
-      - 'modules.lock'
-      - 'UPSTREAM'
+      - 'DEPENDENCIES.lock'
       - 'patches/micropython/**'
       - 'patches/tinyusb/**'
       - 'tests/test_provenance.py'
@@ -25,14 +26,15 @@ on:
   pull_request:
     paths:
       - 'build_mp.py'
+      - 'scripts/pins.py'
       - 'tests/test_build_mp.py'
+      - 'tests/test_pins.py'
       - 'tests/test_freeze_list.py'
       - 'tests/test_effects_selection.py'
       - 'modules/audioeffects/**'
       - 'scripts/freeze_list.py'
       - 'modules/library.py'
-      - 'modules.lock'
-      - 'UPSTREAM'
+      - 'DEPENDENCIES.lock'
       - 'patches/micropython/**'
       - 'patches/tinyusb/**'
       - 'tests/test_provenance.py'
@@ -51,7 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Unit tests
-        run: PYTHONPATH=tests python3 -m unittest test_build_mp test_freeze_list test_effects_selection -v
+        run: PYTHONPATH=tests python3 -m unittest test_build_mp test_pins test_freeze_list test_effects_selection -v
       - name: provenance.json is current
         run: PYTHONPATH=tests python3 -m unittest test_provenance -v
 
@@ -64,9 +66,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - name: Read the pinned upstream from UPSTREAM
+      - name: Read the pinned upstream from DEPENDENCIES.lock
         id: pin
-        run: echo "ref=$(cat UPSTREAM)" >> "$GITHUB_OUTPUT"
+        run: echo "ref=$(python3 scripts/pins.py micropython)" >> "$GITHUB_OUTPUT"
       - name: Check out the pinned upstream
         uses: actions/checkout@v7
         with:

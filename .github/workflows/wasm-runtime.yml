@@ -1,6 +1,6 @@
 # The website (PyDevices.github.io) and workbench serve a WebAssembly build of
 # this repository: the webassembly port, pydevices variant, every module. Its
-# sources move here, in modules.lock, the patch series and the module
+# sources move here, in DEPENDENCIES.lock, the patch series and the module
 # manifests, and nothing on either site notices. So when main changes what
 # goes into that build, this rebuilds it from the pins, checks it starts and
 # imports what it freezes, and opens a pull request on each site with the new
@@ -15,10 +15,9 @@ on:
   push:
     branches: [main]
     paths:
-      - 'modules.lock'
-      - 'deps.lock'
-      - 'UPSTREAM'
+      - 'DEPENDENCIES.lock'
       - 'build_mp.py'
+      - 'scripts/pins.py'
       - 'modules/**'
       - 'lib-overrides/**'
       - 'patches/micropython/**'

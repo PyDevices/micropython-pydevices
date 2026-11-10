@@ -1,5 +1,5 @@
 # btclassic from a bare clone: a classic ESP32 firmware with the module, built
-# as a release would (ESP-IDF at deps.lock's pin, under the esp32 port's
+# as a release would (ESP-IDF at its DEPENDENCIES.lock pin, under the esp32 port's
 # -Werror=all), and the ESP-IDF component alone on ESP-IDF 6.1 for every chip
 # it is written for, the ESP32-S31 among them, which MicroPython can't build
 # for yet.
@@ -14,6 +14,7 @@ on:
       - '!modules/btclassic/*.pyi'
       - '!modules/btclassic/examples/**'
       - 'build_mp.py'
+      - 'scripts/pins.py'
       - '.github/workflows/btclassic.yml'
   pull_request:
     paths:
@@ -22,6 +23,7 @@ on:
       - '!modules/btclassic/*.pyi'
       - '!modules/btclassic/examples/**'
       - 'build_mp.py'
+      - 'scripts/pins.py'
       - '.github/workflows/btclassic.yml'
   # Everything, weekly: the path filters skip what a change can't reach.
   schedule:
@@ -62,6 +64,10 @@ jobs:
         id: py
         run: echo "version=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" >> "$GITHUB_OUTPUT"
 
+      - name: The toolchain pins, which the cached deps/ is tied to
+        id: toolchains
+        run: echo "key=$(python3 scripts/pins.py --key toolchains)" >> "$GITHUB_OUTPUT"
+
       # release-firmware.yml's cache, the same paths and key so it's shared.
       - name: Cache ESP-IDF
         uses: actions/cache@v6
@@ -71,15 +77,15 @@ jobs:
             deps/circuitpython
             deps/circuitpython-venv
             ~/.espressif
-          key: deps-idf-py${{ steps.py.outputs.version }}-${{ hashFiles('deps.lock', 'patches/circuitpython/**') }}
+          key: deps-idf-py${{ steps.py.outputs.version }}-${{ steps.toolchains.outputs.key }}-${{ hashFiles('patches/circuitpython/**') }}
 
       - name: Cache compiler output
         uses: actions/cache@v6
         with:
           path: /home/runner/.cache/ccache
-          key: ccache-btclassic-esp32-${{ hashFiles('UPSTREAM', 'modules.lock') }}-${{ github.run_id }}
+          key: ccache-btclassic-esp32-${{ hashFiles('DEPENDENCIES.lock') }}-${{ github.run_id }}
           restore-keys: |
-            ccache-btclassic-esp32-${{ hashFiles('UPSTREAM', 'modules.lock') }}-
+            ccache-btclassic-esp32-${{ hashFiles('DEPENDENCIES.lock') }}-
             ccache-btclassic-esp32-
 
       - name: Build a classic ESP32 firmware with btclassic

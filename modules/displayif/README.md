@@ -60,7 +60,7 @@ RGB and DSI framebuffers prefer **PSRAM** (`MALLOC_CAP_SPIRAM`). Ensure `CONFIG_
 
 ## 🚀 Build
 
-Tested against the MicroPython this repository pins ([UPSTREAM](../../UPSTREAM)), the CircuitPython
+Tested against the MicroPython this repository pins ([DEPENDENCIES.lock](../../DEPENDENCIES.lock)), the CircuitPython
 11.0.0-alpha.2 oracle, and SDL2 >= 2.0 (desktop `usdl2`) — see [this module's DEPENDENCIES.lock](DEPENDENCIES.lock) for the
 other pins and how to verify them locally.
 
@@ -86,7 +86,7 @@ cd micropython/ports/unix && make submodules && make
 The manifest freezes no Python; it only names the C module, and the build glue
 picks the modules your port supports (see [docs/port-matrix.md](docs/port-matrix.md)).
 On unix that is `usdl2`; the bus and framebuffer modules are
-MCU-only. Tested on the unix port against the pinned MicroPython ([UPSTREAM](../../UPSTREAM)).
+MCU-only. Tested on the unix port against the pinned MicroPython ([DEPENDENCIES.lock](../../DEPENDENCIES.lock)).
 
 If you would rather not edit the MicroPython tree, write a manifest of your own
 and pass it as `FROZEN_MANIFEST=`. That replaces the port's default, so include

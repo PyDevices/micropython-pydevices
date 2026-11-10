@@ -8,7 +8,7 @@ fork, and it publishes no Python package.
 ## The model
 
 ```text
-pinned MicroPython tag (UPSTREAM)
+pinned MicroPython commit (DEPENDENCIES.lock)
    + patches/micropython/ and each module's own patches, one local commit
              |
    upstream board (esp32, rp2)    or    upstream / our variant (unix, windows, webassembly)
@@ -36,7 +36,7 @@ is the user's side of this.
 
 ## Rules
 
-- Upstream is **pinned**. Moving `UPSTREAM` re-validates every patch.
+- Upstream is **pinned**. Moving the `micropython` line of `DEPENDENCIES.lock` re-validates every patch.
 - Patches are justified in their headers. Never hand-edit a patched tree: change
   the patch and prepare again.
 - [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py) names no version and no setting. Pins move in the lock files,

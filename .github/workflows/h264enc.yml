@@ -13,6 +13,7 @@ on:
       - '!modules/h264enc/*.md'
       - '!modules/h264enc/examples/**'
       - 'build_mp.py'
+      - 'scripts/pins.py'
       - '.github/workflows/h264enc.yml'
   pull_request:
     paths:
@@ -20,6 +21,7 @@ on:
       - '!modules/h264enc/*.md'
       - '!modules/h264enc/examples/**'
       - 'build_mp.py'
+      - 'scripts/pins.py'
       - '.github/workflows/h264enc.yml'
   # Everything, weekly: the path filters skip what a change can't reach.
   schedule:
@@ -80,6 +82,10 @@ jobs:
         id: py
         run: echo "version=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" >> "$GITHUB_OUTPUT"
 
+      - name: The toolchain pins, which the cached deps/ is tied to
+        id: toolchains
+        run: echo "key=$(python3 scripts/pins.py --key toolchains)" >> "$GITHUB_OUTPUT"
+
       # release-firmware.yml's cache, the same paths and key so it's shared:
       # ESP-IDF and the compilers it downloads (the CircuitPython paths stay empty)
       - name: Cache ESP-IDF
@@ -90,15 +96,15 @@ jobs:
             deps/circuitpython
             deps/circuitpython-venv
             ~/.espressif
-          key: deps-idf-py${{ steps.py.outputs.version }}-${{ hashFiles('deps.lock', 'patches/circuitpython/**') }}
+          key: deps-idf-py${{ steps.py.outputs.version }}-${{ steps.toolchains.outputs.key }}-${{ hashFiles('patches/circuitpython/**') }}
 
       - name: Cache compiler output
         uses: actions/cache@v6
         with:
           path: /home/runner/.cache/ccache
-          key: ccache-h264enc-p4-${{ hashFiles('UPSTREAM', 'modules.lock') }}-${{ github.run_id }}
+          key: ccache-h264enc-p4-${{ hashFiles('DEPENDENCIES.lock') }}-${{ github.run_id }}
           restore-keys: |
-            ccache-h264enc-p4-${{ hashFiles('UPSTREAM', 'modules.lock') }}-
+            ccache-h264enc-p4-${{ hashFiles('DEPENDENCIES.lock') }}-
             ccache-h264enc-p4-
 
       - name: Build an ESP32-P4 firmware with h264enc

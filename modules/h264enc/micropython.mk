@@ -10,7 +10,7 @@
 #
 # esp_h264 is Espressif's encoder component, from its component registry.
 # CircuitPython builds with the component manager off, so micropython-pydevices'
-# build_mp.py fetches it at the version deps.lock pins (the one
+# build_mp.py fetches it at the version DEPENDENCIES.lock pins (the one
 # components/h264enc_esp_h264 asks MicroPython's build for) and passes it; one
 # of its CircuitPython patches has the port build the component and link it.
 # The colour conversion is ppa's: name both modules, or Encoder() says ppa is

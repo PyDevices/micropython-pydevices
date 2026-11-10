@@ -39,7 +39,7 @@ class CircuitPythonJobs(unittest.TestCase):
     def test_docs_examples_and_the_other_interpreters_patches_reach_none(self):
         self.assertEqual(self.reach("modules/pngio/README.md", "modules/mdns/examples/a.py",
                                     "modules/displayif/docs/x.md", "patches/micropython/0001-x.patch",
-                                    "patches/tinyusb/0001-x.patch", "UPSTREAM", "variants/LCD_7/x.cmake",
+                                    "patches/tinyusb/0001-x.patch", "variants/LCD_7/x.cmake",
                                     "docs/a.md", "tests/test_release_firmware.py"), set())
 
     def test_usbhost_tests_do_not_build_the_p4_image(self):
@@ -47,7 +47,7 @@ class CircuitPythonJobs(unittest.TestCase):
 
     def test_the_pins_the_builder_and_circuitpythons_patches_reach_all(self):
         everything = set(ci_scope.CP_JOBS)
-        for path in ("build_mp.py", "deps.lock", "modules.lock", "patches/circuitpython/0001-x.patch",
+        for path in ("build_mp.py", "DEPENDENCIES.lock", "scripts/pins.py", "patches/circuitpython/0001-x.patch",
                      "modules/library.py", "modules/manifest.py", "a_path_no_rule_names.txt"):
             self.assertEqual(self.reach(path), everything, path)
 
@@ -74,8 +74,8 @@ class FirmwareCells(unittest.TestCase):
         self.assertEqual(self.scope([ci_scope.FIRMWARE_WORKFLOW]), (True, True, []))
 
     def test_a_pin_builds_the_whole_set(self):
-        self.assertEqual(self.scope(["modules.lock"]), (True, True, []))
-        self.assertEqual(self.scope(["deps.lock"]), (True, True, []))
+        self.assertEqual(self.scope(["DEPENDENCIES.lock"]), (True, True, []))
+        self.assertEqual(self.scope(["scripts/pins.py"]), (True, True, []))
 
     def test_build_mp_builds_the_stm32_cells(self):
         self.assertEqual(self.scope(["build_mp.py"]), (True, False, ["mp-giga-shield"]))

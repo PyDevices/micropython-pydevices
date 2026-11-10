@@ -55,18 +55,19 @@ INERT = (
 )
 
 # What the three CircuitPython jobs can read. They build CircuitPython, so
-# MicroPython's patches, its pin and TinyUSB's patches reach none of them, and
-# no job builds a module's examples or docs.
-CP_COMMON = ("build_mp.py", "deps.lock", "modules.lock", "patches/circuitpython/**",
+# MicroPython's patches and TinyUSB's patches reach none of them, and no job
+# builds a module's examples or docs. DEPENDENCIES.lock is one file, so a move
+# of any pin in it, MicroPython's too, reaches all three.
+CP_COMMON = ("build_mp.py", "DEPENDENCIES.lock", "scripts/pins.py", "patches/circuitpython/**",
              "modules/library.py", "modules/manifest.py", "scripts/ci_scope.py")
-CP_NOT_BUILT = ("UPSTREAM", "patches/micropython/**", "patches/micropython-lib/**", "patches/tinyusb/**",
+CP_NOT_BUILT = ("patches/micropython/**", "patches/micropython-lib/**", "patches/tinyusb/**",
                 "patches/apply_patches.py", "modules/*/examples/**", "modules/*/docs/**")
 # The modules the unix-modules job names. The rest (audioif, picotts, tflite,
 # vision, audioinstruments, audioeffects, audiocomponents, all) are not in its list.
 UNIX_MODULES = ("displayif", "pydevices", "pdwidgets", "palettes", "pngio", "tsmux", "ppa", "jpegio", "cameraif",
                 "mdns", "usbhost", "castif", "h264enc")
 CP_JOBS = {
-    # pygraphics comes from modules.lock: nothing under modules/ is built with it.
+    # pygraphics comes from DEPENDENCIES.lock: nothing under modules/ is built with it.
     "unix": CP_COMMON,
     "unix_modules": CP_COMMON + tuple("modules/%s/**" % m for m in UNIX_MODULES),
     # The ESP32-P4 board cell with usbhost: its sources, not its tests or tools.
@@ -93,8 +94,8 @@ def cp_reach(path):
 
 FIRMWARE = "scripts/release_firmware.py"
 FIRMWARE_WORKFLOW = ".github/workflows/release-firmware.yml"
-# The pins every build fetches: a change to one can break any board.
-FIRMWARE_PINS = ("modules.lock", "deps.lock")
+# The pins every build fetches, and their reader: a change to one can break any board.
+FIRMWARE_PINS = ("DEPENDENCIES.lock", "scripts/pins.py")
 # build_mp.py builds every board, and the btclassic, h264enc and circuitpython
 # workflows already build esp32, rp2 and CircuitPython boards through it on a
 # change. Nothing else builds an stm32 image, whose layout build_mp.py checks
@@ -122,8 +123,8 @@ def firmware_scope(files, show_base, show_head):
 
     The workflow, or anything in release_firmware.py besides CELLS, builds the
     whole set. A change to CELLS builds the cells whose row changed, and the
-    whole set when a cell is added or removed. A pin in modules.lock or
-    deps.lock builds the whole set too, and build_mp.py the cells nothing else
+    whole set when a cell is added or removed. A pin in DEPENDENCIES.lock
+    builds the whole set too, and build_mp.py the cells nothing else
     builds through it. Everything else the workflow watches is read by the unit
     tests its gate job runs and by no build."""
     if FIRMWARE_WORKFLOW in files or any(p in files for p in FIRMWARE_PINS):
