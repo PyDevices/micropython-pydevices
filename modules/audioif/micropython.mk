@@ -22,10 +22,10 @@ endif
 
 CFLAGS_USERMOD += -I$(AUDIODSP_DIR)/src
 
-SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/_audioif.c
-SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audiobusio.c
-SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audioi2sin.c
-SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audioif_wasapi.c
+SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/src/_audioif.c
+SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/src/audiobusio.c
+SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/src/audioi2sin.c
+SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/src/audioif_wasapi.c
 
 # An STM32H7 plays through its DAC (audioio.AudioOut), with the pump in the
 # engine's service mode; audioif_stm32.c is that driver, and _audioif.c then
@@ -34,8 +34,8 @@ SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audioif_wasapi.c
 # for those, audiobusio.PDMIn and analogbufio.BufferedIn.
 ifeq ($(MCU_SERIES),h7)
 CFLAGS_USERMOD += -DAUDIOIF_DRIVER_STM32
-SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audioif_stm32.c
-SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/audioin_stm32.c
+SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/src/audioif_stm32.c
+SRC_USERMOD_C += $(AUDIOPUMP_MOD_DIR)/src/audioin_stm32.c
 endif
 
 # --- which audioif this firmware was built from ----------------------

@@ -37,9 +37,9 @@ The portable engine belongs in [audiodsp](https://github.com/PyDevices/audiodsp)
 
 | Path | Purpose |
 |---|---|
-| [`_audioif.c`](../_audioif.c) | Platform driver hooks and native lower-level API. |
-| [`audiobusio.c`](../audiobusio.c) | CircuitPython-compatible `I2SOut` implementation. |
-| [`audiopump_i2s.h`](../audiopump_i2s.h) | I2S driver interface shared by native pieces. |
+| [`src/_audioif.c`](../src/_audioif.c) | Platform driver hooks and native lower-level API. |
+| [`src/audiobusio.c`](../src/audiobusio.c) | CircuitPython-compatible `I2SOut` implementation. |
+| [`src/audiopump_i2s.h`](../src/audiopump_i2s.h) | I2S driver interface shared by native pieces. |
 | [`micropython.mk`](../micropython.mk), [`micropython.cmake`](../micropython.cmake) | Make/CMake user-module integration. |
 | [`manifest.py`](../manifest.py) | Native module declaration for combined manifests. |
 | [`tests/`](../tests) | Desktop probes ([`run_probes.sh`](../tests/run_probes.sh)) plus S3 drift and stall witnesses. |
