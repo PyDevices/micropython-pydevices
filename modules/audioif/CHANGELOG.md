@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **The GIGA's audio no longer stops for the interpreter.** The pump renders
+  from an interrupt of its own, on its own stack, so a garbage collection, a
+  write to `/flash` or a Python callback that holds the interpreter longer
+  than the DAC's ring no longer plays silence. Synth Station played ten
+  minutes with a `gc.collect()` every 3 s and a 32 KB write every 30 s without
+  a starved frame, where the same run on the interpreter starved 3.5%.
+  `_audioif.render_mode()` switches between `"irq"` and `"interpreter"`, and
+  `_audioif.render_stats()` reports the longest render and its stack use. It
+  needs an audiodsp with the interrupt hooks; with an older one the pump
+  stays on the interpreter.
 - **A microphone and a speaker on two clocks.** `_audioif.Input(...,
   ring=ring)` on Windows reads the microphone on its own thread into an
   `audiopump.Ring`, so an `audiopump.DriftResampler` can play it at the

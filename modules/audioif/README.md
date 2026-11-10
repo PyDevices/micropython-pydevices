@@ -132,15 +132,24 @@ and `while out.playing: pass` waits for either. `quiescent_value` takes
 only CircuitPython's default, 0x8000, which is where the DAC rests, and
 `sample_rate=` (ours) is the rate it opens at before the first `play()`.
 
-The port has no threads, so the pump runs in the engine's service mode, on the
-interpreter: a soft timer looks at the DMA every 4 ms and schedules the pump
-whenever a block's worth of its ring has played. It runs between
-bytecodes and while the interpreter sleeps. A C call that holds the interpreter
-for longer than the ring underruns, and the DAC plays
-silence until the pump catches up; `starved()` counts it. The ring holds about
-93 ms; `buffer_ms=` (ours) asks for more or less, up to 12,288 frames (278 ms at
-44.1 kHz). More rides out longer stalls and puts the sound further behind, so a
-music player can ask for 250 and an instrument should leave it alone.
+The port has no threads, so the pump runs in the engine's service mode: a soft
+timer looks at the DMA every 4 ms and, whenever a block's worth of its ring has
+played, raises an interrupt of the driver's own that runs the pump on its own
+stack. A garbage collection, a write to `/flash` or a long Python callback
+doesn't hold the audio up: Synth Station played ten minutes with a
+`gc.collect()` every 3 s and 32 KB written to `/flash` every 30 s without a
+starved frame. Run on the interpreter, the same test starved 3.5% of them.
+
+`_audioif.render_mode("interpreter")` runs the pump on the interpreter instead,
+between bytecodes and while it sleeps, and `render_mode("irq")` goes back;
+`_audioif.render_stats()` says how long the longest render took and how much of
+its stack it used. With an audiodsp too old for the interrupt, the interpreter
+is the only mode. There, a C call that holds the interpreter for longer than
+the ring underruns, and the DAC plays silence until the pump catches up;
+`starved()` counts it either way. The ring holds about 93 ms; `buffer_ms=`
+(ours) asks for more or less, up to 12,288 frames (278 ms at 44.1 kHz). More
+rides out longer stalls and puts the sound further behind, so a music player
+can ask for 250 and an instrument should leave it alone.
 
 ## `audioi2sin.I2SIn` — recording from a microphone
 
@@ -312,7 +321,7 @@ it and it has not been done.
 | **ESP32 family** | a FreeRTOS task pinned to the core the interpreter is not on, optionally with its stack in PSRAM | `xSemaphoreCreateRecursiveMutex`, which is priority-inheriting | `esp_timer_get_time` | the I2S channel, written from the pull loop | `Input`, single-port or two-port |
 | **unix** | `pthread` | recursive `pthread_mutex` | `clock_gettime` | a file the loop `write(2)`s each block to | — |
 | **Windows** | `_beginthreadex` | `CRITICAL_SECTION` | `QueryPerformanceCounter` | a file descriptor, or a WASAPI speaker written from the pull loop | `Input`, a WASAPI microphone read on the pump's thread |
-| **STM32H7** (Arduino GIGA R1) | none: the engine's service mode, run by a soft timer that schedules the pump on the interpreter whenever the DAC has played a block | — | `mp_hal_ticks_us` | the DAC's two channels, through a circular DMA paced by TIM6 | a PDM microphone through DFSDM1, or an ADC1 pin paced by TIM15, into one ring by DMA; not an `Input` |
+| **STM32H7** (Arduino GIGA R1) | none: the engine's service mode, run from an interrupt of the driver's own, on its own stack, whenever the DAC has played a block (or on the interpreter, by `render_mode()`) | the render interrupt, held off by the interpreter's side | `mp_hal_ticks_us` | the DAC's two channels, through a circular DMA paced by TIM6 | a PDM microphone through DFSDM1, or an ADC1 pin paced by TIM15, into one ring by DMA; not an `Input` |
 | **WebAssembly** | none — **and none is needed** | — | — | — | — |
 
 WebAssembly is not a gap. That build has no threads (no `-pthread`, no
