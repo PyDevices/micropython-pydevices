@@ -585,6 +585,7 @@ What stays this module's own: the constructor, `frame()`, `capture()`,
 
 | File | What it shows |
 |---|---|
+| [`cameraif_simpletest.py`](examples/cameraif_simpletest.py) | The shortest proof the camera works: the sensor's name, then one frame |
 | [`camera_preview.py`](examples/camera_preview.py) | The camera on the board's own panel. No PC, no network, no USB |
 | [`camera_espcamera.py`](examples/camera_espcamera.py) | espcamera's API: `take()`, `reconfigure()`, `vflip` and `hmirror`, a JPEG |
 | [`camera_snapshot.py`](examples/camera_snapshot.py) | A still to the filesystem as hardware-encoded JPEG |

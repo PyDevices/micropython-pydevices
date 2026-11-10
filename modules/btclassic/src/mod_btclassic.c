@@ -1715,8 +1715,17 @@ extern const mp_obj_type_t btc_messages_type;
 // the module
 // =========================================================================
 
+// btclassic.__revision__: which btclassic this firmware was built from. The
+// build passes BTCLASSIC_REVISION (git describe) as a compile definition; a
+// build with no git says "unknown" rather than guessing.
+#ifndef BTCLASSIC_REVISION
+#define BTCLASSIC_REVISION "unknown"
+#endif
+static const MP_DEFINE_STR_OBJ(btclassic_revision_obj, BTCLASSIC_REVISION);
+
 static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_btclassic) },
+    { MP_ROM_QSTR(MP_QSTR___revision__), MP_ROM_PTR(&btclassic_revision_obj) },
     { MP_ROM_QSTR(MP_QSTR_Bluetooth), MP_ROM_PTR(&btc_bluetooth_type) },
     { MP_ROM_QSTR(MP_QSTR_AudioSink), MP_ROM_PTR(&btc_sink_type) },
     { MP_ROM_QSTR(MP_QSTR_HandsFree), MP_ROM_PTR(&btc_hf_type) },

@@ -37,4 +37,17 @@ target_sources(usermod_picotts INTERFACE
 )
 target_include_directories(usermod_picotts INTERFACE ${PICOTTS_SVOX})
 target_compile_definitions(usermod_picotts INTERFACE PICO_PLATFORM=PICO_CIRCUITPY)
+
+# --- which picotts this firmware was built from ---------------------------
+# Computed at build time from this repo's own git, never stored; "unknown" when
+# there is no git (a tarball). Read on a target as picotts.__revision__.
+execute_process(
+    COMMAND git -C ${PICOTTS_DIR} describe --always --dirty --abbrev=7
+    OUTPUT_VARIABLE PICOTTS_REVISION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+if(NOT PICOTTS_REVISION)
+    set(PICOTTS_REVISION "unknown")
+endif()
+target_compile_definitions(usermod_picotts INTERFACE PICOTTS_REVISION=\"${PICOTTS_REVISION}\")
 target_link_libraries(usermod INTERFACE usermod_picotts)

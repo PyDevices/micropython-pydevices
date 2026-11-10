@@ -9,9 +9,22 @@
 # through MICROPY_DEF_BOARD, which the port compiles into every file and its
 # qstr scan reads too (patches/ teaches the port that switch). Every other
 # port and chip skips the module whole.
+# --- which btclassic this firmware was built from ---------------------
+# Computed at build time from this repo's own git, never stored; "unknown" when
+# there is no git (a tarball). Read on a target as <module>.__revision__.
+execute_process(
+    COMMAND git -C ${CMAKE_CURRENT_LIST_DIR} describe --always --dirty --abbrev=7
+    OUTPUT_VARIABLE BTCLASSIC_REVISION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+if(NOT BTCLASSIC_REVISION)
+    set(BTCLASSIC_REVISION "unknown")
+endif()
+
 if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
     set(BTCLASSIC_IDF ${CMAKE_CURRENT_LIST_DIR}/esp-idf/btclassic)
     add_library(usermod_btclassic INTERFACE)
+    target_compile_definitions(usermod_btclassic INTERFACE BTCLASSIC_REVISION=\"${BTCLASSIC_REVISION}\")
     target_sources(usermod_btclassic INTERFACE
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic.c
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_source.c
@@ -100,6 +113,7 @@ elseif(MICROPY_BLUETOOTH_BTSTACK)
     # same stack, so BLE stays.
     include(${CMAKE_CURRENT_LIST_DIR}/btstack/btstack.cmake)
     add_library(usermod_btclassic INTERFACE)
+    target_compile_definitions(usermod_btclassic INTERFACE BTCLASSIC_REVISION=\"${BTCLASSIC_REVISION}\")
     target_sources(usermod_btclassic INTERFACE
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic.c
         ${CMAKE_CURRENT_LIST_DIR}/src/mod_btclassic_source.c

@@ -15,7 +15,7 @@ pairing is the same scripts on two boards, not a special `pair_*` file.
 | **MSC** | [`sd_drive.py`](sd_drive.py), [`ram_drive.py`](ram_drive.py) | [`usb_drive_mount.py`](usb_drive_mount.py), [`usb_drive_read.py`](usb_drive_read.py), [`usb_drive_log.py`](usb_drive_log.py) |
 | **CDC** | MicroPython's own console | [`usb_serial.py`](usb_serial.py) |
 | **NET** | — | [`phone_tether.py`](phone_tether.py) (the internet through an Android phone's USB tethering) |
-| **enum** | — | [`host_enum.py`](host_enum.py) (lists what is plugged in, watches attach and detach) |
+| **enum** | — | [`usbhost_simpletest.py`](usbhost_simpletest.py) (the shortest list of what is plugged in), [`host_enum.py`](host_enum.py) (names each device, watches attach and detach) |
 
 ## Board-to-board pairings
 
