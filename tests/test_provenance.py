@@ -24,7 +24,7 @@ REPO = Path(__file__).resolve().parent.parent
 
 class Committed(unittest.TestCase):
     def test_provenance_json_matches_the_tree(self):
-        # Fails when a patch or UPSTREAM changed and the file wasn't regenerated.
+        # Fails when a patch or the micropython pin changed and the file wasn't regenerated.
         self.assertEqual(up.main(["--check"]), 0, "run: python3 scripts/update_provenance.py")
 
 
@@ -36,11 +36,14 @@ class Generator(unittest.TestCase):
             (self.dir / rel).mkdir(parents=True)
         (self.dir / "patches/micropython/0001-a.patch").write_text("a\n")
         (self.dir / "patches/tinyusb/0001-t.patch").write_text("t\n")
-        (self.dir / "UPSTREAM").write_text("b70ae1aca657bb93e2857dac4e2a2d21a3803200\n")
+        self.pin("b70ae1aca657bb93e2857dac4e2a2d21a3803200")
         (self.dir / "provenance.json").write_text(
             json.dumps({"upstream": "micropython/micropython main at b70ae1aca657 (v1.30.0-preview-160)",
                         "migrated-from": "history"}))
         self.run_main()
+
+    def pin(self, commit):
+        (self.dir / "DEPENDENCIES.lock").write_text("micropython https://github.com/micropython/micropython %s\n" % commit)
 
     def run_main(self, *argv):
         with contextlib.redirect_stdout(io.StringIO()):
@@ -70,7 +73,7 @@ class Generator(unittest.TestCase):
         self.assertEqual(self.run_main("--check"), 1)
 
     def test_moved_pin_needs_a_name_for_it(self):
-        (self.dir / "UPSTREAM").write_text("c" * 40 + "\n")
+        self.pin("c" * 40)
         self.assertEqual(self.run_main("--check"), 1)
         with self.assertRaises(SystemExit):
             self.run_main()

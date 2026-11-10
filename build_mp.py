@@ -18,11 +18,11 @@ it doesn't recognise go straight to make.
         --board adafruit_feather_rp2040 --modules pygraphics
 
 --interpreter circuitpython builds CircuitPython-compatible firmware instead:
-CircuitPython at its deps.lock pin, our C modules compiled in through its
+CircuitPython at its DEPENDENCIES.lock pin, our C modules compiled in through its
 USER_C_MODULES. Ports and boards are then CircuitPython's own.
 
-This script names no version and no setting. Pins live in modules.lock,
-deps.lock and UPSTREAM; esp32 settings live in sdkconfig fragments found by
+This script names no version and no setting. Pins live in DEPENDENCIES.lock,
+read by scripts/pins.py; esp32 settings live in sdkconfig fragments found by
 convention. See docs/build-plan.md.
 
 Environment: OUT_DIR (default builds/), VARIANTS_DIR (default variants/),
@@ -66,7 +66,9 @@ JOBS = os.environ.get("JOBS", str(os.cpu_count() or 4))
 DEFAULT_VARIANT = {"unix": "standard", "windows": "standard", "webassembly": "standard"}
 
 sys.path.insert(0, str(REPO / "patches"))
+sys.path.insert(0, str(REPO / "scripts"))
 import apply_patches  # noqa: E402
+import pins  # noqa: E402
 
 
 def say(msg=""):
@@ -143,13 +145,19 @@ def workspace():
     return ws if (ws / "micropython" / ".git").exists() else None
 
 
-def read_lock(name):
-    rows = []
-    for line in (REPO / name).read_text().splitlines():
-        line = line.split("#", 1)[0].strip()
-        if line:
-            rows.append(line.split())
-    return rows
+def lock():
+    """DEPENDENCIES.lock as {name: Pin}, read by scripts/pins.py."""
+    try:
+        return pins.read(REPO)
+    except (pins.LockError, OSError) as e:
+        die(str(e))
+
+
+def pin(name):
+    p = lock().get(name)
+    if p is None:
+        die(f"{pins.LOCK} has no {name} line")
+    return p
 
 
 def link(dest, target):
@@ -158,7 +166,9 @@ def link(dest, target):
     say(f"linked {dest.relative_to(REPO)} -> {target}")
 
 
-def clone_at(url, ref, dest, recursive=False):
+def clone_at(url, ref, dest, recursive=False, commit=None):
+    """A depth-1 checkout of a tag or a full commit. With commit, a tag that
+    is now another commit is refused, and the checkout removed."""
     say(f"cloning {url} at {ref} into {dest.relative_to(REPO)}")
     run(["git", "init", "-q", str(dest)])
     # Git for Windows defaults core.autocrlf=true: patches checked out CRLF don't apply.
@@ -168,6 +178,10 @@ def clone_at(url, ref, dest, recursive=False):
     spec = ref if re.fullmatch(r"[0-9a-f]{40}", ref) else f"refs/tags/{ref}:refs/tags/{ref}"
     run(["git", "-C", str(dest), "fetch", "-q", "--depth", "1", "origin", spec])
     run(["git", "-C", str(dest), "-c", "advice.detachedHead=false", "checkout", "-q", ref if spec != ref else "FETCH_HEAD"])
+    head = git_out(dest, "rev-parse", "HEAD")
+    if commit and head != commit:
+        shutil.rmtree(dest)
+        die(f"{url} {ref} is {head}, but {pins.LOCK} pins {commit}")
     if recursive:
         run(["git", "-C", str(dest), "submodule", "update", "--init", "--recursive", "--depth", "1", "-q"])
 
@@ -178,8 +192,8 @@ def ensure_micropython(ws):
     if ws:
         link(MP, ws / "micropython")
     else:
-        # UPSTREAM is a tag or a full commit: clone --branch takes only the first.
-        clone_at("https://github.com/micropython/micropython", (REPO / "UPSTREAM").read_text().strip(), MP)
+        mp = pin(pins.MICROPYTHON)
+        clone_at(mp.url, mp.ref, MP)
         fetch_history(MP)
 
 
@@ -230,7 +244,7 @@ def micropython_version(mp, upstream):
     return tag, git_out(mp, "rev-parse", "--short=10", upstream)
 
 
-# omnipython-lvgl is pinned in modules.lock beside the modules, but it is not
+# omnipython-lvgl is pinned in DEPENDENCIES.lock beside the modules, but it is not
 # one module directory: it is LVGL, its generated bindings and one port per
 # interpreter (ports/micropython, ports/circuitpython), which read generated/,
 # lv_conf.h and lvgl/ from the repository's root. The checkout lands in
@@ -245,9 +259,7 @@ LVGL_OLD_NAMES = ("lvgl-micropython", "lvgl-circuitpython", "lvgl-bindings")
 
 
 def ensure_modules(ws):
-    for name, url, commit in read_lock("modules.lock"):
-        if name in (LVGL_REPO, LIBRARY):
-            continue
+    for name, url, commit, _ in (p for p in lock().values() if p.group == "modules"):
         dest = MODULES_DIR / name
         if dest.exists() or dest.is_symlink():
             continue
@@ -283,15 +295,12 @@ def lvgl_port(root, interpreter):
 
 def lvgl_checkout(ws):
     """modules/.omnipython-lvgl: LVGL, its bindings and its ports, at their
-    modules.lock commit (or the workspace's own checkout).
+    DEPENDENCIES.lock commit (or the workspace's own checkout).
 
     Fetched shallow, sparse and blobless: the ports, generated/, python/ and
     the root's files (lv_conf.h), and LVGL's src/ at the commit the repository
     records, so it downloads tens of MB rather than LVGL's whole history."""
-    rows = {row[0]: row[1:] for row in read_lock("modules.lock")}
-    if LVGL_REPO not in rows:
-        die(f"modules.lock has no {LVGL_REPO} row, which {LVGL_MODULE} comes from")
-    url, commit = rows[LVGL_REPO]
+    url, commit = pin(LVGL_REPO)[1:3]
     dest = MODULES_DIR / f".{LVGL_REPO}"
     if dest.is_symlink():
         if (dest / "lv_conf.h").is_file():
@@ -300,7 +309,7 @@ def lvgl_checkout(ws):
     elif dest.is_dir():
         if git_out(dest, "rev-parse", "HEAD") == commit and (dest / "lvgl" / "lvgl.h").is_file():
             return dest.resolve()
-        say(f"{dest} is not at modules.lock's {commit[:12]}; fetching it again")
+        say(f"{dest} is not at {pins.LOCK}'s {commit[:12]}; fetching it again")
         shutil.rmtree(dest)
     sibling = ws / LVGL_REPO if ws else None
     if sibling and (sibling / "lv_conf.h").is_file():
@@ -308,8 +317,6 @@ def lvgl_checkout(ws):
             die(f"{sibling} has no LVGL: git -C {sibling} submodule update --init --depth 1 lvgl")
         link(dest, sibling)
         return dest.resolve()
-    if not re.fullmatch(r"[0-9a-f]{40}", commit):
-        die(f"modules.lock pins {LVGL_REPO} at {commit!r}: it takes a full 40-character commit")
     say(f"fetching {url} at {commit[:12]} into {dest} (the ports, generated/, lv_conf.h and LVGL's src/)")
     part = dest.with_name(dest.name + ".partial")
     shutil.rmtree(part, ignore_errors=True)
@@ -324,7 +331,7 @@ def lvgl_checkout(ws):
             if r.returncode:
                 shutil.rmtree(part, ignore_errors=True)
                 die(f"could not fetch {origin} at {sha} (git {cmd[0]}: {r.stderr.strip() or r.returncode});"
-                    f" is modules.lock's {LVGL_REPO} commit on GitHub?")
+                    f" is {pins.LOCK}'s {LVGL_REPO} commit on GitHub?")
 
     sparse(part, url, commit, ["generated", "lvgl", "ports", "python"])
     lvgl_sha = git_out(part, "ls-tree", "HEAD", "lvgl").split()[2:3]
@@ -340,7 +347,7 @@ def lvgl_checkout(ws):
 
 # omnipython-lib is the repository of our Python-only packages: pydevices,
 # palettes, pdwidgets, appkit, audioinstruments, audioeffects, and every board
-# config and driver. It is pinned in modules.lock beside the modules but is not
+# config and driver. It is pinned in DEPENDENCIES.lock beside the modules but is not
 # one: a build asks its tools/libbuild.py for the library tree, one directory
 # per package with a manifest.py beside its sources, and registers that tree
 # with add_library(). A manifest then require()s a package from it. Packages
@@ -358,12 +365,9 @@ LIBRARY = "omnipython-lib"
 
 
 def library_checkout(ws):
-    """modules/.omnipython-lib: the library repository, at its modules.lock commit
+    """modules/.omnipython-lib: the library repository, at its DEPENDENCIES.lock commit
     (or the workspace's own checkout of it)."""
-    rows = {row[0]: row[1:] for row in read_lock("modules.lock")}
-    if LIBRARY not in rows:
-        die(f"modules.lock has no {LIBRARY} row, which the library packages come from")
-    url, commit = rows[LIBRARY]
+    url, commit = pin(LIBRARY)[1:3]
     dest = MODULES_DIR / f".{LIBRARY}"
     if dest.is_symlink():
         if (dest / "tools" / "libbuild.py").is_file():
@@ -372,15 +376,13 @@ def library_checkout(ws):
     elif dest.is_dir():
         if git_out(dest, "rev-parse", "HEAD") == commit:
             return dest
-        say(f"{dest} is not at modules.lock's {commit[:12]}; fetching it again")
+        say(f"{dest} is not at {pins.LOCK}'s {commit[:12]}; fetching it again")
         shutil.rmtree(dest)
     # Called pydevices until the rename; either name is the same repository.
     for sibling in ((ws / LIBRARY, ws / "pydevices") if ws else ()):
         if (sibling / "tools" / "libbuild.py").is_file():
             link(dest, sibling)
             return dest
-    if not re.fullmatch(r"[0-9a-f]{40}", commit):
-        die(f"modules.lock pins {LIBRARY} at {commit!r}: it takes a full 40-character commit")
     clone_at(url, commit, dest)
     return dest
 
@@ -471,18 +473,19 @@ def dep_version(name, path):
 
 
 def ensure_dep(name, ws):
-    """Fetch (or link) one toolchain and refuse if it isn't the locked version."""
-    lock = {row[0]: row[1:] for row in read_lock("deps.lock")}
-    url, version = lock[name]
+    """Fetch (or link) one toolchain and refuse if it isn't the locked version:
+    the tag a checkout is pinned by, or a download's version."""
+    p = pin(name)
+    url, version = p.url, p.tag or p.ref
     dest = DEPS / name
     if not (dest.exists() or dest.is_symlink()):
         if ws and (ws / name).is_dir():
             link(dest, ws / name)
         elif name == "esp-idf":
-            clone_at(url, version, dest, recursive=True)
+            clone_at(url, version, dest, recursive=True, commit=p.ref)
             run([BASH, "-c", f"cd {dest} && ./install.sh all"])
         elif name == "emsdk":
-            run(["git", "clone", "-q", url, str(dest)])
+            clone_at(url, version, dest, commit=p.ref)
             run([BASH, "-c", f"cd {dest} && ./emsdk install {version} && ./emsdk activate {version}"])
         elif name == "SDL2":
             DEPS.mkdir(exist_ok=True)
@@ -509,7 +512,7 @@ def ensure_dep(name, ws):
                 shutil.move(str(Path(tmp) / name), str(dest))
     have = dep_version(name, dest.resolve())
     if have != version:
-        die(f"deps/{name} is {have or 'unreadable'}, but deps.lock wants {version}")
+        die(f"deps/{name} is {have or 'unreadable'}, but {pins.LOCK} wants {version}")
     return dest.resolve()
 
 
@@ -701,29 +704,29 @@ def record(dirs, library=None):
 
 
 def off_pin(name, real, commit):
-    """How a module checkout stands against its modules.lock pin when it isn't
+    """How a module checkout stands against its DEPENDENCIES.lock pin when it isn't
     at it (and a line saying so), else None. In the workspace a sibling
     checkout wins over the pin, so one left behind builds old code into an
     image named for the current commit; this line is how you find out."""
-    pins = {row[0]: row[2] for row in read_lock("modules.lock") if len(row) > 2}
-    pin = pins.get(name)
-    if not pin or not commit or commit == pin:
+    p = lock().get(name)
+    want = p.ref if p and not p.download else None
+    if not want or not commit or commit == want:
         return None
 
     def git_ok(*a):
         return subprocess.run(["git", "-C", str(real), *a], capture_output=True).returncode == 0
 
-    if not git_ok("cat-file", "-e", pin + "^{commit}"):
+    if not git_ok("cat-file", "-e", want + "^{commit}"):
         where = "not at (the pin isn't fetched here)"
-    elif git_ok("merge-base", "--is-ancestor", pin, commit):
+    elif git_ok("merge-base", "--is-ancestor", want, commit):
         where = "ahead of"
-    elif git_ok("merge-base", "--is-ancestor", commit, pin):
+    elif git_ok("merge-base", "--is-ancestor", commit, want):
         where = "behind"
     else:
         where = "beside"
-    say(f"{name}: building {real} at {commit[:12]}, {where} modules.lock's {pin[:12]}"
+    say(f"{name}: building {real} at {commit[:12]}, {where} {pins.LOCK}'s {want[:12]}"
         + ("; git -C " + str(real) + " pull to catch up" if where == "behind" else ""))
-    return f"{where} {pin[:12]}"
+    return f"{where} {want[:12]}"
 
 
 def modules_moved(had, now):
@@ -1360,12 +1363,13 @@ def make_submodules(shell, make, mp):
 
 
 def tinyusb_component(mp, chip):
-    """deps/espressif__tinyusb at its deps.lock tag with patches/tinyusb/
+    """deps/espressif__tinyusb at its DEPENDENCIES.lock tag with patches/tinyusb/
     applied (one local commit, like the MicroPython tree's), or None for a
     chip without TinyUSB."""
     if chip not in TINYUSB_CHIPS:
         return None
-    url, tag = {row[0]: row[1:] for row in read_lock("deps.lock")}[TINYUSB]
+    p = pin(TINYUSB)
+    url, tag = p.url, p.tag
     # The copy replaces whatever TinyUSB the port asks for, so it must be the
     # one the prepared tree's manifest names (patch 0014).
     manifest = (mp / "ports" / "esp32" / "main" / "idf_component.yml").read_text()
@@ -1374,11 +1378,11 @@ def tinyusb_component(mp, chip):
     version = re.search(r"^\s+version:\s*(\S+)", block.group(1), re.M) if block else None
     if not (git_src and version) or (git_src.group(1), version.group(1)) != (url, tag):
         die(f"the port builds TinyUSB {git_src.group(1) if git_src else '?'} {version.group(1) if version else '?'}, "
-            f"but deps.lock patches {url} {tag}: move them together")
+            f"but {pins.LOCK} patches {url} {tag}: move them together")
     dest = DEPS / TINYUSB
     if not dest.exists():
         DEPS.mkdir(exist_ok=True)
-        clone_at(url, tag, dest)
+        clone_at(url, tag, dest, commit=p.ref)
     patches = sorted(TINYUSB_PATCHES.glob("*.patch"))
     digest = hashlib.sha256()
     for patch in patches:
@@ -1647,7 +1651,7 @@ CP_BOARDS = REPO / "boards" / "circuitpython"
 # ESP-IDF components a module needs on CircuitPython's espressif port that
 # ESP-IDF doesn't ship. MicroPython's esp32 build gets them from Espressif's
 # component manager; CircuitPython builds with it off, so they are pinned in
-# deps.lock, fetched into deps/, and handed to make as
+# DEPENDENCIES.lock, fetched into deps/, and handed to make as
 # USER_ESP_IDF_COMPONENT_DIRS (one of our CircuitPython patches).
 CP_ESP_IDF_COMPONENTS = {"cameraif": ("esp_cam_sensor", "esp_sccb_intf", "cmake_utilities"),
                          "h264enc": ("esp_h264",),
@@ -1667,19 +1671,20 @@ def lock_beside(path):
 
 
 def ensure_circuitpython():
-    """deps/circuitpython at its deps.lock tag, and a venv with its build tools.
+    """deps/circuitpython at its DEPENDENCIES.lock tag, and a venv with its build tools.
 
     Always a checkout of our own, never a link to a sibling circuitpython/: a
     sibling is at whatever version its owner needs, and may carry other
     repositories' patches. Only the submodules a target needs are fetched,
     by CircuitPython's own tools/ci_fetch_deps.py, at build time."""
-    url, version = {row[0]: row[1:] for row in read_lock("deps.lock")}["circuitpython"]
+    p = pin("circuitpython")
+    url, version = p.url, p.tag
     if not CP.exists():
         DEPS.mkdir(exist_ok=True)
-        clone_at(url, version, CP)
+        clone_at(url, version, CP, commit=p.ref)
     have = dep_version("circuitpython", CP)
     if have != version:
-        die(f"deps/circuitpython is {have or 'not at a tag'}, but deps.lock wants {version}")
+        die(f"deps/circuitpython is {have or 'not at a tag'}, but {pins.LOCK} wants {version}")
     # The short BUILD= links (below) are symlinks, which CircuitPython's
     # .gitignore (build-*/, directories only) doesn't cover; without this the
     # checkout reads as modified to anything that asks git.
@@ -2238,7 +2243,7 @@ def main():
                     break
                 except OSError:
                     pass
-    upstream = (REPO / "UPSTREAM").read_text().strip()
+    upstream = pin(pins.MICROPYTHON).ref
     apply_patches.prepare(mp, upstream, apply_patches.series(), refresh=True)
     version = micropython_version(mp, upstream)
 

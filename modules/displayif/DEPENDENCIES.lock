@@ -6,7 +6,7 @@
 # and where the one vendored third-party source tree came from.
 #
 # MicroPython: the one this module builds against is pinned for the whole
-# repository, in the repository's UPSTREAM (a full commit). CI builds the
+# repository, in the repository's own DEPENDENCIES.lock. CI builds the
 # unix port from that pin; nothing here repeats it, so it can't go stale.
 # Check yours with: git -C <your micropython checkout> rev-parse HEAD
 #

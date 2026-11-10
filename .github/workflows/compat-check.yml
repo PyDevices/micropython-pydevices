@@ -24,13 +24,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: overlay
-      # Read the ref from UPSTREAM rather than repeating it here. The two drifted
-      # during the move to v1.29.0 -- the series was rebased, this ref was not --
+      # Read the ref from DEPENDENCIES.lock rather than repeating it here. The
+      # two drifted during the move to v1.29.0 -- the series was rebased, this ref was not --
       # and the whole check quietly became "does the new series apply to the old
       # tree?", which it does not and should not.
-      - name: Read the pinned upstream from UPSTREAM
+      - name: Read the pinned upstream from DEPENDENCIES.lock
         id: pin
-        run: echo "ref=$(cat overlay/UPSTREAM)" >> "$GITHUB_OUTPUT"
+        run: echo "ref=$(python3 overlay/scripts/pins.py micropython)" >> "$GITHUB_OUTPUT"
       - name: Check out the pinned upstream
         uses: actions/checkout@v7
         with:

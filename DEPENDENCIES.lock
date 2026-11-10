@@ -1,0 +1,91 @@
+# Everything a build fetches, one pin per line:
+#
+#   <name> <clone-url> <full 40-character commit>
+#
+# GitHub serves a fetch by commit only for the whole 40 characters. A line that
+# ends in `# tag <tag>` names the tag that commit is: the build fetches it by
+# that tag, refuses it if the tag is now another commit, and checks the
+# toolchain's own record of its version against it. The downloads at the end
+# are archives, not checkouts: their third column is the version the unpacked
+# files say they are. scripts/pins.py reads this file for every script and
+# workflow here; `python3 scripts/pins.py --list` shows how it reads it.
+
+# MicroPython, the commit the patch series applies to. Moving it re-validates
+# every patch (patches/apply_patches.py), and provenance.json says what it is
+# called (scripts/update_provenance.py).
+micropython       https://github.com/micropython/micropython          b70ae1aca657bb93e2857dac4e2a2d21a3803200
+
+# Modules. build_mp.py clones a module at its commit only when modules/<name>
+# is missing; in a workspace modules/<name> is a link to the sibling checkout
+# and wins. castif is not here: it lives in modules/castif, tracked in this
+# repository.
+audiodsp          https://github.com/PyDevices/audiodsp.git           8d5c4a0ca69f12425c39c811ae190682655e5805
+pygraphics        https://github.com/PyDevices/pygraphics.git         f97fd2e20e73f23c2138ab52a630cf04b0a7aea1
+ulab              https://github.com/v923z/micropython-ulab.git       1d3ddd8f5228e2c7335dac71f4846e6abb0ec9f9
+
+# omnipython-lvgl is not a module directory: it is LVGL, its generated
+# bindings and a port per interpreter. --modules names it lvgl ("all" takes it
+# too), and a build fetches it at this commit into modules/.omnipython-lvgl (a
+# sibling checkout is linked there instead) and compiles the port for its
+# interpreter. Move the commit here to move every LVGL build, MicroPython's and
+# CircuitPython's.
+omnipython-lvgl   https://github.com/PyDevices/omnipython-lvgl.git    c34fbeeb0440e71acb62c92ddee1c3c65d089622
+
+# omnipython-lib is not a module either: it is the repository of our
+# Python-only packages (pydevices, palettes, pdwidgets, audioinstruments,
+# audioeffects, board configs and drivers). A build asks its tools/libbuild.py
+# for the library tree and require()s packages from it; the modules/ entries of
+# those names are manifests that do exactly that. It is the pydevices
+# repository until the rename. The packages the library builds from other
+# repositories (audiocomponents' two) are pinned by tag in its lib-lock.json,
+# not here.
+omnipython-lib    https://github.com/PyDevices/pydevices.git          e691f190adf0fe880c67f0a93840895111e1701c
+
+# esp-vision (espressif/esp-vision, Apache-2.0): the source of the tflite
+# module and, later, its image stack. modules/.esp-vision/fetch.sh puts it at
+# modules/.esp-vision/src. Its files are compiled as they are: our glue lives
+# in the module directories that use it (modules/tflite, modules/vision), and
+# modules/vision/esp-vision-patches changes py_espdl.cpp in a build-tree copy,
+# never here.
+esp-vision        https://github.com/espressif/esp-vision.git         ecda8004b95e1df275ac2a1f9cdf487d03defc63
+
+# Toolchains. A build fetches and checks only the one its port uses: esp-idf
+# for esp32, emsdk for webassembly, SDL2 for windows when displayif is
+# selected, circuitpython for --interpreter circuitpython, and the ESP-IDF
+# components below for a CircuitPython espressif build with cameraif, h264enc
+# or usbhost. In a workspace deps/<name> may be a link to a shared checkout,
+# and a build refuses it if it isn't the version pinned here.
+# The ESP-IDF version is our choice, not upstream's recommendation.
+esp-idf           https://github.com/espressif/esp-idf.git            735507283d5b2f9fb363a1901172dbd9e847945d  # tag v5.5.4
+# emsdk installs the Emscripten release of the same name as its tag.
+emsdk             https://github.com/emscripten-core/emsdk.git        1518bec61a0430aa5cfda576f5ce3191004c84d9  # tag 6.0.1
+# TinyUSB for the esp32 port's S2, S3 and P4 builds, at the tag patch 0014
+# points the port's component manifest at. build_mp.py checks the two agree,
+# applies patches/tinyusb/ to this copy and builds it in place of the managed
+# component. The name is the component's: ESP-IDF names one by its directory.
+espressif__tinyusb https://github.com/micropython/tinyusb-espressif.git 5c5c660317943820d49ce5c188f1bd60cd8aade6  # tag v0.21.0.1-micropython1
+# CircuitPython is the second interpreter, and the one toolchain pin that is a
+# source tree. Always our own checkout in deps/, never a link to a sibling. Its
+# core is MicroPython 1.29, like the micropython pin, and its espressif port
+# moved to ESP-IDF 6.1.
+circuitpython     https://github.com/adafruit/circuitpython.git       d53b2277cfad71589028e5da77c984c045db990d  # tag 11.0.0-alpha.2
+
+# Downloads: <name> <archive-url> <version>. A build unpacks one into deps/
+# and refuses it if its files say another version.
+SDL2              https://github.com/libsdl-org/SDL/releases/download/release-2.30.10/SDL2-devel-2.30.10-mingw.tar.gz  2.30.10
+# ESP-IDF components for cameraif on CircuitPython's espressif port: the camera
+# sensor drivers and the two components they need, from Espressif's component
+# registry, at the versions MicroPython's P4 build resolves. CircuitPython
+# builds with the component manager off, so these are fetched into deps/ when
+# an espressif build names cameraif.
+esp_cam_sensor    https://components-file.espressif.com/components/espressif/esp_cam_sensor/2.6.0/espressif__esp_cam_sensor-v2.6.0.zip    2.6.0
+esp_sccb_intf     https://components-file.espressif.com/components/espressif/esp_sccb_intf/0.0.9/espressif__esp_sccb_intf-v0.0.9.zip      0.0.9
+cmake_utilities   https://components-file.espressif.com/components/espressif/cmake_utilities/0.5.3/espressif__cmake_utilities-v0.5.3.zip  0.5.3
+# esp_h264, the ESP32-P4's H.264 encoder, for h264enc on CircuitPython's
+# espressif port: the version modules/h264enc/components/h264enc_esp_h264 asks
+# MicroPython's build for.
+esp_h264          https://components-file.espressif.com/components/espressif/esp_h264/1.4.1/espressif__esp_h264-v1.4.1.zip              1.4.1
+# usb, ESP-IDF's USB host library, for usbhost on CircuitPython's espressif
+# port: from ESP-IDF 6 it is this registry component, not part of ESP-IDF.
+# The name is the component's, which ESP-IDF takes from its directory.
+usb               https://components-file.espressif.com/components/espressif/usb/1.6.0/espressif__usb-v1.6.0.zip                      1.6.0

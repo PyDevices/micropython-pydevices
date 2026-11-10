@@ -33,7 +33,7 @@ def row(commit=A, dirty=False, changes=None):
 
 
 class OffPin(unittest.TestCase):
-    """A module checkout that isn't at its modules.lock pin is named, with which way it's off."""
+    """A module checkout that isn't at its DEPENDENCIES.lock pin is named, with which way it's off."""
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -45,14 +45,14 @@ class OffPin(unittest.TestCase):
             subprocess.run(git + ["commit", "-q", "--allow-empty", "-m", str(i)], check=True)
             self.commits.append(subprocess.run(git + ["rev-parse", "HEAD"], capture_output=True,
                                                text=True, check=True).stdout.strip())
-        self.read_lock = build_mp.read_lock
+        self.lock = build_mp.lock
 
     def tearDown(self):
-        build_mp.read_lock = self.read_lock
+        build_mp.lock = self.lock
         self.dir.cleanup()
 
     def off(self, pin, commit):
-        build_mp.read_lock = lambda name: [["audiodsp", "https://example.invalid/audiodsp.git", pin]]
+        build_mp.lock = lambda: {"audiodsp": build_mp.pins.Pin("audiodsp", "https://example.invalid/audiodsp.git", pin)}
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             got = build_mp.off_pin("audiodsp", self.repo, commit)
@@ -74,7 +74,7 @@ class OffPin(unittest.TestCase):
         self.assertTrue(self.off(B, self.commits[2])[0].startswith("not at"))
 
     def test_module_without_a_lock_row(self):
-        build_mp.read_lock = lambda name: []
+        build_mp.lock = lambda: {}
         self.assertIsNone(build_mp.off_pin("pydevices", self.repo, self.commits[0]))
 
 
@@ -258,7 +258,7 @@ class GitRepo:
 
 
 class Lvgl(unittest.TestCase):
-    """omnipython-lvgl comes from modules.lock: --modules names it lvgl, a build
+    """omnipython-lvgl comes from DEPENDENCIES.lock: --modules names it lvgl, a build
     takes the port for its interpreter, and the record names the repository."""
 
     def checkout(self, tmp):
@@ -341,7 +341,7 @@ class Lvgl(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             (repo / "modules").mkdir()
-            (repo / "modules.lock").write_text("omnipython-lvgl https://example.invalid/omnipython-lvgl.git 84d1de3\n")
+            (repo / "DEPENDENCIES.lock").write_text("omnipython-lvgl https://example.invalid/omnipython-lvgl.git 84d1de3\n")
             saved = build_mp.REPO, build_mp.MODULES_DIR
             build_mp.REPO, build_mp.MODULES_DIR = repo, repo / "modules"
             try:
@@ -425,7 +425,7 @@ class LibraryPackages(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             (repo / "modules").mkdir()
-            (repo / "modules.lock").write_text("omnipython-lib https://example.invalid/lib.git 46e1654\n")
+            (repo / "DEPENDENCIES.lock").write_text("omnipython-lib https://example.invalid/lib.git 46e1654\n")
             saved = build_mp.REPO, build_mp.MODULES_DIR
             build_mp.REPO, build_mp.MODULES_DIR = repo, repo / "modules"
             try:
@@ -442,7 +442,7 @@ class LibraryPackages(unittest.TestCase):
             (ws / "pydevices" / "tools" / "libbuild.py").write_text("")
             repo = Path(tmp) / "repo"
             (repo / "modules").mkdir(parents=True)
-            (repo / "modules.lock").write_text("omnipython-lib https://example.invalid/lib.git " + "a" * 40 + "\n")
+            (repo / "DEPENDENCIES.lock").write_text("omnipython-lib https://example.invalid/lib.git " + "a" * 40 + "\n")
             saved = build_mp.REPO, build_mp.MODULES_DIR
             build_mp.REPO, build_mp.MODULES_DIR = repo, repo / "modules"
             try:

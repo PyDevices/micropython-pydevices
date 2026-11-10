@@ -10,13 +10,15 @@ on:
     branches: [main]
     paths:
       - 'build_mp.py'
-      - 'modules.lock'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
       - 'patches/**'
       - '.github/workflows/windows-native.yml'
   pull_request:
     paths:
       - 'build_mp.py'
-      - 'modules.lock'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
       - 'patches/**'
       - '.github/workflows/windows-native.yml'
   workflow_dispatch:

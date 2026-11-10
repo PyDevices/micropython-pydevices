@@ -10,7 +10,8 @@ on:
       - '!modules/audioif/docs/**'
       - '!modules/audioif/examples/**'
       - 'build_mp.py'
-      - 'modules.lock'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
       - 'patches/**'
       - '.github/workflows/audioif.yml'
   pull_request:
@@ -20,7 +21,8 @@ on:
       - '!modules/audioif/docs/**'
       - '!modules/audioif/examples/**'
       - 'build_mp.py'
-      - 'modules.lock'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
       - 'patches/**'
       - '.github/workflows/audioif.yml'
   # Everything, weekly: the path filters skip what a change can't reach.
@@ -47,7 +49,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libffi-dev pkg-config
-      # audiodsp comes at its modules.lock commit; audioif's glue finds it
+      # audiodsp comes at its DEPENDENCIES.lock commit; audioif's glue finds it
       # as its sibling in modules/.
       - name: Build the unix port with audiodsp and audioif
         run: python3 build_mp.py --port unix --modules audiodsp,audioif

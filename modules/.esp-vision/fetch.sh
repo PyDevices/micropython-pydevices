@@ -1,5 +1,5 @@
 #!/bin/sh
-# Put esp-vision at its pinned commit in modules/.esp-vision/src, once.
+# Put esp-vision at its DEPENDENCIES.lock commit in modules/.esp-vision/src, once.
 #
 # A clone at the pinned commit beside the sibling checkouts (../esp-vision
 # from their parent folder) is linked instead; ESP_VISION_DIR names one anywhere else. Otherwise the pinned commit
@@ -9,8 +9,9 @@
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 src="$here/src"
-url=$(awk '!/^#/ && NF { print $2 }' "$here/ESP_VISION.lock")
-pin=$(awk '!/^#/ && NF { print $3 }' "$here/ESP_VISION.lock")
+pins="$here/../../scripts/pins.py"
+url=$(python3 "$pins" esp-vision url)
+pin=$(python3 "$pins" esp-vision commit)
 at_pin() { [ "$(git -C "$1" rev-parse HEAD 2>/dev/null)" = "$pin" ]; }
 
 if [ -e "$src" ] || [ -L "$src" ]; then

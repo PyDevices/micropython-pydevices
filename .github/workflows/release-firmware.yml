@@ -37,7 +37,7 @@ on:
         default: false
         type: boolean
       omnipython-lvgl-ref:
-        description: omnipython-lvgl branch, tag or full 40-character commit for every LVGL build (left empty, it takes the commit modules.lock pins)
+        description: omnipython-lvgl branch, tag or full 40-character commit for every LVGL build (left empty, it takes the commit DEPENDENCIES.lock pins)
         default: ''
         type: string
   schedule:
@@ -50,8 +50,8 @@ on:
       - 'scripts/stage_firmware_page.py'
       - 'scripts/ci_scope.py'
       - 'build_mp.py'
-      - 'modules.lock'
-      - 'deps.lock'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
       - 'tests/test_release_firmware.py'
       - 'tests/test_stage_firmware_page.py'
       - 'tests/test_ci_scope.py'
@@ -121,7 +121,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: omnipython-lvgl at the ref asked for, in modules.lock
+      - name: omnipython-lvgl at the ref asked for, in DEPENDENCIES.lock
         if: inputs.omnipython-lvgl-ref != ''
         env:
           REF: ${{ inputs.omnipython-lvgl-ref }}
@@ -149,6 +149,11 @@ jobs:
         if: matrix.deps != 'none'
         run: echo "version=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" >> "$GITHUB_OUTPUT"
 
+      - name: The toolchain pins, which the cached deps/ is tied to
+        id: toolchains
+        if: matrix.deps != 'none'
+        run: echo "key=$(python3 scripts/pins.py --key toolchains)" >> "$GITHUB_OUTPUT"
+
       # ESP-IDF v5.5.4 (MicroPython) or CircuitPython's tree with its own
       # ESP-IDF (CircuitPython), and the compilers they download.
       - name: Cache the toolchains
@@ -161,15 +166,15 @@ jobs:
             deps/circuitpython
             deps/circuitpython-venv
             ~/.espressif
-          key: deps-${{ matrix.deps }}-py${{ steps.py.outputs.version }}-${{ hashFiles('deps.lock', 'patches/circuitpython/**') }}
+          key: deps-${{ matrix.deps }}-py${{ steps.py.outputs.version }}-${{ steps.toolchains.outputs.key }}-${{ hashFiles('patches/circuitpython/**') }}
 
       - name: Cache compiler output
         uses: actions/cache@v6
         with:
           path: /home/runner/.cache/ccache
-          key: ccache-${{ matrix.id }}-${{ hashFiles('UPSTREAM', 'modules.lock') }}-${{ github.run_id }}
+          key: ccache-${{ matrix.id }}-${{ hashFiles('DEPENDENCIES.lock') }}-${{ github.run_id }}
           restore-keys: |
-            ccache-${{ matrix.id }}-${{ hashFiles('UPSTREAM', 'modules.lock') }}-
+            ccache-${{ matrix.id }}-${{ hashFiles('DEPENDENCIES.lock') }}-
             ccache-${{ matrix.id }}-
 
       - name: Build ${{ matrix.id }}
@@ -211,8 +216,8 @@ jobs:
           merge-multiple: true
           path: in
 
-      # The same pin the builds took, so firmware.json's modules.lock says it.
-      - name: omnipython-lvgl at the ref asked for, in modules.lock
+      # The same pin the builds took, so firmware.json's pins say it.
+      - name: omnipython-lvgl at the ref asked for, in DEPENDENCIES.lock
         if: inputs.omnipython-lvgl-ref != ''
         env:
           REF: ${{ inputs.omnipython-lvgl-ref }}

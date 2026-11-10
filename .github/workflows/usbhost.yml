@@ -11,14 +11,16 @@ on:
     paths:
       - 'modules/usbhost/**'
       - 'build_mp.py'
-      - 'modules.lock'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
       - 'patches/**'
       - '.github/workflows/usbhost.yml'
   pull_request:
     paths:
       - 'modules/usbhost/**'
       - 'build_mp.py'
-      - 'modules.lock'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
       - 'patches/**'
       - '.github/workflows/usbhost.yml'
   workflow_dispatch:

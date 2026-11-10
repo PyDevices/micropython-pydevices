@@ -5,7 +5,7 @@
 
 """Prepare a MicroPython checkout for our builds.
 
-The checkout is moved to the tag in UPSTREAM, then gets every patch in
+The checkout is moved to the micropython commit in DEPENDENCIES.lock, then gets every patch in
 patches/micropython/ and every module's own MicroPython patches (the *.patch
 files directly inside modules/<name>/patches/, today cameraif's),
 all applied once and recorded as one local commit. That commit's body names
@@ -44,6 +44,8 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
+import pins  # noqa: E402
 OVERLAY = REPO / "patches" / "micropython"
 LIB_OVERLAY = REPO / "patches" / "micropython-lib"
 LIB = Path("lib") / "micropython-lib"
@@ -235,7 +237,7 @@ def main(argv):
     mp = Path(args[0]) if args else REPO / "micropython"
     if not (mp / ".git").exists():
         sys.exit(f"not a git checkout: {mp}")
-    upstream = (REPO / "UPSTREAM").read_text().strip()
+    upstream = pins.get(pins.MICROPYTHON, REPO).ref
     patches = series()
     if "--check" in argv:
         check(mp, upstream, patches)

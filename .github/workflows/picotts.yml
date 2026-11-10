@@ -11,7 +11,8 @@ on:
       - '!modules/picotts/*.md'
       - '!modules/picotts/examples/**'
       - 'build_mp.py'
-      - 'modules.lock'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
       - '.github/workflows/picotts.yml'
   pull_request:
     paths:
@@ -19,7 +20,8 @@ on:
       - '!modules/picotts/*.md'
       - '!modules/picotts/examples/**'
       - 'build_mp.py'
-      - 'modules.lock'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
       - '.github/workflows/picotts.yml'
   # Everything, weekly: the path filters skip what a change can't reach.
   schedule:
@@ -87,6 +89,10 @@ jobs:
         id: py
         run: echo "version=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" >> "$GITHUB_OUTPUT"
 
+      - name: The toolchain pins, which the cached deps/ is tied to
+        id: toolchains
+        run: echo "key=$(python3 scripts/pins.py --key toolchains)" >> "$GITHUB_OUTPUT"
+
       # release-firmware.yml's cache, the same paths and key so it's shared.
       - name: Cache ESP-IDF
         uses: actions/cache@v6
@@ -96,15 +102,15 @@ jobs:
             deps/circuitpython
             deps/circuitpython-venv
             ~/.espressif
-          key: deps-idf-py${{ steps.py.outputs.version }}-${{ hashFiles('deps.lock', 'patches/circuitpython/**') }}
+          key: deps-idf-py${{ steps.py.outputs.version }}-${{ steps.toolchains.outputs.key }}-${{ hashFiles('patches/circuitpython/**') }}
 
       - name: Cache compiler output
         uses: actions/cache@v6
         with:
           path: /home/runner/.cache/ccache
-          key: ccache-picotts-s3-${{ hashFiles('UPSTREAM', 'modules.lock') }}-${{ github.run_id }}
+          key: ccache-picotts-s3-${{ hashFiles('DEPENDENCIES.lock') }}-${{ github.run_id }}
           restore-keys: |
-            ccache-picotts-s3-${{ hashFiles('UPSTREAM', 'modules.lock') }}-
+            ccache-picotts-s3-${{ hashFiles('DEPENDENCIES.lock') }}-
             ccache-picotts-s3-
 
       - name: Build an ESP32-S3 firmware with picotts

@@ -10,7 +10,8 @@ on:
       - '!modules/displayif/docs/**'
       - '!modules/displayif/examples/**'
       - 'build_mp.py'
-      - 'modules.lock'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
       - 'patches/**'
       - '.github/workflows/displayif.yml'
   pull_request:
@@ -20,7 +21,8 @@ on:
       - '!modules/displayif/docs/**'
       - '!modules/displayif/examples/**'
       - 'build_mp.py'
-      - 'modules.lock'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
       - 'patches/**'
       - '.github/workflows/displayif.yml'
   # Everything, weekly: the path filters skip what a change can't reach.

@@ -2,10 +2,10 @@
 
 `--interpreter circuitpython` is a flag rather than a second command because
 everything around the interpreter is shared: the module names and
-`modules.lock`, the workspace links, the output layout and the build record.
+`DEPENDENCIES.lock`, the workspace links, the output layout and the build record.
 What differs is one function, and these are its parts.
 
-- **The checkout.** CircuitPython is pinned in `deps.lock` like a toolchain and
+- **The checkout.** CircuitPython is pinned in `DEPENDENCIES.lock` like a toolchain and
   cloned into `deps/circuitpython`, always our own clone, never a link to a
   sibling checkout. A build fetches only the submodules its target needs, with
   CircuitPython's own `tools/ci_fetch_deps.py` (a board's name, or `tests` for
@@ -22,7 +22,7 @@ What differs is one function, and these are its parts.
   same branch name would otherwise share one.
 - **espressif brings its own ESP-IDF.** CircuitPython's espressif port builds
   with the ESP-IDF in `ports/espressif/esp-idf`, not the `esp-idf` in
-  `deps.lock`. Before make, the build initialises that tree's submodules
+  `DEPENDENCIES.lock`. Before make, the build initialises that tree's submodules
   shallowly (ESP-IDF's CMake would otherwise clone them with their whole
   history), runs its `install.sh` for the board's chip (compilers go in
   `~/.espressif`, shared with any ESP-IDF of the same version) and puts ESP-IDF's
@@ -42,7 +42,7 @@ What differs is one function, and these are its parts.
   `USER_ESP_IDF_COMPONENT_DIRS` adds components ESP-IDF doesn't ship.
   CircuitPython builds with the component manager off, so for cameraif the build
   fetches `esp_cam_sensor`, `esp_sccb_intf` and `cmake_utilities` at their
-  `deps.lock` versions into `deps/` and passes them, and `esp_h264` the same way
+  `DEPENDENCIES.lock` versions into `deps/` and passes them, and `esp_h264` the same way
   for h264enc. The DEV-KIT's board sdkconfig enables the OV5647.
 - **mpy-cross is built first, on its own**, for the same reason as on
   MicroPython ([the `BUILD=` trap](index.md#traps-the-build-already-handles)).

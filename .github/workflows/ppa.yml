@@ -10,6 +10,7 @@ on:
       - '!modules/ppa/*.md'
       - '!modules/ppa/examples/**'
       - 'build_mp.py'
+      - 'scripts/pins.py'
       - '.github/workflows/ppa.yml'
   pull_request:
     paths:
@@ -17,6 +18,7 @@ on:
       - '!modules/ppa/*.md'
       - '!modules/ppa/examples/**'
       - 'build_mp.py'
+      - 'scripts/pins.py'
       - '.github/workflows/ppa.yml'
   # Everything, weekly: the path filters skip what a change can't reach.
   schedule:

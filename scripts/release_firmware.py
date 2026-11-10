@@ -15,7 +15,7 @@ on Linux or WSL.
     release_firmware.py build <cell> <out-dir>
         Build one cell with build_mp.py and put its files, a sha256 of each and
         a cell.json in <out-dir>/<cell>/. LVGL (omnipython-lvgl) comes in at
-        the commit modules.lock pins, for MicroPython and CircuitPython alike.
+        the commit DEPENDENCIES.lock pins, for MicroPython and CircuitPython alike.
 
     release_firmware.py assemble <in-dir> <out-dir> [--pico2] [--tag TAG]
                                  [--run-url URL]
@@ -56,6 +56,8 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
+import pins as pinfile  # noqa: E402
 
 MB = 1024 * 1024
 
@@ -209,15 +211,6 @@ def sha256(path):
         for block in iter(lambda: f.read(1 << 20), b""):
             h.update(block)
     return h.hexdigest()
-
-
-def read_lock(name):
-    rows = []
-    for line in (REPO / name).read_text().splitlines():
-        line = line.split("#", 1)[0].strip()
-        if line:
-            rows.append(line.split())
-    return rows
 
 
 # ---- matrix ----------------------------------------------------------------
@@ -541,7 +534,7 @@ def version_numbers(describe):
     return m.group(1) if m else None
 
 
-def preview_reasons(upstream_describe, cp_version, deps):
+def preview_reasons(upstream_describe, cp_version):
     """Why a set built from these pins is a preview (D3: such a set is never published)."""
     reasons = []
     if "preview" in (upstream_describe or "") or re.search(r"-\d+-g[0-9a-f]+$", upstream_describe or ""):
@@ -614,12 +607,12 @@ def assemble(indir, out, pico2, tag, run_url, now=None):
         entry["files"] = files
         builds.append(entry)
 
-    deps = {r[0]: r[2] for r in read_lock("deps.lock")}
-    pins = {"UPSTREAM": (REPO / "UPSTREAM").read_text().strip(),
-            "deps.lock": deps,
-            "modules.lock": {r[0]: r[2] for r in read_lock("modules.lock")}}
-    reasons = preview_reasons(mp_version, cp_version, deps)
-    doc = {"schema": 1, "tag": tag, "built": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    # Every line of DEPENDENCIES.lock: a checkout's commit (and its tag where
+    # the line names one), a download's version.
+    pins = {p.name: {"version": p.ref} if p.download else dict({"commit": p.ref}, **({"tag": p.tag} if p.tag else {}))
+            for p in pinfile.read(REPO).values()}
+    reasons = preview_reasons(mp_version, cp_version)
+    doc = {"schema": 2, "tag": tag, "built": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
            "run": run_url, "micropython": mp_version, "circuitpython": cp_version,
            "preview": bool(reasons), "preview_reasons": reasons, "pins": pins, "builds": builds}
     (out / "firmware.json").write_text(json.dumps(doc, indent=1) + "\n")
