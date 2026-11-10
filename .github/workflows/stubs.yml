@@ -1,0 +1,39 @@
+# The modules' type stubs: mypy reads every .pyi under modules/, so a stub
+# that doesn't parse or contradicts itself fails here and not in your editor.
+# Runs when a stub or this file changes.
+name: Stubs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/**/*.pyi'
+      - '.github/workflows/stubs.yml'
+  pull_request:
+    paths:
+      - 'modules/**/*.pyi'
+      - '.github/workflows/stubs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mypy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install mypy
+      # One module's stubs at a time: two modules may each ship an `image.pyi`.
+      - name: mypy over each module's stubs
+        run: |
+          status=0
+          for dir in $(find modules -name '*.pyi' -printf '%h\n' | sort -u); do
+            echo "== $dir"
+            (cd "$dir" && python -m mypy --no-incremental ./*.pyi) || status=1
+          done
+          exit $status

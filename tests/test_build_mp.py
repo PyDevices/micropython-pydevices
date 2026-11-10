@@ -622,8 +622,9 @@ class BoardManifest(unittest.TestCase):
 
 
 class Rp2BoardDir(unittest.TestCase):
-    """A variant of ours on rp2 gets a board directory: upstream's, linked
-    through unchanged, with our files added where the port looks for them."""
+    """Every rp2 build gets a board directory: upstream's, linked through
+    unchanged, with what every build of ours adds and a variant's files where
+    the port looks for them."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -644,9 +645,29 @@ class Rp2BoardDir(unittest.TestCase):
         build_mp.VARIANTS_DIR = self.saved
         self.tmp.cleanup()
 
+    def board_cmake(self):
+        return (build_mp.VARIANTS_DIR / "rp2" / "board.cmake").resolve().as_posix()
+
+    def test_every_build_gets_our_board_settings_after_upstreams(self):
+        build_mp.rp2_board_dir(self.gen, self.base, "BOARD", None)
+        text = (self.gen / "mpconfigboard.cmake").read_text()
+        self.assertFalse((self.gen / "mpconfigboard.cmake").is_symlink())
+        self.assertIn(f"include({self.base.as_posix()}/mpconfigboard.cmake)", text)
+        self.assertLess(text.index(self.base.as_posix()), text.index(self.board_cmake()))
+        for name in ("mpconfigboard.h", "mpconfigvariant.cmake", "pins.csv", "board.json"):
+            self.assertEqual(self.gen.joinpath(name).resolve(), self.base.joinpath(name).resolve(), name)
+        self.assertEqual(sorted(p.name for p in self.gen.glob("mpconfigvariant_*")), [])
+
+    def test_an_upstream_variant_is_linked_through(self):
+        (self.base / "mpconfigvariant_UP.cmake").write_text("set(U 1)")
+        build_mp.rp2_board_dir(self.gen, self.base, "BOARD", "UP")
+        self.assertTrue((self.gen / "mpconfigvariant_UP.cmake").is_symlink())
+        self.assertIn(self.board_cmake(), (self.gen / "mpconfigboard.cmake").read_text())
+
     def test_variant_file_only(self):
         build_mp.rp2_board_dir(self.gen, self.base, "BOARD", "OURS")
-        for name in ("mpconfigboard.cmake", "mpconfigboard.h", "mpconfigvariant.cmake", "pins.csv", "board.json"):
+        self.assertIn(self.board_cmake(), (self.gen / "mpconfigboard.cmake").read_text())
+        for name in ("mpconfigboard.h", "mpconfigvariant.cmake", "pins.csv", "board.json"):
             self.assertEqual(self.gen.joinpath(name).resolve(), self.base.joinpath(name).resolve(), name)
             self.assertTrue(self.gen.joinpath(name).is_symlink(), name)
         text = (self.gen / "mpconfigvariant_OURS.cmake").read_text()
@@ -703,6 +724,47 @@ class Rp2KeepFs(unittest.TestCase):
     def test_not_sizes(self):
         for text in ("", "0", "576.5K", "1000", "-4K", "big"):
             self.assertIsNone(build_mp.fs_size(text), text)
+
+
+class Rp2Speed(unittest.TestCase):
+    """Every rp2 build runs its CPU at its chip's rated clock, and one that
+    runs below it says so after it."""
+
+    RP2040 = "PICO_PLATFORM:STRING=rp2040\n"
+    RP2350 = "PICO_PLATFORM:STRING=rp2350-arm-s\n"
+
+    def note(self, cache, flags):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            build_mp.rp2_speed_note(cache, flags)
+        return out.getvalue()
+
+    def test_our_board_settings_ask_for_the_fastest_clock(self):
+        text = (build_mp.REPO / "variants" / "rp2" / "board.cmake").read_text()
+        self.assertRegex(text, r"(?m)^set\(PICO_USE_FASTEST_SUPPORTED_CLOCK 1\)$")
+
+    def test_rp2040_at_the_sdk_default_is_named(self):
+        self.assertEqual(build_mp.rp2_cpu(self.RP2040, "C_DEFINES = -DPICO_RP2040=1"), (125, 200))
+        self.assertIn("the CPU at 125 MHz; its chip is rated for 200.", self.note(self.RP2040, "C_DEFINES = -DPICO_RP2040=1"))
+
+    def test_rp2040_at_the_fastest_clock_is_quiet(self):
+        flags = "C_DEFINES = -DPICO_BOARD=\\\"pico\\\" -DPICO_USE_FASTEST_SUPPORTED_CLOCK=1 -DPICO_XIP_RAM=0"
+        self.assertEqual(build_mp.rp2_cpu(self.RP2040, flags), (200, 200))
+        self.assertEqual(self.note(self.RP2040, flags), "")
+
+    def test_a_clock_given_outright_wins(self):
+        flags = "-DPICO_USE_FASTEST_SUPPORTED_CLOCK=1 -DSYS_CLK_MHZ=133"
+        self.assertIn("the CPU at 133 MHz", self.note(self.RP2040, flags))
+        self.assertEqual(build_mp.rp2_cpu(self.RP2040, "-DSYS_CLK_HZ=200000000"), (200, 200))
+        self.assertEqual(build_mp.rp2_cpu(self.RP2040, "-DSYS_CLK_KHZ=200000"), (200, 200))
+
+    def test_rp2350_at_its_default_is_quiet(self):
+        self.assertEqual(build_mp.rp2_cpu(self.RP2350, ""), (150, 150))
+        self.assertEqual(self.note(self.RP2350, ""), "")
+
+    def test_a_build_that_does_not_say_is_quiet(self):
+        self.assertEqual(build_mp.rp2_cpu("", ""), (None, None))
+        self.assertEqual(self.note("", ""), "")
 
 
 class Esp32Autosize(unittest.TestCase):

@@ -37,7 +37,8 @@ if(ESP_PLATFORM AND (IDF_TARGET STREQUAL "esp32p4" OR IDF_TARGET STREQUAL "esp32
         ${_ulab_parent} ${_jpegdrv}/include ${_newjpeg}/include)
 
     set(_src ${EV}/modules/py_image.c ${EV}/modules/py_imageio.c ${EV}/modules/py_helper.c
-        ${EV}/platform/jpeg.c ${CMAKE_CURRENT_LIST_DIR}/src/vision_preview_none.c)
+        ${EV}/platform/jpeg.c ${CMAKE_CURRENT_LIST_DIR}/src/vision_preview_none.c
+        ${CMAKE_CURRENT_LIST_DIR}/src/vision_revision.c)
     # imlib, esp-vision's components/imlib list, with its options.
     set(_up ${EV}/components/imlib/upstream)
     set(_compat ${EV}/components/imlib/compat)
@@ -106,7 +107,7 @@ if(ESP_PLATFORM AND (IDF_TARGET STREQUAL "esp32p4" OR IDF_TARGET STREQUAL "esp32
     if(IDF_TARGET STREQUAL "esp32p4")
         idf_component_get_property(_mp espressif__esp_media_protocols COMPONENT_DIR)
         idf_component_get_property(_sal espressif__media_lib_sal COMPONENT_DIR)
-        list(APPEND _src ${EV}/modules/py_rtsp.c)
+        list(APPEND _src ${EV}/modules/py_rtsp.c ${CMAKE_CURRENT_LIST_DIR}/src/vision_revision_p4.c)
         list(APPEND _inc ${_mp}/include ${_sal}/include ${_sal}/include/port)
         list(APPEND _libs idf::espressif__esp_media_protocols idf::espressif__media_lib_sal)
         # The prebuilt RTSP library calls ESP_ERROR_CHECK's handler, which
@@ -116,7 +117,21 @@ if(ESP_PLATFORM AND (IDF_TARGET STREQUAL "esp32p4" OR IDF_TARGET STREQUAL "esp32
         list(APPEND _libs "-u _esp_error_check_failed")
     endif()
 
+    # --- which vision this firmware was built from -----------------------
+    # Computed at build time from this repo's own git, never stored; "unknown"
+    # when there is no git (a tarball). Read on a target as
+    # image.__revision__ (and espdl, h264 and rtsp the same).
+    execute_process(
+        COMMAND git -C ${CMAKE_CURRENT_LIST_DIR} describe --always --dirty --abbrev=7
+        OUTPUT_VARIABLE VISION_REVISION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if(NOT VISION_REVISION)
+        set(VISION_REVISION "unknown")
+    endif()
+
     add_library(usermod_vision INTERFACE)
+    target_compile_definitions(usermod_vision INTERFACE VISION_REVISION=\"${VISION_REVISION}\")
     target_sources(usermod_vision INTERFACE ${_src})
     target_include_directories(usermod_vision INTERFACE ${_inc})
     target_compile_definitions(usermod_vision INTERFACE CMSIS_MCU_H="cmsis_compiler.h" OMV_NO_GPL=1)

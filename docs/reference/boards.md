@@ -32,6 +32,9 @@ except the flash of a P4 image for revisions before 3, which ESP-IDF holds to
 40 MHz. [Add a board variant](../guides/add-a-board-variant.md#an-esp32-board)
 says how a new board does the same.
 
+Every rp2 board runs its CPU at the chip's rated clock too: 200 MHz on an
+RP2040, where the SDK's default is 125, and 150 on an RP2350.
+
 Our ESP32-S3 builds need an S3 with PSRAM: they keep the TLS library in PSRAM,
 and on an S3 without it, Wi-Fi can't join a WPA2 network. Most S3 boards have
 PSRAM. For one that doesn't, such as Adafruit's QT Py ESP32-S3 with 8 MB flash

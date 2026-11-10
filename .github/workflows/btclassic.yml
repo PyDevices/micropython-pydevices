@@ -11,6 +11,7 @@ on:
     paths:
       - 'modules/btclassic/**'
       - '!modules/btclassic/*.md'
+      - '!modules/btclassic/*.pyi'
       - '!modules/btclassic/examples/**'
       - 'build_mp.py'
       - '.github/workflows/btclassic.yml'
@@ -18,6 +19,7 @@ on:
     paths:
       - 'modules/btclassic/**'
       - '!modules/btclassic/*.md'
+      - '!modules/btclassic/*.pyi'
       - '!modules/btclassic/examples/**'
       - 'build_mp.py'
       - '.github/workflows/btclassic.yml'
