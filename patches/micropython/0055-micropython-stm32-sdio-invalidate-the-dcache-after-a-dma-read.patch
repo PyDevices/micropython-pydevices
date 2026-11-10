@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 00:00:00 -0500
+Subject: [PATCH] stm32/sdio: Invalidate the D-cache after a DMA read.
+
+sdio_transfer_cmd53() cleans and invalidates the receive buffer's cache
+lines before a DMA read, so that nothing dirty is written back over what
+the DMA writes. It did nothing once the transfer had finished. A Cortex-M7
+can fill a line of the buffer again while the DMA is still writing to RAM
+(a speculative read can do it), and the CPU then reads that line's old
+contents instead of the new data.
+
+On an Arduino GIGA R1 (STM32H747) this showed up as firmware builds
+that joined Wi-Fi but passed no traffic: the CYW43 driver read a stale
+first line of the buffer it receives packets into, and DHCP never
+completed. Whether a build failed depended only on how its code was
+laid out, and an affected image failed on every boot. On such an image,
+making that one 32-byte line non-cacheable through the MPU was enough
+for DHCP, DNS and TCP to work, while the same MPU region left cacheable
+still failed. The same image with an invalidate added after the DMA
+read got an address on each of two boots, and without it failed on both.
+
+Clean and invalidate the buffer again after a DMA read completes, as
+dma_unprotect_rx_region() does for SPI and the SD card. Reads that don't
+use DMA, and writes, are unchanged.
+
+diff --git a/ports/stm32/sdio.c b/ports/stm32/sdio.c
+--- a/ports/stm32/sdio.c
++++ b/ports/stm32/sdio.c
+@@ -515,6 +515,13 @@
+         #if defined(STM32F7)
+         dma_nohal_deinit(&dma_SDIO_0);
+         #endif
++        if (!write) {
++            // The cache was cleaned and invalidated before the transfer, but the
++            // CPU can fill lines of buf again while the DMA is writing to RAM (a
++            // Cortex-M7 may read speculatively), and those lines then hold the
++            // old data. Invalidate again so the CPU reads what the DMA wrote.
++            MP_HAL_CLEANINVALIDATE_DCACHE(buf, len);
++        }
+     }
+ 
+     return 0;

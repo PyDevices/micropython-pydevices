@@ -163,6 +163,9 @@
   },
   "0054-micropython-esp32-sdcard-stop-a-failed-transfer-before-resetting-the-host.patch": {
    "sha256": "385435b571aa0114a4ed091f0e7c4c49d0f8994998d3ff3e2804c6d7ca76eefe"
+  },
+  "0055-micropython-stm32-sdio-invalidate-the-dcache-after-a-dma-read.patch": {
+   "sha256": "4b0cc28efb118b20bf84c61ac1c5cb8195c23a1ac3214b7ba6bef0ffa54fe722"
   }
  },
  "tinyusb_patches": {
