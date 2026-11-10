@@ -4,6 +4,10 @@ PPA_DIR := $(USERMOD_DIR)/src
 
 CFLAGS_USERMOD += -I$(PPA_DIR)
 
+# Which ppa this firmware was built from: ppa.__revision__.
+PPA_REVISION := $(shell git -C $(USERMOD_DIR) describe --always --dirty --abbrev=7 2>/dev/null || echo unknown)
+CFLAGS_USERMOD += -DPPA_REVISION='"$(PPA_REVISION)"'
+
 SRC_USERMOD_C += $(PPA_DIR)/mod_ppa.c
 
 # No qstrs: they stay out of the QSTR scan.

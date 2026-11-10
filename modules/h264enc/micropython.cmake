@@ -7,7 +7,19 @@
 # chip skips it whole, so `all` needs no exception for it. CircuitPython
 # builds it through micropython.mk, with esp_h264 fetched by build_mp.py.
 if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32p4")
+    # --- which h264enc this firmware was built from ---------------------------
+    # Computed at build time from this repo's own git, never stored; "unknown" when
+    # there is no git (a tarball). Read on a target as <module>.__revision__.
+    execute_process(
+        COMMAND git -C ${CMAKE_CURRENT_LIST_DIR} describe --always --dirty --abbrev=7
+        OUTPUT_VARIABLE H264ENC_REVISION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if(NOT H264ENC_REVISION)
+        set(H264ENC_REVISION "unknown")
+    endif()
     add_library(usermod_h264enc INTERFACE)
+    target_compile_definitions(usermod_h264enc INTERFACE H264ENC_REVISION=\"${H264ENC_REVISION}\")
     target_sources(usermod_h264enc INTERFACE ${CMAKE_CURRENT_LIST_DIR}/src/mod_h264enc.c)
     target_include_directories(usermod_h264enc INTERFACE ${CMAKE_CURRENT_LIST_DIR}/src)
     target_link_libraries(usermod_h264enc INTERFACE idf::espressif__esp_h264

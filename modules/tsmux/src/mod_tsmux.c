@@ -303,8 +303,17 @@ MP_DEFINE_CONST_OBJ_TYPE(
 
 // --- module -------------------------------------------------------------------
 
+// tsmux.__revision__: which tsmux this firmware was built from. The build
+// passes TSMUX_REVISION (git describe) as a compile definition; a build with no
+// git says "unknown" rather than guessing.
+#ifndef TSMUX_REVISION
+#define TSMUX_REVISION "unknown"
+#endif
+static const MP_DEFINE_STR_OBJ(tsmux_revision_obj, TSMUX_REVISION);
+
 static const mp_rom_map_elem_t tsmux_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_tsmux) },
+    { MP_ROM_QSTR(MP_QSTR___revision__), MP_ROM_PTR(&tsmux_revision_obj) },
     { MP_ROM_QSTR(MP_QSTR_Muxer), MP_ROM_PTR(&tsmux_muxer_type) },
     { MP_ROM_QSTR(MP_QSTR_Segmenter), MP_ROM_PTR(&tsmux_segmenter_type) },
 };

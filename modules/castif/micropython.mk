@@ -24,6 +24,10 @@ CASTIF_MOD_DIR := $(USERMOD_DIR)
 SRC_USERMOD_C += $(CASTIF_MOD_DIR)/src/mod_castif.c $(CASTIF_MOD_DIR)/src/castif_hls.c
 CFLAGS_USERMOD += -I$(CASTIF_MOD_DIR)/src
 
+# Which castif this firmware was built from: castif.__revision__.
+CASTIF_REVISION := $(shell git -C $(USERMOD_DIR) describe --always --dirty --abbrev=7 2>/dev/null || echo unknown)
+CFLAGS_USERMOD += -DCASTIF_REVISION='"$(CASTIF_REVISION)"'
+
 ifeq ($(CIRCUITPY_WIFI),0)
 CFLAGS_USERMOD += -DCASTIF_NO_NETWORK=1
 # No qstrs: it stays out of the QSTR scan.

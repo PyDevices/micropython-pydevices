@@ -31,6 +31,10 @@ endif
 SRC_USERMOD_C += $(H264ENC_MOD_DIR)/src/mod_h264enc.c
 CFLAGS_USERMOD += -I$(H264ENC_MOD_DIR)/src
 
+# Which h264enc this firmware was built from: h264enc.__revision__.
+H264ENC_REVISION := $(shell git -C $(USERMOD_DIR) describe --always --dirty --abbrev=7 2>/dev/null || echo unknown)
+CFLAGS_USERMOD += -DH264ENC_REVISION='"$(H264ENC_REVISION)"'
+
 # The component builds a library, and the port links it.
 USER_ESP_IDF_COMPONENTS += esp_h264
 
