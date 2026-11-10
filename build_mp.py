@@ -865,24 +865,80 @@ def esp32_clocks(sdk):
             mhz(r"^CONFIG_SPIRAM_SPEED_(\d+)M=y$") if re.search(r"^CONFIG_SPIRAM=y$", sdk, re.M) else None)
 
 
+# The highest CPU clock each chip is rated for, in MHz: the top of ESP-IDF's
+# CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ choice for that target, which matches the
+# datasheets. esp32_cpu_rated() covers the exceptions.
+ESP32_CPU_RATED = {"esp32": 240, "esp32s2": 240, "esp32s3": 240, "esp32c2": 120, "esp32c3": 160,
+                   "esp32c5": 240, "esp32c6": 160, "esp32c61": 160, "esp32h2": 96, "esp32p4": 400}
+
+
+def esp32_cpu_rated(sdk):
+    """The highest CPU clock, in MHz, for the chip an esp32 sdkconfig builds
+    for, or None when the target isn't one we know.
+
+    A P4 image for revisions before 3.0 is held to their 360 MHz (IDF offers
+    400 there only as an experimental option). A single-core classic ESP32
+    build is held to 160, the rating of the ESP32-S0WD and ESP32-D2WD it is
+    usually for. A C5 with flash encryption is held to 160: IDF says encrypted
+    flash writes aren't stable above it."""
+    m = re.search(r'^CONFIG_IDF_TARGET="(\w+)"$', sdk, re.M)
+    target = m.group(1) if m else ""
+    rated = ESP32_CPU_RATED.get(target)
+
+    def on(name):
+        return re.search(rf"^CONFIG_{name}=y$", sdk, re.M) is not None
+
+    if target == "esp32p4" and on("ESP32P4_SELECTS_REV_LESS_V3"):
+        rated = 360
+    elif target == "esp32" and on("FREERTOS_UNICORE"):
+        rated = 160
+    elif target == "esp32c5" and on("SECURE_FLASH_ENC_ENABLED"):
+        rated = 160
+    return rated
+
+
+def esp32_cpu(sdk):
+    """The CPU clock an esp32 sdkconfig sets and the chip's rated one, in MHz
+    (either None when the sdkconfig doesn't say)."""
+    m = re.search(r"^CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=(\d+)$", sdk, re.M)
+    return (int(m.group(1)) if m else None), esp32_cpu_rated(sdk)
+
+
 def esp32_speed_note(sdk):
-    """Flash and PSRAM should run at the fastest clock the chips are rated for.
-    Below 80 MHz, code and data that miss the cache wait on a slow bus, and on
-    a classic ESP32 that starves Bluetooth audio: two boards that fell behind in
-    A2DP music at 40 MHz played clean at 80 MHz. Say so loudly after a build."""
+    """The CPU, flash and PSRAM should run at the fastest clock the chips are
+    rated for. Below 80 MHz, code and data that miss the cache wait on a slow
+    bus, and on a classic ESP32 that starves Bluetooth audio: two boards that
+    fell behind in A2DP music at 40 MHz played clean at 80 MHz. A CPU below its
+    rating runs out of time first: a 48 kHz synth with a reverb clicked on a
+    classic ESP32 at 160 MHz and played clean at 240. Say so loudly after a
+    build."""
     flash, psram = esp32_clocks(sdk)
-    slow = [f"flash at {flash} MHz"] if flash and flash < 80 else []
+    cpu, rated = esp32_cpu(sdk)
+    # An image that also runs on a revision 0 P4 can't clock its flash above
+    # 40 MHz: IDF offers no faster choice there.
+    flash_floor = 40 if re.search(r"^CONFIG_ESP32P4_REV_MIN_0=y$", sdk, re.M) else 80
+    slow = [f"the CPU at {cpu} MHz (rated for {rated})"] if cpu and rated and cpu < rated else []
+    slow += [f"flash at {flash} MHz"] if flash and flash < flash_floor else []
     slow += [f"PSRAM at {psram} MHz"] if psram and psram < 80 else []
     if not slow:
         return
+    runs = slow[0] if len(slow) == 1 else ", ".join(slow[:-1]) + " and " + slow[-1]
     say("\n" + "!" * 72)
-    say(f"  This image runs {' and '.join(slow)}. Run flash and PSRAM at the fastest")
-    say("  clock your board's chips are rated for: most are rated for 80 MHz or more,")
-    say("  and at 40 MHz a classic ESP32 can fall behind in Bluetooth audio. Check")
-    say("  the chips' datasheets (esptool's flash-id reads the flash's JEDEC ID), then")
-    say("  set CONFIG_ESPTOOLPY_FLASHFREQ_80M=y and CONFIG_SPIRAM_SPEED_80M=y in the")
-    say("  board's variant sdkconfig, as variants/esp32/ESP32_GENERIC/QTPY_PICO does.")
-    say("  The flash clock lives in the bootloader: flash it with the app.")
+    say(f"  This image runs {runs}.")
+    say("  Run the CPU, flash and PSRAM at the fastest clock the board's chips are")
+    say("  rated for, in the board's variant sdkconfig.")
+    if cpu and rated and cpu < rated:
+        say(f"  The CPU: set CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_{rated}=y,")
+        say(f"  CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_{cpu}=n and CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ={rated},")
+        say("  as variants/esp32/ESP32_GENERIC/AUDIO_KIT does. Below its rating, audio")
+        say("  work runs out of time: a synth with a reverb clicks at 160 MHz on an ESP32.")
+    if (flash and flash < flash_floor) or (psram and psram < 80):
+        say("  Flash and PSRAM: most are rated for 80 MHz or more, and at 40 MHz a")
+        say("  classic ESP32 can fall behind in Bluetooth audio. Check the chips'")
+        say("  datasheets (esptool's flash-id reads the flash's JEDEC ID), then set")
+        say("  CONFIG_ESPTOOLPY_FLASHFREQ_80M=y and CONFIG_SPIRAM_SPEED_80M=y, as")
+        say("  variants/esp32/ESP32_GENERIC/QTPY_PICO does. The flash clock lives in")
+        say("  the bootloader: flash it with the app.")
     say("!" * 72 + "\n")
 
 

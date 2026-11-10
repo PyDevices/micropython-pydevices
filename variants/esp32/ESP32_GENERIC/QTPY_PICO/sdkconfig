@@ -8,3 +8,10 @@ CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 CONFIG_ESPTOOLPY_FLASHFREQ_40M=n
 CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_SPEED_40M=n
+
+# The CPU at 240 MHz, the ESP32-PICO-V3-02's rating, where upstream's default
+# is 160. A 48 kHz synth with a reverb on a classic ESP32 needs about 5 ms of
+# each 5.3 ms block at 160 MHz and clicks; at 240 it needs about 3.5 ms.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=n
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240

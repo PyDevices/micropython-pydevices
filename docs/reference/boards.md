@@ -17,13 +17,20 @@ top. Add `--modules` to any of these:
 | LilyGO T-Embed S3 | `--port esp32 --board ESP32_GENERIC_S3 --variant T_EMBED --flash 16MB` |
 | Ai-Thinker ESP32-Audio-Kit (ESP32-A1S), CPU at 240 MHz, flash and PSRAM at 80 MHz | `--port esp32 --board ESP32_GENERIC --variant AUDIO_KIT --flash 4MB` (write the bootloader with the app) |
 | WT32-SC01 Plus | `--port esp32 --board ESP32_GENERIC_S3 --flash 16MB` |
-| Adafruit QT Py ESP32 Pico (8 MB flash, 2 MB PSRAM), flash and PSRAM at 80 MHz | `--port esp32 --board ESP32_GENERIC --variant QTPY_PICO --flash 8MB` (write the bootloader with the app) |
+| Adafruit QT Py ESP32 Pico (8 MB flash, 2 MB PSRAM), CPU at 240 MHz, flash and PSRAM at 80 MHz | `--port esp32 --board ESP32_GENERIC --variant QTPY_PICO --flash 8MB` (write the bootloader with the app) |
 | Raspberry Pi Pico (RP2040) | `--port rp2 --board RPI_PICO` (not `--modules all`: [it doesn't fit](../guides/fit-firmware-on-a-small-flash.md)) |
 | Raspberry Pi Pico 2 (RP2350) | `--port rp2 --board RPI_PICO2` |
 | Pimoroni Pico Plus 2 W (16 MB flash, 8 MB PSRAM, 48 GPIOs) | `--port rp2 --board RPI_PICO2_W --variant PIMORONI_PICO_PLUS2_W` |
 | Arduino GIGA R1 WiFi | `--port stm32 --board ARDUINO_GIGA` (past 1,280 KB it [takes the M4 core's flash](../guides/fit-firmware-on-a-small-flash.md)) |
 | Arduino GIGA R1 WiFi, playing through its headphone jack ([`audioio.AudioOut`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/audioif/README.md#audioioaudioout--the-same-output-on-a-dac)) | `--port stm32 --board ARDUINO_GIGA --modules audiodsp,audioif` |
 | Arduino GIGA R1 WiFi with the GIGA Display Shield | `--port stm32 --board ARDUINO_GIGA --variant DISPLAY_SHIELD --modules displayif,lvgl` ([two images to flash](../guides/flash-a-board.md#stm32-arduino-giga-r1-wifi)) |
+
+Every ESP32 board here runs its CPU at the chip's rated clock (240 MHz on an
+ESP32 or S3; 400 on a P4 of revision 3 or later, 360 before that), and its
+flash and PSRAM at the fastest clock its chips are rated for: 80 MHz or more,
+except the flash of a P4 image for revisions before 3, which ESP-IDF holds to
+40 MHz. [Add a board variant](../guides/add-a-board-variant.md#an-esp32-board)
+says how a new board does the same.
 
 Our ESP32-S3 builds need an S3 with PSRAM: they keep the TLS library in PSRAM,
 and on an S3 without it, Wi-Fi can't join a WPA2 network. Most S3 boards have
@@ -47,7 +54,7 @@ Our variants, in [`variants/`](https://github.com/PyDevices/micropython-pydevice
 | esp32 | `ESP32_GENERIC_S3` `LCD_4_3`, `LCD_7`, `T_EMBED` | The S3 boards in the table above. |
 | esp32 | `ESP32_GENERIC_P4` `WIFI6_DEV_KIT`, `WIFI6_DEV_KIT_H2` | The P4 DEV-KIT, with the USB device on the two different connectors in the table above. |
 | esp32 | `ESP32_GENERIC_P4` `P4X_EYE` | The ESP32-P4X-EYE: `C6_WIFI` with ESP-Hosted on the pins its C6 uses, the OV2710 sensor driver, the USB device on the port marked "USB 2.0" and the REPL on "Debug", and a 9 MB app slot for the camera and vision modules. |
-| esp32 | `ESP32_GENERIC` `QTPY_PICO` | The QT Py ESP32 Pico: upstream's PSRAM variant with flash and PSRAM at 80 MHz, which keeps Bluetooth audio from falling behind. |
+| esp32 | `ESP32_GENERIC` `QTPY_PICO` | The QT Py ESP32 Pico: upstream's PSRAM variant with flash and PSRAM at 80 MHz, which keeps Bluetooth audio from falling behind, and the CPU at 240 MHz. |
 | rp2 | `RPI_PICO2_W` `PIMORONI_PICO_PLUS2_W` | The Pimoroni Pico Plus 2 W. |
 | stm32 | `ARDUINO_GIGA` `DISPLAY_SHIELD` | The GIGA R1 WiFi with room for LVGL and the shield's MIPI DSI panel: the Wi-Fi and Bluetooth firmware moved to QSPI flash as a second image, Bluetooth LE through NimBLE, a one-dimensional ulab with numpy's array core and elementwise maths only ([what's out](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/stm32/ARDUINO_GIGA/DISPLAY_SHIELD/ulab_config.h)), LVGL's 40 px font left out, and USB through TinyUSB: `machine.USBDevice` on the USB-C port and a USB host on the USB-A port, where bus-powered devices that draw more than about 500 mA may not run; use a powered hub. |
 

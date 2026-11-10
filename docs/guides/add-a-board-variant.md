@@ -42,14 +42,29 @@ adds a coredump partition on the S3, which a standard build leaves unused).
 Without one, the board's own is used. Either way, autosize grows the app
 partition when the image doesn't fit.
 
-Set flash and PSRAM to the fastest clock the board's chips are rated for,
-usually 80 MHz, in the variant's `sdkconfig`
-([`QTPY_PICO`'s](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/esp32/ESP32_GENERIC/QTPY_PICO/sdkconfig)
-is two lines). Upstream's generic boards run them at 40 MHz, and at that
-clock a classic ESP32 can fall behind in Bluetooth audio. Read the flash's
-JEDEC ID with `esptool.py flash-id` and check its datasheet first. The flash
-clock lives in the bootloader, so write the bootloader with the app. A build
-below 80 MHz says so when it finishes.
+Run the CPU, flash and PSRAM at the fastest clocks the board's chips are
+rated for. The CPU's rating is the chip's: 240 MHz for an ESP32, S2, S3 or C5,
+160 for a C3 or C6, 400 for a P4 of revision 3 or later and 360 before that.
+Every S3 build already runs at 240
+([`variants/esp32/sdkconfig.esp32s3`](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/esp32/sdkconfig.esp32s3)),
+and a P4 build runs at its revision's rating by default. A classic ESP32
+board sets 240 in the variant's `sdkconfig`, as
+[`AUDIO_KIT`'s](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/esp32/ESP32_GENERIC/AUDIO_KIT/sdkconfig)
+does: upstream's default is 160 MHz, and at 160 a 48 kHz synth with a reverb
+runs out of time and clicks. The ESP32-S0WD and ESP32-D2WD are the exceptions,
+rated for 160.
+
+Flash and PSRAM are usually rated for 80 MHz, which the variant's `sdkconfig`
+sets in two lines
+([`QTPY_PICO`'s](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/esp32/ESP32_GENERIC/QTPY_PICO/sdkconfig)).
+Upstream's generic boards run them at 40 MHz, and at that clock a classic
+ESP32 can fall behind in Bluetooth audio. Read the flash's JEDEC ID with
+`esptool.py flash-id` and check its datasheet first. The flash clock lives in
+the bootloader, so write the bootloader with the app. A P4 image for chips
+before revision 3 keeps its flash at 40 MHz, the most ESP-IDF offers there.
+
+A build with the CPU below its chip's rating, or flash or PSRAM below 80 MHz,
+says so when it finishes, with the lines to set.
 
 ## An rp2 board
 
