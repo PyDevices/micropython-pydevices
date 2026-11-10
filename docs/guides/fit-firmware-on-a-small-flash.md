@@ -16,10 +16,10 @@ To refuse the growth and stop instead, add `--no-autosize`.
 
 ## Keep a board's files through an update
 
-On rp2, autosize works the filesystem's size out again in each new build
-folder, so a newer image that is a few KB bigger can come out with a smaller
-filesystem than the one already on your board, and flashing it empties the
-board. To keep the board's filesystem where it is, ask the board its size:
+Autosize works the firmware's share out again in each new build folder, so a
+newer image that is a few KB bigger can come out with a smaller filesystem
+than the one already on your board, and flashing it empties the board. To keep
+the board's filesystem where it is, ask the board its size. On rp2:
 
 ```python
 import rp2
@@ -27,17 +27,31 @@ f = rp2.Flash()
 print(f.ioctl(4, 0) * f.ioctl(5, 0))  # 589824 is 576 KB
 ```
 
+On esp32:
+
+```python
+import esp32
+print(esp32.Partition.find(esp32.Partition.TYPE_DATA, label="vfs")[0].info()[3])  # 2752512 is 2688 KB
+```
+
 and build with that size:
 
 ```bash
 ./build_mp.py --port rp2 --board RPI_PICO --modules displayif,lvgl,pydevices --keep-fs 576K
+./build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant LCD_7 --flash 8MB --modules all --keep-fs 2688K
 ```
 
 If the firmware fits beside it, the image keeps that filesystem and your files
 are there after the flash. If it doesn't, the build stops and says what size
-would fit, rather than moving it. A rebuild in the same build folder starts
-from the size that folder used last, so it keeps the filesystem without
-`--keep-fs` unless the image has outgrown it.
+would fit, rather than moving it. On esp32 the filesystem is the end of the
+flash, so `--keep-fs` needs `--flash`, and the app partition takes the flash
+before it. On rp2, a rebuild in the same build folder starts from the size that
+folder used last, so it keeps the filesystem without `--keep-fs` unless the
+image has outgrown it.
+
+The firmware page's MicroPython images are built this way, so updating a board
+from one release to the next keeps its files. A release that has to move a
+board's filesystem says so at the top of its notes.
 
 On esp32, autosize works only if the flash size is right: the partition table
 tool refuses a table larger than the configured flash, so give `--flash`.

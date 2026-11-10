@@ -40,7 +40,8 @@ The partition table is found the same way, the most specific `partitions.csv`
 winning ([`variants/esp32/partitions.esp32s3.csv`](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/esp32/partitions.esp32s3.csv)
 adds a coredump partition on the S3, which a standard build leaves unused).
 Without one, the board's own is used. Either way, autosize grows the app
-partition when the image doesn't fit.
+partition when the image doesn't fit, unless the build keeps a board's
+filesystem with `--keep-fs`.
 
 Run the CPU, flash and PSRAM at the fastest clocks the board's chips are
 rated for. The CPU's rating is the chip's: 240 MHz for an ESP32, S2, S3 or C5,

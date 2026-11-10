@@ -289,9 +289,19 @@ jobs:
           name: firmware
           path: firmware
 
+      # The notes name every board whose filesystem this set moves, against the
+      # newest set people could download (a published release, pre-releases too).
       - name: The tag may go on a draft, and the Release's notes
         run: |
-          python3 scripts/release_firmware.py notes firmware/firmware.json --out "$RUNNER_TEMP/notes.md"
+          prev=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '[.[] | select(.draft | not) | select(any(.assets[]; .name == "firmware.json"))][0].tag_name // empty')
+          previous=()
+          if [[ -n "$prev" ]]; then
+            gh release download "$prev" -p firmware.json -D "$RUNNER_TEMP/previous"
+            previous=(--previous "$RUNNER_TEMP/previous/firmware.json")
+            echo "comparing with $prev"
+          fi
+          python3 scripts/release_firmware.py notes firmware/firmware.json "${previous[@]}" --out "$RUNNER_TEMP/notes.md"
           echo "TAG=$(python3 -c 'import json; print(json.load(open("firmware/firmware.json"))["tag"])')" >> "$GITHUB_ENV"
           echo "PRERELEASE=$(python3 -c 'import json; print("--prerelease" if json.load(open("firmware/firmware.json"))["preview"] else "")')" >> "$GITHUB_ENV"
 

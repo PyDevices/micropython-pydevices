@@ -24,11 +24,13 @@ on Linux or WSL.
         beside them in <out-dir>. Exits 1 if any check fails. It never
         uploads or publishes anything.
 
-    release_firmware.py notes <firmware.json> [--out FILE]
+    release_firmware.py notes <firmware.json> [--previous FILE] [--out FILE]
         Check that the set's tag may go on a draft Release and write the
         Release's notes (to FILE, or stdout). A set built from preview pins
         only takes a tag that starts with "staged-", so publishing it by
-        accident would look wrong. This is what the workflow's draft step runs.
+        accident would look wrong. With --previous, the firmware.json of the
+        last set people could download, the notes name every board whose
+        filesystem this set moves. This is what the workflow's draft step runs.
 
     release_firmware.py cells
         List the cells.
@@ -36,8 +38,9 @@ on Linux or WSL.
 The checks in `assemble` are the ones a download would trip over: each file is
 the one the build wrote (sha256), none is empty or past its flash, a flash
 image starts like one and carries the app image the build also produced, a UF2
-is whole blocks, no module was built from a dirty tree, and every cell the run
-should have built is there.
+is whole blocks, no module was built from a dirty tree, every cell the run
+should have built is there, and each MicroPython board's filesystem is where
+its cell keeps it.
 """
 import argparse
 import datetime
@@ -63,22 +66,29 @@ MB = 1024 * 1024
 # `deps` names the cache the workflow keeps its toolchains in. An stm32 cell
 # also has `base`, where the chip's flash starts: `offset` is an address there,
 # and the Wi-Fi firmware goes to WIFI_OFFSET in the QSPI flash.
+#
+# `fs` is the filesystem a MicroPython board keeps from one release to the next,
+# the end of its flash, which build_mp.py builds beside (--keep-fs). An image
+# that outgrows the flash left to it fails its build instead of shipping a
+# filesystem that moved: a board that updated to that would come up with an
+# empty one. Changing `fs` moves the filesystem on that board, so it is done on
+# purpose, and the notes of the release that ships it say so (`notes --previous`).
 CELLS = [
     dict(id="mp-p4-devkit", label="ESP32-P4-WIFI6-DEV-KIT", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_P4", variant="WIFI6_DEV_KIT_H2", flash="16MB", modules="all",
-         chip="esp32p4", offset=0x2000, kind="esp32", deps="idf"),
+         chip="esp32p4", offset=0x2000, kind="esp32", deps="idf", fs="10176K"),
     dict(id="mp-p4-panel", label="ESP32-P4-WIFI6-Touch-LCD-4B", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_P4", variant="PRE_REV3_C6_WIFI", flash="32MB", modules="all",
-         chip="esp32p4", offset=0x2000, kind="esp32", deps="idf"),
+         chip="esp32p4", offset=0x2000, kind="esp32", deps="idf", fs="26880K"),
     dict(id="mp-s3-lcd7", label="ESP32-S3-Touch-LCD-7", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_S3", variant="LCD_7", flash="8MB", modules="all",
-         chip="esp32s3", offset=0, kind="esp32", deps="idf"),
+         chip="esp32s3", offset=0, kind="esp32", deps="idf", fs="2688K"),
     dict(id="mp-s3-lcd43", label="ESP32-S3-Touch-LCD-4.3", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_S3", variant="LCD_4_3", flash="8MB", modules="all",
-         chip="esp32s3", offset=0, kind="esp32", deps="idf"),
+         chip="esp32s3", offset=0, kind="esp32", deps="idf", fs="2688K"),
     dict(id="mp-s3-tembed", label="LilyGO T-Embed S3", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_S3", variant="T_EMBED", flash="16MB", modules="all",
-         chip="esp32s3", offset=0, kind="esp32", deps="idf"),
+         chip="esp32s3", offset=0, kind="esp32", deps="idf", fs="10880K"),
     dict(id="cp-p4-devkit", label="ESP32-P4-WIFI6-DEV-KIT", interpreter="circuitpython", port="espressif",
          board="waveshare_esp32p4_wifi6_dev_kit", variant=None, flash="16MB",
          modules="audiodsp,pygraphics,pngio,tsmux,ppa,jpegio,cameraif,castif,h264enc,usbhost,pydevices,pdwidgets,palettes,lvgl",
@@ -105,10 +115,10 @@ CELLS = [
     # Off by default until a board is on the bench to run it on.
     dict(id="mp-pico2", label="Raspberry Pi Pico 2", interpreter="micropython", port="rp2",
          board="RPI_PICO2", variant=None, flash="4MB", modules="all",
-         chip="rp2350", offset=None, kind="rp2", deps="none", optional=True),
+         chip="rp2350", offset=None, kind="rp2", deps="none", fs="1536K", optional=True),
     dict(id="mp-pico-plus2-w", label="Pimoroni Pico Plus 2 W", interpreter="micropython", port="rp2",
          board="RPI_PICO2_W", variant="PIMORONI_PICO_PLUS2_W", flash="16MB", modules="all",
-         chip="rp2350", offset=None, kind="rp2", deps="none", optional=True),
+         chip="rp2350", offset=None, kind="rp2", deps="none", fs="12416K", optional=True),
 ]
 
 # What each kind of cell must hand over, as (role, file in the build dir, required).
@@ -166,6 +176,33 @@ def wanted(pico2=False):
     return [c for c in CELLS if pico2 or not c.get("optional")]
 
 
+def size_bytes(text):
+    """A cell's `fs` in bytes ("2688K", "1M"), or None if it isn't whole 4 KB flash sectors."""
+    m = re.fullmatch(r"(\d+)([KM]?)", text or "")
+    n = int(m.group(1)) * {"": 1, "K": 1024, "M": MB}[m.group(2)] if m else 0
+    return n if n and n % 4096 == 0 else None
+
+
+def keeps_fs(c):
+    """Whether a cell's filesystem is ours to keep in place: MicroPython's on
+    esp32 and rp2, whose layout build_mp.py works out. CircuitPython's boards and
+    the GIGA's QSPI filesystem have a layout of their own."""
+    return c["interpreter"] == "micropython" and c["kind"] in ("esp32", "rp2")
+
+
+def check_cells():
+    """Every cell whose filesystem build_mp.py places names the size it keeps."""
+    problems = []
+    for c in CELLS:
+        if keeps_fs(c) and not size_bytes(c.get("fs")):
+            problems.append(f"{c['id']}: names no filesystem to keep (fs={c.get('fs')!r}), so a release "
+                            "could move it and empty every board that updates")
+        elif not keeps_fs(c) and "fs" in c:
+            problems.append(f"{c['id']}: fs is for MicroPython's esp32 and rp2 cells")
+    if problems:
+        raise Failed("\n".join(problems))
+
+
 def sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -187,6 +224,7 @@ def read_lock(name):
 
 def matrix(pico2, only=()):
     """The cells to build: all the wanted ones, or just the ids in `only`."""
+    check_cells()
     for cell_id in only:
         cell(cell_id)
     rows = [{k: c[k] for k in ("id", "label", "kind", "deps", "interpreter")}
@@ -245,6 +283,8 @@ def build_args(c):
         args += ["--variant", c["variant"]]
     if c["interpreter"] == "micropython" and c["port"] == "esp32":
         args += ["--flash", c["flash"]]
+    if c.get("fs"):
+        args += ["--keep-fs", c["fs"]]
     args += ["--modules", c["modules"]]
     return args
 
@@ -261,7 +301,12 @@ def build(cell_id, out):
     rc = subprocess.run(args, cwd=REPO).returncode
     seconds = round(time.time() - start)
     if rc != 0:
-        raise Failed(f"build_mp.py failed for {c['id']} (exit {rc}) after {seconds} s")
+        kept = ("" if not c.get("fs") else
+                f". If it says the firmware doesn't fit beside the {c['fs']} filesystem, the image has outgrown "
+                "the flash this board keeps for it: build fewer modules into it, or give the cell a smaller fs on "
+                "purpose, which moves the board's filesystem (the release notes then tell its users to copy their "
+                "files off first)")
+        raise Failed(f"build_mp.py failed for {c['id']} (exit {rc}) after {seconds} s{kept}")
     src = build_dir(c)
     record = json.loads((src / "pydevices-build.json").read_text())
     if not record.get("complete"):
@@ -304,6 +349,9 @@ def build(cell_id, out):
     meta["module_revisions"] = {n: m for n, m in sorted((record.get("module_revisions") or {}).items())}
     if c["interpreter"] == "circuitpython":
         meta["circuitpython_patches"] = record.get("circuitpython_patches", [])
+    if c["kind"] == "rp2" and record.get("rp2_storage_bytes"):
+        # A UF2 doesn't say where the filesystem starts; the build's CMake cache does.
+        meta["rp2_storage_bytes"] = record["rp2_storage_bytes"]
     if c["kind"] == "esp32":
         args_json = json.loads((src / "flasher_args.json").read_text())
         meta["esptool"] = {"chip": args_json.get("extra_esptool_args", {}).get("chip"),
@@ -322,6 +370,62 @@ BOOTLOADER = {"esp32s3": 0x0, "esp32p4": 0x2000}
 UF2_MAGICS = (b"UF2\n", b"WQ]\x9e", b"\x30\x6f\xb1\x0a")  # start magic 0, 1 and the end magic
 # Smallest sizes a firmware that carries this interpreter and its modules can have.
 MIN_BYTES = {"esp32": 1 * MB, "espressif": 1 * MB, "rp2": 512 * 1024, "stm32": 1 * MB}
+# Where an RP2040's or RP2350's flash appears, and the UF2 family of a block
+# written at an absolute address (the RP2350's errata block past the image).
+XIP_BASE = 0x10000000
+UF2_FAMILY_ABSOLUTE = 0xE48BFF57
+
+
+def esp32_fs(table, flash_bytes):
+    """(offset, size) of the filesystem MicroPython mounts with this binary
+    partition table: the data partition named vfs (or ffat), or else the flash
+    after the last partition, which it makes one of at boot."""
+    end, named = 0, None
+    for at in range(0, len(table) - 31, 32):
+        if table[at:at + 2] != b"\xaa\x50":
+            break
+        ptype, offset, size = table[at + 2], *struct.unpack_from("<II", table, at + 4)
+        label = table[at + 12:at + 28].split(b"\0", 1)[0]
+        end = max(end, offset + size)
+        if ptype == 1 and label in (b"vfs", b"ffat") and named is None:
+            named = (offset, size)
+    return named or (end, flash_bytes - end)
+
+
+def uf2_end(blob):
+    """The flash address just past the last byte a UF2 writes, leaving out the
+    blocks written at an absolute address."""
+    end = 0
+    for at in range(0, len(blob) - 511, 512):
+        flags, addr, size, _, _, family = struct.unpack_from("<IIIIII", blob, at + 8)
+        if not (flags & 0x2000 and family == UF2_FAMILY_ABSOLUTE):
+            end = max(end, addr + size)
+    return end
+
+
+def check_fs(c, meta, data, flash_bytes):
+    """A cell that keeps its filesystem: the build put it where the cell says,
+    so a board that updates keeps its files. Adds fs_offset and fs_bytes to meta."""
+    want = size_bytes(c.get("fs"))
+    if c["kind"] == "esp32":
+        if "partitions" not in data:
+            return []
+        offset, size = esp32_fs(data["partitions"].read_bytes(), flash_bytes)
+    else:
+        size = meta.get("rp2_storage_bytes")
+        if not size:
+            return [f"{c['id']}: the build recorded no filesystem size, so where it starts isn't known"]
+        offset = flash_bytes - size
+    meta["fs_offset"], meta["fs_bytes"] = hex(offset), size
+    problems = []
+    if size != want or offset != flash_bytes - want:
+        problems.append(f"{c['id']}: the filesystem is {size // 1024} KB at {offset:#x}, not the {c['fs']} at "
+                        f"{flash_bytes - want:#x} the cell keeps: a board that updates would come up with an empty one")
+    if "uf2" in data and uf2_end(data["uf2"].read_bytes()) > XIP_BASE + offset:
+        problems.append(f"{c['id']}: {data['uf2'].name} writes past {XIP_BASE + offset:#x}, into the filesystem")
+    if "flash" in data and c["offset"] + data["flash"].stat().st_size > offset:
+        problems.append(f"{c['id']}: {data['flash'].name} writes past {offset:#x}, into the filesystem")
+    return problems
 
 
 def check_stm32(c, data, flash_bytes):
@@ -417,6 +521,8 @@ def check_cell(d, c):
             problems.append(f"{c['id']}: {data['uf2'].name} has no UF2 block magic")
         elif len(blob) // 512 * 256 > flash_bytes:
             problems.append(f"{c['id']}: {data['uf2'].name} carries more than the {c['flash']} flash holds")
+    if c.get("fs"):
+        problems += check_fs(c, meta, data, flash_bytes)
     for role in ("elf", "map"):
         if role in data and data[role].stat().st_size < 1024:
             problems.append(f"{c['id']}: {data[role].name} is only {data[role].stat().st_size} bytes")
@@ -503,6 +609,8 @@ def assemble(indir, out, pico2, tag, run_url, now=None):
             entry["esptool"] = m["esptool"]
         if "circuitpython_patches" in m:
             entry["circuitpython_patches"] = m["circuitpython_patches"]
+        if m.get("fs_offset"):
+            entry["fs_offset"], entry["fs_bytes"] = m["fs_offset"], m["fs_bytes"]
         entry["files"] = files
         builds.append(entry)
 
@@ -520,11 +628,11 @@ def assemble(indir, out, pico2, tag, run_url, now=None):
 
 def summary(doc):
     lines = [f"Firmware set {doc['tag']}" + (" (preview pins: never published)" if doc["preview"] else ""),
-             "", "| Cell | Build | Flash image | Offset | Build time |", "|---|---|---:|---|---:|"]
+             "", "| Cell | Build | Flash image | Offset | Filesystem | Build time |", "|---|---|---:|---|---|---:|"]
     for b in doc["builds"]:
         main = next(f for f in b["files"] if f["role"] in ("flash", "uf2"))
         lines.append(f"| {b['id']} | {b['label']} | {main['size'] / MB:.2f} MB | {b.get('flash_offset') or 'UF2'} "
-                     f"| {b['build_seconds'] // 60} min {b['build_seconds'] % 60:02d} s |")
+                     f"| {fs_text(b)} | {b['build_seconds'] // 60} min {b['build_seconds'] % 60:02d} s |")
     return "\n".join(lines) + "\n"
 
 
@@ -560,8 +668,25 @@ def write_command(b, f):
     return f"esptool --chip {b['chip']} write-flash {b['flash_offset']} {f['name']}"
 
 
-def notes(doc):
-    """The draft Release's body, for whoever opens it."""
+def kind_of(b):
+    return "MicroPython" if b["interpreter"] == "micropython" else "CircuitPython-compatible"
+
+
+def fs_text(b):
+    return f"{b['fs_bytes'] // 1024:,} KB at {b['fs_offset']}" if b.get("fs_offset") else ""
+
+
+def moved(doc, previous):
+    """The builds whose filesystem isn't where the previous set put it."""
+    before = {b["id"]: b for b in (previous or {}).get("builds", []) if b.get("fs_offset")}
+    return [(b, before[b["id"]]) for b in doc["builds"] if b["id"] in before and b.get("fs_offset")
+            and (b["fs_offset"], b["fs_bytes"]) != (before[b["id"]]["fs_offset"], before[b["id"]]["fs_bytes"])]
+
+
+def notes(doc, previous=None):
+    """The draft Release's body, for whoever opens it. `previous` is the
+    firmware.json of the last set people could download: a board whose
+    filesystem this set moves is named at the top."""
     tag = doc["tag"]
     lines = []
     if doc["preview"]:
@@ -569,13 +694,20 @@ def notes(doc):
                   ". This draft stays private until a set is built from tagged versions.", ""]
     lines += [f"OmniPython firmware {tag}: MicroPython {doc['micropython']}"
               + (f" and CircuitPython-compatible {doc['circuitpython']}" if doc.get("circuitpython") else "")
-              + f", built by [this run]({doc['run']}) on {doc['built'][:10]}.", "",
-              "**Before you flash,** copy your files off the board, `secrets.py` above all. A build can move the "
-              "filesystem, and after a flash across a layout change MicroPython finds the old data where its "
-              "filesystem now starts, says it looks corrupted and mounts nothing. So when the partition table "
-              "changes, or you come from another firmware (MicroPython to CircuitPython or back), run "
-              "`esptool --chip <chip> erase-flash` first, then put your files back.", "",
-              "| Board | Interpreter | File to flash | How |", "|---|---|---|---|"]
+              + f", built by [this run]({doc['run']}) on {doc['built'][:10]}.", ""]
+    shifted = moved(doc, previous)
+    if shifted:
+        lines += [f"**This release moves the filesystem** on the boards below. Updating one from {previous['tag']} "
+                  "leaves it with an empty filesystem, so copy its files off first, and put them back after.", ""]
+        lines += [f"- {b['label']}, {kind_of(b)}: {fs_text(b)}, was {fs_text(old)}" for b, old in shifted]
+        lines += [""]
+    lines += ["**Before you flash,** copy your files off the board, `secrets.py` above all. Each MicroPython "
+              "board's filesystem keeps its size and place from one release to the next, as the table gives it, "
+              "and a release that moves one says so at the top. After a flash across a layout change MicroPython "
+              "finds the old data where its filesystem now starts, says it looks corrupted and mounts nothing. "
+              "So when the filesystem moves, or you come from another firmware (MicroPython to CircuitPython or "
+              "back), run `esptool --chip <chip> erase-flash` first, then put your files back.", "",
+              "| Board | Interpreter | File to flash | How | Filesystem |", "|---|---|---|---|---|"]
     for b in doc["builds"]:
         f = next(x for x in b["files"] if x["role"] in ("flash", "uf2"))
         how = ("copy it onto the board's BOOTSEL drive" if f["role"] == "uf2"
@@ -586,8 +718,7 @@ def notes(doc):
             # Two images, the Wi-Fi firmware first.
             names = f"`{wifi['name']}`, then `{f['name']}`"
             how = f"`{write_command(b, wifi)}`, then `{write_command(b, f)}`"
-        kind = "MicroPython" if b["interpreter"] == "micropython" else "CircuitPython-compatible"
-        lines.append(f"| {b['label']} | {kind} {b['interpreter_version']} | {names} | {how} |")
+        lines.append(f"| {b['label']} | {kind_of(b)} {b['interpreter_version']} | {names} | {how} | {fs_text(b)} |")
     if any(b["chip"] == "stm32h747" for b in doc["builds"]):
         lines += ["",
                   "The GIGA's two images are written in its bootloader (`machine.bootloader()` at the REPL, or "
@@ -627,6 +758,7 @@ def main(argv=None):
     a.add_argument("--run-url", default="")
     n = sub.add_parser("notes")
     n.add_argument("firmware_json")
+    n.add_argument("--previous", help="the firmware.json of the last set people could download")
     n.add_argument("--out")
     sub.add_parser("cells")
     args = ap.parse_args(argv)
@@ -640,7 +772,11 @@ def main(argv=None):
         elif args.cmd == "notes":
             doc = json.loads(Path(args.firmware_json).read_text())
             check_draft_tag(doc)
-            text = notes(doc)
+            previous = json.loads(Path(args.previous).read_text()) if args.previous else None
+            text = notes(doc, previous)
+            for b, old in moved(doc, previous):
+                print(f"note: {b['id']}'s filesystem moves: {fs_text(b)}, was {fs_text(old)} in {previous['tag']}",
+                      file=sys.stderr)
             if args.out:
                 Path(args.out).write_text(text)
             else:

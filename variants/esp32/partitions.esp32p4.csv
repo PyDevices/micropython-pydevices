@@ -1,0 +1,8 @@
+# Name, Type, SubType, Offset, Size, Flags
+# Every ESP32-P4 build without a table of its own: upstream's
+# partitions-4MiBplus.csv, here so a build knows its table before it starts
+# (--keep-fs sizes it then). The filesystem takes whatever flash is left after
+# the last partition.
+nvs,      data, nvs,      0x9000,   0x6000,
+phy_init, data, phy,      0xf000,   0x1000,
+factory,  app,  factory,  0x10000,  0x1F0000,

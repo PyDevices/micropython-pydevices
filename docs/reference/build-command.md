@@ -3,7 +3,7 @@
 ```text
 ./build_mp.py [--interpreter {micropython,circuitpython}] [--port PORT]
               [--board BOARD] [--variant VARIANT] [--modules MODULES]
-              [--flash FLASH] [--no-autosize] [--coredump] [--clean]
+              [--flash FLASH] [--no-autosize] [--keep-fs SIZE] [--coredump] [--clean]
               [make arguments]
 ```
 
@@ -22,6 +22,7 @@ optional. Leave out `--modules` and it lists [`modules/`](https://github.com/PyD
 | `--modules` | A comma list of short names, full paths, or `all`. See [Modules](modules.md). |
 | `--flash` | esp32 flash size, such as `16MB`. |
 | `--no-autosize` | esp32, rp2 and the Arduino GIGA: refuse instead of growing the firmware's share of flash. |
+| `--keep-fs` | esp32 and rp2: build beside the filesystem a board already has, its size in bytes or KB (`576K`), and stop instead of moving it. See [Keep a board's files through an update](../guides/fit-firmware-on-a-small-flash.md#keep-a-boards-files-through-an-update). |
 | `--coredump` | esp32: a troubleshooting build that writes a core dump to flash on a crash. Standard builds don't. |
 | `--clean` | Delete this target's build directory first. |
 

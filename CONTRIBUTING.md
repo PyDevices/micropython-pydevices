@@ -93,6 +93,20 @@ inside the flash image, UF2 blocks, the vector table of a GIGA's main image) and
 every file's sha256 and size, the flash offset, and the pins the set was built
 from.
 
+### Each board keeps its filesystem
+
+Every MicroPython esp32 and rp2 cell names the filesystem its boards keep from
+one release to the next (`fs`), and builds with `--keep-fs` at that size. An
+image that outgrows the flash left beside it fails its build, which says what
+size would fit, instead of shipping a set that leaves an updated board with an
+empty filesystem. `assemble` checks each filesystem is where its cell says and
+records it in `firmware.json`.
+
+When an image no longer fits, build fewer modules into it, or change the cell's
+`fs` on purpose. That moves the filesystem on that board, and the draft's notes
+say so: they compare the set with the newest published one and name each board
+whose filesystem moved.
+
 ### Build a set
 
 Actions > Release firmware > Run workflow. A pull request that touches the
