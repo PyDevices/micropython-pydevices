@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 00:00:00 -0500
+Subject: [PATCH] esp32/machine_sdcard: Let a board set the SDMMC pin drive strength.
+
+ESP-IDF drives the SDMMC pins it routes through the IO MUX at full
+strength (3) on every chip but the ESP32. On the ESP32-P4X-EYE that
+makes the microSD bus ring: about one 4 KB write in 5,000 failed with a
+data CRC error, a missing CRC status or a stalled data phase, at 26
+and 40 MHz alike.
+
+A board can now set MICROPY_HW_SDMMC_DRIVE_STRENGTH (0 to 3), applied to
+its SDMMC slot's pins each time the card is initialised. That has to
+follow card init, which sets the D3 pin up again at full strength when
+it widens the bus. Boards that don't set it are unchanged.
+
+diff --git a/ports/esp32/machine_sdcard.c b/ports/esp32/machine_sdcard.c
+--- a/ports/esp32/machine_sdcard.c
++++ b/ports/esp32/machine_sdcard.c
+@@ -37,6 +37,7 @@
+ #if SOC_SDMMC_HOST_SUPPORTED
+ #include "driver/sdmmc_host.h"
+ #include "soc/sdmmc_periph.h"
++#include "driver/gpio.h"
+ #if SOC_SDMMC_IO_POWER_EXTERNAL
+ #include "sd_pwr_ctrl_by_on_chip_ldo.h"
+ #endif
+@@ -171,6 +172,46 @@
+     if (arg_vals[arg_id].u_obj != mp_const_none) \
+     config.pin_var = machine_pin_get_id(arg_vals[arg_id].u_obj)
+ 
++#if SOC_SDMMC_HOST_SUPPORTED && defined(MICROPY_HW_SDMMC_DRIVE_STRENGTH)
++// ESP-IDF drives the pins it routes through the IO MUX at full strength. On
++// some boards that makes the bus ring enough to corrupt a write now and then,
++// so a board can choose a weaker drive (0 to 3) for its SDMMC slot.
++static void sdcard_set_drive_strength(int slot, const sdmmc_slot_config_t *config) {
++    #if SOC_SDMMC_USE_GPIO_MATRIX
++    gpio_num_t pins[] = {
++        config->clk, config->cmd, config->d0, config->d1, config->d2, config->d3,
++        config->d4, config->d5, config->d6, config->d7,
++    };
++    #else
++    gpio_num_t pins[10] = {
++        GPIO_NUM_NC, GPIO_NUM_NC, GPIO_NUM_NC, GPIO_NUM_NC, GPIO_NUM_NC,
++        GPIO_NUM_NC, GPIO_NUM_NC, GPIO_NUM_NC, GPIO_NUM_NC, GPIO_NUM_NC,
++    };
++    #endif
++    #if SOC_SDMMC_USE_IOMUX
++    // A pin left unset is the slot's own IO MUX pin.
++    const sdmmc_slot_io_info_t *iomux = &sdmmc_slot_gpio_num[slot];
++    const gpio_num_t defaults[] = {
++        iomux->clk, iomux->cmd, iomux->d0, iomux->d1, iomux->d2, iomux->d3,
++        iomux->d4, iomux->d5, iomux->d6, iomux->d7,
++    };
++    #endif
++    size_t width = config->width == SDMMC_SLOT_WIDTH_DEFAULT ? sdmmc_slot_info[slot].width : config->width;
++    size_t count = width >= 8 ? 10 : width >= 4 ? 6 : 3;
++    for (size_t i = 0; i < count; ++i) {
++        gpio_num_t pin = pins[i];
++        #if SOC_SDMMC_USE_IOMUX
++        if (pin == GPIO_NUM_NC) {
++            pin = defaults[i];
++        }
++        #endif
++        if (GPIO_IS_VALID_OUTPUT_GPIO(pin)) {
++            gpio_set_drive_capability(pin, MICROPY_HW_SDMMC_DRIVE_STRENGTH);
++        }
++    }
++}
++#endif
++
+ static esp_err_t sdcard_ensure_card_init(sdcard_card_obj_t *self, bool force) {
+     if (force || !(self->flags & SDCARD_CARD_FLAGS_CARD_INIT_DONE)) {
+         DEBUG_printf("  Calling card init");
+@@ -180,6 +221,13 @@
+             // Ensure card's host structure has the correct slot after init
+             self->card.host.slot = self->host.slot;
+             self->flags |= SDCARD_CARD_FLAGS_CARD_INIT_DONE;
++            #if SOC_SDMMC_HOST_SUPPORTED && defined(MICROPY_HW_SDMMC_DRIVE_STRENGTH)
++            // After card init, which sets the D3 pin up again when it
++            // widens the bus.
++            if (!(self->host.flags & SDMMC_HOST_FLAG_SPI)) {
++                sdcard_set_drive_strength(self->host.slot, &self->slot_config);
++            }
++            #endif
+         } else {
+             self->flags &= ~SDCARD_CARD_FLAGS_CARD_INIT_DONE;
+         }

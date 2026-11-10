@@ -1,0 +1,114 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 00:00:00 -0500
+Subject: [PATCH] esp32/machine_sdcard: Stop a failed transfer before resetting the host.
+
+A write that fails partway leaves the card waiting for the rest of its
+data, and can leave the controller's data path waiting too. Recovering
+from that by resetting the controller works, but the reset runs outside
+ESP-IDF's request lock, so it can cut short a transfer on the
+controller's other slot, which on an ESP32-P4 is often the Wi-Fi
+coprocessor's SDIO link.
+
+Send the stop command first, through ESP-IDF like any other command,
+wait for the card to return to its transfer state and repeat the
+transfer. Reset the controller only if that didn't work.
+
+diff --git a/ports/esp32/machine_sdcard.c b/ports/esp32/machine_sdcard.c
+--- a/ports/esp32/machine_sdcard.c
++++ b/ports/esp32/machine_sdcard.c
+@@ -44,6 +44,7 @@
+ #endif
+ #include "driver/sdspi_host.h"
+ #include "sdmmc_cmd.h"
++#include "sd_protocol_defs.h"
+ #include "esp_log.h"
+ #include "esp_heap_caps.h"
+ #include "esp_memory_utils.h"
+@@ -88,6 +89,8 @@
+ // there, so this is the common case, not the exception.
+ #define SDCARD_BOUNCE_SECTORS (32)
+ #define SDCARD_BOUNCE_ALIGN (128)
++// How long stopping a failed transfer may take.
++#define SDCARD_STOP_TIMEOUT_MS (1000)
+ 
+ #define SDCARD_CARD_FLAGS_HOST_INIT_DONE 0x01
+ #define SDCARD_CARD_FLAGS_CARD_INIT_DONE 0x02
+@@ -628,11 +631,48 @@
+ // its FIFO.
+ esp_err_t sdmmc_host_reset(void);
+ 
+-// Bring an SDMMC slot back after a failed transfer. The failure can leave the
+-// controller's data path stuck mid-block, so that every later command times
+-// out, or the card in its programming state. Resetting the controller alone
+-// isn't enough: the card won't initialise again until its slot is set up
+-// again too. A second slot on the same controller keeps its settings.
++// Send one command to the card. ESP-IDF holds the host's request lock for the
++// whole exchange, so a second slot on the same controller isn't disturbed.
++static esp_err_t sdcard_command(sdcard_card_obj_t *self, uint32_t opcode, uint32_t arg, int flags, uint32_t *response) {
++    sdmmc_command_t cmd = {
++        .opcode = opcode,
++        .arg = arg,
++        .flags = flags,
++        .timeout_ms = SDCARD_STOP_TIMEOUT_MS,
++    };
++    esp_err_t err = self->host.do_transaction(self->host.slot, &cmd);
++    if (response) {
++        *response = cmd.response[0];
++    }
++    return err;
++}
++
++// Stop a failed transfer and wait until the card is ready for the next one. A
++// write that fails partway leaves the card waiting for the rest of its data,
++// and the controller's data path can be left waiting too. The stop command
++// ends both.
++static esp_err_t sdcard_stop(sdcard_card_obj_t *self) {
++    // A card that has already left the transfer doesn't answer the stop.
++    sdcard_command(self, MMC_STOP_TRANSMISSION, 0, SCF_CMD_AC | SCF_RSP_R1B | SCF_WAIT_BUSY, NULL);
++    int64_t t0 = esp_timer_get_time();
++    do {
++        uint32_t status;
++        if (sdcard_command(self, MMC_SEND_STATUS, MMC_ARG_RCA(self->card.rca), SCF_CMD_AC | SCF_RSP_R1, &status) == ESP_OK
++            && MMC_R1_CURRENT_STATE_STATUS(status) == MMC_R1_CURRENT_STATE_TRAN
++            && (status & MMC_R1_READY_FOR_DATA)) {
++            return ESP_OK;
++        }
++        vTaskDelay(1);
++    } while (esp_timer_get_time() - t0 < SDCARD_STOP_TIMEOUT_MS * 1000);
++    return ESP_ERR_TIMEOUT;
++}
++
++// Bring an SDMMC slot back when stopping the transfer wasn't enough. The
++// failure can leave the controller's data path stuck mid-block, so that every
++// later command times out. Resetting the controller alone isn't enough: the
++// card won't initialise again until its slot is set up again too. A second
++// slot on the same controller keeps its settings, but the reset happens
++// outside ESP-IDF's request lock and so can cut short a transfer on that slot.
+ static esp_err_t sdcard_recover(sdcard_card_obj_t *self) {
+     SDMMC.bmod.sw_reset = 1; // the DMA engine
+     esp_err_t err = sdmmc_host_reset();
+@@ -653,13 +693,19 @@
+ }
+ #endif
+ 
+-// Retry a failed transfer once after recovering the slot. Repeating a
+-// transfer is safe: it writes or reads the same sectors.
++// Retry a failed transfer after stopping it, and once more after recovering
++// the slot if that didn't work. Repeating a transfer is safe: it writes or
++// reads the same sectors.
+ static esp_err_t sdcard_transfer(sdcard_card_obj_t *self, uint8_t *buf, size_t block, size_t count, bool write) {
+     esp_err_t err = sdcard_transfer_once(self, buf, block, count, write);
+     #if SOC_SDMMC_HOST_SUPPORTED
+-    if (err != ESP_OK && !(self->host.flags & SDMMC_HOST_FLAG_SPI) && sdcard_recover(self) == ESP_OK) {
+-        err = sdcard_transfer_once(self, buf, block, count, write);
++    if (err != ESP_OK && !(self->host.flags & SDMMC_HOST_FLAG_SPI)) {
++        if (sdcard_stop(self) == ESP_OK) {
++            err = sdcard_transfer_once(self, buf, block, count, write);
++        }
++        if (err != ESP_OK && sdcard_recover(self) == ESP_OK) {
++            err = sdcard_transfer_once(self, buf, block, count, write);
++        }
+     }
+     #endif
+     return err;
