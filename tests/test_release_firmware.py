@@ -394,14 +394,14 @@ class Assemble(unittest.TestCase):
         self.pico2_set()
         doc = self.run_assemble(pico2=True)
         pico2 = next(b for b in doc["builds"] if b["id"] == "mp-pico2")
-        self.assertEqual((pico2["fs_offset"], pico2["fs_bytes"]), ("0x280000", 1536 * 1024))
+        self.assertEqual((pico2["fs_offset"], pico2["fs_bytes"]), ("0x350000", 704 * 1024))
 
     def test_an_rp2_filesystem_that_moved_is_caught(self):
         d = self.pico2_set()
         meta = json.loads((d / "cell.json").read_text())
-        meta["rp2_storage_bytes"] = 1472 * 1024
+        meta["rp2_storage_bytes"] = 640 * 1024
         (d / "cell.json").write_text(json.dumps(meta))
-        with self.assertRaisesRegex(rf.Failed, "mp-pico2: the filesystem is 1472 KB at 0x290000, not the 1536K"):
+        with self.assertRaisesRegex(rf.Failed, "mp-pico2: the filesystem is 640 KB at 0x360000, not the 704K"):
             self.run_assemble(pico2=True)
 
     def test_an_rp2_build_that_recorded_no_filesystem_is_caught(self):
@@ -414,13 +414,13 @@ class Assemble(unittest.TestCase):
 
     def test_a_uf2_that_writes_into_the_filesystem_is_caught(self):
         self.pico2_set()
-        last = rf.XIP_BASE + 0x280000 - 256
+        last = rf.XIP_BASE + 0x350000 - 256
         # The RP2350's errata block past the image is written at an absolute address and doesn't count.
         good = self.uf2_block(rf.XIP_BASE) * 2000 + self.uf2_block(last) + self.uf2_block(0x10FFFF00, rf.UF2_FAMILY_ABSOLUTE)
         self.rewrite("mp-pico2", "uf2", good)
         self.run_assemble(pico2=True)
         self.rewrite("mp-pico2", "uf2", good + self.uf2_block(last + 256))
-        with self.assertRaisesRegex(rf.Failed, "mp-pico2: firmware.uf2 writes past 0x10280000, into the filesystem"):
+        with self.assertRaisesRegex(rf.Failed, "mp-pico2: firmware.uf2 writes past 0x10350000, into the filesystem"):
             self.run_assemble(pico2=True)
 
 

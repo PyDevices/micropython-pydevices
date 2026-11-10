@@ -115,7 +115,7 @@ CELLS = [
     # Off by default until a board is on the bench to run it on.
     dict(id="mp-pico2", label="Raspberry Pi Pico 2", interpreter="micropython", port="rp2",
          board="RPI_PICO2", variant=None, flash="4MB", modules="all",
-         chip="rp2350", offset=None, kind="rp2", deps="none", fs="1536K", optional=True),
+         chip="rp2350", offset=None, kind="rp2", deps="none", fs="704K", optional=True),
     dict(id="mp-pico-plus2-w", label="Pimoroni Pico Plus 2 W", interpreter="micropython", port="rp2",
          board="RPI_PICO2_W", variant="PIMORONI_PICO_PLUS2_W", flash="16MB", modules="all",
          chip="rp2350", offset=None, kind="rp2", deps="none", fs="12416K", optional=True),

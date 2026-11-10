@@ -74,7 +74,7 @@ compile runs twice.
 ## When nothing will fit
 
 How much fits depends on the flash. On a Pico 2 (4 MB), `all` builds and fits,
-using 93 % of its 2560 KB firmware region and leaving a 1536 KB filesystem. On
+using 94 % of its 3392 KB firmware region and leaving a 704 KB filesystem. On
 a Pico (2 MB) it can't: the image is bigger than the whole flash, so the build
 stops at the first link with the overflow error. Name what your project uses instead:
 
