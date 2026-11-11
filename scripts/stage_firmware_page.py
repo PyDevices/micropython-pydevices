@@ -42,7 +42,7 @@ from pathlib import Path
 
 CHIP_FAMILY = {"esp32s3": "ESP32-S3", "esp32p4": "ESP32-P4", "esp32": "ESP32", "esp32c3": "ESP32-C3",
                "esp32c6": "ESP32-C6", "esp32s2": "ESP32-S2"}
-SERVED = ("flash", "wifi", "uf2")
+SERVED = ("flash", "wifi", "romfs", "romfs-files", "uf2")
 
 
 class Failed(Exception):
