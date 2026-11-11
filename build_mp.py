@@ -299,7 +299,8 @@ def lvgl_checkout(ws):
 
     Fetched shallow, sparse and blobless: the ports, generated/, python/ and
     the root's files (lv_conf.h), and LVGL's src/ at the commit the repository
-    records, so it downloads tens of MB rather than LVGL's whole history."""
+    records (and its include/, from LVGL 9.6), so it downloads tens of MB
+    rather than LVGL's whole history."""
     url, commit = pin(LVGL_REPO)[1:3]
     dest = MODULES_DIR / f".{LVGL_REPO}"
     if dest.is_symlink():
@@ -340,7 +341,8 @@ def lvgl_checkout(ws):
         shutil.rmtree(part, ignore_errors=True)
         die(f"{LVGL_REPO} {commit[:12]} records no lvgl submodule")
     shutil.rmtree(part / "lvgl")
-    sparse(part / "lvgl", lvgl_url, lvgl_sha[0], ["src"])
+    # LVGL 9.6 keeps its public headers in include/, beside src/.
+    sparse(part / "lvgl", lvgl_url, lvgl_sha[0], ["include", "src"])
     part.rename(dest)
     return dest.resolve()
 
