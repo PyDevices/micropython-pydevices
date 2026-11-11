@@ -772,13 +772,16 @@ big-endian into consecutive registers, and a dict when it doesn't:
 | `min`, `max`, `default` | As the tuple's. With `vts_mul`, a maximum of `-n` counts back from that many times the mode's `vts` |
 
 `sensors/` holds descriptions of the cameras `esp_cam_sensor` has drivers
-for, written by `tools/sensorgen/sensorgen.py` from Espressif's own source.
-It runs each driver on a desktop against a pretend chip, and
-`replay_check.py` plays every description back against that driver, register
-for register. A description that matches a driver on the desktop is not yet a
-camera: the OV2710's and the OV5647's are checked on a board as well, and
-those two are what the ESP32-P4 images freeze in place of their C drivers
-(`cameraif_sensors.SENSORS`, which `Camera()` tries when no driver answers).
+for, written by `tools/sensorgen/sensorgen.py` from Espressif's own source. It
+runs each driver on a desktop against a pretend chip, and `replay_check.py`
+plays every description back against that driver, register for register. Each
+file's header says whether the description was run on a sensor (the OV5647's
+and the OV2710's were, read back against their drivers on a board) or written
+from the data and not yet run on one, and where it differs from the driver.
+They are frozen into every ESP32-P4 image in place of the drivers
+(`cameraif_sensors.NAMES`), and `Camera()` tries them in turn when it isn't
+given `sensor=`. Four drivers with real logic (the Arducam modules, the two
+HDMI bridges) and four with no Bayer mode have no description.
 
 Everything except `name`, `reg_bits`, the controls and the tuning is
 required, and a missing or malformed key raises a `ValueError` naming it.
