@@ -13,6 +13,11 @@
 // run time. The REPL's CDC port is TinyUSB's own.
 #define MICROPY_HW_TINYUSB_STACK (1)
 
+// No USB drive built in: a program that wants one presents it from code with
+// usb-device-msc (MSCInterface over any block device), like every other USB
+// function, so the port starts as the REPL alone.
+#define MICROPY_HW_USB_MSC (0)
+
 // USB host on the USB-A socket, for usbhost's TinyUSB engine: TinyUSB's host
 // stack on OTG_HS (root port 1) through its internal full-speed PHY, beside
 // the device on USB-C (root port 0). Root port 1 gets no mode, so boot starts
