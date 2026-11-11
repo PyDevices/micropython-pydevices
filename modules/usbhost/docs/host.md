@@ -3,6 +3,9 @@
 What the host does today, where its limits are, and why it is built the way
 it is. The [README](../README.md) says what usbhost is and how to build it.
 
+Which device classes the packages drive, and which boards run them, are in
+[USB host support](https://github.com/PyDevices/pydevices/blob/main/docs/reference/usb-host-support.md).
+
 ## Limits, and what has been proven
 
 The controller's
@@ -26,8 +29,8 @@ the P4 reaches full-speed devices when you start the host with
 appends sensor lines to one and reads them back after a remount;
 [`usb_drive_read.py`](../examples/usb_drive_read.py) reads a file end to end and checks its SHA-256), with
 Bulk-Only Reset Recovery and REQUEST SENSE behind it, both exercised by
-a deliberate device-side failure rather than assumed; HID delivers raw reports rather than decoded
-events; and `host_stop()` on a device that was genuinely held open is now
+a deliberate device-side failure rather than assumed; HID is decoded by `usb-host-hid` into
+key, button and movement events (the raw reports stay available through `usb.core`); and `host_stop()` on a device that was genuinely held open is now
 reliable at realistic hold times (8 of 8 clean in this session's sample)
 after two rounds of fixes -- the teardown now closes each class driver's
 session properly instead of skipping straight to the raw device handle,

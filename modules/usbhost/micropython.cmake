@@ -9,10 +9,11 @@
 set(USBHOST_MOD_DIR ${CMAKE_CURRENT_LIST_DIR})
 set(USBHOST_SRC_DIR ${USBHOST_MOD_DIR}/src)
 
-# usbhost is TinyUSB all the way down -- every source below needs it -- and
-# TinyUSB is present on parts with a USB OTG controller: ESP32-S2, S3, and P4.
-# That is the same line MicroPython draws with MICROPY_PY_TINYUSB
-# (ports/esp32/esp32_common.cmake).
+# On the ESP32 this host is ESP-IDF's usb_host library, which needs a USB OTG
+# controller: ESP32-S2, S3, and P4. (The Arduino GIGA R1's TinyUSB host is wired
+# up by micropython.mk.) The device-side streaming hooks below sit on TinyUSB,
+# which is present on the same parts. That is the line MicroPython draws with
+# MICROPY_PY_TINYUSB (ports/esp32/esp32_common.cmake).
 #
 # Other ESP32 parts (C6, C3, C61, H2, classic) have USB Serial/JTAG at most, so
 # the TinyUSB component is absent from their build. rp2 fails differently and

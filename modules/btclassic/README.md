@@ -62,6 +62,8 @@ per profile that takes it.
 | `Tether(bt)` | The internet through a phone's Bluetooth tethering (PAN), as a network interface like `network.WLAN`: `connect()`, `isconnected()`, `ifconfig()` and `ipconfig()`. Pico W only. |
 | `ObjectPush(bt)` | Files and contact cards (OPP): `send()` one to a phone or computer, `pull()` its owner's card, or `listen()` and take what it sends with `received()`. |
 
+[Profiles](docs/profiles.md) lists which profiles each chip runs and which it can't.
+
 Nothing calls back into Python. Each object's state is properties, and its
 `changes()` returns a bit for each kind of state that changed since you last
 asked, so a program polls it as often as it redraws. A profile closes with

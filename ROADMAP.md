@@ -12,6 +12,9 @@ or missing for you, open an
 - **Python packages in a ROMFS partition on a 4 MB ESP32.** Put instruments or
   an app's modules in flash beside the firmware and run them in place, where a
   LittleFS filesystem has no room for that many files.
+- **USB networking from the board.** Switch on `network.USBD_NCM` in the
+  ESP32 builds that carry lwIP, so a computer reaches a board over the USB
+  cable with no Wi-Fi.
 
 ## Watching a board
 
