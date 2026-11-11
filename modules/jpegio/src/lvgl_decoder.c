@@ -30,8 +30,11 @@
 // decoder instead of being claimed.
 
 #include "lvgl/lvgl.h"
-#include "lvgl/src/draw/lv_image_decoder_private.h"  // lv_image_decoder_t.info_cb, lv_image_cache_data_t
-#include "lvgl/src/core/lv_global.h"                 // LV_GLOBAL_DEFAULT()->image_cache_draw_buf_handlers
+// lv_image_decoder_t.info_cb, lv_image_cache_data_t and
+// LV_GLOBAL_DEFAULT()->image_cache_draw_buf_handlers. lvgl_private.h is where
+// every LVGL release keeps them: 9.6 moved the decoder's header from src/draw/
+// to src/image/.
+#include "lvgl/src/lvgl_private.h"
 
 #include <string.h>
 

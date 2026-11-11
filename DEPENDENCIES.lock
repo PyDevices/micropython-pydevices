@@ -29,7 +29,7 @@ ulab              https://github.com/v923z/micropython-ulab.git       15e9997470
 # sibling checkout is linked there instead) and compiles the port for its
 # interpreter. Move the commit here to move every LVGL build, MicroPython's and
 # CircuitPython's.
-omnipython-lvgl   https://github.com/PyDevices/omnipython-lvgl.git    a13f5c75e25b8ba5133d7bf6b7a5b09971e3f5dc
+omnipython-lvgl   https://github.com/PyDevices/omnipython-lvgl.git    cf775e0f23e619edddc68d16d535bb8f6f7f3171
 
 # omnipython-lib is not a module either: it is the repository of our
 # Python-only packages (pydevices, palettes, pdwidgets, audioinstruments,
@@ -39,7 +39,7 @@ omnipython-lvgl   https://github.com/PyDevices/omnipython-lvgl.git    a13f5c75e2
 # repository until the rename. The packages the library builds from other
 # repositories (audiocomponents' two) are pinned by tag in its lib-lock.json,
 # not here.
-omnipython-lib    https://github.com/PyDevices/pydevices.git          7f5069149778cc5214d7abd3f46a0b9f2eab0042
+omnipython-lib    https://github.com/PyDevices/pydevices.git          f79afbc85b2ba79ea870bd7133c49f23858f1cb2
 
 # esp-vision (espressif/esp-vision, Apache-2.0): the source of the tflite
 # module and, later, its image stack. modules/.esp-vision/fetch.sh puts it at
