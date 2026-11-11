@@ -68,10 +68,12 @@ typedef struct {
 // register; a mask other than 0xFF makes that a read-modify-write. A field
 // with a zero mask writes the same byte every time (its "shift" is the byte),
 // a page register or a group hold. With a table, setting n writes the next
-// row of the table, a byte for each field that isn't a constant.
+// row of the table, a byte for each field that isn't a constant. `before` and
+// `after` are register lists written around the fields.
 typedef struct {
     table_blob_t fields, values;
     size_t n_fields, n_cols;    // cols: the fields that take a table byte
+    table_list_t before, after; // written around the fields (a group hold, a trigger bit)
     int min, max, def; // max <= 0 counts back from the mode's frame length, times mul
     int mul;
     bool have;
@@ -90,6 +92,7 @@ typedef struct {
     table_list_t *mode_stream;      // two a mode, on then off, when a mode has its own
     size_t n_modes;
     table_list_t init, stream_on, stream_off;
+    bool stream_toggle;             // on and off are one write: only when the state changes
     table_ctrl_t exposure, gain;
     table_list_t pattern[2];        // on, off
     bool have_pattern;
@@ -239,6 +242,7 @@ static void table_parse_list(mp_obj_t seq, table_list_t *out) {
 // value spread over consecutive registers, most significant first, or a dict:
 //   fields   bytes, four an entry: register high, low, shift, mask
 //   table    bytes: what each setting writes into the fields, setting after setting
+//   before, after   register lists written around the fields
 //   min, max, default, and vts_mul (max and default <= 0 count back from
 //   vts_mul times the frame length)
 static void table_parse_ctrl(mp_obj_t v, table_ctrl_t *out) {
@@ -264,6 +268,8 @@ static void table_parse_ctrl(mp_obj_t v, table_ctrl_t *out) {
                 mp_raise_ValueError(MP_ERROR_TEXT("control table is a row of bytes for each setting"));
             }
         }
+        table_parse_list(table_get(v, MP_QSTR_before), &out->before);
+        table_parse_list(table_get(v, MP_QSTR_after), &out->after);
         out->min = mp_obj_get_int(table_need(v, MP_QSTR_min));
         out->max = mp_obj_get_int(table_need(v, MP_QSTR_max));
         int d = table_int(v, MP_QSTR_default, out->max);
@@ -303,6 +309,8 @@ static void table_parse_ctrl(mp_obj_t v, table_ctrl_t *out) {
 static void table_free_ctrl(table_ctrl_t *c) {
     table_free_blob(&c->fields);
     table_free_blob(&c->values);
+    table_free_list(&c->before);
+    table_free_list(&c->after);
 }
 
 // A pair of lists, (on, off).
@@ -443,6 +451,7 @@ void *cameraif_table_parse(mp_obj_t desc, uint8_t *addr) {
             table_parse_list(it[0], &t->stream_on);
             table_parse_list(it[1], &t->stream_off);
         }
+        t->stream_toggle = table_int(desc, MP_QSTR_stream_toggle, 0) != 0;
         table_parse_ctrl(table_get(desc, MP_QSTR_exposure), &t->exposure);
         table_parse_ctrl(table_get(desc, MP_QSTR_gain), &t->gain);
         // Other controls, by name.
@@ -647,7 +656,7 @@ static esp_err_t table_apply(esp_cam_sensor_device_t *dev, const table_ctrl_t *c
         return ESP_ERR_INVALID_ARG;
     }
     size_t col = 0;
-    esp_err_t ret = ESP_OK;
+    esp_err_t ret = table_write_list(dev, &c->before);
     for (size_t i = 0; i < c->n_fields && ret == ESP_OK; i++, f += TABLE_FIELD) {
         uint8_t b;
         if (f[3] == 0) {
@@ -663,7 +672,7 @@ static esp_err_t table_apply(esp_cam_sensor_device_t *dev, const table_ctrl_t *c
         }
         ret = table_write_masked(dev, f[0] << 8 | f[1], b, f[3]);
     }
-    return ret;
+    return ret == ESP_OK ? table_write_list(dev, &c->after) : ret;
 }
 
 static esp_err_t table_apply_exposure(esp_cam_sensor_device_t *dev) {
@@ -747,6 +756,10 @@ static esp_err_t table_set_stream(esp_cam_sensor_device_t *dev, int enable) {
         if (i < t->n_modes && t->mode_stream[2 * i].data) {
             l = &t->mode_stream[2 * i + (enable ? 0 : 1)];
         }
+    }
+    // A toggle writes the same thing to start and to stop, so only a change counts.
+    if (t->stream_toggle && (dev->stream_status != 0) == (enable != 0)) {
+        return ESP_OK;
     }
     esp_err_t ret = table_write_list(dev, l);
     if (ret == ESP_OK) {

@@ -12,7 +12,9 @@
 
     cam = cameraif.Camera(..., sensor=SENSOR)
 
-What cameraif's table engine can't do, so this leaves out:
+Written from esp_cam_sensor 2.7.0 data, not yet run on a sensor.
+
+Differs from Espressif's driver:
 
 - the tuning differs by chip revision (eco4 / eco5); this is the one for the chip's later revision.
 
@@ -102,7 +104,8 @@ SENSOR = {
         b"\x01\x00\x00",
     ),
     "exposure": {
-        "fields": b"\x35\x00\x00\x00\x35\x01\x04\xff\x35\x02\xfc\xff",
+        "fields": b"\x35\x01\x04\xff\x35\x02\xfc\xff",
+        "before": b"\x35\x00\x00",
         "min": 5,
         "max": -25,
         "default": 681,

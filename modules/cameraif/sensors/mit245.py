@@ -12,7 +12,9 @@
 
     cam = cameraif.Camera(..., sensor=SENSOR)
 
-What cameraif's table engine can't do, so this leaves out:
+Written from esp_cam_sensor 2.7.0 data, not yet run on a sensor.
+
+Differs from Espressif's driver:
 
 - the tuning's gamma is a curve of 16 points, not a power; cameraif keeps its default exponent.
 
@@ -147,13 +149,17 @@ SENSOR = {
         b"\x01\x00\x00",
     ),
     "exposure": {
-        "fields": b"\x01\x04\x01\x00\x02\x02\x08\xff\x02\x03\x00\xff\x01\x04\x00\x00",
+        "fields": b"\x02\x02\x08\xff\x02\x03\x00\xff",
+        "before": b"\x01\x04\x01",
+        "after": b"\x01\x04\x00",
         "min": 1,
         "max": -3,
         "default": 332,
     },
     "gain": {
-        "fields": b"\x01\x04\x01\x00\x02\x04\x08\xff\x02\x05\x00\xff\x01\x04\x00\x00",
+        "fields": b"\x02\x04\x08\xff\x02\x05\x00\xff",
+        "before": b"\x01\x04\x01",
+        "after": b"\x01\x04\x00",
         "min": 0,
         "max": 608,
         "default": 0,

@@ -62,6 +62,14 @@ PRELOAD = {
     "ov5647": {0x3037: 0x03},
 }
 
+# Sensors a description has been run on, and where: their header says so. Every
+# other description is "written from esp_cam_sensor data, not yet run on a
+# sensor". Set by hand when a board check passes.
+CONFIRMED = {
+    "ov2710": "an ESP32-P4-EYE, 2026-11-11: every register of its two modes and the flip, mirror and test pattern states read back equal to the driver's, found by auto-detect with no driver in the image, and a 1920x1080 frame looks right; the ae_level table was not set on the board",
+    "ov5647": "an ESP32-P4 Devkit, 2026-11-11: every register of its five modes, exposure, flip, mirror and the test pattern read back equal to the driver's, found by auto-detect with no driver in the image",
+}
+
 # What the table engine can't express today, by the short name the fit uses.
 GAPS = {
     "control_map": "a control the engine's fields and tables can't take",
@@ -78,6 +86,7 @@ GAPS = {
     "gamma_curve": "the tuning's gamma is a curve of 16 points, not a power; cameraif keeps its default exponent",
     "tuning_by_rev": "the tuning differs by chip revision (eco4 / eco5); this is the one for the chip's later revision",
     "id_pre": "the ID check writes first",
+    "test_pattern": "the test pattern is left out: the driver's writes depend on a register bank it remembers",
 }
 
 LOGIC = {"format_reads", "trace_failed"}
@@ -435,9 +444,12 @@ class Fit:
         if any(on is False or off is False for on, off in per.values()):
             self.gap("stream_rmw", "the stream's reads aren't a mask")
             return
-        if any(on == off and on for on, off in per.values()):
-            self.gap("stream_toggle")
+        toggle = any(on == off and on for on, off in per.values())
+        if toggle and not all(on == off for on, off in per.values()):
+            self.gap("stream_toggle", "only some modes toggle")
             return
+        if toggle:
+            self.desc["stream_toggle"] = True
         common = max(set(per.values()), key=lambda p: list(per.values()).count(p))
         self.desc["stream"] = (list(common[0]), list(common[1]))
         # A mode that does it differently carries its own lists.
@@ -455,7 +467,7 @@ class Fit:
             return None
         on, off = pairs.pop()
         if not on or not off:
-            if on is False or off is False:
+            if (on is False or off is False) and name != "test_pattern":
                 self.gap("control_map", f"{name} reads registers it keeps part of")
             return None
         return list(on), list(off)
@@ -485,6 +497,8 @@ class Fit:
             return
         p = self.fit_pair("test_pattern")
         if p is None:
+            if any(self.bit_ops(i, "test_pattern", a) is False for i in self.bayer for a in (0, 1)):
+                self.gap("test_pattern")
             return
         on, off = p
         plain = lambda ops: all(len(o) == 2 and o[0] is not None for o in ops)
@@ -576,10 +590,18 @@ class Fit:
         if not vary:
             self.gap("control_map", f"{name} writes the same whatever the value")
             return None
-        const = [j for j in range(n) if j not in vary]
+        lo, hi = vary[0], vary[-1]
+        const = [j for j in range(lo, hi + 1) if j not in vary]
         if any(masks[j] != 0xFF for j in const):
-            self.gap("control_map", f"{name} keeps part of a register it writes the same every time")
+            self.gap("control_map", f"{name} keeps part of a register between its values")
             return None
+        # Constant writes before the first varying one and after the last are
+        # lists of their own (a group hold, a trigger bit); between, constant fields.
+
+        def edge(rng):
+            return tuple((layout[j][0], data[j][0]) if masks[j] == 0xFF else (layout[j][0], data[j][0], masks[j])
+                         for j in rng)
+        before, after = edge(range(0, lo)), edge(range(hi + 1, n))
         shifts = {}
         for j in vary:
             s = next((s for s in range(-8, 24)
@@ -588,18 +610,20 @@ class Fit:
                 break
             shifts[j] = s
         else:
-            # Linear: a constant write is a field with a zero mask whose "shift" is the value.
             fields = tuple((layout[j][0], data[j][0], 0) if j in const else (layout[j][0], shifts[j], masks[j])
-                           for j in range(n))
-            return {"fields": fields, "table": None, "p": p, "vals": vals, "mode": i}
+                           for j in range(lo, hi + 1))
+            return {"fields": fields, "table": None, "before": before, "after": after,
+                    "p": p, "vals": vals, "mode": i}
         # A table: every setting from min to max has to have been probed.
         first, last = (0, p["count"] - 1) if p["type"] == 3 else (p["min"], p["max"])
         if vals != list(range(first, last + 1)):
             self.gap("control_map", f"{name} isn't linear and only {len(vals)} of its settings were probed")
             return None
-        fields = tuple((layout[j][0], data[j][0], 0) if j in const else (layout[j][0], 0, masks[j]) for j in range(n))
+        fields = tuple((layout[j][0], data[j][0], 0) if j in const else (layout[j][0], 0, masks[j])
+                       for j in range(lo, hi + 1))
         table = bytes(data[j][k] for k in range(len(vals)) for j in vary)
-        return {"fields": fields, "table": table, "p": p, "vals": vals, "mode": i}
+        return {"fields": fields, "table": table, "before": before, "after": after,
+                "p": p, "vals": vals, "mode": i}
 
     def finish_limits(self, name: str, ctls: list, found: list) -> dict:
         c = ctls[0]
@@ -613,6 +637,10 @@ class Fit:
             hi = [p["max"] for p in ps]
         df = [p.get("default", hi[k]) for k, p in enumerate(ps)]
         out = {"fields": c["fields"], "table": c["table"], "min": lo[0]}
+        if c["before"]:
+            out["before"] = c["before"]
+        if c["after"]:
+            out["after"] = c["after"]
         if len(set(lo)) != 1:
             self.gap("control_map", f"{name}'s minimum differs by mode")
         mul = next((m for m in (1, 2, 4, 8, 16) if len({h - m * v for h, v in zip(hi, vts)}) == 1), None)
@@ -772,9 +800,14 @@ def emit(fit: Fit, tune: dict, tune_src: Path | None, version: str, ecs: Path) -
         "    cam = cameraif.Camera(..., sensor=SENSOR)",
     ]
     gaps = {k: v for k, v in fit.gaps.items() if k not in DROPPED}
+    where = CONFIRMED.get(fit.drv.name)
+    L += ["", f"Confirmed on hardware: {where}." if where
+          else f"Written from esp_cam_sensor {version} data, not yet run on a sensor."]
     if gaps:
-        L += ["", "What cameraif's table engine can't do, so this leaves out:", ""]
+        L += ["", "Differs from Espressif's driver:", ""]
         L += [f"- {GAPS.get(k, k)}" + (f" ({v})" if v else "") + "." for k, v in sorted(gaps.items())]
+    else:
+        L += ["", "Differs from Espressif's driver in nothing the engine can see: a replay on a desktop", "writes the same registers, mode by mode and control by control."]
     if fit.dropped:
         L += ["", "Controls cameraif doesn't use, left out: " + ", ".join(sorted(fit.dropped)) + "."]
     if "timer" in fit.gaps:
@@ -815,6 +848,8 @@ def emit(fit: Fit, tune: dict, tune_src: Path | None, version: str, ecs: Path) -
         L.append("    \"stream\": (")
         L += ["        " + blob_py(pack(lst), 8) + "," for lst in d["stream"]]
         L.append("    ),")
+        if d.get("stream_toggle"):
+            L.append("    \"stream_toggle\": True,")
     for k in ("exposure", "gain"):
         if k in d:
             L.append(f"    \"{k}\": {ctrl_py(d[k], rb, 4)},")
@@ -858,7 +893,7 @@ def emit(fit: Fit, tune: dict, tune_src: Path | None, version: str, ecs: Path) -
 def ctrl_py(c: object, rb: int, indent: int) -> str:
     """A control: a tuple when it is a plain value over consecutive registers, else a dict."""
     f = c["fields"]
-    simple = (not c.get("table") and "vts_mul" not in c
+    simple = (not c.get("table") and "vts_mul" not in c and not c.get("before") and not c.get("after")
               and all(m == 0xFF for _, _, m in f)
               and [r for r, _, _ in f] == list(range(f[0][0], f[0][0] + len(f)))
               and [s for _, s, _ in f] == [8 * (len(f) - 1 - i) for i in range(len(f))])
@@ -869,6 +904,9 @@ def ctrl_py(c: object, rb: int, indent: int) -> str:
     rows = [f"{pad}\"fields\": {blob_py(pack_fields(f), indent + 4)},"]
     if c.get("table"):
         rows.append(f"{pad}\"table\": {blob_py(c['table'], indent + 4, 24)},")
+    for k in ("before", "after"):
+        if c.get(k):
+            rows.append(f"{pad}\"{k}\": {blob_py(pack(c[k]), indent + 4)},")
     rows.append(f"{pad}\"min\": {c['min']},")
     rows.append(f"{pad}\"max\": {c['max']},")
     if df is not None:

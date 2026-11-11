@@ -12,6 +12,11 @@
 
     cam = cameraif.Camera(..., sensor=SENSOR)
 
+Confirmed on hardware: an ESP32-P4-EYE, 2026-11-11: every register of its two modes and the flip, mirror and test pattern states read back equal to the driver's, found by auto-detect with no driver in the image, and a 1920x1080 frame looks right; the ae_level table was not set on the board.
+
+Differs from Espressif's driver in nothing the engine can see: a replay on a desktop
+writes the same registers, mode by mode and control by control.
+
 Controls cameraif doesn't use, left out: stats.
 
 The driver's timer only gathers statistics for esp_ipa, which cameraif

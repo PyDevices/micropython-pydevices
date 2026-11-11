@@ -65,6 +65,7 @@ class Engine:
         f, table = c["fields"], c.get("table")
         cols = sum(1 for k in range(0, len(f), 4) if f[k + 3])
         col = 0
+        self.wlist(c.get("before"))
         for k in range(0, len(f), 4):
             reg, sh, mask = f[k] << 8 | f[k + 1], f[k + 2], f[k + 3]
             if mask == 0:
@@ -77,6 +78,7 @@ class Engine:
                 sh = sh - 256 if sh > 127 else sh
                 b = (v >> sh if sh >= 0 else v << -sh) & 0xFF
             self.write(reg, b, mask)
+        self.wlist(c.get("after"))
 
     def orient(self, which: str, on: bool) -> None:
         fl = self.d["flip"]

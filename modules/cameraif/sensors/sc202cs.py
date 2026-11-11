@@ -12,6 +12,11 @@
 
     cam = cameraif.Camera(..., sensor=SENSOR)
 
+Written from esp_cam_sensor 2.7.0 data, not yet run on a sensor.
+
+Differs from Espressif's driver in nothing the engine can see: a replay on a desktop
+writes the same registers, mode by mode and control by control.
+
 Controls cameraif doesn't use, left out: exposure_us, group_exp_gain.
 """
 
@@ -169,7 +174,8 @@ SENSOR = {
         b"\x01\x00\x00",
     ),
     "exposure": {
-        "fields": b"\x3e\x00\x00\x00\x3e\x01\x04\xff\x3e\x02\xfc\xff",
+        "fields": b"\x3e\x01\x04\xff\x3e\x02\xfc\xff",
+        "before": b"\x3e\x00\x00",
         "min": 8,
         "max": -6,
         "default": 988,

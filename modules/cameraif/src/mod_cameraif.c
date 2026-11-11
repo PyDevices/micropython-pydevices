@@ -1174,17 +1174,19 @@ static void cameraif_tune_from(cameraif_obj_t *c, mp_map_t *m, mp_obj_t *gamma, 
     }
 }
 
-// With no driver built into the firmware answering: the descriptions frozen
-// into the image (cameraif_sensors.SENSORS), each opened at its own address
-// and checked against its own chip ID. A board without the module, or a
-// malformed description, simply finds nothing.
+// The sensors cameraif knows are descriptions frozen into the image
+// (cameraif_sensors.NAMES, each a module with a SENSOR): each is opened at its
+// own address and checked against its own chip ID, one at a time, and dropped
+// from sys.modules again so a board with one camera doesn't keep nineteen
+// descriptions' dicts. A board without the module, or a malformed
+// description, simply finds nothing.
 static void cameraif_probe_described(cameraif_obj_t *c, esp_cam_sensor_config_t *cfg) {
-    mp_obj_t *items = NULL;
+    mp_obj_t *names = NULL;
     size_t n = 0;
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
         mp_obj_t mod = mp_import_name(MP_QSTR_cameraif_sensors, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
-        mp_obj_get_array(mp_load_attr(mod, MP_QSTR_SENSORS), &n, &items);
+        mp_obj_get_array(mp_load_attr(mod, MP_QSTR_NAMES), &n, &names);
         nlr_pop();
     } else {
         return;
@@ -1192,12 +1194,19 @@ static void cameraif_probe_described(cameraif_obj_t *c, esp_cam_sensor_config_t 
     for (size_t i = 0; i < n && c->sensor == NULL; i++) {
         uint8_t addr = 0;
         void *table = NULL;
+        qstr q = 0;
         if (nlr_push(&nlr) == 0) {
-            table = cameraif_table_parse(items[i], &addr);
+            q = mp_obj_str_get_qstr(names[i]);
+            mp_obj_t mod = mp_import_name(q, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+            table = cameraif_table_parse(mp_load_attr(mod, MP_QSTR_SENSOR), &addr);
             nlr_pop();
         } else {
+            if (q != 0) {
+                mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map, MP_OBJ_NEW_QSTR(q), MP_MAP_LOOKUP_REMOVE_IF_FOUND);
+            }
             continue;
         }
+        mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map, MP_OBJ_NEW_QSTR(q), MP_MAP_LOOKUP_REMOVE_IF_FOUND);
         sccb_i2c_config_t sccb_cfg = {
             .scl_speed_hz = 100000,
             .device_address = addr,
@@ -3283,10 +3292,10 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 
 // A probe that cannot fail is not a probe. Reaching this branch already means
 // the firmware was built for a target with a MIPI-CSI controller, so what is
-// left to ask is whether any sensor driver was linked into it: esp_cam_sensor
-// drivers register themselves in the detect section walked by the open path
-// above, and with no CONFIG_CAMERA_<chip> (plus its AUTO_DETECT option) the
-// section is empty and no camera can ever be found on a perfectly good bus.
+// left to ask is whether any sensor was built into it: a description frozen
+// into the image (cameraif_sensors), or an esp_cam_sensor driver, which
+// registers itself in the detect section walked by the open path above. With
+// neither, no camera can ever be found on a perfectly good bus.
 //
 // That is not hypothetical. It is exactly the state a P4 build lands in when
 // the option is missed, and this module then reports it as "no camera sensor
@@ -3299,8 +3308,17 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 // could not probe honestly even if it wanted to, and "is a sensor plugged in"
 // is already answered, with a message, by constructing a Camera.
 static mp_obj_t cameraif_available(void) {
-    return mp_obj_new_bool(&__esp_cam_sensor_detect_fn_array_start
-        < &__esp_cam_sensor_detect_fn_array_end);
+    if (&__esp_cam_sensor_detect_fn_array_start < &__esp_cam_sensor_detect_fn_array_end) {
+        return mp_const_true;
+    }
+    // No driver in the firmware: the descriptions frozen into it are the sensors.
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_import_name(MP_QSTR_cameraif_sensors, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+        nlr_pop();
+        return mp_const_true;
+    }
+    return mp_const_false;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(cameraif_available_obj, cameraif_available);
 
