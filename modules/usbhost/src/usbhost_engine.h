@@ -92,7 +92,7 @@ int usbhost_xfer_ctrl(uint32_t dev_id, const uint8_t setup[8], uint8_t *data, ui
 #endif // USBHOST_HAVE_HOST
 
 #if USBHOST_HAVE_NET
-int usbhost_net_start(uint32_t dev_id, uint8_t itf, uint8_t ep_in, uint8_t ep_out, uint16_t mps,
+int usbhost_net_start(uint32_t dev_id, uint8_t itf, uint8_t alt, uint8_t ep_in, uint8_t ep_out, uint16_t mps,
     const uint8_t mac[6], bool rndis);
 void usbhost_net_stop(void);
 int usbhost_net_info(uint32_t addr[4], uint32_t counts[5]);
