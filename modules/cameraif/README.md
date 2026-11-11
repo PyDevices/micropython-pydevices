@@ -91,7 +91,11 @@ On MicroPython older than 1.29, manifests have no `c_module()`; use the
 make USER_C_MODULES=/path/to/cameraif/micropython.cmake BOARD=ESP32_GENERIC_P4
 ```
 
-Either way, enable a sensor driver in the board's sdkconfig — for the OV5647:
+Either way, the second patch turns on every MIPI-CSI sensor driver
+`esp_cam_sensor` has, each with its probe and every mode, so whichever camera
+is plugged in is found. [sdkconfig.esp32p4](sdkconfig.esp32p4) lists them.
+To build with fewer, set them in your board's sdkconfig instead. A driver
+needs two options, as here for the OV5647:
 
 ```
 CONFIG_CAMERA_OV5647=y
@@ -101,6 +105,10 @@ CONFIG_CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
 The `AUTO_DETECT` symbol is what registers the driver's probe in the linker
 section the component scans. Set only the first and the driver compiles,
 links, and is never asked anything.
+
+The P4's ISP takes only Bayer (RAW) input. The sensors that send YUV or RGB
+(the GC2145, OV5640, OV5645 and SC121AT) and the LT6911 and TC358743 HDMI
+bridges are found and named, and `Camera` then says it can't stream them.
 
 ### On CircuitPython
 
@@ -117,8 +125,8 @@ drivers at a pinned version.
 ```
 
 `jpegio` gives `capture_jpeg()` the P4's JPEG engine and `ppa` gives
-`capture_scaled()` its scaler. The board's sdkconfig enables the sensor
-drivers, as above. On CircuitPython, `i2c=` can also be a `busio.I2C`, such as
+`capture_scaled()` its scaler. The board's sdkconfig enables every sensor
+driver, as above. On CircuitPython, `i2c=` can also be a `busio.I2C`, such as
 `board.I2C()`, and the camera joins that bus. The camera closes at the end of
 every program, before CircuitPython releases the board's I2C bus.
 
@@ -140,7 +148,7 @@ time — the P4 has one CSI controller — and constructing a second one raises.
 | `pwdn` | `-1` | Sensor power-down pin, `-1` for none |
 | `xclk` | `-1` | The pin cameraif drives the sensor's clock on, `-1` when the camera module carries its own oscillator. The OV5647 modules do; the ESP32-P4-EYE's OV2710 doesn't, and needs `xclk=11` |
 | `xclk_hz` | `24000000` | Frequency for that clock. The P4's clock router makes any that divides 480 MHz exactly; anything else falls back to LEDC on its last timer and channel |
-| `format` | `None` | Sensor format by name, by index, or by size as `(width, height)`; `None` picks the driver's default |
+| `format` | `None` | Sensor format by name, by index, or by size as `(width, height)`; `None` picks the sensor's first Bayer (RAW) mode in `formats()` |
 | `pixel_format` | `None` | What `take()` returns: a `PixelFormat` (`RGB565`, the default, `GRAYSCALE` or `JPEG`). Or `"rgb888"`, for 24-bit frames from `frame()` and `capture()` |
 | `frame_size` | `None` | The size `take()` returns, a `FrameSize`; `None` is the sensor's own ([below](#written-for-espcamera)) |
 | `jpeg_quality` | `80` | `take()`'s JPEG quality, 1-100, higher is better |

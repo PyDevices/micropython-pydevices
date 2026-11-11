@@ -2,7 +2,9 @@
 
 `cameraif` makes a MIPI-CSI camera available as a MicroPython `Camera` object
 on the ESP32-P4. It probes the sensor driver on the I2C bus instead of being
-hard-coded for one model; the proven configuration is an OV5647 at 800×800.
+hard-coded for one model. Every MIPI-CSI driver Espressif's `esp_cam_sensor`
+has is in the firmware; the proven configurations are an OV5647 at 800×800 and
+the ESP32-P4-EYE's OV2710.
 
 It is firmware user C code, not a pip or MIP package. Build the required
 ESP32-P4 firmware first, then use the Python API from a board application.
@@ -50,10 +52,10 @@ return `None` or zero when no frame arrives by the timeout.
 
 [`apply_patches.sh`](../apply_patches.sh) adds the sensor-driver component and required ESP32
 sdkconfig change to a MicroPython checkout. Build with this repository's
-[`micropython.cmake`](../micropython.cmake) as `USER_C_MODULES`, then enable the desired sensor driver
-in the board sdkconfig. For OV5647, both `CONFIG_CAMERA_OV5647=y` and its
-`AUTO_DETECT_MIPI_INTERFACE_SENSOR` setting are required; the latter registers
-the probe that discovers the sensor.
+[`micropython.cmake`](../micropython.cmake) as `USER_C_MODULES`. The sdkconfig patch turns on
+every MIPI-CSI sensor driver. Each driver needs both `CONFIG_CAMERA_<chip>=y` and
+its `AUTO_DETECT_MIPI_INTERFACE_SENSOR` setting; the latter registers the probe
+that discovers the sensor.
 
 The root [README](../README.md#install) is authoritative for the exact patch,
 build, and sdkconfig commands.
