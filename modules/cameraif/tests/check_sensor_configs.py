@@ -2,18 +2,19 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Check that every ESP32-P4 build turns on the same camera sensors.
+"""Check that every ESP32-P4 build leaves the sensor drivers out and describes every sensor.
 
-Three files carry cameraif's sensor settings: the fragment build_mp.py appends
-to every P4 build (sdkconfig.esp32p4), the patch that gives a MicroPython tree
-outside build_mp.py the same settings (patches/0002), and the CircuitPython
-board's sdkconfig. This checks that all three set the same CONFIG_CAMERA_*
-options to the same values.
+cameraif's cameras are descriptions in sensors/, frozen into every P4 image
+(cameraif_sensors.NAMES). So no esp_cam_sensor driver is built in: the fragment
+build_mp.py appends to every P4 build (sdkconfig.esp32p4) and the patch that
+gives a MicroPython tree outside build_mp.py the same settings (patches/0002)
+set no CONFIG_CAMERA_* option, and the CircuitPython board, which has no
+cameraif, is not looked at.
 
-Given esp_cam_sensor's source, it also checks that every driver with a MIPI-CSI
-interface is on (but those whose description is frozen in instead), with its MIPI auto-detect and every MIPI mode it has, and no
-DVP or SPI auto-detect, since cameraif only drives the CSI port. With
---download it fetches the version DEPENDENCIES.lock pins.
+Given esp_cam_sensor's source it also checks that every driver with a MIPI-CSI
+interface has a description in sensors/ and is in cameraif_sensors.NAMES, or is
+one of the few that can't be described, and that every description names a
+driver. With --download it fetches the version DEPENDENCIES.lock pins.
 
     python tests/check_sensor_configs.py
     python tests/check_sensor_configs.py --download
@@ -32,20 +33,24 @@ MODULE = Path(__file__).resolve().parent.parent
 REPO = MODULE.parent.parent
 FRAGMENT = MODULE / "sdkconfig.esp32p4"
 PATCH = MODULE / "patches" / "0002-micropython-esp32-p4-camera-sensor-sdkconfig.patch"
-CP_SDKCONFIG = REPO / "boards" / "circuitpython" / "espressif" / "waveshare_esp32p4_wifi6_dev_kit" / "sdkconfig"
+SENSORS = MODULE / "sensors"
+FROZEN = MODULE / "frozen" / "cameraif_sensors.py"
 LOCK = REPO / "DEPENDENCIES.lock"
 
 SETTING = re.compile(r"^(CONFIG_CAMERA_\w+)=(\S+)$")
 
-# Sensors whose C driver the MicroPython images leave out: their descriptions
-# in sensors/ are frozen in instead. The CircuitPython board has no cameraif and
-# keeps the driver.
-DESCRIBED = ("OV5647",)
-
-
-def is_described(option):
-    """Whether a CONFIG_CAMERA_* option belongs to a sensor frozen in as a description."""
-    return any(option.startswith("CONFIG_CAMERA_%s" % name) for name in DESCRIBED)
+# MIPI drivers with no description, and why: a description is data, and these
+# are not.
+NOT_DESCRIBED = {
+    "arducam_imx500": "polls its module's controller and reads its modes at run time",
+    "pivariety": "polls its module's controller and reads its modes at run time",
+    "lt6911": "an HDMI-to-CSI bridge whose mode follows the HDMI source",
+    "tc358743": "an HDMI-to-CSI bridge whose mode follows the HDMI source",
+    "gc2145": "no Bayer mode: cameraif's ISP takes only RAW",
+    "ov5640": "no Bayer mode: cameraif's ISP takes only RAW",
+    "ov5645": "no Bayer mode: cameraif's ISP takes only RAW",
+    "sc121at": "no Bayer mode: cameraif's ISP takes only RAW",
+}
 
 
 def settings(lines):
@@ -70,31 +75,19 @@ def patch_lines(patch):
 
 
 def mipi_drivers(source):
-    """{driver option: (MIPI auto-detect options, other auto-detect options,
-    MIPI mode options)} for every esp_cam_sensor driver with a MIPI-CSI port."""
-    drivers = {}
+    """The names of the esp_cam_sensor drivers with a MIPI-CSI interface."""
+    names = set()
     for kconfig in sorted((source / "sensors").glob("**/Kconfig.*")):
-        top, names, choice = None, [], False
+        top = None
         for line in kconfig.read_text().splitlines():
-            s = line.strip()
-            if s.startswith("choice"):
-                choice = True
-            elif s.startswith("endchoice"):
-                choice = False
-            m = re.match(r"(?:menu)?config (CAMERA_\w+)$", s)
+            m = re.match(r"\s*(?:menu)?config (CAMERA_\w+)$", line)
             if not m:
                 continue
             if top is None:
                 top = m.group(1)
-            elif not choice:
-                names.append(m.group(1))
-        mipi_detect = [n for n in names if n.endswith("_AUTO_DETECT_MIPI_INTERFACE_SENSOR")]
-        if not mipi_detect:
-            continue
-        other_detect = [n for n in names if re.search(r"_AUTO_DETECT_(DVP|SPI)_INTERFACE_SENSOR$", n)]
-        modes = [n for n in names if re.search(r"_MIPI_(RAW|RGB|YUV)\w*\d+FPS", n)]
-        drivers[top] = (mipi_detect, other_detect, modes)
-    return drivers
+            elif m.group(1).endswith("_AUTO_DETECT_MIPI_INTERFACE_SENSOR"):
+                names.add(top[len("CAMERA_"):].lower())
+    return names
 
 
 def pinned_sensors():
@@ -113,6 +106,12 @@ def pinned_sensors():
     return tmp
 
 
+def frozen_names():
+    """The names cameraif_sensors.NAMES lists."""
+    m = re.search(r"NAMES = \((.*?)\)", FROZEN.read_text(), re.S)
+    return re.findall(r'"(\w+)"', m.group(1)) if m else []
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--sensors", type=Path, help="an unpacked esp_cam_sensor")
@@ -120,36 +119,39 @@ def main():
     args = ap.parse_args()
 
     problems = []
-    fragment = settings(FRAGMENT.read_text().splitlines())
-    for option in sorted(fragment):
-        if is_described(option):
-            problems.append("%s is set in sdkconfig.esp32p4, but that sensor is frozen in as a description" % option)
-    for name, other in (("patches/0002", settings(patch_lines(PATCH))),
-                        ("the CircuitPython board's sdkconfig", settings(CP_SDKCONFIG.read_text().splitlines()))):
-        for option in sorted(set(fragment) | set(other)):
-            if name != "patches/0002" and is_described(option):
-                continue
-            if fragment.get(option) != other.get(option):
-                problems.append("%s: %s is %s in sdkconfig.esp32p4, %s in %s"
-                                % (option, option, fragment.get(option, "unset"), other.get(option, "unset"), name))
+    for name, found in (("sdkconfig.esp32p4", settings(FRAGMENT.read_text().splitlines())),
+                        ("patches/0002", settings(patch_lines(PATCH)))):
+        for option in sorted(found):
+            problems.append("%s sets %s: no sensor driver is built in, the descriptions are frozen" % (name, option))
+
+    described = sorted(p.stem for p in SENSORS.glob("*.py"))
+    listed = frozen_names()
+    for name in described:
+        if name not in listed:
+            problems.append("sensors/%s.py is not in cameraif_sensors.NAMES" % name)
+    for name in listed:
+        if name not in described:
+            problems.append("cameraif_sensors.NAMES lists %s, which has no description" % name)
+    if len(set(listed)) != len(listed):
+        problems.append("cameraif_sensors.NAMES lists a sensor twice")
 
     source = args.sensors or (pinned_sensors() if args.download else None)
     if source is not None:
         drivers = mipi_drivers(source)
-        for top, (mipi_detect, other_detect, modes) in sorted(drivers.items()):
-            if is_described("CONFIG_" + top):
-                continue
-            for option in [top] + mipi_detect + modes:
-                if fragment.get("CONFIG_" + option) != "y":
-                    problems.append("CONFIG_%s isn't on: every MIPI-CSI driver is, with every mode" % option)
-            for option in other_detect:
-                if fragment.get("CONFIG_" + option) == "y":
-                    problems.append("CONFIG_%s is on: cameraif only drives the CSI port" % option)
+        for name in sorted(drivers):
+            if name not in described and name not in NOT_DESCRIBED:
+                problems.append("%s has a MIPI-CSI driver and no description in sensors/" % name)
+        for name in described:
+            if name not in drivers:
+                problems.append("sensors/%s.py names no driver in this esp_cam_sensor" % name)
+        for name in sorted(NOT_DESCRIBED):
+            if name in described:
+                problems.append("%s is described but listed as one that can't be" % name)
         print("%d MIPI-CSI drivers in %s" % (len(drivers), source))
 
     for p in problems:
         print(p)
-    print("%d CONFIG_CAMERA_* settings, %s" % (len(fragment), "in step" if not problems else "%d problems" % len(problems)))
+    print("%d sensors described, %s" % (len(described), "in step" if not problems else "%d problems" % len(problems)))
     return 1 if problems else 0
 
 

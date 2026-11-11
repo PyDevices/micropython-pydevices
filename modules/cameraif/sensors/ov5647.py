@@ -12,6 +12,11 @@
 
     cam = cameraif.Camera(..., sensor=SENSOR)
 
+Confirmed on hardware: an ESP32-P4 Devkit, 2026-11-11: every register of its five modes, exposure, flip, mirror and the test pattern read back equal to the driver's, found by auto-detect with no driver in the image.
+
+Differs from Espressif's driver in nothing the engine can see: a replay on a desktop
+writes the same registers, mode by mode and control by control.
+
 The driver reads 0x3037 and acts on it; the value the chip holds before any write is fixed here:
   0x3037 = 0x03.
 """

@@ -12,6 +12,11 @@
 
     cam = cameraif.Camera(..., sensor=SENSOR)
 
+Written from esp_cam_sensor 2.7.0 data, not yet run on a sensor.
+
+Differs from Espressif's driver in nothing the engine can see: a replay on a desktop
+writes the same registers, mode by mode and control by control.
+
 Controls cameraif doesn't use, left out: stats.
 
 The driver's timer only gathers statistics for esp_ipa, which cameraif

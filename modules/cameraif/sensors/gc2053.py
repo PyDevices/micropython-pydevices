@@ -12,6 +12,11 @@
 
     cam = cameraif.Camera(..., sensor=SENSOR)
 
+Written from esp_cam_sensor 2.7.0 data, not yet run on a sensor.
+
+Differs from Espressif's driver in nothing the engine can see: a replay on a desktop
+writes the same registers, mode by mode and control by control.
+
 Controls cameraif doesn't use, left out: exposure_us, group_exp_gain.
 """
 
@@ -116,15 +121,16 @@ SENSOR = {
         b"\x00\xfe\x00\x00\x3e\x11",
     ),
     "exposure": {
-        "fields": b"\x00\xfe\x00\x00\x00\x03\x08\xff\x00\xfe\x00\x00\x00\x04\x00\xff",
+        "fields": b"\x00\x03\x08\xff\x00\xfe\x00\x00\x00\x04\x00\xff",
+        "before": b"\x00\xfe\x00",
         "min": 2,
         "max": -32,
         "default": 675,
     },
     "gain": {
         "fields": (
-            b"\x00\xfe\x00\x00\x00\xb4\x00\x00\x00\xb3\x00\xff\x00\xb8\x00\xff\x00\xb9"
-            b"\x00\xff\x00\xb1\x01\x00\x00\xb2\x00\xff"
+            b"\x00\xb3\x00\xff\x00\xb8\x00\xff\x00\xb9\x00\xff\x00\xb1\x01\x00\x00\xb2"
+            b"\x00\xff"
         ),
         "table": (
             b"\x00\x01\x00\x00\x00\x01\x00\x08\x00\x01\x00\x10\x00\x01\x00\x18\x00\x01\x00\x20\x10\x01\x0c\x00"
@@ -150,6 +156,7 @@ SENSOR = {
             b"\x93\x0d\x12\x14\x93\x0d\x12\x1c\x93\x0d\x12\x20\x93\x0d\x12\x24\x93\x0d\x12\x28\x93\x0d\x12\x30"
             b"\x93\x0d\x12\x34"
         ),
+        "before": b"\x00\xfe\x00\x00\xb4\x00",
         "min": 0,
         "max": 126,
         "default": 0,

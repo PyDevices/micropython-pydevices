@@ -12,7 +12,9 @@
 
     cam = cameraif.Camera(..., sensor=SENSOR)
 
-What cameraif's table engine can't do, so this leaves out:
+Written from esp_cam_sensor 2.7.0 data, not yet run on a sensor.
+
+Differs from Espressif's driver:
 
 - the tuning differs by chip revision (eco4 / eco5); this is the one for the chip's later revision.
 
@@ -230,21 +232,22 @@ SENSOR = {
         b"\x00\xfd\x00\x00\xba\x03",
     ),
     "exposure": {
-        "fields": b"\x00\xfd\x01\x00\x00\x0e\x08\xff\x00\x0f\x00\xff\x00\xfe\x02\x00",
+        "fields": b"\x00\x0e\x08\xff\x00\x0f\x00\xff",
+        "before": b"\x00\xfd\x01",
+        "after": b"\x00\xfe\x02",
         "min": 2,
         "max": -9,
         "default": 450,
     },
     "gain": {
-        "fields": (
-            b"\x00\xfd\x01\x00\x00\x24\x00\xff\x00\x1f\x00\x00\x00\x20\x40\x00\x00\xfe"
-            b"\x02\x00"
-        ),
+        "fields": b"\x00\x24\x00\xff",
         "table": (
             b"\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x20\x22\x24\x26\x28\x2a\x2c\x2e"
             b"\x30\x32\x34\x36\x38\x3a\x3c\x3e\x40\x44\x48\x4c\x50\x54\x58\x5c\x60\x64\x68\x6c\x70\x74\x78\x7c"
             b"\x80\x88\x90\x98"
         ),
+        "before": b"\x00\xfd\x01",
+        "after": b"\x00\x1f\x00\x00\x20\x40\x00\xfe\x02",
         "min": 0,
         "max": 51,
         "default": 16,

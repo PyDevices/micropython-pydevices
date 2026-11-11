@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: MIT
 
 # MicroPython manifest for cameraif. The module is native; its Python half is
-# the descriptions of the sensors whose C driver the ESP32-P4 images no longer
-# carry (see sensors/ and cameraif_sensors.py): frozen here, read in place from
+# the descriptions of the sensors, which the ESP32-P4 images carry in place of
+# Espressif's C drivers (see sensors/ and cameraif_sensors.py): frozen here, read in place from
 # flash, and tried by Camera() when no C driver answers.
 import os
 
@@ -13,5 +13,5 @@ c_module(".")  # this directory holds the micropython.cmake / micropython.mk for
 
 # Only the P4 has a MIPI camera for cameraif to open.
 if os.environ.get("PYDEVICES_TARGET", "").startswith("esp32/ESP32_GENERIC_P4"):
-    freeze("sensors", ("ov5647.py",))
+    freeze("sensors")
     freeze("frozen", "cameraif_sensors.py")
