@@ -771,9 +771,7 @@ static esp_err_t table_set_format(esp_cam_sensor_device_t *dev, const esp_cam_se
     table_apply_exposure(dev);
     table_apply_gain(dev);
     table_apply_orientation(dev);
-    for (size_t i = 0; i < t->n_extra; i++) {
-        table_apply(dev, &t->extra[i].c, t->extra[i].value);
-    }
+    // The other controls keep the values the mode's own list left, until set.
     return table_set_stream(dev, 0);
 }
 
