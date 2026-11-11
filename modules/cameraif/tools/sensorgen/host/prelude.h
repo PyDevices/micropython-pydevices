@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <sys/param.h>
+#include "sdkconfig.h"
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_rom_sys.h"

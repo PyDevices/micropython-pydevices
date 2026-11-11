@@ -156,6 +156,22 @@ static esp_cam_sensor_device_t *detect(void) {
     return DRIVER_DETECT(&cfg);
 }
 
+// Registers whose reset value a driver reads and acts on: TRACE_PRELOAD is
+// "reg=value,reg=value" in hex, the chip's value for them before any write.
+static void preload(void) {
+    const char *p = getenv("TRACE_PRELOAD");
+    while (p && *p) {
+        char *end;
+        unsigned long r = strtoul(p, &end, 16);
+        if (*end != '=') {
+            break;
+        }
+        unsigned long v = strtoul(end + 1, &end, 16);
+        mem[r & 0xffff] = v;
+        p = *end == ',' ? end + 1 : end;
+    }
+}
+
 // Answer the ID check: run detect once silently to see which registers it
 // reads, put the product ID there, and run it for real.
 static void seed_id(void) {
@@ -171,6 +187,7 @@ static void seed_id(void) {
     }
     quiet = 0;
     memset(mem, 0, sizeof(mem));
+    preload();
     uint32_t pid = DRIVER_PID;
     if (n_id_reads >= 2 && id_bits[0] == 8) {
         // high byte first, as every 8-bit-register driver here reads it
@@ -269,7 +286,7 @@ static void probe_bits(const char *name, uint32_t id, int ioctl_cmd) {
     memcpy(saved, mem, sizeof(mem));
     for (int m = 0; m < 2; m++) {
         read_mode = m == 0 ? READ_ZERO : READ_ONES;
-        for (int v = 0; v <= 1; v++) {
+        for (int v = 1; v >= 0; v--) {   // on first: a driver that remembers the stream skips a repeat
             char phase[48];
             snprintf(phase, sizeof(phase), "%s_%s", name, modes[m]);
             if (ioctl_cmd) {
@@ -335,6 +352,31 @@ static void probe_values_of(size_t i) {
     }
     for (size_t k = 0; k < n; k++) {
         set_param(params[i].name, params[i].id, (int32_t)vals[k]);
+    }
+    // A few of the values again with every read answering 0, then all ones,
+    // so a read-modify-write on a register shows its mask.
+    if (n > 0) {
+        size_t pick[6] = { 0, n > 1 ? 1 : 0, n / 3, n / 2, n > 1 ? n - 2 : 0, n - 1 };
+        static const char *suffix[] = { "rz", "ro" };
+        uint32_t *saved = malloc(sizeof(mem));
+        memcpy(saved, mem, sizeof(mem));
+        for (int m = 0; m < 2; m++) {
+            read_mode = m == 0 ? READ_ZERO : READ_ONES;
+            char phase[48];
+            snprintf(phase, sizeof(phase), "%s_%s", params[i].name, suffix[m]);
+            // A control with few settings may be a table, so every one; else a spread.
+            size_t count = n <= 700 ? n : 6;
+            for (size_t k = 0; k < count; k++) {
+                size_t at = n <= 700 ? k : pick[k];
+                if (n > 700 && k > 0 && pick[k] == pick[k - 1]) {
+                    continue;
+                }
+                set_param(phase, params[i].id, (int32_t)vals[at]);
+            }
+        }
+        read_mode = READ_MEM;
+        memcpy(mem, saved, sizeof(mem));
+        free(saved);
     }
 }
 
