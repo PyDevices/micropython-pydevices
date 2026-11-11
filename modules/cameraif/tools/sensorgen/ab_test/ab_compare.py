@@ -74,7 +74,7 @@ def compare(root: Path, mode: str) -> None:
         path = root / arm / f"{mode}.json"
         if path.exists():
             runs[arm] = json.loads(path.read_text())
-    if "driver" not in runs:
+    if ARMS[0] not in runs:
         print(f"{mode}: no driver run, nothing to compare against")
         return
     print(f"\n{mode}")
@@ -97,9 +97,9 @@ def compare(root: Path, mode: str) -> None:
             f"{arm:12} {luma:6.1f} {mean[0]:5.0f} {mean[1]:5.0f} {mean[2]:5.0f} {times} "
             f"{run['color_temp'] or '-':>7} {np.abs(h - base).sum() / 2:6.3f}"
         )
-    driver = dict(runs["driver"]["regs"])
+    driver = dict(runs[ARMS[0]]["regs"])
     for arm, run in runs.items():
-        if arm == "driver":
+        if arm == ARMS[0]:
             continue
         diffs = [(r, driver.get(r), v) for r, v in run["regs"] if driver.get(r) != v]
         moving = [d for d in diffs if d[0] in AE_REGS]
