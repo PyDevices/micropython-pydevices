@@ -172,6 +172,9 @@
   },
   "0057-micropython-py-scheduler-no-callbacks-while-irqs-are-disabled.patch": {
    "sha256": "623b63b01d950a07f933124be33cbe9a13d65f2207dc9e459312cc8a3ce0ddf9"
+  },
+  "0058-micropython-esp32-sdcard-release-the-ldo-when-the-constructor-fails.patch": {
+   "sha256": "3a81627727a3ce1913cf542cc1b31cf24094fee9eb5935237d1ba040ffc081ff"
   }
  },
  "tinyusb_patches": {
