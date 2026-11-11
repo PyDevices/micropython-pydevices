@@ -91,11 +91,11 @@ On MicroPython older than 1.29, manifests have no `c_module()`; use the
 make USER_C_MODULES=/path/to/cameraif/micropython.cmake BOARD=ESP32_GENERIC_P4
 ```
 
-Either way, the second patch turns on every MIPI-CSI sensor driver
-`esp_cam_sensor` has, each with its probe and every mode, so whichever camera
-is plugged in is found. [sdkconfig.esp32p4](sdkconfig.esp32p4) lists them.
-To build with fewer, set them in your board's sdkconfig instead. A driver
-needs two options, as here for the OV5647:
+Either way, no `esp_cam_sensor` sensor driver is built in. Every camera cameraif
+knows is a description in [sensors/](sensors), frozen into the firmware and
+tried in turn when you don't pass `sensor=`, so whichever of those cameras is
+plugged in is found. To build one of Espressif's drivers in as well, set its
+options in your board's sdkconfig. A driver needs two:
 
 ```
 CONFIG_CAMERA_OV5647=y
@@ -104,11 +104,13 @@ CONFIG_CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
 
 The `AUTO_DETECT` symbol is what registers the driver's probe in the linker
 section the component scans. Set only the first and the driver compiles,
-links, and is never asked anything.
+links, and is never asked anything. Built-in drivers are probed before the
+frozen descriptions.
 
 The P4's ISP takes only Bayer (RAW) input. The sensors that send YUV or RGB
 (the GC2145, OV5640, OV5645 and SC121AT) and the LT6911 and TC358743 HDMI
-bridges are found and named, and `Camera` then says it can't stream them.
+bridges have no description, so `Camera` doesn't find them unless you build
+their driver in, and then says it can't stream them.
 
 ### On CircuitPython
 
