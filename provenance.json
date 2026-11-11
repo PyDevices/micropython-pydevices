@@ -166,6 +166,9 @@
   },
   "0055-micropython-stm32-sdio-invalidate-the-dcache-after-a-dma-read.patch": {
    "sha256": "4b0cc28efb118b20bf84c61ac1c5cb8195c23a1ac3214b7ba6bef0ffa54fe722"
+  },
+  "0056-micropython-extmod-websocket-dont-block-a-read-during-a-blocking-write.patch": {
+   "sha256": "7a303c6411aadd790622e78b7d0ad8678123fd9c519017deea836cad4a035ac7"
   }
  },
  "tinyusb_patches": {

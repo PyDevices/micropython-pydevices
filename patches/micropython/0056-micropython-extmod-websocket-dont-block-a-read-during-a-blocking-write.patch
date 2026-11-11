@@ -1,0 +1,104 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 00:00:00 -0500
+Subject: [PATCH] extmod/modwebsocket: Don't block a read during a blocking write.
+
+A websocket made with blocking writes (WebREPL makes one) switches its
+socket to blocking mode for each write, and back to non-blocking after
+it. While the write waits for room to send, the network stack can run
+scheduled callbacks, and os.dupterm_notify is one: it reads from the
+same websocket, with the scheduler locked. That read found the socket
+in blocking mode. Once it had taken every byte that had arrived, it
+waited for more, and if the client sent nothing it never returned, so
+the write under it never finished either.
+
+On an Arduino GIGA R1 (STM32H747), with the stm32 port's lwIP sockets,
+a long output over WebREPL hung the board this way: printing 80 kB at
+a time stopped partway through, sometimes in the first dump and
+sometimes after a few dozen. A sampler in
+SysTick put every sample of the hang in mp_event_wait_ms() under
+lwip_tcp_receive(), called from websocket_read() and _webrepl_read(),
+with the scheduler locked twice. With this change the same board ran
+180 such dumps in four rounds without a stall, and Ctrl-C still stopped
+a long print over WebREPL each of ten times.
+
+Read without blocking when a blocking write is in progress, and give
+the socket back to the write afterwards. A write nested inside another
+one (a close reply sent from such a read) now leaves the socket in
+blocking mode for the outer write, instead of switching it to
+non-blocking under it.
+
+diff --git a/extmod/modwebsocket.c b/extmod/modwebsocket.c
+--- a/extmod/modwebsocket.c
++++ b/extmod/modwebsocket.c
+@@ -36,7 +36,7 @@
+ 
+ enum { FRAME_HEADER, FRAME_OPT, PAYLOAD, CONTROL };
+ 
+-enum { BLOCKING_WRITE = 0x80 };
++enum { BLOCKING_WRITE = 0x80, WRITING = 0x40 };
+ 
+ typedef struct _mp_obj_websocket_t {
+     mp_obj_base_t base;
+@@ -74,8 +74,34 @@ static mp_obj_t websocket_make_new(const mp_obj_type_t *type, size_t n_args, siz
+     return MP_OBJ_FROM_PTR(o);
+ }
+ 
++static void websocket_set_blocking(mp_obj_websocket_t *self, bool blocking) {
++    mp_obj_t dest[3];
++    mp_load_method(self->sock, MP_QSTR_setblocking, dest);
++    dest[2] = mp_obj_new_bool(blocking);
++    mp_call_method_n_kw(1, 0, dest);
++}
++
++static mp_uint_t websocket_read_frames(mp_obj_t self_in, void *buf, mp_uint_t size, int *errcode);
++
+ static mp_uint_t websocket_read(mp_obj_t self_in, void *buf, mp_uint_t size, int *errcode) {
+     mp_obj_websocket_t *self = MP_OBJ_TO_PTR(self_in);
++    if (!(self->opts & WRITING)) {
++        return websocket_read_frames(self_in, buf, size, errcode);
++    }
++    // A blocking write is waiting for room to send, with the socket switched
++    // to blocking mode. Scheduled callbacks can run during that wait, and one
++    // of them can read from this stream (os.dupterm_notify does, with the
++    // scheduler locked). That read must not block: if no more data arrives,
++    // it would never return and the write would never finish. Read without
++    // blocking, then give the write its blocking socket back.
++    websocket_set_blocking(self, false);
++    mp_uint_t out_sz = websocket_read_frames(self_in, buf, size, errcode);
++    websocket_set_blocking(self, true);
++    return out_sz;
++}
++
++static mp_uint_t websocket_read_frames(mp_obj_t self_in, void *buf, mp_uint_t size, int *errcode) {
++    mp_obj_websocket_t *self = MP_OBJ_TO_PTR(self_in);
+ 
+     const mp_stream_p_t *stream_p = mp_get_stream(self->sock);
+     while (1) {
+@@ -244,11 +270,10 @@ static mp_uint_t websocket_write(mp_obj_t self_in, const void *buf, mp_uint_t si
+ static mp_uint_t websocket_write_raw(mp_obj_t self_in, const byte *header, int hdr_sz, const void *buf, mp_uint_t size, int *errcode) {
+     mp_obj_websocket_t *self = MP_OBJ_TO_PTR(self_in);
+ 
+-    mp_obj_t dest[3];
++    byte writing = self->opts & WRITING;
+     if (self->opts & BLOCKING_WRITE) {
+-        mp_load_method(self->sock, MP_QSTR_setblocking, dest);
+-        dest[2] = mp_const_true;
+-        mp_call_method_n_kw(1, 0, dest);
++        websocket_set_blocking(self, true);
++        self->opts |= WRITING;
+     }
+ 
+     mp_uint_t out_sz = mp_stream_write_exactly(self->sock, header, hdr_sz, errcode);
+@@ -257,8 +282,9 @@ static mp_uint_t websocket_write_raw(mp_obj_t self_in, const byte *header, int h
+     }
+ 
+     if (self->opts & BLOCKING_WRITE) {
+-        dest[2] = mp_const_false;
+-        mp_call_method_n_kw(1, 0, dest);
++        // A write nested in another one leaves the socket blocking for it.
++        self->opts = (self->opts & ~WRITING) | writing;
++        websocket_set_blocking(self, writing != 0);
+     }
+ 
+     if (*errcode != 0) {
