@@ -19,9 +19,9 @@ micropython       https://github.com/micropython/micropython          b70ae1aca6
 # is missing; in a workspace modules/<name> is a link to the sibling checkout
 # and wins. castif is not here: it lives in modules/castif, tracked in this
 # repository.
-audiodsp          https://github.com/PyDevices/audiodsp.git           8d5c4a0ca69f12425c39c811ae190682655e5805
+audiodsp          https://github.com/PyDevices/audiodsp.git           c0ae8fba81946593698a51aae707cb54989f587e
 pygraphics        https://github.com/PyDevices/pygraphics.git         f97fd2e20e73f23c2138ab52a630cf04b0a7aea1
-ulab              https://github.com/v923z/micropython-ulab.git       1d3ddd8f5228e2c7335dac71f4846e6abb0ec9f9
+ulab              https://github.com/v923z/micropython-ulab.git       15e999747079205b2415e71a6aa2840b8f85f9dc
 
 # omnipython-lvgl is not a module directory: it is LVGL, its generated
 # bindings and a port per interpreter. --modules names it lvgl ("all" takes it
@@ -39,7 +39,7 @@ omnipython-lvgl   https://github.com/PyDevices/omnipython-lvgl.git    95eba21906
 # repository until the rename. The packages the library builds from other
 # repositories (audiocomponents' two) are pinned by tag in its lib-lock.json,
 # not here.
-omnipython-lib    https://github.com/PyDevices/pydevices.git          e691f190adf0fe880c67f0a93840895111e1701c
+omnipython-lib    https://github.com/PyDevices/pydevices.git          7f5069149778cc5214d7abd3f46a0b9f2eab0042
 
 # esp-vision (espressif/esp-vision, Apache-2.0): the source of the tflite
 # module and, later, its image stack. modules/.esp-vision/fetch.sh puts it at

@@ -97,7 +97,13 @@ def log_mel(audio):
     rows = np.zeros((count, BANDS))
     for i in range(count):
         frame[:WINDOW] = audio[i * HOP : i * HOP + WINDOW] * hann
-        real, imag = np.fft.fft(frame)
+        # ulab with complex numbers returns one complex array, as numpy
+        # does; without them it returns the real and imaginary parts.
+        spectrum = np.fft.fft(frame)
+        if isinstance(spectrum, tuple):
+            real, imag = spectrum
+        else:
+            real, imag = np.real(spectrum), np.imag(spectrum)
         magnitude = np.sqrt(real[: FFT // 2 + 1] ** 2 + imag[: FFT // 2 + 1] ** 2)
         rows[i, :] = np.log(np.dot(magnitude, weights) + 0.001)
     return rows
