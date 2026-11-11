@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 00:00:00 -0600
+Subject: [PATCH] py/scheduler: Don't run callbacks between disable_irq() and
+ enable_irq().
+
+The VM checks for pending callbacks at every backward jump, so a loop
+between machine.disable_irq() and machine.enable_irq() runs any callback
+that is due there, with interrupts still off. usb.device's Buffer does
+this: finish_read() and finish_write() shuffle bytes in a loop inside
+disable_irq(), and they run for every USB transfer.
+
+On esp32, disable_irq() is a FreeRTOS critical section. A callback that
+waits on an interrupt then waits inside it: an I2C transfer blocks on its
+completion interrupt, the yield that would switch away can't fire, and the
+task places itself on the I2C queue's wait list a second time. The list
+links to itself and the next insert spins, until the interrupt watchdog
+resets the chip ("Interrupt wdt timeout on CPU1", in vListInsert under
+xQueueReceive in the I2C master driver). An LVGL app polling a touch panel
+from a timer while a USB MIDI device sends hit it within a minute; a
+3 ms timer reading an I2C register while the USB device echoes MIDI hits
+it in one to four seconds.
+
+Leave callbacks pending while the atomic section is nested. They run at
+the next check after enable_irq(). Ports opt in by defining
+MICROPY_ATOMIC_SECTION_NESTED(); esp32 reads the depth of its recursive
+mp_atomic_mux.
+
+diff --git a/ports/esp32/mphalport.h b/ports/esp32/mphalport.h
+--- a/ports/esp32/mphalport.h
++++ b/ports/esp32/mphalport.h
+@@ -90,6 +90,10 @@
+ #define MICROPY_BEGIN_ATOMIC_SECTION() mp_begin_atomic_section()
+ #define MICROPY_END_ATOMIC_SECTION(state) mp_end_atomic_section(state)
+ 
++// Whether the atomic section just taken is nested inside another on this core.
++// mp_atomic_mux is a recursive spinlock and its count is the nesting depth.
++#define MICROPY_ATOMIC_SECTION_NESTED() (mp_atomic_mux.count > 1)
++
+ __attribute__((always_inline)) static inline mp_uint_t mp_hal_ticks_us(void) {
+     return esp_timer_get_time();
+ }
+diff --git a/py/scheduler.c b/py/scheduler.c
+--- a/py/scheduler.c
++++ b/py/scheduler.c
+@@ -82,6 +82,17 @@
+         return;
+     }
+ 
++    #ifdef MICROPY_ATOMIC_SECTION_NESTED
++    if (MICROPY_ATOMIC_SECTION_NESTED()) {
++        // We were called from inside an atomic section, such as Python code
++        // between machine.disable_irq() and machine.enable_irq(). A callback
++        // that waits on an interrupt (an I2C transfer, a sleep) would wait with
++        // interrupts off, so leave the callbacks pending until it ends.
++        MICROPY_END_ATOMIC_SECTION(atomic_state);
++        return;
++    }
++    #endif
++
+     // Equivalent to mp_sched_lock(), but we're already in the atomic
+     // section and know that we're pending.
+     MP_STATE_VM(sched_state) = MP_SCHED_LOCKED;
