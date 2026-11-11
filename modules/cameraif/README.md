@@ -734,13 +734,24 @@ cam = cameraif.Camera(7, 8, i2c=1, reset=21, sensor=SENSOR)
 | `name` | What `sensor()` reports |
 | `addr`, `reg_bits` | The SCCB address, and 8- or 16-bit register addresses |
 | `id` | `(register, value)`: the 16-bit chip ID, in that register and the next |
-| `init` | `[(register, value), ...]` written before every mode; `(None, ms)` waits |
-| `modes` | A list of dicts: `name`, `width`, `height`, `fps`, `format` (`"raw8"`, `"raw10"`, `"raw12"`), `bayer`, `lanes`, `lane_hz`, `pclk`, `hts`, `vts`, and the mode's `regs` |
-| `stream` | `(registers on, registers off)` |
+| `init` | A register list, written before every mode ([below](#a-register-list)) |
+| `modes` | A list of dicts: `name`, `width`, `height`, `fps`, `format` (`"raw8"`, `"raw10"`, `"raw12"`), `bayer`, `lanes`, `lane_hz`, `pclk`, `hts`, `vts`, and the mode's `regs`, a register list |
+| `stream` | `(register list on, register list off)` |
 | `exposure`, `gain` | `(register, bytes, minimum, maximum, default)`; a maximum of `-n` is the mode's `vts` less `n`, a default of `None` the maximum |
 | `flip` | `(register, vertical bits, horizontal bits)` |
 | `test_pattern` | `(register, bytes, on value, off value)` |
 | `auto_exposure`, `black_level`, `gamma`, `ccm`, `ccm_table`, `awb_table`, `color` | The camera's tuning ([above](#colour-tuning-per-sensor)); `tuning=` and the other arguments to `Camera()` override it |
+
+### A register list
+
+A list is either `[(register, value), ...]`, where `(None, ms)` waits, or the
+same thing packed into `bytes`: three bytes an entry, the register high byte
+first, then its low byte, then the value; a register of `0xFFFF` waits
+`value` ms. The packed form is what the sensor generator writes, and the one to
+use for more than a few registers. In a frozen module it is read from flash
+where it sits and costs no heap; a long list of tuples costs several times the
+flash and heap of the same list packed. The OV2710's two modes are 555 bytes
+packed, and the SC2336's twelve are 5.7 KB.
 
 Everything except `name`, `reg_bits`, the controls and the tuning is
 required, and a missing or malformed key raises a `ValueError` naming it.
