@@ -57,6 +57,14 @@ speaker stream still open no longer wedges the host.
 in the intersection arithmetic and against a live device (excluded from a
 class tuple, it is invisible to `host_devices()`; included, it attaches).
 
+## How much isochronous data the host takes
+
+An isochronous IN stream on the ESP32-P4's high-speed port carries one packet in every microframe, which is up to 7.5 MB/s with a 944-byte packet. A Logitech C920e streamed 640x480, 1280x720 and 1920x1080 MJPEG at 30 frames a second on it, 3 to 4 MB/s, and uncompressed 640x480 at 7.4 MB/s with no errors and nothing dropped.
+
+A camera's larger alternate settings promise two or three transactions a microframe, and the host doesn't take those: ESP-IDF's controller driver doesn't set the controller's multi-transaction count, so only the first packet of each microframe arrives and every frame is torn. `usb.host.video` leaves those settings out. A camera that asks for more than one transaction for an MJPEG mode is streamed on the largest single-transaction setting, which works because a real MJPEG frame takes far less than the camera's worst-case reservation.
+
+A slow stream from a webcam is usually the camera. Most lengthen the exposure in a dim room and send fewer frames than the mode says (a C920e asked for 30 a second gave 22 at 640x480, with every microframe polled and no errors). `Camera.hold_frame_rate()` turns that off.
+
 ## Keyboards and MIDI controllers behind a hub on the ESP32-P4
 
 The P4's host port is high speed. Plug a keyboard, a mouse or a MIDI
