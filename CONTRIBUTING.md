@@ -88,7 +88,7 @@ repository by the **Release firmware** workflow
 in [`scripts/release_firmware.py`](scripts/release_firmware.py), and
 `release_firmware.py cells` lists them). Each cell is one `build_mp.py` call; the
 `assemble` job checks every file (checksums, the ESP image magic, the app image
-inside the flash image, UF2 blocks, the vector table of a GIGA's main image) and writes `firmware.json`, which records
+inside the flash image, UF2 blocks, the vector table of a GIGA's main image and the modules in its ROMFS image) and writes `firmware.json`, which records
 every file's sha256 and size, the flash offset, and the pins the set was built
 from.
 

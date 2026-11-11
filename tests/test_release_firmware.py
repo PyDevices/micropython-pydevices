@@ -9,13 +9,16 @@
 
 Each check is shown to fail by planting its fault in a set that passes.
 """
+import contextlib
 import hashlib
+import io
 import json
 import shutil
 import struct
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -43,6 +46,10 @@ def kept_table(c):
                       ("factory", 0, 0, 0x10000, flash - fs - 0x10000)])
 
 
+# What a GIGA build moves to its ROMFS, cut down.
+ROMFS_MODULES = ["asyncio/core.mpy", "webrepl.mpy"]
+
+
 def fake_cell(root, c, version="v1.30.0-preview"):
     """A cell directory as `build` leaves it, with files that pass every check."""
     d = Path(root) / c["id"]
@@ -63,6 +70,12 @@ def fake_cell(root, c, version="v1.30.0-preview"):
         head = struct.pack("<II", 0x24080000, c["offset"] + 0x2001)
         files["flash"] = put(d, "firmware0.bin", head + b"\x00" * (1536 * 1024))
         files["wifi"] = put(d, "firmware1.bin", b"w" * 400000)
+        files["romfs"] = put(d, "romfs.img", rf.ROMFS_HEADER + b"\x80\x01" + b"core.mpy webrepl.mpy" + b"r" * 30000)
+        zipped = io.BytesIO()
+        with zipfile.ZipFile(zipped, "w") as z:
+            for name in ROMFS_MODULES:
+                z.writestr(name, b"M")
+        files["romfs-files"] = put(d, "romfs-files.zip", zipped.getvalue())
     else:
         block = b"UF2\n" + b"WQ]\x9e" + b"\x00" * 500 + b"\x30\x6f\xb1\x0a"
         files["uf2"] = put(d, "firmware.uf2", block * 2000)   # 1 MB
@@ -71,6 +84,7 @@ def fake_cell(root, c, version="v1.30.0-preview"):
     meta = {k: c[k] for k in ("id", "label", "interpreter", "port", "board", "variant", "chip", "flash", "modules")}
     if c["kind"] == "stm32":
         meta["wifi_offset"] = rf.hex8(rf.WIFI_OFFSET)
+        meta["romfs_offset"], meta["romfs_modules"] = rf.hex8(rf.ROMFS_OFFSET), ROMFS_MODULES
     meta.update(kind=c["kind"], flash_offset=None if c["offset"] is None else rf.hex8(c["offset"]) if c["kind"] == "stm32" else hex(c["offset"]),
                 flash_bytes=int(c["flash"][:-2]) * rf.MB, files=files, build_seconds=61,
                 interpreter_version=version if c["interpreter"] == "micropython" else "11.0.0-alpha.1-dirty",
@@ -147,6 +161,40 @@ class Table(unittest.TestCase):
         self.assertEqual(args[args.index("--modules") + 1].split(",")[-1], "lvgl")
 
 
+class BuildTheGiga(unittest.TestCase):
+    """`build` hands over the GIGA's ROMFS image, and the same modules as a zip."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.src = self.root / "src"
+        (self.src / "romfs" / "asyncio").mkdir(parents=True)
+        (self.src / "romfs" / "asyncio" / "core.mpy").write_bytes(b"M1")
+        (self.src / "romfs" / "webrepl.mpy").write_bytes(b"M2")
+        for name, data in (("firmware0.bin", b"0" * 64), ("firmware1.bin", b"1" * 64), ("romfs.img", b"r" * 64),
+                           ("firmware.elf", b"\x7fELF v1.30.0-preview"), ("firmware.map", b"m")):
+            (self.src / name).write_bytes(data)
+        (self.src / "pydevices-build.json").write_text(json.dumps(
+            {"complete": True, "micropython_version": "v1.30.0-preview", "romfs_modules": ROMFS_MODULES}))
+
+    def tearDown(self):
+        shutil.rmtree(self.root)
+
+    def test_the_romfs_image_and_zip_go_with_firmware0(self):
+        with mock.patch.object(rf, "build_dir", return_value=self.src), \
+                mock.patch.object(rf, "micropython_version", return_value="v1.30.0-preview"), \
+                mock.patch.object(rf.subprocess, "run", return_value=mock.Mock(returncode=0)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            rf.build("mp-giga-shield", self.root / "out")
+        out = self.root / "out" / "mp-giga-shield"
+        meta = json.loads((out / "cell.json").read_text())
+        self.assertEqual(sorted(meta["files"]), ["elf", "flash", "map", "romfs", "romfs-files", "wifi"])
+        self.assertEqual((out / "romfs.img").read_bytes(), b"r" * 64)
+        with zipfile.ZipFile(out / "romfs-files.zip") as z:
+            self.assertEqual(z.read("asyncio/core.mpy"), b"M1")
+            self.assertEqual(z.read("webrepl.mpy"), b"M2")
+        self.assertEqual((meta["romfs_offset"], meta["romfs_modules"]), ("0x90B00000", ROMFS_MODULES))
+
+
 class Assemble(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
@@ -189,14 +237,18 @@ class Assemble(unittest.TestCase):
         self.assertEqual(cp4["flash_offset"], "0x0")
         self.assertEqual(cp4["app_offset"], "0x10000")
 
-    def test_the_giga_ships_two_images_named_for_where_they_go(self):
+    def test_the_giga_ships_three_images_named_for_where_they_go(self):
         doc = self.run_assemble(tag="v1.30.0-20261106")
         giga = next(b for b in doc["builds"] if b["id"] == "mp-giga-shield")
         names = {f["role"]: f["name"] for f in giga["files"]}
         stem = "omnipython-mp-arduino_giga-display_shield-v1.30.0-20261106"
         self.assertEqual(names["flash"], stem + ".firmware0-at-0x08040000.bin")
         self.assertEqual(names["wifi"], stem + ".firmware1-at-0x90F00000.bin")
-        self.assertEqual((giga["flash_offset"], giga["wifi_offset"]), ("0x08040000", "0x90F00000"))
+        self.assertEqual(names["romfs"], stem + ".romfs-at-0x90B00000.img")
+        self.assertEqual(names["romfs-files"], stem + ".romfs-files.zip")
+        self.assertEqual((giga["flash_offset"], giga["wifi_offset"], giga["romfs_offset"]),
+                         ("0x08040000", "0x90F00000", "0x90B00000"))
+        self.assertEqual(giga["romfs_modules"], ROMFS_MODULES)
         for name in names.values():
             self.assertTrue((self.out / name).is_file(), name)
 
@@ -299,6 +351,43 @@ class Assemble(unittest.TestCase):
     def test_a_giga_wifi_image_past_the_qspi_flash_is_caught(self):
         self.rewrite_giga("wifi", lambda b: b + b"w" * (1 * rf.MB))
         self.fails_with("past the QSPI flash")
+
+    def test_a_giga_without_its_romfs_image_is_caught(self):
+        d = self.indir / "mp-giga-shield"
+        meta = json.loads((d / "cell.json").read_text())
+        del meta["files"]["romfs"]
+        (d / "cell.json").write_text(json.dumps(meta))
+        self.fails_with("mp-giga-shield: no romfs file")
+
+    def test_a_giga_build_that_moved_no_python_is_caught(self):
+        d = self.indir / "mp-giga-shield"
+        meta = json.loads((d / "cell.json").read_text())
+        meta["romfs_modules"] = []
+        (d / "cell.json").write_text(json.dumps(meta))
+        self.fails_with("moved no Python modules to ROMFS")
+
+    def test_a_giga_romfs_image_that_is_not_one_is_caught(self):
+        self.rewrite_giga("romfs", lambda b: b"\xff" * 3 + b[3:])
+        self.fails_with("does not start with a ROMFS header")
+
+    def test_a_giga_romfs_image_past_its_partition_is_caught(self):
+        self.rewrite_giga("romfs", lambda b: b + b"r" * (4 * rf.MB))
+        self.fails_with("more than the ROMFS partition holds")
+
+    def test_a_giga_romfs_image_without_a_module_is_caught(self):
+        self.rewrite_giga("romfs", lambda b: b.replace(b"webrepl.mpy", b"other.mpy"))
+        self.fails_with("lacks webrepl.mpy")
+
+    def test_a_giga_romfs_zip_without_a_module_is_caught(self):
+        def drop(blob):
+            out = io.BytesIO()
+            with zipfile.ZipFile(io.BytesIO(blob)) as src, zipfile.ZipFile(out, "w") as z:
+                for name in src.namelist():
+                    if name != "asyncio/core.mpy":
+                        z.writestr(name, src.read(name))
+            return out.getvalue()
+        self.rewrite_giga("romfs-files", drop)
+        self.fails_with("romfs-files.zip lacks asyncio/core.mpy")
 
     def test_a_uf2_cut_off_mid_block_is_caught(self):
         d = self.indir / "cp-feather-rp2040"
@@ -534,12 +623,14 @@ class DraftRelease(unittest.TestCase):
         self.assertIn("--chip esp32s3 write-flash 0x0 ", text)
         self.assertIn("BOOTSEL drive", text)
 
-    def test_the_notes_give_the_giga_both_dfu_commands_wifi_first(self):
+    def test_the_notes_give_the_giga_three_dfu_commands_wifi_first_firmware0_last(self):
         text = rf.notes(self.doc)
         stem = "omnipython-mp-arduino_giga-display_shield-staged-20261020"
         wifi = f"dfu-util -a 1 -d 2341:0366 -s 0x90F00000 -D {stem}.firmware1-at-0x90F00000.bin"
+        romfs = f"dfu-util -a 1 -d 2341:0366 -s 0x90B00000 -D {stem}.romfs-at-0x90B00000.img"
         main = f"dfu-util -a 0 -d 2341:0366 -s 0x08040000:leave -D {stem}.firmware0-at-0x08040000.bin"
-        self.assertIn(wifi + "`, then `" + main, text)
+        self.assertIn(wifi + "`, then `" + romfs + "`, then `" + main, text)
+        self.assertIn("romfs-files", text)
         self.assertIn("flash-a-board.md#stm32-arduino-giga-r1-wifi", text)
 
     def test_the_notes_give_each_micropython_board_its_filesystem(self):

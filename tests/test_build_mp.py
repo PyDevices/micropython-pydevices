@@ -1090,7 +1090,7 @@ class Stm32M4Slot(unittest.TestCase):
 
 
 class PythonToRomfs(unittest.TestCase):
-    """--python-to-romfs compiles the Python a GIGA build left unfrozen for the board's ROMFS."""
+    """A GIGA build compiles the Python its manifest left unfrozen, and packs it for the board's ROMFS."""
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -1113,9 +1113,10 @@ class PythonToRomfs(unittest.TestCase):
                                        [str(self.root / "src" / "data.mpy"), "data.mpy", None]]))
         out = self.root / "romfs"
         with contextlib.redirect_stdout(io.StringIO()):
-            build_mp.python_to_romfs(listing, out, self.cross, "armv7emdp")
+            listed = build_mp.python_to_romfs(listing, out, self.cross, "armv7emdp")
         self.assertEqual(sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file()),
                          ["asyncio/core.mpy", "data.mpy", "fast.mpy"])
+        self.assertEqual(listed, ["asyncio/core.mpy", "data.mpy", "fast.mpy"])
         self.assertIn("-march=armv7emdp -s asyncio/core.py", (out / "asyncio" / "core.mpy").read_text())
         self.assertIn("-O3", (out / "fast.mpy").read_text())
         self.assertEqual((out / "data.mpy").read_bytes(), b"M\x06")
@@ -1123,6 +1124,20 @@ class PythonToRomfs(unittest.TestCase):
     def test_a_build_whose_manifest_wrote_no_list_is_refused(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             build_mp.python_to_romfs(self.root / "missing.json", self.root / "romfs", self.cross, "armv7emdp")
+
+    def test_the_modules_are_packed_by_the_checkouts_own_romfs_writer(self):
+        writer = self.root / "mp" / "tools" / "mpremote" / "mpremote"
+        writer.mkdir(parents=True)
+        (writer / "romfs.py").write_text(
+            "import os\n"
+            "def make_romfs(src_dir, *, mpy_cross):\n"
+            "    print('a tree nobody needs to see')\n"
+            "    return repr((sorted(os.listdir(src_dir)), mpy_cross)).encode()\n")
+        out = self.root / "romfs.img"
+        with contextlib.redirect_stdout(io.StringIO()) as said:
+            build_mp.romfs_image(self.root / "mp", self.root / "src", out)
+        self.assertEqual(out.read_bytes(), repr((["core.py", "data.mpy"], False)).encode())
+        self.assertNotIn("a tree", said.getvalue())
 
     def test_the_giga_compiles_for_its_h7(self):
         mp = self.root / "mp"

@@ -53,6 +53,7 @@ import struct
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -136,16 +137,22 @@ FILES = {
     ("micropython", "rp2"): [("uf2", "firmware.uf2", True), ("elf", "firmware.elf", True),
                              ("map", "firmware.elf.map", True)],
     # `flash` is firmware0.bin, for the microcontroller; `wifi` is firmware1.bin, the Wi-Fi chip's.
+    # `romfs` is the image of the firmware's own Python modules, which it doesn't freeze, for the
+    # ROMFS partition; `romfs-files` is the same modules as a zip, to add to a ROMFS of your own.
     ("micropython", "stm32"): [("flash", "firmware0.bin", True), ("wifi", "firmware1.bin", True),
+                               ("romfs", "romfs.img", True), ("romfs-files", "romfs.zip", True),
                                ("elf", "firmware.elf", True), ("map", "firmware.map", True)],
 }
 
 EXTENSION = {"flash": ".bin", "app": ".app.bin", "uf2": ".uf2", "elf": ".elf", "map": ".map",
-             "partitions": ".partitions.bin", "wifi": ".bin"}
+             "partitions": ".partitions.bin", "wifi": ".bin", "romfs": ".img", "romfs-files": ".zip"}
 
-# The Wi-Fi firmware's address in the GIGA's QSPI flash, and where that flash ends.
+# The Wi-Fi firmware's address in the GIGA's QSPI flash, and where that flash
+# ends. The ROMFS partition is the 4 MB before the Wi-Fi firmware.
 WIFI_OFFSET = 0x90F00000
 QSPI_END = 0x91000000
+ROMFS_OFFSET = 0x90B00000
+ROMFS_HEADER = b"\xd2\xcd\x31"
 
 
 def hex8(n):
@@ -160,6 +167,10 @@ def asset_extension(c, role):
         return f".firmware0-at-{hex8(c['offset'])}.bin"
     if c["kind"] == "stm32" and role == "wifi":
         return f".firmware1-at-{hex8(WIFI_OFFSET)}.bin"
+    if c["kind"] == "stm32" and role == "romfs":
+        return f".romfs-at-{hex8(ROMFS_OFFSET)}.img"
+    if c["kind"] == "stm32" and role == "romfs-files":
+        return ".romfs-files.zip"
     return EXTENSION[role]
 
 
@@ -305,6 +316,10 @@ def build(cell_id, out):
     if not record.get("complete"):
         raise Failed(f"{src / 'pydevices-build.json'} says the build is not complete")
 
+    if (src / "romfs").is_dir():
+        # The modules in romfs.img as files, for anyone who deploys a ROMFS of their own.
+        (src / "romfs.zip").unlink(missing_ok=True)
+        shutil.make_archive(str(src / "romfs"), "zip", src / "romfs")
     files = {}
     for role, name, required in FILES[(c["interpreter"], c["kind"])]:
         f = src / name
@@ -331,6 +346,7 @@ def build(cell_id, out):
     meta["flash_offset"] = None if c["offset"] is None else hex(c["offset"])
     if c["kind"] == "stm32":
         meta["flash_offset"], meta["wifi_offset"] = hex8(c["offset"]), hex8(WIFI_OFFSET)
+        meta["romfs_offset"], meta["romfs_modules"] = hex8(ROMFS_OFFSET), record.get("romfs_modules") or []
     meta["flash_bytes"] = int(c["flash"][:-2]) * MB
     meta["kind"] = c["kind"]
     if c["interpreter"] == "circuitpython":
@@ -421,11 +437,13 @@ def check_fs(c, meta, data, flash_bytes):
     return problems
 
 
-def check_stm32(c, data, flash_bytes):
+def check_stm32(c, data, flash_bytes, modules):
     """What a download would trip over in a GIGA's two images: firmware0.bin has to
     start with a Cortex-M vector table (a stack in RAM, a Thumb reset address
     inside the image) and fit the chip's flash from where it is written, and
-    firmware1.bin has to fit the QSPI flash from where it is written."""
+    firmware1.bin has to fit the QSPI flash from where it is written. The firmware
+    freezes no Python, so its ROMFS image has to be one, fit the partition, and
+    hold every module the build moved there, which the zip has to hold too."""
     problems = []
     if "flash" in data:
         img = data["flash"].read_bytes()
@@ -446,6 +464,26 @@ def check_stm32(c, data, flash_bytes):
         size = data["wifi"].stat().st_size
         if WIFI_OFFSET + size > QSPI_END:
             problems.append(f"{c['id']}: {data['wifi'].name} ends at {WIFI_OFFSET + size:#x}, past the QSPI flash")
+    if not modules:
+        problems.append(f"{c['id']}: the build moved no Python modules to ROMFS, so firmware0.bin would boot "
+                        "without asyncio, webrepl and the rest")
+    if "romfs" in data:
+        img = data["romfs"].read_bytes()
+        name = data["romfs"].name
+        if img[:3] != ROMFS_HEADER:
+            problems.append(f"{c['id']}: {name} does not start with a ROMFS header")
+        if ROMFS_OFFSET + len(img) > WIFI_OFFSET:
+            problems.append(f"{c['id']}: {name} is {len(img)} bytes, more than the ROMFS partition holds "
+                            f"from {hex8(ROMFS_OFFSET)} to the Wi-Fi firmware")
+        # ROMFS stores each name as it is, so a module's file name is in the image.
+        missing = [m for m in modules if m.rsplit("/", 1)[-1].encode() not in img]
+        if missing:
+            problems.append(f"{c['id']}: {name} lacks {', '.join(missing)}")
+    if "romfs-files" in data:
+        with zipfile.ZipFile(data["romfs-files"]) as z:
+            missing = sorted(set(modules) - set(z.namelist()))
+        if missing:
+            problems.append(f"{c['id']}: {data['romfs-files'].name} lacks {', '.join(missing)}")
     return problems
 
 
@@ -482,7 +520,7 @@ def check_cell(d, c):
 
     flash_bytes = meta.get("flash_bytes", 0)
     if c["kind"] == "stm32":
-        problems += check_stm32(c, data, flash_bytes)
+        problems += check_stm32(c, data, flash_bytes, meta.get("romfs_modules"))
     # A flash image: starts like one, fits the flash, carries the app image.
     elif "flash" in data:
         img = data["flash"].read_bytes()
@@ -598,6 +636,8 @@ def assemble(indir, out, pico2, tag, run_url, now=None):
             entry["app_offset"] = m["app_offset"]
         if m.get("wifi_offset"):
             entry["wifi_offset"] = m["wifi_offset"]
+        if m.get("romfs_offset"):
+            entry["romfs_offset"], entry["romfs_modules"] = m["romfs_offset"], m["romfs_modules"]
         if "esptool" in m:
             entry["esptool"] = m["esptool"]
         if "circuitpython_patches" in m:
@@ -653,6 +693,8 @@ def write_command(b, f):
     if b["chip"] == "stm32h747":
         if f["role"] == "wifi":
             return f"dfu-util -a 1 -d 2341:0366 -s {b['wifi_offset']} -D {f['name']}"
+        if f["role"] == "romfs":
+            return f"dfu-util -a 1 -d 2341:0366 -s {b['romfs_offset']} -D {f['name']}"
         if f["role"] == "flash":
             return f"dfu-util -a 0 -d 2341:0366 -s {b['flash_offset']}:leave -D {f['name']}"
         return None
@@ -706,18 +748,21 @@ def notes(doc, previous=None):
         how = ("copy it onto the board's BOOTSEL drive" if f["role"] == "uf2"
                else f"`{write_command(b, f)}`")
         names = f"`{f['name']}`"
-        wifi = next((x for x in b["files"] if x["role"] == "wifi"), None)
-        if wifi:
-            # Two images, the Wi-Fi firmware first.
-            names = f"`{wifi['name']}`, then `{f['name']}`"
-            how = f"`{write_command(b, wifi)}`, then `{write_command(b, f)}`"
+        before = [x for role in ("wifi", "romfs") for x in b["files"] if x["role"] == role]
+        if before:
+            # The GIGA's images, the Wi-Fi firmware first and firmware0 last.
+            names = ", then ".join(f"`{x['name']}`" for x in before + [f])
+            how = ", then ".join(f"`{write_command(b, x)}`" for x in before + [f])
         lines.append(f"| {b['label']} | {kind_of(b)} {b['interpreter_version']} | {names} | {how} | {fs_text(b)} |")
     if any(b["chip"] == "stm32h747" for b in doc["builds"]):
         lines += ["",
-                  "The GIGA's two images are written in its bootloader (`machine.bootloader()` at the REPL, or "
+                  "The GIGA's three images are written in its bootloader (`machine.bootloader()` at the REPL, or "
                   "double-tap RESET), the Wi-Fi firmware first. The Wi-Fi image only changes when its driver does, "
-                  "so after the first time you can write the other alone. The other image overwrites any program on the "
-                  "board's M4 core, and the OmniPython libraries go in its ROMFS afterwards: "
+                  "so after the first time you can leave it out. The ROMFS image holds the firmware's own Python "
+                  "modules (asyncio, webrepl, mip, requests and the rest), which it doesn't freeze, so write it with "
+                  "every update. The last image overwrites any program on the board's M4 core. To add the "
+                  "OmniPython libraries to the ROMFS, unzip the `romfs-files` zip into the folder you deploy, "
+                  "because a deploy replaces the whole partition: "
                   f"[the flash guide](https://github.com/{REPO_SLUG}/blob/main/docs/guides/flash-a-board.md"
                   "#stm32-arduino-giga-r1-wifi) has the steps."]
     lines += ["",

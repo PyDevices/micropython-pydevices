@@ -23,7 +23,7 @@ top. Add `--modules` to any of these:
 | Pimoroni Pico Plus 2 W (16 MB flash, 8 MB PSRAM, 48 GPIOs) | `--port rp2 --board RPI_PICO2_W --variant PIMORONI_PICO_PLUS2_W` |
 | Arduino GIGA R1 WiFi | `--port stm32 --board ARDUINO_GIGA` (past 1,280 KB it [takes the M4 core's flash](../guides/fit-firmware-on-a-small-flash.md)) |
 | Arduino GIGA R1 WiFi, playing through its headphone jack ([`audioio.AudioOut`](https://github.com/PyDevices/micropython-pydevices/blob/main/modules/audioif/README.md#audioioaudioout--the-same-output-on-a-dac)) | `--port stm32 --board ARDUINO_GIGA --modules audiodsp,audioif` |
-| Arduino GIGA R1 WiFi with the GIGA Display Shield | `--port stm32 --board ARDUINO_GIGA --variant DISPLAY_SHIELD --modules displayif,lvgl` ([two images to flash](../guides/flash-a-board.md#stm32-arduino-giga-r1-wifi)) |
+| Arduino GIGA R1 WiFi with the GIGA Display Shield | `--port stm32 --board ARDUINO_GIGA --variant DISPLAY_SHIELD --modules displayif,lvgl` ([three images to flash](../guides/flash-a-board.md#stm32-arduino-giga-r1-wifi)) |
 
 Every ESP32 board here runs its CPU at the chip's rated clock (240 MHz on an
 ESP32 or S3; 400 on a P4 of revision 3 or later, 360 before that), and its
@@ -59,7 +59,7 @@ Our variants, in [`variants/`](https://github.com/PyDevices/micropython-pydevice
 | esp32 | `ESP32_GENERIC_P4` `P4X_EYE` | The ESP32-P4X-EYE: `C6_WIFI` with ESP-Hosted on the pins its C6 uses, the OV2710 sensor driver, the USB device on the port marked "USB 2.0" and the REPL on "Debug", and a 9 MB app slot for the camera and vision modules. |
 | esp32 | `ESP32_GENERIC` `QTPY_PICO` | The QT Py ESP32 Pico: upstream's PSRAM variant with flash and PSRAM at 80 MHz, which keeps Bluetooth audio from falling behind, and the CPU at 240 MHz. |
 | rp2 | `RPI_PICO2_W` `PIMORONI_PICO_PLUS2_W` | The Pimoroni Pico Plus 2 W. |
-| stm32 | `ARDUINO_GIGA` `DISPLAY_SHIELD` | The GIGA R1 WiFi with room for LVGL and the shield's MIPI DSI panel: the Wi-Fi and Bluetooth firmware moved to QSPI flash as a second image, Bluetooth LE through NimBLE, a one-dimensional ulab with numpy's array core and elementwise maths only ([what's out](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/stm32/ARDUINO_GIGA/DISPLAY_SHIELD/ulab_config.h)), LVGL's 40 px font left out, and USB through TinyUSB: `machine.USBDevice` on the USB-C port and a USB host on the USB-A port, where bus-powered devices that draw more than about 500 mA may not run; use a powered hub. |
+| stm32 | `ARDUINO_GIGA` `DISPLAY_SHIELD` | The GIGA R1 WiFi with room for LVGL and the shield's MIPI DSI panel: the Wi-Fi and Bluetooth firmware moved to QSPI flash as a second image, its Python modules in a ROMFS image instead of frozen, Bluetooth LE through NimBLE, a one-dimensional ulab with numpy's array core and elementwise maths only ([what's out](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/stm32/ARDUINO_GIGA/DISPLAY_SHIELD/ulab_config.h)), LVGL's 40 px font left out, and USB through TinyUSB: `machine.USBDevice` on the USB-C port and a USB host on the USB-A port, where bus-powered devices that draw more than about 500 mA may not run; use a powered hub. |
 
 The esp32 [`variants/esp32/`](https://github.com/PyDevices/micropython-pydevices/tree/main/variants/esp32) folder also holds the `sdkconfig` fragments and
 partition table every esp32 or every chip gets:

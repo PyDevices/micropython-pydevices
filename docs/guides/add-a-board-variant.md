@@ -111,7 +111,9 @@ board, unchanged, and adds:
 
 `ARDUINO_GIGA`'s `DISPLAY_SHIELD` is the one stm32 variant of ours. It moves
 the Wi-Fi chip's firmware into QSPI flash with a linker script fragment and
-turns on the HAL's DSI driver for displayif's `mipidsi`. Its
+turns on the HAL's DSI driver for displayif's `mipidsi`. Its `manifest.py`
+freezes no Python: it hands its modules to `build_mp.py`, which compiles them
+into `romfs.img` for the board's ROMFS partition. Its
 `mpconfigboard.h` also switches USB to TinyUSB, which is one line:
 `#define MICROPY_HW_TINYUSB_STACK (1)`.
 
