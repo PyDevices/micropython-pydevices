@@ -102,7 +102,7 @@ def run(name, arm):
                 if key in c and ctl_regs[key]:
                     lo, hi = c[key][0], c[key][1]
                     for v in sorted({lo, lo + 1, (lo + hi) // 2, hi - 1, hi}):
-                        fn(v)
+                        fn(v, raw=True)
                         states["%s=%d" % (key, v)] = _read(cam, ctl_regs[key])
             for key, fn in (("flip", cam.flip), ("mirror", cam.mirror)):
                 if ctl_regs.get(key):
