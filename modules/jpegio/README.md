@@ -193,8 +193,8 @@ cameraif's `capture_jpeg()` does.
 
 ### Hardware decode (ESP32-P4)
 
-`JpegDecoder(hardware=True)` decodes on the P4's JPEG engine when it can, two
-to three times faster than TJpgDec (320x240: 13–16 ms against 29–57 ms): a
+`JpegDecoder(hardware=True)` decodes on the P4's JPEG engine when it can, up
+to ten times faster than TJpgDec (320x240: 5–6 ms against 30–60 ms; 640x480: 16 ms against 155 ms): a
 whole baseline image into a buffer at `scale=0`, with
 `x`, `y` and `stride` as usual. Everything else (a callable target, a nonzero
 scale, a JPEG the engine refuses) quietly goes to TJpgDec as before. After a
@@ -207,9 +207,14 @@ to 44 dB from each other on the corpus, not bit-identical, and the TJpgDec
 output is what the golden corpus pins. On any other chip `hardware=True` raises
 `OSError`.
 
-(The engine's own RGB output uses studio-range BT.601, which crushes JPEG's
-blacks and clips its whites, so jpegio asks it for YUV and converts with
-JPEG's full-range matrix itself. That conversion is most of the 13–16 ms.)
+(The engine's own RGB output uses the studio-range BT.601 matrix, which crushes
+JPEG's blacks and clips its whites. The engine's 2D-DMA takes its colour matrix
+from registers, so jpegio loads JPEG's full-range one while a decode runs
+(the link wraps the driver's setup call for that) and the engine writes
+RGB565 itself, to within one level of TJpgDec's. A 640x480 frame takes about
+16 ms: 4 ms in the engine and 11 ms copying its padded rows into your
+buffer. Converting the engine's YUV in software, as this did before, took
+45 ms.)
 
 ## Errors
 
