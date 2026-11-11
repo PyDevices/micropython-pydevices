@@ -2207,6 +2207,9 @@ def main():
     ap.add_argument("--coredump", action="store_true",
                     help="esp32: a troubleshooting build that writes a core dump to flash on a crash (standard builds don't)")
     ap.add_argument("--clean", action="store_true", help="delete this target's build dir first")
+    ap.add_argument("--python-to-romfs", action="store_true",
+                    help="Arduino GIGA: freeze no Python; compile it into romfs/ beside the firmware instead, "
+                         "for the board's ROMFS partition, which leaves internal flash to the C modules")
     args, make_extra = ap.parse_known_args()
     if args.coredump and args.interpreter != "micropython":
         die("--coredump is for MicroPython on esp32")
@@ -2309,6 +2312,8 @@ def main():
     module_set = sorted([d.name if d.parent == MODULES_DIR else str(d) for d in module_dirs] + library_packages)
     want = {"port": port, "board": board, "variant": variant, "flash": flash, "modules": spec,
             "module_set": module_set}
+    if args.python_to_romfs:
+        want["python_to_romfs"] = True
     # Each module's commit too: a module that moved keeps its name, and make
     # would reuse frozen content and qstr headers from before it moved.
     revisions = record(module_dirs, library.source)
@@ -2326,6 +2331,13 @@ def main():
         # The padding module that moves the code at the M4's boot address
         # when it must; empty until then. Regenerated before each make.
         env["PYDEVICES_MODULES"] = ",".join(x for x in (spec, (build / "m4pad-src" / "m4pad").as_posix()) if x)
+    romfs_list = build / "romfs-python.json"
+    if args.python_to_romfs:
+        if port != "stm32" or board not in STM32_M4_SLOT:
+            die("--python-to-romfs is for the Arduino GIGA, whose manifest moves its Python to ROMFS")
+        # The board's manifest writes its Python modules here and freezes none.
+        romfs_list.unlink(missing_ok=True)
+        env["PYDEVICES_PYTHON_TO_ROMFS"] = romfs_list.as_posix()
     # The frozen pydevices leaves its host-only files off a board's image.
     env["PYDEVICES_PLATFORM"] = "desktop" if port in ("unix", "windows", "webassembly") else "board"
     if version:
@@ -2613,6 +2625,8 @@ def main():
         shown = "\n  ".join(stray[:10]) + (f"\n  ... and {len(stray) - 10} more" if len(stray) > 10 else "")
         die(f"some of this build's objects were compiled from outside their module:\n  {shown}\n"
             "A directory of the module's name beside another module was searched before the module's own.")
+    if args.python_to_romfs:
+        python_to_romfs(romfs_list, build / "romfs", Path(env["MICROPY_MPYCROSS"]), mpy_cross_arch(mp, port, board))
     rec = dict(want, complete=True)
     if port == "rp2" and rp2_storage:
         rec["rp2_storage_bytes"] = rp2_storage
@@ -2634,6 +2648,45 @@ def main():
                  "micropython", "micropython.exe", "micropython.mjs", "micropython.wasm"):
         if (build / name).exists():
             say(f"  {build / name}")
+    if args.python_to_romfs:
+        say(f"  {build / 'romfs'}/  (the Python modules: add them to the board's ROMFS image, at its root)")
+
+
+# The -march mpy-cross takes for an STM32 series, as ports/stm32/Makefile sets it.
+STM32_MPY_ARCH = {"f0": "armv6m", "g0": "armv6m", "l0": "armv6m", "f4": "armv7emsp", "l4": "armv7emsp",
+                  "wb": "armv7emsp", "g4": "armv7emsp", "f7": "armv7emdp", "h7": "armv7emdp"}
+
+
+def mpy_cross_arch(mp, port, board):
+    """The -march for a board's .mpy files, so native and viper code in them runs."""
+    if port != "stm32":
+        die("--python-to-romfs is for the Arduino GIGA (stm32)")
+    text = (mp / "ports" / "stm32" / "boards" / board / "mpconfigboard.mk").read_text()
+    series = re.search(r"^MCU_SERIES\s*=\s*(\w+)", text, re.MULTILINE)
+    if not series or series.group(1) not in STM32_MPY_ARCH:
+        die(f"--python-to-romfs: no mpy-cross architecture known for {board}")
+    return STM32_MPY_ARCH[series.group(1)]
+
+
+def python_to_romfs(listing, out, mpy_cross, arch):
+    """Compile the Python modules a --python-to-romfs build left out of its
+    frozen content into out/, laid out as they import, for the board's ROMFS."""
+    if not listing.is_file():
+        die(f"--python-to-romfs: the build wrote no {listing.name}; this board's manifest doesn't move its Python")
+    shutil.rmtree(out, ignore_errors=True)
+    files = json.loads(listing.read_text())
+    for source, target, opt in files:
+        dest = out / target
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if target.endswith(".py"):
+            cmd = [str(mpy_cross), f"-march={arch}", "-s", target, "-o", str(dest.with_suffix(".mpy")), source]
+            if opt is not None:
+                cmd.insert(1, f"-O{opt}")
+            run(cmd)
+        else:
+            shutil.copyfile(source, dest)
+    size = sum(f.stat().st_size for f in out.rglob("*") if f.is_file())
+    say(f"python-to-romfs: {len(files)} modules, {size:,} bytes, in {out}")
 
 
 if __name__ == "__main__":
