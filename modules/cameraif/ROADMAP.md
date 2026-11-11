@@ -7,6 +7,9 @@
 - Sensors that send YUV or RGB, such as the OV5640 and GC2145, and the
   HDMI-to-CSI bridges, streaming around the ISP. Today `Camera` finds and
   names them, then says it can't stream them.
+- The other 17 sensors in `sensors/` taking the place of their built-in
+  drivers, one at a time as each is checked on a board, so a camera needs no
+  firmware build and the image drops that driver's flash.
 - Tests that run in CI without a camera, beside the lint it runs today.
 
 Bugs, and things you need that don't work yet, go to

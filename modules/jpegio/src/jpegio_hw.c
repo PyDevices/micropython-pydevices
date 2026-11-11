@@ -26,6 +26,15 @@
 #include "driver/jpeg_encode.h"
 #include "esp_heap_caps.h"
 #include "esp_memory_utils.h"
+#include "esp_attr.h"
+#include "esp_err.h"
+#include "hal/dma2d_ll.h"
+#endif
+
+// 1 where the link wraps the 2D-DMA colour-matrix setup (micropython.cmake):
+// without it the engine would only give studio-range RGB, so decode says no.
+#ifndef JPEGIO_HW_WRAP
+#define JPEGIO_HW_WRAP 0
 #endif
 
 #define JPEGIO_HW_TIMEOUT_MS 1000
@@ -200,33 +209,65 @@ mp_obj_t jpegio_hw_encode(const void *pixels, int width, int height, size_t stri
 
 // --- decode ------------------------------------------------------------------
 
-// The engine's own RGB output goes through the 2D-DMA's BT.601 matrix, which
-// is the studio-range one (Y 16..235): JPEG is full range (JFIF), so its RGB
-// comes back with black crushed below 16 and white clipped above 235. The
-// engine is asked for YUV 4:4:4 instead and converted here with JFIF's
-// full-range matrix (libjpeg's integer tables), packed as TJpgDec packs RGB565.
-static int16_t jpegio_hw_cr_r[256], jpegio_hw_cb_b[256];
-static int32_t jpegio_hw_cr_g[256], jpegio_hw_cb_g[256];
+// The engine's own RGB output goes through the 2D-DMA's colour matrix, and the
+// stock one is BT.601 studio range (Y 16..235): JPEG is full range (JFIF), so
+// its RGB would come back with black crushed below 16 and white clipped above
+// 235. The matrix is a 3x4 table in registers the driver loads while it sets
+// up each job, so the link wraps the driver's call to that setup
+// (micropython.cmake, -Wl,--wrap) and, while a decode of ours is running,
+// loads JFIF's full-range matrix in its place. The engine then writes RGB565
+// itself, in a few milliseconds, where converting its YUV in software took
+// ten times as long and was most of a 640x480 decode (micropython-pydevices#422).
+static volatile bool jpegio_hw_full_range;
 
-static void jpegio_hw_yuv_tables(void) {
-    if (jpegio_hw_cb_b[0] != 0) {
-        return;
-    }
-    for (int i = 0; i < 256; i++) {
-        int c = i - 128;
-        jpegio_hw_cr_r[i] = (int16_t)((91881 * c + 32768) >> 16);     // 1.402
-        jpegio_hw_cb_b[i] = (int16_t)((116130 * c + 32768) >> 16);    // 1.772
-        jpegio_hw_cr_g[i] = -46802 * c;                               // -0.714136
-        jpegio_hw_cb_g[i] = -22554 * c + 32768;                       // -0.344136, rounding
-    }
+#if JPEGIO_HW_WRAP
+
+// The driver's dma2d_csc_config_t (esp_private/dma2d.h, not on this module's
+// include path): the option first, then the two scramble orders.
+typedef struct {
+    int option;
+    int pre_scramble;
+    int post_scramble;
+} jpegio_hw_csc_cfg_t;
+
+esp_err_t __real_dma2d_configure_color_space_conversion(void *chan, const jpegio_hw_csc_cfg_t *cfg);
+
+// JFIF, 8 fractional bits, rows R, G, B over (Y, Cb, Cr, offset): the stock
+// table's layout (a[0][0] * Y + a[0][2] * V + d) with the 16 offset and the
+// 1.164 gain taken out.
+#define JPEGIO_HW_RGB_ROWS { \
+    { 256, 0, 359, -45952 }, \
+    { 256, -88, -183, 34688 }, \
+    { 256, 454, 0, -58112 }, \
 }
 
-static inline unsigned jpegio_hw_clamp(int v) {
-    return v < 0 ? 0 : (v > 255 ? 255 : (unsigned)v);
+esp_err_t IRAM_ATTR __wrap_dma2d_configure_color_space_conversion(void *chan, const jpegio_hw_csc_cfg_t *cfg) {
+    esp_err_t err = __real_dma2d_configure_color_space_conversion(chan, cfg);
+    // The decoder's YUV to RGB565 option, BT.601 (see jpeg_decode.c's csc setup).
+    if (err == ESP_OK && jpegio_hw_full_range && cfg->option == DMA2D_CSC_RX_YUV420_TO_RGB565_601) {
+        static const int t[3][4] = JPEGIO_HW_RGB_ROWS;
+        dma2d_dev_t *dev = DMA2D_LL_GET_HW(0);
+        typeof(dev->in_channel[0].in_color_param_group) g;
+        g.param_h.a = t[0][0]; g.param_h.b = t[0][1]; g.param_h.c = t[0][2]; g.param_h.d = t[0][3];
+        g.param_m.a = t[1][0]; g.param_m.b = t[1][1]; g.param_m.c = t[1][2]; g.param_m.d = t[1][3];
+        g.param_l.a = t[2][0]; g.param_l.b = t[2][1]; g.param_l.c = t[2][2]; g.param_l.d = t[2][3];
+        dev->in_channel[0].in_color_param_group.param_h.val[0] = g.param_h.val[0];
+        dev->in_channel[0].in_color_param_group.param_h.val[1] = g.param_h.val[1];
+        dev->in_channel[0].in_color_param_group.param_m.val[0] = g.param_m.val[0];
+        dev->in_channel[0].in_color_param_group.param_m.val[1] = g.param_m.val[1];
+        dev->in_channel[0].in_color_param_group.param_l.val[0] = g.param_l.val[0];
+        dev->in_channel[0].in_color_param_group.param_l.val[1] = g.param_l.val[1];
+    }
+    return err;
 }
+
+#endif // JPEGIO_HW_WRAP
 
 const char *jpegio_hw_decode(const uint8_t *data, size_t len, int width, int height,
     uint16_t *pixels, size_t stride, int x, int y) {
+    if (!JPEGIO_HW_WRAP) {
+        return "this build cannot give the engine JPEG's colour matrix";
+    }
     if (jpegio_hw_decoder == NULL) {
         jpeg_decode_engine_cfg_t eng = { .timeout_ms = JPEGIO_HW_TIMEOUT_MS };
         if (jpeg_new_decoder_engine(&eng, &jpegio_hw_decoder) != ESP_OK) {
@@ -255,34 +296,29 @@ const char *jpegio_hw_decode(const uint8_t *data, size_t len, int width, int hei
         memcpy(jpegio_hw_dec_in.buf, data, len);
         data = jpegio_hw_dec_in.buf;
     }
-    if (!jpegio_hw_reserve(&jpegio_hw_dec_out, pw * ph * 3, false, JPEG_DEC_ALLOC_OUTPUT_BUFFER)) {
+    if (!jpegio_hw_reserve(&jpegio_hw_dec_out, pw * ph * 2, false, JPEG_DEC_ALLOC_OUTPUT_BUFFER)) {
         return "no memory for the engine's output";
     }
     jpeg_decode_cfg_t cfg = {
-        .output_format = JPEG_DECODE_OUT_FORMAT_YUV444,   // see jpegio_hw_yuv_tables
+        .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,   // full range: see the wrap above
         .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
         .conv_std = JPEG_YUV_RGB_CONV_STD_BT601,
     };
     uint32_t out_len = 0;
-    if (jpeg_decoder_process(jpegio_hw_decoder, &cfg, data, len,
-        jpegio_hw_dec_out.buf, jpegio_hw_dec_out.size, &out_len) != ESP_OK) {
+    jpegio_hw_full_range = true;
+    esp_err_t err = jpeg_decoder_process(jpegio_hw_decoder, &cfg, data, len,
+        jpegio_hw_dec_out.buf, jpegio_hw_dec_out.size, &out_len);
+    jpegio_hw_full_range = false;
+    if (err != ESP_OK) {
         return "the engine refused this JPEG (baseline only)";
     }
-    if (out_len != pw * ph * 3) {
+    if (out_len != pw * ph * 2) {
         return "the engine's output is not the size its MCUs imply";
     }
-    jpegio_hw_yuv_tables();
-    const uint8_t *src = jpegio_hw_dec_out.buf;      // V, U, Y per pixel
+    const uint8_t *src = jpegio_hw_dec_out.buf;
     uint16_t *dst = pixels + (size_t)y * stride + x;
-    for (int r = 0; r < height; r++, src += pw * 3, dst += stride) {
-        const uint8_t *p = src;
-        for (int c = 0; c < width; c++, p += 3) {
-            int cr = p[0], cb = p[1], yy = p[2];
-            unsigned rr = jpegio_hw_clamp(yy + jpegio_hw_cr_r[cr]);
-            unsigned gg = jpegio_hw_clamp(yy + ((jpegio_hw_cb_g[cb] + jpegio_hw_cr_g[cr]) >> 16));
-            unsigned bb = jpegio_hw_clamp(yy + jpegio_hw_cb_b[cb]);
-            dst[c] = (uint16_t)(((rr & 0xF8) << 8) | ((gg & 0xFC) << 3) | (bb >> 3));
-        }
+    for (int r = 0; r < height; r++, src += pw * 2, dst += stride) {
+        memcpy(dst, src, (size_t)width * 2);
     }
     return NULL;
 }

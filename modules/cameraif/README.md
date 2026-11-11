@@ -733,14 +733,52 @@ cam = cameraif.Camera(7, 8, i2c=1, reset=21, sensor=SENSOR)
 |---|---|
 | `name` | What `sensor()` reports |
 | `addr`, `reg_bits` | The SCCB address, and 8- or 16-bit register addresses |
-| `id` | `(register, value)`: the 16-bit chip ID, in that register and the next |
-| `init` | `[(register, value), ...]` written before every mode; `(None, ms)` waits |
-| `modes` | A list of dicts: `name`, `width`, `height`, `fps`, `format` (`"raw8"`, `"raw10"`, `"raw12"`), `bayer`, `lanes`, `lane_hz`, `pclk`, `hts`, `vts`, and the mode's `regs` |
-| `stream` | `(registers on, registers off)` |
-| `exposure`, `gain` | `(register, bytes, minimum, maximum, default)`; a maximum of `-n` is the mode's `vts` less `n`, a default of `None` the maximum |
-| `flip` | `(register, vertical bits, horizontal bits)` |
-| `test_pattern` | `(register, bytes, on value, off value)` |
+| `id` | `(register, value)`: the 16-bit chip ID, in that register and the next; or `((register, ...), value)` for one to four registers read in that order, high byte first |
+| `id_pre` | A register list written before the ID is read (a page register) |
+| `init` | A register list, written before every mode ([below](#a-register-list)) |
+| `modes` | A list of dicts: `name`, `width`, `height`, `fps`, `format` (`"raw8"`, `"raw10"`, `"raw12"`), `bayer`, `lanes`, `lane_hz`, `pclk`, `hts`, `vts`, and the mode's `regs`, a register list |
+| `stream` | `(register list on, register list off)`; a mode may carry its own `stream` instead |
+| `exposure`, `gain` | `(register, bytes, minimum, maximum, default)`; a maximum of `-n` is the mode's `vts` less `n`, a default of `None` the maximum. A dict for anything else ([below](#a-control)) |
+| `controls` | `{name: control}` for the others a sensor has: `ae_level`, `brightness`, `contrast`, `saturation`, `sharpness`, `denoise`, `special_effect`, `wb` |
+| `flip` | `(register, vertical bits, horizontal bits)`; or `{"v": (on, off), "h": (on, off)}` of register lists, when the two are in different registers or write more than their bits |
+| `test_pattern` | `(register, bytes, on value, off value)`; or `(register list on, register list off)` |
 | `auto_exposure`, `black_level`, `gamma`, `ccm`, `ccm_table`, `awb_table`, `color` | The camera's tuning ([above](#colour-tuning-per-sensor)); `tuning=` and the other arguments to `Camera()` override it |
+
+### A register list
+
+A list is either `[(register, value), ...]`, where `(None, ms)` waits, or the
+same thing packed into `bytes`: three bytes an entry, the register high byte
+first, then its low byte, then the value; a register of `0xFFFF` waits
+`value` ms. The packed form is what the sensor generator writes, and the one to
+use for more than a few registers. In a frozen module it is read from flash
+where it sits and costs no heap; a long list of tuples costs several times the
+flash and heap of the same list packed. The OV2710's two modes are 555 bytes
+packed, and the SC2336's twelve are 5.7 KB.
+
+An entry whose register is `0xFFFE` is not a write: its `value` is a mask, and
+the entry after it changes only those bits of its register, reading the rest
+back first. That is how a list sets one bit (a stream or flip bit, the test
+pattern) without knowing what the register's other bits hold.
+
+### A control
+
+An exposure, a gain or another control is the tuple above when its value goes
+big-endian into consecutive registers, and a dict when it doesn't:
+
+| Key | Meaning |
+|---|---|
+| `fields` | `bytes`, four to an entry: the register high byte and low byte, a shift, a mask. Each field writes `value >> shift` into its register (the shift is a signed byte: a negative one shifts left), a read-modify-write when the mask isn't `0xFF`. A zero mask writes the shift byte itself every time: a page register, a group hold |
+| `table` | `bytes`: a gain or an auto-exposure level that is an index to register values, a row for each setting from `min`, a byte for each field that isn't a constant |
+| `min`, `max`, `default` | As the tuple's. With `vts_mul`, a maximum of `-n` counts back from that many times the mode's `vts` |
+
+`sensors/` holds descriptions of the cameras `esp_cam_sensor` has drivers
+for, written by `tools/sensorgen/sensorgen.py` from Espressif's own source.
+It runs each driver on a desktop against a pretend chip, and
+`replay_check.py` plays every description back against that driver, register
+for register. A description that matches a driver on the desktop is not yet a
+camera: the OV2710's and the OV5647's are checked on a board as well, and
+those two are what the ESP32-P4 images freeze in place of their C drivers
+(`cameraif_sensors.SENSORS`, which `Camera()` tries when no driver answers).
 
 Everything except `name`, `reg_bits`, the controls and the tuning is
 required, and a missing or malformed key raises a `ValueError` naming it.

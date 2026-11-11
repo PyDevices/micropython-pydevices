@@ -37,8 +37,10 @@ target_sources(usermod_jpegio INTERFACE
 # The ESP32-P4 encodes and decodes on its JPEG engine (esp_driver_jpeg, which
 # main does not require on its own, so it is named here).
 if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32p4")
-    target_compile_definitions(usermod_jpegio INTERFACE JPEGIO_HW=1)
+    target_compile_definitions(usermod_jpegio INTERFACE JPEGIO_HW=1 JPEGIO_HW_WRAP=1)
     target_link_libraries(usermod_jpegio INTERFACE idf::esp_driver_jpeg)
+    # jpegio_hw.c loads the full-range colour matrix through this wrap.
+    target_link_options(usermod_jpegio INTERFACE -Wl,--wrap=dma2d_configure_color_space_conversion)
 endif()
 
 # The LVGL image decoder (lvgl_decoder.c) is built only when LVGL is in this

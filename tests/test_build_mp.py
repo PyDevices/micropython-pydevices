@@ -842,8 +842,9 @@ class Esp32KeepFs(unittest.TestCase):
 
     def test_the_release_cells_keep_the_tables_their_last_set_had(self):
         # The app partitions the release workflow's set of 2026-11-09 shipped with,
-        # each grown by autosize but the DEV-KIT's.
-        shipped = {"mp-p4-devkit": 0x600000, "mp-p4-panel": 0x5B0000, "mp-s3-lcd7": 0x540000,
+        # each grown by autosize but the DEV-KIT's, and the Touch-LCD-4B's grown
+        # 256 KB more for esp_cam_sensor 2.7.0's JX-H63P.
+        shipped = {"mp-p4-devkit": 0x600000, "mp-p4-panel": 0x5F0000, "mp-s3-lcd7": 0x540000,
                    "mp-s3-lcd43": 0x540000, "mp-s3-tembed": 0x540000}
         for c in rf.CELLS:
             if c["interpreter"] != "micropython" or c["kind"] != "esp32":

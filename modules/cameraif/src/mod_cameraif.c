@@ -32,6 +32,7 @@
 #include "py/objstr.h"
 #include "py/mphal.h"
 #include "py/objarray.h"
+#include "py/builtin.h"
 
 #if defined(__has_include)
 #if __has_include("sdkconfig.h")
@@ -1173,6 +1174,52 @@ static void cameraif_tune_from(cameraif_obj_t *c, mp_map_t *m, mp_obj_t *gamma, 
     }
 }
 
+// With no driver built into the firmware answering: the descriptions frozen
+// into the image (cameraif_sensors.SENSORS), each opened at its own address
+// and checked against its own chip ID. A board without the module, or a
+// malformed description, simply finds nothing.
+static void cameraif_probe_described(cameraif_obj_t *c, esp_cam_sensor_config_t *cfg) {
+    mp_obj_t *items = NULL;
+    size_t n = 0;
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t mod = mp_import_name(MP_QSTR_cameraif_sensors, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+        mp_obj_get_array(mp_load_attr(mod, MP_QSTR_SENSORS), &n, &items);
+        nlr_pop();
+    } else {
+        return;
+    }
+    for (size_t i = 0; i < n && c->sensor == NULL; i++) {
+        uint8_t addr = 0;
+        void *table = NULL;
+        if (nlr_push(&nlr) == 0) {
+            table = cameraif_table_parse(items[i], &addr);
+            nlr_pop();
+        } else {
+            continue;
+        }
+        sccb_i2c_config_t sccb_cfg = {
+            .scl_speed_hz = 100000,
+            .device_address = addr,
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        };
+        esp_sccb_io_handle_t io = NULL;
+        if (sccb_new_i2c_io(c->i2c, &sccb_cfg, &io) != ESP_OK) {
+            cameraif_table_free(table);
+            continue;
+        }
+        cfg->sccb_handle = io;
+        cfg->sensor_port = ESP_CAM_SENSOR_MIPI_CSI;
+        c->sensor = cameraif_table_detect(table, cfg);      // frees the table when nothing answers
+        if (c->sensor != NULL) {
+            c->sccb = io;
+            c->addr = addr;
+        } else {
+            esp_sccb_del_i2c_io(io);
+        }
+    }
+}
+
 static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
     size_t n_kw, const mp_obj_t *all_args) {
     enum {
@@ -1419,6 +1466,9 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
             break;
         }
         esp_sccb_del_i2c_io(io);
+    }
+    if (c->sensor == NULL) {
+        cameraif_probe_described(c, &sensor_cfg);
     }
     if (c->sensor == NULL) {
         cameraif_teardown();

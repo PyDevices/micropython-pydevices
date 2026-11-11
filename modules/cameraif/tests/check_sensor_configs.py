@@ -11,7 +11,7 @@ board's sdkconfig. This checks that all three set the same CONFIG_CAMERA_*
 options to the same values.
 
 Given esp_cam_sensor's source, it also checks that every driver with a MIPI-CSI
-interface is on, with its MIPI auto-detect and every MIPI mode it has, and no
+interface is on (but those whose description is frozen in instead), with its MIPI auto-detect and every MIPI mode it has, and no
 DVP or SPI auto-detect, since cameraif only drives the CSI port. With
 --download it fetches the version DEPENDENCIES.lock pins.
 
@@ -36,6 +36,16 @@ CP_SDKCONFIG = REPO / "boards" / "circuitpython" / "espressif" / "waveshare_esp3
 LOCK = REPO / "DEPENDENCIES.lock"
 
 SETTING = re.compile(r"^(CONFIG_CAMERA_\w+)=(\S+)$")
+
+# Sensors whose C driver the MicroPython images leave out: their descriptions
+# in sensors/ are frozen in instead. The CircuitPython board has no cameraif and
+# keeps the driver.
+DESCRIBED = ("OV5647",)
+
+
+def is_described(option):
+    """Whether a CONFIG_CAMERA_* option belongs to a sensor frozen in as a description."""
+    return any(option.startswith("CONFIG_CAMERA_%s" % name) for name in DESCRIBED)
 
 
 def settings(lines):
@@ -111,9 +121,14 @@ def main():
 
     problems = []
     fragment = settings(FRAGMENT.read_text().splitlines())
+    for option in sorted(fragment):
+        if is_described(option):
+            problems.append("%s is set in sdkconfig.esp32p4, but that sensor is frozen in as a description" % option)
     for name, other in (("patches/0002", settings(patch_lines(PATCH))),
                         ("the CircuitPython board's sdkconfig", settings(CP_SDKCONFIG.read_text().splitlines()))):
         for option in sorted(set(fragment) | set(other)):
+            if name != "patches/0002" and is_described(option):
+                continue
             if fragment.get(option) != other.get(option):
                 problems.append("%s: %s is %s in sdkconfig.esp32p4, %s in %s"
                                 % (option, option, fragment.get(option, "unset"), other.get(option, "unset"), name))
@@ -122,6 +137,8 @@ def main():
     if source is not None:
         drivers = mipi_drivers(source)
         for top, (mipi_detect, other_detect, modes) in sorted(drivers.items()):
+            if is_described("CONFIG_" + top):
+                continue
             for option in [top] + mipi_detect + modes:
                 if fragment.get("CONFIG_" + option) != "y":
                     problems.append("CONFIG_%s isn't on: every MIPI-CSI driver is, with every mode" % option)
