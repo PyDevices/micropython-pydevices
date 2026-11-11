@@ -9,7 +9,9 @@
 //
 // Everything is copied out of the dict into the C heap: the sensor outlives
 // any one Python call, and the soft-reset teardown runs after the Python heap
-// is gone.
+// is gone. The one exception is a packed register list that already sits in
+// flash (a frozen module's bytes): that is read in place, which is why a
+// description costs no heap beyond its small control fields.
 
 #include "py/runtime.h"
 #include "py/obj.h"
@@ -29,20 +31,22 @@
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "esp_cam_sensor.h"
+#include "esp_memory_utils.h"
 #include "esp_sccb_intf.h"
 
 #include "sensor_table.h"
 
-#define TABLE_DELAY (0xFFFF)    // a register entry that waits `value` ms instead
+// A register list is packed: three bytes an entry, the register high byte
+// first, then its low byte, then the value. A register of 0xFFFF is a wait
+// of `value` ms instead. A frozen bytes object is used where it sits in flash;
+// anything else is copied, so the list outlives the Python heap.
+#define TABLE_DELAY (0xFFFF)
+#define TABLE_ENTRY (3)
 
 typedef struct {
-    uint16_t reg;
-    uint16_t val;
-} table_reg_t;
-
-typedef struct {
-    table_reg_t *regs;
-    size_t n;
+    const uint8_t *data;
+    size_t n;               // entries
+    bool owned;             // data is ours to free
 } table_list_t;
 
 typedef struct {
@@ -90,20 +94,54 @@ static int table_int(mp_obj_t d, qstr key, int dflt) {
     return v == MP_OBJ_NULL || v == mp_const_none ? dflt : mp_obj_get_int(v);
 }
 
-// [(reg, value), (None, ms), ...]
+// Either bytes of packed (register, value) entries, or a sequence of
+// (register, value) pairs, where (None, ms) waits.
 static void table_parse_list(mp_obj_t seq, table_list_t *out) {
-    out->regs = NULL;
+    out->data = NULL;
     out->n = 0;
+    out->owned = false;
     if (seq == MP_OBJ_NULL || seq == mp_const_none) {
+        return;
+    }
+    if (mp_obj_is_type(seq, &mp_type_bytes)) {
+        size_t len;
+        const byte *data = (const byte *)mp_obj_str_get_data(seq, &len);
+        if (len % TABLE_ENTRY != 0) {
+            mp_raise_ValueError(MP_ERROR_TEXT("packed sensor registers are three bytes each"));
+        }
+        out->n = len / TABLE_ENTRY;
+        if (esp_ptr_in_drom(data)) {
+            out->data = data;
+            return;
+        }
+        uint8_t *copy = malloc(len ? len : 1);
+        if (copy == NULL) {
+            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("sensor table"));
+        }
+        memcpy(copy, data, len);
+        out->data = copy;
+        out->owned = true;
         return;
     }
     size_t n;
     mp_obj_t *items;
     mp_obj_get_array(seq, &n, &items);
-    out->regs = calloc(n ? n : 1, sizeof(table_reg_t));
-    if (out->regs == NULL) {
+    // A wait over 255 ms takes more than one entry.
+    size_t cap = n;
+    for (size_t i = 0; i < n; i++) {
+        size_t m;
+        mp_obj_t *pair;
+        mp_obj_get_array(items[i], &m, &pair);
+        if (m == 2 && pair[0] == mp_const_none) {
+            cap += mp_obj_get_int(pair[1]) / 255;
+        }
+    }
+    uint8_t *w = malloc(cap * TABLE_ENTRY + 1);
+    if (w == NULL) {
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("sensor table"));
     }
+    out->data = w;
+    out->owned = true;
     for (size_t i = 0; i < n; i++) {
         size_t m;
         mp_obj_t *pair;
@@ -111,10 +149,21 @@ static void table_parse_list(mp_obj_t seq, table_list_t *out) {
         if (m != 2) {
             mp_raise_ValueError(MP_ERROR_TEXT("sensor registers are (register, value) pairs"));
         }
-        out->regs[i].reg = pair[0] == mp_const_none ? TABLE_DELAY : (uint16_t)mp_obj_get_int(pair[0]);
-        out->regs[i].val = (uint16_t)mp_obj_get_int(pair[1]);
+        if (pair[0] == mp_const_none) {
+            for (int ms = mp_obj_get_int(pair[1]); ms > 0; ms -= 255) {
+                *w++ = TABLE_DELAY >> 8;
+                *w++ = TABLE_DELAY & 0xFF;
+                *w++ = ms > 255 ? 255 : ms;
+                out->n++;
+            }
+        } else {
+            int reg = mp_obj_get_int(pair[0]);
+            *w++ = reg >> 8;
+            *w++ = reg & 0xFF;
+            *w++ = mp_obj_get_int(pair[1]);
+            out->n++;
+        }
     }
-    out->n = n;
 }
 
 // (register, bytes, minimum, maximum, default)
@@ -165,8 +214,8 @@ static void table_free(table_t *t) {
         return;
     }
     for (size_t i = 0; i < t->n_modes; i++) {
-        if (t->mode_regs) {
-            free(t->mode_regs[i].regs);
+        if (t->mode_regs && t->mode_regs[i].owned) {
+            free((void *)t->mode_regs[i].data);
         }
         if (t->formats) {
             free((void *)t->formats[i].name);
@@ -175,9 +224,15 @@ static void table_free(table_t *t) {
     free(t->formats);
     free(t->isp);
     free(t->mode_regs);
-    free(t->init.regs);
-    free(t->stream_on.regs);
-    free(t->stream_off.regs);
+    if (t->init.owned) {
+        free((void *)t->init.data);
+    }
+    if (t->stream_on.owned) {
+        free((void *)t->stream_on.data);
+    }
+    if (t->stream_off.owned) {
+        free((void *)t->stream_off.data);
+    }
     free(t);
 }
 
@@ -317,12 +372,13 @@ static esp_err_t table_write_n(esp_cam_sensor_device_t *dev, int reg, int bytes,
 }
 
 static esp_err_t table_write_list(esp_cam_sensor_device_t *dev, const table_list_t *l) {
-    for (size_t i = 0; i < l->n; i++) {
-        if (l->regs[i].reg == TABLE_DELAY) {
-            vTaskDelay(pdMS_TO_TICKS(l->regs[i].val) + 1);
+    for (const uint8_t *p = l->data, *end = p + l->n * TABLE_ENTRY; p < end; p += TABLE_ENTRY) {
+        uint16_t reg = p[0] << 8 | p[1];
+        if (reg == TABLE_DELAY) {
+            vTaskDelay(pdMS_TO_TICKS(p[2]) + 1);
             continue;
         }
-        esp_err_t ret = table_write(dev, l->regs[i].reg, (uint8_t)l->regs[i].val);
+        esp_err_t ret = table_write(dev, reg, p[2]);
         if (ret != ESP_OK) {
             return ret;
         }
