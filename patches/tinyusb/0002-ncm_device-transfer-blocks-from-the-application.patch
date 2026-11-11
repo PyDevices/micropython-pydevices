@@ -1,0 +1,120 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 15:13:17 -0600
+Subject: [PATCH] ncm_device: transfer blocks from the application, parameters
+ in RAM, an out divisor Windows takes.
+
+A firmware can carry the NCM driver for code to turn on at run time, the
+way MicroPython's runtime USB device offers its functions. Its transfer
+blocks were static, so every such firmware spent them whether NCM ran or
+not (24 KB at 8 KB blocks). The application now hands them over with
+netd_set_buffer(), sized by netd_buffer_size(); until it does, netd_open()
+claims no interface.
+
+The ESP32-P4's USB controller reads a control transfer's data by DMA,
+which can't reach the flash a const table lives in, so the host read
+zeros for GET_NTB_PARAMETERS and Windows' NCM driver refused to start.
+The table moves to RAM.
+
+Windows' NCM driver (UsbNcm) also refuses an out divisor of 1 or 2 and
+reports the device as failed (Code 10) right after reading the table.
+It starts on 4 or 8; Linux' cdc_ncm takes any of them.
+---
+ src/class/net/ncm_device.c | 28 ++++++++++++++++++++++++----
+ src/class/net/net_device.h |  6 ++++++
+ 2 files changed, 30 insertions(+), 4 deletions(-)
+
+diff --git a/src/class/net/ncm_device.c b/src/class/net/ncm_device.c
+index e5f4413..b3755a2 100644
+--- a/src/class/net/ncm_device.c
++++ b/src/class/net/ncm_device.c
+@@ -143,7 +143,20 @@ typedef struct {
+ } ncm_epbuf_t;
+ 
+ static ncm_interface_t ncm_interface;
+-CFG_TUD_MEM_SECTION static ncm_epbuf_t ncm_epbuf;
++// The transfer blocks come from the application (netd_set_buffer()) when it
++// turns NCM on, so a firmware that carries this driver without using it
++// spends no RAM on them. Until then the driver claims no interface.
++static ncm_epbuf_t *ncm_epbuf_ptr;
++#define ncm_epbuf (*ncm_epbuf_ptr)
++
++uint32_t netd_buffer_size(void) {
++  return sizeof(ncm_epbuf_t);
++}
++
++void netd_set_buffer(void *buf) {
++  ncm_epbuf_ptr = (ncm_epbuf_t *) buf;
++  netd_init();
++}
+ 
+ //--------------------------------------------------------------------+
+ // Weak stubs: invoked if no strong implementation is available
+@@ -166,7 +179,8 @@ TU_ATTR_WEAK bool tud_network_default_link_state_cb(void) {
+  * \attention
+  *     We are lucky, that byte order is correct
+  */
+-TU_ATTR_ALIGNED(4) static const ntb_parameters_t ntb_parameters = {
++// In RAM: the USB controller reads control data by DMA, which can't reach flash.
++TU_ATTR_ALIGNED(4) static ntb_parameters_t ntb_parameters = {
+   .wLength                  = sizeof(ntb_parameters_t),
+   .bmNtbFormatsSupported    = 0x01,// 16-bit NTB supported
+   .dwNtbInMaxSize           = CFG_TUD_NCM_IN_NTB_MAX_SIZE,
+@@ -175,7 +189,9 @@ TU_ATTR_ALIGNED(4) static const ntb_parameters_t ntb_parameters = {
+   .wNdbInAlignment          = TUD_NCM_ALIGNMENT,
+   .wReserved                = 0,
+   .dwNtbOutMaxSize          = CFG_TUD_NCM_OUT_NTB_MAX_SIZE,
+-  .wNdbOutDivisor           = 1,
++  // Windows' NCM driver won't start on an out divisor of 1 or 2: it takes
++  // 4 or 8.
++  .wNdbOutDivisor           = 4,
+   .wNdbOutPayloadRemainder  = 0,
+   .wNdbOutAlignment         = TUD_NCM_ALIGNMENT,
+   .wNtbOutMaxDatagrams      = CFG_TUD_NCM_OUT_MAX_DATAGRAMS_PER_NTB,
+@@ -853,14 +869,17 @@ void netd_init(void) {
+ 
+   ncm_interface.xmit_max_ntb_size = CFG_TUD_NCM_IN_NTB_MAX_SIZE;
+   ncm_interface.xmit_max_datagrams = CFG_TUD_NCM_IN_MAX_DATAGRAMS_PER_NTB;
++  ncm_interface.link_is_up = tud_network_default_link_state_cb();
+ 
++  if (ncm_epbuf_ptr == NULL) {
++    return;
++  }
+   for (int i = 0; i < XMIT_NTB_N; ++i) {
+     ncm_interface.xmit_free_ntb[i] = &ncm_epbuf.xmit[i].ntb;
+   }
+   for (int i = 0; i < RECV_NTB_N; ++i) {
+     ncm_interface.recv_free_ntb[i] = &ncm_epbuf.recv[i].ntb;
+   }
+-  ncm_interface.link_is_up = tud_network_default_link_state_cb();
+ } // netd_init
+ 
+ /**
+@@ -895,6 +914,7 @@ void netd_reset(uint8_t rhport) {
+  * - USB interface is open
+  */
+ uint16_t netd_open(uint8_t rhport, tusb_desc_interface_t const *itf_desc, uint16_t max_len) {
++  TU_VERIFY(ncm_epbuf_ptr != NULL, 0);// no transfer blocks: NCM isn't turned on
+   TU_ASSERT(ncm_interface.ep_notif == 0, 0);// assure that the interface is only opened once
+ 
+   ncm_interface.itf_num = itf_desc->bInterfaceNumber;// management interface
+diff --git a/src/class/net/net_device.h b/src/class/net/net_device.h
+index 1ad069d..09d1ea0 100644
+--- a/src/class/net/net_device.h
++++ b/src/class/net/net_device.h
+@@ -116,6 +116,12 @@ void tud_network_link_state(uint8_t rhport, bool is_up);
+ //--------------------------------------------------------------------+
+ // INTERNAL USBD-CLASS DRIVER API
+ //--------------------------------------------------------------------+
++// NCM's transfer blocks: the application allocates netd_buffer_size() bytes,
++// aligned and placed as CFG_TUD_MEM_SECTION and CFG_TUD_MEM_ALIGN ask, and
++// hands them over once, before the host configures the device.
++uint32_t netd_buffer_size     (void);
++void     netd_set_buffer      (void *buf);
++
+ void     netd_init            (void);
+ bool     netd_deinit          (void);
+ void     netd_reset           (uint8_t rhport);
+-- 
+2.43.0
+

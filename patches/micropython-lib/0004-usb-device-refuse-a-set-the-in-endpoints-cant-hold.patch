@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 00:00:00 -0600
+Subject: [PATCH] usb-device: refuse a set of functions the controller's IN
+ endpoints can't hold.
+
+A USB controller has few IN endpoints: an ESP32-S2, S3 or a full-speed
+P4 has four besides endpoint 0, and the REPL's serial port takes two. A
+set that needs more failed deep in the descriptor, or opened and never
+moved data. init() and config() now count the IN endpoints each function's
+descriptor asks for and, where machine.USBDevice says how many the chip
+has (EP_IN_MAX), raise a ValueError before anything changes, so the
+device that is up stays up. The message names the chip's count and each
+function's: "2 IN endpoints left (4 on this chip, the REPL's serial port
+takes 2): NCMInterface needs 2, MIDIInterface needs 1".
+
+---
+diff --git a/micropython/usb/usb-device/manifest.py b/micropython/usb/usb-device/manifest.py
+index fa0d8a3..2607bd5 100644
+--- a/micropython/usb/usb-device/manifest.py
++++ b/micropython/usb/usb-device/manifest.py
+@@ -1,2 +1,2 @@
+-metadata(version="0.2.1")
++metadata(version="0.2.2")
+ package("usb")
+diff --git a/micropython/usb/usb-device/usb/device/core.py b/micropython/usb/usb-device/usb/device/core.py
+index e6bc8bb..6891029 100644
+--- a/micropython/usb/usb-device/usb/device/core.py
++++ b/micropython/usb/usb-device/usb/device/core.py
+@@ -75,6 +75,48 @@ def get():
+     return _dev
+ 
+ 
++def _count_in_eps(desc, end):
++    # The IN endpoint descriptors in desc[:end].
++    n = i = 0
++    while i < end and desc[i]:
++        if desc[i + 1] == _STD_DESC_ENDPOINT_TYPE and desc[i + 2] & _EP_IN_FLAG:
++            n += 1
++        i += desc[i]
++    return n
++
++
++def _check_in_eps(usbd, builtin_driver, itfs):
++    # The controller's IN endpoints (besides endpoint 0) are the scarce ones:
++    # 4 on an ESP32-S2, S3 or a full-speed P4, 7 on a high-speed P4.
++    # machine.USBDevice says how many in EP_IN_MAX where the port knows.
++    # Refuse a set that can't fit before anything changes, naming what each
++    # function takes, so the device that's up now stays up.
++    limit = getattr(usbd, "EP_IN_MAX", None)
++    if limit is None:
++        return
++    if isinstance(builtin_driver, bool):
++        builtin_driver = usbd.BUILTIN_DEFAULT if builtin_driver else usbd.BUILTIN_NONE
++    builtin = builtin_driver.desc_cfg
++    taken = _count_in_eps(builtin, len(builtin)) if builtin else 0
++    needs = []
++    for itf in itfs:
++        desc = Descriptor(None)
++        itf.desc_cfg(desc, 0, 0, [])
++        desc = Descriptor(bytearray(desc.o))
++        itf.desc_cfg(desc, 0, 0, [])
++        needs.append((itf, _count_in_eps(desc.b, desc.o)))
++    if taken + sum(n for _, n in needs) <= limit:
++        return
++    parts = ", ".join("{} needs {}".format(type(itf).__name__, n) for itf, n in needs)
++    if taken:
++        raise ValueError(
++            "{} IN endpoints left ({} on this chip, the REPL's serial port takes {}): {}".format(
++                limit - taken, limit, taken, parts
++            )
++        )
++    raise ValueError("{} IN endpoints on this chip: {}".format(limit, parts))
++
++
+ class _Device:
+     # Class that implements the Python parts of the MicroPython USBDevice.
+     #
+@@ -90,6 +132,7 @@ class _Device:
+ 
+     def init(self, *itfs, **kwargs):
+         # Helper function to configure the USB device and activate it in a single call
++        _check_in_eps(self._usbd, kwargs.get("builtin_driver", False), itfs)
+         self.active(False)
+         self.config(*itfs, **kwargs)
+         self.active(True)
+@@ -120,6 +163,8 @@ class _Device:
+         if self.active():
+             raise OSError(_MP_EINVAL)  # Must set active(False) first
+ 
++        _check_in_eps(_usbd, builtin_driver, itfs)
++
+         # Convenience: Allow builtin_driver to be True, False or one of
+         # the machine.USBDevice.BUILTIN_ constants
+         if isinstance(builtin_driver, bool):

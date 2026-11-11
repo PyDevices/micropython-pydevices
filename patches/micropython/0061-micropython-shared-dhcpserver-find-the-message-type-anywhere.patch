@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 16:30:00 -0600
+Subject: [PATCH] shared/netutils/dhcpserver: find the message type anywhere in
+ the options.
+
+The server read the DHCP message type from the first option. dhcpcd puts
+the requested address first in a REQUEST, so the server ignored it: dhcpcd
+got an OFFER and never an ACK, and fell back to a link-local address.
+Windows and most other clients put the type first, which hid it. The type
+is now looked up like every other option.
+---
+ shared/netutils/dhcpserver.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/shared/netutils/dhcpserver.c b/shared/netutils/dhcpserver.c
+--- a/shared/netutils/dhcpserver.c
++++ b/shared/netutils/dhcpserver.c
+@@ -208,7 +208,14 @@
+     uint8_t *opt = (uint8_t *)&dhcp_msg.options;
+     opt += 4; // assume magic cookie: 99, 130, 83, 99
+ 
+-    switch (opt[2]) {
++    // The message type can be any option, not only the first: dhcpcd puts
++    // the requested address ahead of it in a REQUEST.
++    uint8_t *msg_type = opt_find(opt, DHCP_OPT_MSG_TYPE);
++    if (msg_type == NULL) {
++        goto ignore_request;
++    }
++
++    switch (msg_type[2]) {
+         case DHCPDISCOVER: {
+             int yi = DHCPS_MAX_IP;
+             for (int i = 0; i < DHCPS_MAX_IP; ++i) {
+-- 
+2.43.0
+
