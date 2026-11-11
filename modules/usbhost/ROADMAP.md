@@ -10,9 +10,9 @@ packages themselves are in pydevices' roadmap.
   a USB Audio 2.0 speaker can share one session.
 - Isochronous IN of two and three transactions a microframe on the ESP32-P4, so a camera's
   uncompressed 640x480 at 30 frames a second (18 MB/s) fits; today the host takes one.
-- Host and device at once on more ESP32-P4 boards. The WIFI6 DEV-KIT does it
-  ([how](docs/host.md#host-and-device-at-once-on-the-esp32-p4)); the
-  ESP32-P4-Pico needs a build that gives its header pins the device.
+- Host and device at once on every ESP32-P4 board that brings both of the
+  chip's USB ports out, chosen in its board config
+  ([how it works](docs/host.md#host-and-device-at-once-on-the-esp32-p4)).
 
 Bugs, and things you need that don't work yet, go to
 [issues](https://github.com/PyDevices/micropython-pydevices/issues).
