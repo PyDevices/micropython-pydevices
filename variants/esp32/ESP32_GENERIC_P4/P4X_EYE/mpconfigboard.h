@@ -14,3 +14,8 @@
 // that about one 4 KB write in 5,000 fails. At the chip's default strength
 // (2) 200 MB copies write with no errors.
 #define MICROPY_HW_SDMMC_DRIVE_STRENGTH (2)
+
+// Ethernet over USB: network.USBD_NCM, beside the REPL's serial port and the
+// SD card's drive. The high-speed device has IN endpoints 1 to 7, and NCM takes
+// two of them from the built-in set.
+#define MICROPY_PY_NETWORK_USBD_NCM (1)

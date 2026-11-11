@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 00:00:00 -0600
+Subject: [PATCH] ncm_device: keep the NTB parameters in RAM.
+
+The ESP32-P4's USB controller reads a control transfer's data by DMA,
+which can't reach the flash a const table lives in, so the host read
+zeros for GET_NTB_PARAMETERS and Windows' NCM driver refused to start.
+
+---
+diff --git a/src/class/net/ncm_device.c b/src/class/net/ncm_device.c
+index 7e1a7e8..32d5a2a 100644
+--- a/src/class/net/ncm_device.c
++++ b/src/class/net/ncm_device.c
+@@ -166,7 +166,8 @@ TU_ATTR_WEAK bool tud_network_default_link_state_cb(void) {
+  * \attention
+  *     We are lucky, that byte order is correct
+  */
+-TU_ATTR_ALIGNED(4) static const ntb_parameters_t ntb_parameters = {
++// In RAM: the USB controller reads control data by DMA, which can't reach flash.
++TU_ATTR_ALIGNED(4) static ntb_parameters_t ntb_parameters = {
+   .wLength                  = sizeof(ntb_parameters_t),
+   .bmNtbFormatsSupported    = 0x01,// 16-bit NTB supported
+   .dwNtbInMaxSize           = CFG_TUD_NCM_IN_NTB_MAX_SIZE,

@@ -1,0 +1,395 @@
+From 2f98d9f2fb67343f23cd6c405ea31b88adf683cd Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 07:15:30 -0600
+Subject: [PATCH] esp32: network.USBD_NCM, Ethernet over USB, through ESP-IDF's
+ network stack
+
+MICROPY_PY_NETWORK_USBD_NCM drives lwIP's raw API, which ESP-IDF allows only
+from its own tcpip task, so the esp32 port gets a driver of its own: an
+esp_netif with a custom I/O driver, a link-local address and ESP-IDF's DHCP
+server for the computer, and no gateway. Frames the stack sends are queued to
+the scheduler, where TinyUSB runs; received ones go to esp_netif_receive().
+The shared pieces learn that ESP-IDF's lwipopts.h has no LWIP_MDNS_RESPONDER,
+that the MAC string is upper-case hex as Windows requires, and extmod's
+driver steps aside on esp32.
+---
+ extmod/network_usbd_ncm.c           |   4 +-
+ ports/esp32/esp32_common.cmake      |   1 +
+ ports/esp32/network_usbd_ncm.c      | 269 ++++++++++++++++++++++++++++
+ ports/esp32/usb.c                   |   8 +
+ shared/tinyusb/mp_usbd_descriptor.c |   7 +
+ shared/tinyusb/tusb_config.h        |  16 +-
+ 6 files changed, 303 insertions(+), 2 deletions(-)
+ create mode 100644 ports/esp32/network_usbd_ncm.c
+
+diff --git a/extmod/network_usbd_ncm.c b/extmod/network_usbd_ncm.c
+index d6ae152..6082bce 100644
+--- a/extmod/network_usbd_ncm.c
++++ b/extmod/network_usbd_ncm.c
+@@ -28,7 +28,9 @@
+ #include "py/mperrno.h"
+ #include "py/mphal.h"
+ 
+-#if MICROPY_PY_NETWORK_USBD_NCM
++// The esp32 port has its own, over ESP-IDF's network stack: lwIP's raw API isn't
++// safe from outside ESP-IDF's tcpip task. See ports/esp32/network_usbd_ncm.c.
++#if MICROPY_PY_NETWORK_USBD_NCM && !defined(ESP_PLATFORM)
+ 
+ // Include NCM configuration (MICROPY_PY_NETWORK_USBD_NCM_DHCP_SERVER).
+ #include "extmod/network_usbd_ncm.h"
+diff --git a/ports/esp32/esp32_common.cmake b/ports/esp32/esp32_common.cmake
+index dc1f922..376b393 100644
+--- a/ports/esp32/esp32_common.cmake
++++ b/ports/esp32/esp32_common.cmake
+@@ -127,6 +127,7 @@ list(APPEND MICROPY_SOURCE_PORT
+     machine_i2c.c
+     network_common.c
+     network_lan.c
++    network_usbd_ncm.c
+     network_ppp.c
+     network_wlan.c
+     network_wlan_csi.c
+diff --git a/ports/esp32/network_usbd_ncm.c b/ports/esp32/network_usbd_ncm.c
+new file mode 100644
+index 0000000..568fec6
+--- /dev/null
++++ b/ports/esp32/network_usbd_ncm.c
+@@ -0,0 +1,269 @@
++/*
++ * This file is part of the MicroPython project, http://micropython.org/
++ *
++ * The MIT License (MIT)
++ *
++ * Copyright (c) 2026 Brad Barnett
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++ */
++
++// network.USBD_NCM on the ESP32: Ethernet over USB (CDC-NCM) as an esp_netif
++// with a custom I/O driver, in place of extmod/network_usbd_ncm.c. That one
++// drives lwIP's raw API, which ESP-IDF only allows from its own tcpip task.
++//
++// The board is the NCM link's one end, at a link-local address of its own, and
++// leases the computer an address beside it from ESP-IDF's DHCP server, with no
++// gateway so the computer's internet route doesn't move. TinyUSB runs from
++// MicroPython's scheduler, so frames the network stack sends are copied into a
++// queue and handed to it there, and received frames go to esp_netif_receive(),
++// which copies them into the stack's own buffers.
++
++#include "py/runtime.h"
++#include "py/mphal.h"
++#include "py/mperrno.h"
++
++#if MICROPY_PY_NETWORK_USBD_NCM
++
++#include <string.h>
++
++#include "freertos/FreeRTOS.h"
++#include "freertos/queue.h"
++#include "esp_mac.h"
++#include "esp_netif.h"
++#include "esp_netif_net_stack.h"
++
++#include "shared/tinyusb/mp_usbd.h"
++#include "modnetwork.h"
++
++#define NCM_TX_QUEUE_LEN (8)
++
++typedef struct _ncm_frame_t {
++    uint16_t len;
++    uint8_t data[];
++} ncm_frame_t;
++
++// The computer's end of the link. usb.c fills it in before the descriptors go out.
++uint8_t tud_network_mac_address[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x00};
++
++const mp_obj_type_t mod_network_nic_type_ncm;
++
++static base_if_obj_t ncm_obj;
++static esp_netif_t *ncm_netif;
++static QueueHandle_t ncm_tx_queue;
++static mp_sched_node_t ncm_tx_node;
++static volatile bool ncm_link;
++
++// Frames the network stack hands the driver: copy, queue, and let the
++// scheduler carry them to TinyUSB. A full queue or a busy link drops the frame,
++// which TCP sends again.
++static void ncm_tx_callback(mp_sched_node_t *node);
++static void ncm_set_link(bool up);
++
++static esp_err_t ncm_transmit(void *handle, void *buffer, size_t len) {
++    (void)handle;
++    if (!ncm_link || len == 0 || len > CFG_TUD_NET_MTU) {
++        return ESP_OK;
++    }
++    ncm_frame_t *frame = malloc(sizeof(ncm_frame_t) + len);
++    if (frame == NULL) {
++        return ESP_OK;
++    }
++    frame->len = len;
++    memcpy(frame->data, buffer, len);
++    if (xQueueSend(ncm_tx_queue, &frame, 0) != pdTRUE) {
++        free(frame);
++        return ESP_OK;
++    }
++    mp_sched_schedule_node(&ncm_tx_node, ncm_tx_callback);
++    return ESP_OK;
++}
++
++static void ncm_tx_callback(mp_sched_node_t *node) {
++    (void)node;
++    ncm_frame_t *frame;
++    while (xQueueReceive(ncm_tx_queue, &frame, 0) == pdTRUE) {
++        if (tud_ready() && tud_network_can_xmit(frame->len)) {
++            tud_network_xmit(frame, frame->len);
++        }
++        free(frame);
++    }
++}
++
++uint16_t tud_network_xmit_cb(uint8_t *dst, void *ref, uint16_t arg) {
++    memcpy(dst, ((ncm_frame_t *)ref)->data, arg);
++    return arg;
++}
++
++bool tud_network_recv_cb(const uint8_t *src, uint16_t size) {
++    if (!ncm_link) {
++        ncm_set_link(true);
++    }
++    if (ncm_netif != NULL && ncm_link && size) {
++        esp_netif_receive(ncm_netif, (void *)src, size, NULL);
++    }
++    tud_network_recv_renew();
++    return true;
++}
++
++// A link-local address from the MAC, 169.254.x.1, as the other ports'
++// driver chooses.
++static uint32_t ncm_address(const uint8_t *mac) {
++    size_t hash = qstr_compute_hash(mac, 6);
++    uint8_t third = (uint8_t)(hash ^ (hash >> 8));
++    if (third == 0) {
++        third = 1;
++    } else if (third == 255) {
++        third = 254;
++    }
++    return esp_netif_htonl((169u << 24) | (254u << 16) | ((uint32_t)third << 8) | 1u);
++}
++
++static void ncm_netif_create(void) {
++    if (ncm_netif != NULL) {
++        return;
++    }
++    // The netif layer starts on first use, as it does for Wi-Fi and Ethernet.
++    mp_call_function_0(MP_OBJ_FROM_PTR(&esp_network_initialize_obj));
++
++    // The board's end of the link is the computer's address with the last bit flipped.
++    static uint8_t mac[6];
++    memcpy(mac, tud_network_mac_address, sizeof(mac));
++    mac[5] ^= 0x01;
++    static esp_netif_ip_info_t ip_info;
++    ip_info.ip.addr = ncm_address(tud_network_mac_address);
++    ip_info.netmask.addr = esp_netif_htonl(0xFFFF0000);
++    ip_info.gw.addr = ip_info.ip.addr;
++
++    static const esp_netif_inherent_config_t base = {
++        .flags = ESP_NETIF_DHCP_SERVER | ESP_NETIF_FLAG_AUTOUP,
++        .ip_info = &ip_info,
++        .if_key = "USBD_NCM",
++        .if_desc = "usbd_ncm",
++        .route_prio = 5,
++    };
++    static esp_netif_driver_ifconfig_t driver = {
++        .handle = (void *)1,
++        .transmit = ncm_transmit,
++    };
++    const esp_netif_config_t config = {
++        .base = &base,
++        .driver = &driver,
++        .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH,
++    };
++
++    ncm_tx_queue = xQueueCreate(NCM_TX_QUEUE_LEN, sizeof(ncm_frame_t *));
++    if (ncm_tx_queue == NULL) {
++        mp_raise_OSError(MP_ENOMEM);
++    }
++    ncm_netif = esp_netif_new(&config);
++    if (ncm_netif == NULL) {
++        mp_raise_OSError(MP_ENOMEM);
++    }
++    esp_netif_set_mac(ncm_netif, mac);
++    // No default gateway for the computer: this link goes nowhere else.
++    uint8_t no_router = 0;
++    esp_netif_dhcps_stop(ncm_netif);
++    esp_netif_dhcps_option(ncm_netif, ESP_NETIF_OP_SET, ESP_NETIF_ROUTER_SOLICITATION_ADDRESS, &no_router, sizeof(no_router));
++    esp_netif_action_start(ncm_netif, NULL, 0, NULL);
++    esp_netif_dhcps_start(ncm_netif);
++
++    ncm_obj.base.type = &mod_network_nic_type_ncm;
++    ncm_obj.if_id = ESP_IF_MAX;
++    ncm_obj.netif = ncm_netif;
++}
++
++static void ncm_set_link(bool up) {
++    ncm_netif_create();
++    if (up == ncm_link) {
++        return;
++    }
++    ncm_link = up;
++    ncm_obj.active = up;
++    if (up) {
++        esp_netif_action_connected(ncm_netif, NULL, 0, NULL);
++    } else {
++        esp_netif_action_disconnected(ncm_netif, NULL, 0, NULL);
++    }
++}
++
++// NCM tells the application nothing when the computer switches the data
++// interface on, so the link comes up with the first thing the computer says:
++// the Ethernet packet filter it sets once the interface is on, or its first
++// frame, whichever TinyUSB reports first. The netif exists from then on.
++void tud_network_set_packet_filter_cb(uint16_t packet_filter) {
++    (void)packet_filter;
++    ncm_set_link(true);
++}
++
++static mp_obj_t ncm_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
++    mp_arg_check_num(n_args, n_kw, 0, 0, false);
++    ncm_netif_create();
++    return MP_OBJ_FROM_PTR(&ncm_obj);
++}
++
++// active(): whether the computer has the link up; active(False) takes it
++// down from this end and active(True) back up.
++static mp_obj_t ncm_active(size_t n_args, const mp_obj_t *args) {
++    if (n_args > 1) {
++        ncm_set_link(mp_obj_is_true(args[1]));
++    }
++    return mp_obj_new_bool(ncm_link);
++}
++static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ncm_active_obj, 1, 2, ncm_active);
++
++static mp_obj_t ncm_isconnected(mp_obj_t self_in) {
++    return mp_obj_new_bool(ncm_link && tud_ready());
++}
++static MP_DEFINE_CONST_FUN_OBJ_1(ncm_isconnected_obj, ncm_isconnected);
++
++// config("mac"): the board's end of the link. config("ifname"): its ESP-IDF name.
++static mp_obj_t ncm_config(mp_obj_t self_in, mp_obj_t key) {
++    switch (mp_obj_str_get_qstr(key)) {
++        case MP_QSTR_mac: {
++            uint8_t mac[6];
++            esp_netif_get_mac(ncm_netif, mac);
++            return mp_obj_new_bytes(mac, sizeof(mac));
++        }
++        case MP_QSTR_ifname:
++            return esp_ifname(ncm_netif);
++        default:
++            mp_raise_ValueError(MP_ERROR_TEXT("unknown config param"));
++    }
++}
++static MP_DEFINE_CONST_FUN_OBJ_2(ncm_config_obj, ncm_config);
++
++static const mp_rom_map_elem_t ncm_locals_dict_table[] = {
++    { MP_ROM_QSTR(MP_QSTR_active), MP_ROM_PTR(&ncm_active_obj) },
++    { MP_ROM_QSTR(MP_QSTR_isconnected), MP_ROM_PTR(&ncm_isconnected_obj) },
++    { MP_ROM_QSTR(MP_QSTR_config), MP_ROM_PTR(&ncm_config_obj) },
++    { MP_ROM_QSTR(MP_QSTR_ifconfig), MP_ROM_PTR(&esp_network_ifconfig_obj) },
++    { MP_ROM_QSTR(MP_QSTR_ipconfig), MP_ROM_PTR(&esp_nic_ipconfig_obj) },
++};
++static MP_DEFINE_CONST_DICT(ncm_locals_dict, ncm_locals_dict_table);
++
++MP_DEFINE_CONST_OBJ_TYPE(
++    mod_network_nic_type_ncm,
++    MP_QSTR_USBD_NCM,
++    MP_TYPE_FLAG_NONE,
++    make_new, ncm_make_new,
++    locals_dict, &ncm_locals_dict
++    );
++
++#endif // MICROPY_PY_NETWORK_USBD_NCM
+diff --git a/ports/esp32/usb.c b/ports/esp32/usb.c
+index fbc8fd1..fdc45f2 100644
+--- a/ports/esp32/usb.c
++++ b/ports/esp32/usb.c
+@@ -55,6 +55,14 @@ void usb_phy_init(void) {
+ 
+     // Init ESP USB Phy
+     usb_new_phy(&phy_conf, &phy_hdl);
++
++    #if MICROPY_PY_NETWORK_USBD_NCM
++    // The computer's end of the NCM link, in the descriptors it reads next. The
++    // first byte marks it locally administered; network_usbd_ncm.c's netif
++    // takes the same address with the last bit flipped.
++    esp_read_mac(tud_network_mac_address, ESP_MAC_ETH);
++    tud_network_mac_address[0] = 0x02;
++    #endif
+ }
+ 
+ #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4
+diff --git a/shared/tinyusb/mp_usbd_descriptor.c b/shared/tinyusb/mp_usbd_descriptor.c
+index f6b1fe9..631139e 100644
+--- a/shared/tinyusb/mp_usbd_descriptor.c
++++ b/shared/tinyusb/mp_usbd_descriptor.c
+@@ -141,6 +141,13 @@ const uint16_t *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
+                 break;
+             case USBD_STR_NCM_MAC:
+                 mp_usbd_hex_str(serial_buf, (uint8_t *)tud_network_mac_address, sizeof(tud_network_mac_address));
++                // CDC-ECM and NCM write the address as upper-case hex digits,
++                // which Windows' driver insists on.
++                for (char *c = serial_buf; *c; c++) {
++                    if (*c >= 'a' && *c <= 'f') {
++                        *c -= 'a' - 'A';
++                    }
++                }
+                 desc_str = serial_buf;
+                 break;
+             #endif
+diff --git a/shared/tinyusb/tusb_config.h b/shared/tinyusb/tusb_config.h
+index 5432b9c..2f73902 100644
+--- a/shared/tinyusb/tusb_config.h
++++ b/shared/tinyusb/tusb_config.h
+@@ -102,9 +102,23 @@
+ 
+ // NCM TinyUSB buffer configuration.
+ // These depend on lwIP parameters (TCP_MSS, LWIP_MDNS_RESPONDER); lwipopts.h
+-// is safe to include here because MICROPY_PY_NETWORK_USBD_NCM implies LWIP.
++// is safe to include here because MICROPY_PY_NETWORK_USBD_NCM implies lwIP: the
++// port's own, or ESP-IDF's on esp32.
+ #include "lwipopts.h"
+ 
++// ESP-IDF's lwipopts.h doesn't define this one: it takes no mDNS responder
++// from the NCM netif, which doesn't run lwIP's raw API.
++#ifndef LWIP_MDNS_RESPONDER
++#define LWIP_MDNS_RESPONDER 0
++#endif
++
++#ifdef ESP_PLATFORM
++// Windows' NCM driver won't start on the smaller blocks the lwIP-derived size
++// below gives.
++#define CFG_TUD_NCM_IN_NTB_MAX_SIZE  (8192)
++#define CFG_TUD_NCM_OUT_NTB_MAX_SIZE (8192)
++#endif
++
+ // Must be >> MTU; can be set to 2048 without impact.
+ #ifndef CFG_TUD_NCM_IN_NTB_MAX_SIZE
+ #define CFG_TUD_NCM_IN_NTB_MAX_SIZE  ((2 + LWIP_MDNS_RESPONDER) * TCP_MSS + 100)
+-- 
+2.43.0
+
