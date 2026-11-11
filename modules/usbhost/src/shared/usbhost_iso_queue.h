@@ -26,6 +26,7 @@
 #include <stdint.h>
 
 #define USBHOST_ISO_HS_PKTS_PER_XFER (32)
+#define USBHOST_ISO_HS_MIN_PKTS_PER_XFER (8)
 #define USBHOST_ISO_FS_PKTS_PER_XFER (8)
 #define USBHOST_ISO_QUEUE_TICKS      (3)
 #define USBHOST_ISO_MIN_XFER         (3)
@@ -57,8 +58,20 @@ static inline usbhost_iso_queue_t usbhost_iso_queue_size(bool high_speed,
         pkts = interval >= USBHOST_ISO_MAX_XFER_SLOTS ? 1 : USBHOST_ISO_MAX_XFER_SLOTS / interval;
     }
     const uint32_t slot_us = high_speed ? 125 : 1000;
-    const uint32_t xfer_us = pkts * interval * slot_us;
     const uint32_t queue_us = (uint32_t)USBHOST_ISO_QUEUE_TICKS * tick_ms * 1000;
+    // Each transfer's buffer is DMA-capable internal RAM, the scarcest kind:
+    // 32 packets of a camera's 944 bytes is 30 KB, and the minimum three of
+    // them took 92 KB of an ESP32-P4's 160 KB, leaving none for the H.264
+    // encoder's 92 KB block. A faster tick needs less queued, so on a
+    // high-speed bus halve the transfers while the minimum count still covers
+    // the queue time (a 1 ms tick: three transfers of 8 packets, 23 KB).
+    if (high_speed) {
+        while (pkts > USBHOST_ISO_HS_MIN_PKTS_PER_XFER
+               && (pkts / 2) * interval * slot_us * USBHOST_ISO_MIN_XFER >= queue_us) {
+            pkts /= 2;
+        }
+    }
+    const uint32_t xfer_us = pkts * interval * slot_us;
     uint32_t nxfer = (queue_us + xfer_us - 1) / xfer_us;
     if (nxfer < USBHOST_ISO_MIN_XFER) {
         nxfer = USBHOST_ISO_MIN_XFER;
