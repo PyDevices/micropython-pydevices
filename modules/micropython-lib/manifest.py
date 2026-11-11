@@ -37,7 +37,7 @@ for _pkg in (
 import os
 
 include("../library.py")
-for _pkg in ("usb-device-audio", "usb-device-video", "usb-device-msc"):
+for _pkg in ("usb-device-audio", "usb-device-video", "usb-device-msc", "usb-device-net"):
     require(_pkg, library="omnipython-lib")
 _names = [n.strip() for n in os.environ.get("PYDEVICES_MODULES", "").split(",")]
 _usbhost = os.path.realpath("../usbhost")

@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 00:00:00 -0600
+Subject: [PATCH] rp2: USB networking turned on from code
+
+network.USBD_NCM and TinyUSB's NCM driver are compiled in wherever the
+runtime USB device and lwIP are, as on esp32, and NCM leaves the built-in
+descriptor: code chooses it through machine.USBDevice with usb-device-net's
+NCMInterface. USBDevice.EP_IN_MAX gives usb.device the controller's IN
+endpoint count for its budget check.
+---
+diff --git a/ports/rp2/mpconfigport.h b/ports/rp2/mpconfigport.h
+--- a/ports/rp2/mpconfigport.h
++++ b/ports/rp2/mpconfigport.h
+@@ -65,6 +65,22 @@
+ #ifndef MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
+ #define MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE    (1) // Support machine.USBDevice
+ #endif
++
++// Ethernet over USB (CDC-NCM): network.USBD_NCM and TinyUSB's NCM driver are
++// compiled in wherever the runtime USB device and lwIP are, but NCM isn't in
++// the built-in descriptor. Code turns it on with a CDC-NCM function of its own
++// through machine.USBDevice (usb-device-net), so it takes no endpoints until then.
++#ifndef MICROPY_PY_NETWORK_USBD_NCM
++#define MICROPY_PY_NETWORK_USBD_NCM             (MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE && MICROPY_PY_LWIP)
++#endif
++#ifndef MICROPY_HW_USB_NCM_BUILTIN
++#define MICROPY_HW_USB_NCM_BUILTIN              (0)
++#endif
++
++// The highest IN endpoint number the controller has.
++#ifndef MICROPY_HW_USB_EP_IN_MAX
++#define MICROPY_HW_USB_EP_IN_MAX                (15)
++#endif
+ #endif
+ 
+ // Number of bytes of flash to allocate to the ROMFS partition.

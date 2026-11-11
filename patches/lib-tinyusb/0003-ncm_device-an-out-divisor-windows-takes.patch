@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 16:30:00 -0600
+Subject: [PATCH] ncm_device: an out divisor Windows takes.
+
+Windows' NCM driver (UsbNcm) refuses an out divisor of 1 or 2 and reports
+the device as failed (Code 10) right after reading GET_NTB_PARAMETERS. It
+starts on 4 or 8; Linux' cdc_ncm takes any of them.
+---
+ src/class/net/ncm_device.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/class/net/ncm_device.c b/src/class/net/ncm_device.c
+--- a/src/class/net/ncm_device.c
++++ b/src/class/net/ncm_device.c
+@@ -175,7 +175,9 @@
+   .wNdbInAlignment          = TUD_NCM_ALIGNMENT,
+   .wReserved                = 0,
+   .dwNtbOutMaxSize          = CFG_TUD_NCM_OUT_NTB_MAX_SIZE,
+-  .wNdbOutDivisor           = 1,
++  // Windows' NCM driver won't start on an out divisor of 1 or 2: it takes
++  // 4 or 8.
++  .wNdbOutDivisor           = 4,
+   .wNdbOutPayloadRemainder  = 0,
+   .wNdbOutAlignment         = TUD_NCM_ALIGNMENT,
+   .wNtbOutMaxDatagrams      = CFG_TUD_NCM_OUT_MAX_DATAGRAMS_PER_NTB,
+-- 
+2.43.0
+

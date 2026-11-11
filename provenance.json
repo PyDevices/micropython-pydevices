@@ -175,11 +175,23 @@
   },
   "0058-micropython-esp32-sdcard-release-the-ldo-when-the-constructor-fails.patch": {
    "sha256": "3a81627727a3ce1913cf542cc1b31cf24094fee9eb5935237d1ba040ffc081ff"
+  },
+  "0059-micropython-esp32-usb-networking-turned-on-from-code.patch": {
+   "sha256": "fa3d97ba8bd8c6f01048bab9bb307efe9564c010842669bb1e16e4029e2ebc81"
+  },
+  "0060-micropython-rp2-usb-networking-turned-on-from-code.patch": {
+   "sha256": "03a31db235d085df764821790d9596db9bda5373e01af348d76af4488029e3d6"
+  },
+  "0061-micropython-shared-dhcpserver-find-the-message-type-anywhere.patch": {
+   "sha256": "bac318df36758216572fefd356b3b8a0c2a71b1ad4aae792fa8f1805bad32270"
   }
  },
  "tinyusb_patches": {
   "0001-dcd_dwc2-disable-an-endpoint-without-waiting-on-isr-cleared-flags.patch": {
    "sha256": "9a15fb67a1c948b9c1554e3e8759a3271da423c37532d690b846ed0643572687"
+  },
+  "0002-ncm_device-transfer-blocks-from-the-application.patch": {
+   "sha256": "9654e5fd53cd70f597a8b02181bfb5cd42a6ec847a7878430dc7bdb4acddc544"
   }
  }
 }
