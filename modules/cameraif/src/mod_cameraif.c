@@ -1432,7 +1432,19 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
         cameraif_teardown();
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("sensor offers no formats"));
     }
-    const esp_cam_sensor_format_t *chosen = &formats.format_array[0];
+    // With no format asked for, the first mode the ISP can take: the sensor's
+    // first Bayer one. A sensor that sends only YUV or RGB is found and named
+    // here, rather than reported absent.
+    isp_color_t isp_in = ISP_COLOR_RAW8;
+    const esp_cam_sensor_format_t *chosen = NULL;
+    for (uint32_t i = 0; i < formats.count && chosen == NULL; i++) {
+        if (cameraif_isp_input_for(formats.format_array[i].format, &isp_in)) {
+            chosen = &formats.format_array[i];
+        }
+    }
+    if (chosen == NULL) {
+        chosen = &formats.format_array[0];
+    }
     if (mp_obj_is_int(args[ARG_format].u_obj)) {
         mp_int_t i = mp_obj_get_int(args[ARG_format].u_obj);
         if (i < 0 || (uint32_t)i >= formats.count) {
@@ -1475,6 +1487,16 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
         }
         chosen = found;
     }
+    // The ISP's input is whatever the sensor says it emits, not an
+    // assumption, and it takes only Bayer. Asked before the sensor is set up,
+    // so a mode it can't take leaves the sensor as it was.
+    if (!cameraif_isp_input_for(chosen->format, &isp_in)) {
+        const char *n = c->sensor->name ? c->sensor->name : "the sensor";
+        cameraif_teardown();
+        mp_raise_msg_varg(&mp_type_ValueError,
+            MP_ERROR_TEXT("%s mode '%s' isn't Bayer (RAW), and the ISP takes only Bayer"),
+            n, chosen->name);
+    }
     if (esp_cam_sensor_set_format(c->sensor, chosen) != ESP_OK) {
         cameraif_teardown();
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("sensor rejected format"));
@@ -1487,16 +1509,9 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("sensor would not stream"));
     }
 
-    // The ISP's input is whatever the sensor says it emits, not an
-    // assumption. Its output is RGB565 unless overridden; raw mode takes the
-    // ISP out of the path entirely and hands back the sensor's own Bayer,
-    // which is the bisect that proves the ISP innocent when frames are black.
-    isp_color_t isp_in = ISP_COLOR_RAW8;
-    if (!cameraif_isp_input_for(chosen->format, &isp_in)) {
-        cameraif_teardown();
-        mp_raise_msg(&mp_type_ValueError,
-            MP_ERROR_TEXT("sensor emits a format the ISP cannot take"));
-    }
+    // The ISP's output is RGB565 unless overridden; raw mode takes the ISP
+    // out of the path entirely and hands back the sensor's own Bayer, which
+    // is the bisect that proves the ISP innocent when frames are black.
     isp_color_t isp_out = ISP_COLOR_RGB565;
     c->bytes_per_px = 2;
     if (pf_in != mp_const_none) {

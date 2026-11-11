@@ -14,12 +14,8 @@ CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D2_4BIT_BUS_SLOT_1=31
 CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D3_4BIT_BUS_SLOT_1=32
 CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=9
 
-# The OV2710 on the MIPI-CSI connector, beside cameraif's OV5647: the driver
-# and its probe (the AUTO_DETECT option keeps the probe out of --gc-sections'
-# reach, see cameraif/sdkconfig.esp32p4), both of its modes, 1920x1080 as the
-# default because the factory firmware streams the whole sensor and crops.
-CONFIG_CAMERA_OV2710=y
-CONFIG_CAMERA_OV2710_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
-CONFIG_CAMERA_OV2710_MIPI_RAW10_1280X720_25FPS=y
-CONFIG_CAMERA_OV2710_MIPI_RAW10_1920X1080_25FPS=y
+# The OV2710 on the MIPI-CSI connector comes from cameraif's
+# sdkconfig.esp32p4, with every other MIPI-CSI sensor driver. Its default
+# mode stays 1920x1080, because the factory firmware streams the whole sensor
+# and crops.
 CONFIG_CAMERA_OV2710_MIPI_DEFAULT_FMT_RAW10_1920X1080_25FPS=y
