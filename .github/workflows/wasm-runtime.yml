@@ -7,8 +7,9 @@
 # runtime and its provenance. Those pull requests are reviewed and merged like
 # any other: nothing here publishes.
 #
-# On a pull request that changes this workflow or its script, only the build
-# and the checks run.
+# On a pull request that changes this workflow, its script or the pins, only
+# the build and the checks run, so a pin that breaks the build is seen before
+# it merges.
 name: WebAssembly runtime
 
 on:
@@ -27,6 +28,7 @@ on:
       - '.github/workflows/wasm-runtime.yml'
   pull_request:
     paths:
+      - 'DEPENDENCIES.lock'
       - 'scripts/wasm_provenance.py'
       - '.github/workflows/wasm-runtime.yml'
   workflow_dispatch:
