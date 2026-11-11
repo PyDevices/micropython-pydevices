@@ -56,7 +56,10 @@ int main(void) {
     CHECK(covers(q, false, 1, 10));
 
     // High speed at 1000 Hz needs no more than the minimum.
+    // The transfers shrink to eight packets (23 KB of a camera's 944-byte
+    // packets for the three, where 32 took 91 KB).
     q = usbhost_iso_queue_size(true, 1, 1);
+    CHECK(q.pkts_per_xfer == 8);
     CHECK(q.num_xfer == USBHOST_ISO_MIN_XFER);
     CHECK(covers(q, true, 1, 1));
 
@@ -75,7 +78,7 @@ int main(void) {
 
     // Zero inputs don't divide by zero.
     q = usbhost_iso_queue_size(true, 0, 0);
-    CHECK(q.pkts_per_xfer == 32 && q.num_xfer == USBHOST_ISO_MIN_XFER);
+    CHECK(q.pkts_per_xfer == 8 && q.num_xfer == USBHOST_ISO_MIN_XFER);
 
     if (failures) {
         printf("%d failure(s)\n", failures);
