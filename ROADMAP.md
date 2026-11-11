@@ -64,6 +64,16 @@ ours to port.
   6.1; the module follows once MicroPython builds for the chip.
 - **A Pico W speaker calls its sender back after a lost link,** as the
   classic ESP32 does. Today it calls back only when `AudioSink` starts.
+- **Three-way calling in `HandsFree` and `AudioGateway`:** hold a call, take a
+  second one and swap between them.
+- **Files over OBEX FTP:** browse, get and put files on a phone or computer,
+  on the OBEX code that `ObjectPush`, `PhoneBook` and `Messages` already use.
+- **A board that serves its own phonebook and messages** (PBAP and MAP
+  servers), so a car or headset can read them from the board.
+- **A Pico W that shares its Wi-Fi over Bluetooth** (a PAN access point), and
+  a dial-up networking (DUN) serial profile on `Serial`.
+- **Browsing a Pico W's own library from a phone:** AVRCP target browsing
+  beside `AudioSource`.
 
 Call audio on the Pico W's hands-free side isn't planned: the CYW43439's
 firmware never brings the call's audio link up.
