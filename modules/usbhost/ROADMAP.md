@@ -8,9 +8,9 @@ packages themselves are in pydevices' roadmap.
   isochronous streams on TinyUSB.
 - The FIFO split chosen per stream rather than per `start()`, so a camera and
   a USB Audio 2.0 speaker can share one session.
-- An answer to whether an ESP32 can be USB host and USB device at once on two
-  connectors: a pedal hosting a MIDI controller while a PC sees its REPL,
-  sound card or drive. The GIGA already does it.
+- Host and device at once on more ESP32-P4 boards. The WIFI6 DEV-KIT does it
+  ([how](docs/host.md#host-and-device-at-once-on-the-esp32-p4)); the
+  ESP32-P4-Pico needs a build that gives its header pins the device.
 
 Bugs, and things you need that don't work yet, go to
 [issues](https://github.com/PyDevices/micropython-pydevices/issues).

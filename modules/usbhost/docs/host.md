@@ -106,6 +106,38 @@ between power-ups. If H3 sends the host straight to the lower socket the hub
 isn't in the path, and `usb.core.start(full_speed=..., force=True)` skips the
 check.
 
+## Host and device at once on the ESP32-P4
+
+An ESP32-P4 can be a USB host on one connector and a USB device on another,
+with traffic on both at once. The P4 has two USB controllers. The host runs
+on the high-speed one, and a board built with `MICROPY_HW_USB_HS (0)` puts
+TinyUSB's device on the full-speed one, which the host never touches. Starting
+and stopping the host leaves the device attached, so the REPL, a MIDI port or
+a sound card stays up on the computer.
+
+On the Waveshare ESP32-P4-WIFI6-DEV-KIT, the `WIFI6_DEV_KIT_H2` variant puts
+the device on the USB-C marked "USB1.1 Type-C", which is wired to GPIO24 and
+GPIO25, and the host on the USB-A sockets. Out of reset the full-speed
+controller gets the PHY on GPIO26 and GPIO27, and USB Serial/JTAG gets GPIO24
+and GPIO25. The variant swaps them at boot by setting `sw_hw_usb_phy_sel` and
+`sw_usb_phy_sel` in `LP_SYS`'s USB control register (the `USB_PHY_SEL` eFuse
+is unburnt, so it doesn't swap them first). The `WIFI6_DEV_KIT` variant keeps
+the default, with the device on GPIO26 and GPIO27. On another P4 board, wire
+the device's USB-C to the pair your build gives the full-speed controller.
+
+On the DEV-KIT's `WIFI6_DEV_KIT_H2` build, the device ran as a MIDI port
+beside the REPL's serial port, with two MIDI devices behind the host's hub: a
+keyboard, and a second board sending 20 notes a second. For ten minutes the
+board echoed each of 24,900 messages from the computer back to it and wrote
+each one to both hosted devices, and passed 12,060 notes from the second board
+on to the computer. None went missing, arrived twice or came out of order, and
+no transfer failed. Echoes took 2.4 ms at the median and 16 ms at the 99th
+percentile, at worst 40 ms.
+
+A board that polls its touch panel over I2C while its device sends resets
+within a minute ([#408](https://github.com/PyDevices/micropython-pydevices/issues/408)).
+The ten minutes above ran with the touch reads turned off.
+
 ## Why the events are drained rather than delivered
 
 The design decision most likely to surprise a reader is that USB events are
