@@ -635,7 +635,8 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbhost_host_stream_c_sink_obj, 4, 4,
 // A hosted network adapter (usb.host.net) as an ESP-IDF network interface,
 // in usbhost_host_net.c: Python does the control side, this moves the frames.
 
-// host_net_start(dev_id, interface, ep_in, ep_out, max_packet, mac, rndis)
+// host_net_start(dev_id, interface, ep_in, ep_out, max_packet, mac, rndis,
+// alternate=0): the alternate setting the data interface's endpoints are in.
 static mp_obj_t usbhost_host_net_start_py(size_t n_args, const mp_obj_t *args) {
     #if USBHOST_HAVE_NET
     mp_buffer_info_t mac;
@@ -643,7 +644,8 @@ static mp_obj_t usbhost_host_net_start_py(size_t n_args, const mp_obj_t *args) {
     if (mac.len != 6) {
         mp_raise_ValueError(MP_ERROR_TEXT("a MAC address is 6 bytes"));
     }
-    usbhost_xfer_check(usbhost_net_start((uint32_t)mp_obj_get_int(args[0]), (uint8_t)mp_obj_get_int(args[1]),
+    uint8_t alt = n_args > 7 ? (uint8_t)mp_obj_get_int(args[7]) : 0;
+    usbhost_xfer_check(usbhost_net_start((uint32_t)mp_obj_get_int(args[0]), (uint8_t)mp_obj_get_int(args[1]), alt,
         (uint8_t)mp_obj_get_int(args[2]), (uint8_t)mp_obj_get_int(args[3]), (uint16_t)mp_obj_get_int(args[4]),
         mac.buf, mp_obj_is_true(args[6])));
     return mp_const_none;
@@ -653,7 +655,7 @@ static mp_obj_t usbhost_host_net_start_py(size_t n_args, const mp_obj_t *args) {
     mp_raise_OSError(MP_EOPNOTSUPP);
     #endif
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbhost_host_net_start_obj, 7, 7, usbhost_host_net_start_py);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbhost_host_net_start_obj, 7, 8, usbhost_host_net_start_py);
 
 static mp_obj_t usbhost_host_net_stop_py(void) {
     #if USBHOST_HAVE_NET
