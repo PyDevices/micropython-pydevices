@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -48,19 +49,25 @@ USED = {
     "sharpness", "denoise", "special_effect", "lenc",
 }
 
+# The controls beyond exposure, gain and the flips that the engine can carry,
+# by the name sensorgen's trace gives them (the engine's `controls` keys).
+ENGINE_CONTROLS = {"ae_level", "brightness", "contrast", "saturation", "sharpness", "denoise",
+                   "special_effect", "wb"}
+
+# Registers a driver reads and acts on while setting a mode, and the value the
+# chip holds in them before anything is written. Not in a datasheet we can
+# quote: found on the board (the registers the driver then wrote tell it), and
+# checked there the same way, so a wrong one shows as a register that differs.
+PRELOAD = {
+    "ov5647": {0x3037: 0x03},
+}
+
 # What the table engine can't express today, by the short name the fit uses.
 GAPS = {
-    "exposure_shift": "exposure sits shifted left in its registers; the engine writes it at bit 0",
-    "exposure_order": "exposure registers aren't consecutive, most significant first",
-    "gain_map": "gain is an index into register values (and total gains), not one number",
-    "control_map": "a control is a table of register values per setting",
-    "test_pattern_rmw": "test pattern sets bits in a register the modes don't set, so a full write can't keep the rest",
-    "stream_rmw": "stream on/off is a read-modify-write",
-    "stream_per_mode": "stream on/off differs between modes",
+    "control_map": "a control the engine's fields and tables can't take",
+    "stream_rmw": "stream on/off reads registers the engine can't mask",
     "stream_toggle": "stream on and off write the same thing (a toggle), so the engine has to know the state",
-    "flip_inverted": "a flip bit is set for off and cleared for on",
-    "flip_two_regs": "vertical and horizontal flip are in different registers",
-    "flip_extra": "a flip writes more than its own bits",
+    "flip_extra": "a flip the engine's lists can't take",
     "format_reads": "setting a mode reads registers and writes what it read",
     "value16": "registers take 16-bit values",
     "mono": "a monochrome sensor (Bayer MONO); the engine names only the four colour orders",
@@ -68,8 +75,9 @@ GAPS = {
     "timer": "the driver runs a timer while streaming",
     "no_bayer": "no Bayer mode: cameraif's ISP takes only RAW, with this driver or a description",
     "trace_failed": "the driver didn't run on the host",
-    "gamma_curve": "the tuning's gamma is a curve of points; the engine takes one exponent",
-    "tuning_by_rev": "the tuning differs by chip revision (eco4 / eco5)",
+    "gamma_curve": "the tuning's gamma is a curve of 16 points, not a power; cameraif keeps its default exponent",
+    "tuning_by_rev": "the tuning differs by chip revision (eco4 / eco5); this is the one for the chip's later revision",
+    "id_pre": "the ID check writes first",
 }
 
 LOGIC = {"format_reads", "trace_failed"}
@@ -156,7 +164,11 @@ def run_trace(drv: Driver, ecs: Path, cfg: Path, work: Path) -> tuple[str | None
         err = [x for x in r.stderr.splitlines() if "error" in x]
         return None, "compile: " + (err[0] if err else r.stderr[-200:]), ids
     try:
-        r = subprocess.run([str(exe)], capture_output=True, text=True, timeout=300)
+        env = dict(os.environ)
+        pre = PRELOAD.get(drv.name)
+        if pre:
+            env["TRACE_PRELOAD"] = ",".join(f"{r:x}={v:x}" for r, v in pre.items())
+        r = subprocess.run([str(exe)], capture_output=True, text=True, timeout=300, env=env)
     except subprocess.TimeoutExpired:
         return None, "the trace timed out", ids
     return r.stdout, (f"trace exit {r.returncode}" if r.returncode else None), ids
@@ -230,6 +242,55 @@ def concat(ws: list[tuple[int, int]]) -> int:
     return v
 
 
+def ops_from(z: list, o: list) -> list | bool:
+    """A probe's writes as (register, value), (register, value, mask) and (None, ms).
+
+    `z` ran with every read answering 0, `o` with all ones. Where they write
+    the same, the write doesn't depend on a read; where they differ, the bits
+    that differ came from the register, and the rest are the mask.
+    """
+    zs = [e for e in z if e[0] in ("W", "D")]
+    os_ = [e for e in o if e[0] in ("W", "D")]
+    if len(zs) != len(os_):
+        return False
+    out = []
+    for a, b in zip(zs, os_):
+        if a[0] != b[0]:
+            return False
+        if a[0] == "D":
+            if a[2] != b[2]:
+                return False
+            out.append((None, a[2]))
+            continue
+        if a[1] != b[1]:
+            return False
+        w0, w1 = a[2], b[2]
+        if w0 == w1:
+            out.append((a[1], w0))
+            continue
+        keep = (w0 ^ w1) & 0xFF
+        if (w0 & keep) or (w1 & keep) != keep:
+            return False
+        mask = ~keep & 0xFF
+        out.append((a[1], w0 & mask, mask))
+    return out
+
+
+def single_mask(pair: tuple) -> tuple | None:
+    """(register, bits, None, inverted) when on and off each set or clear one register's bits."""
+    on, off = pair
+    if len(on) != 1 or len(off) != 1 or len(on[0]) != 3 or len(off[0]) != 3:
+        return None
+    (ra, va, ma), (rb, vb, mb) = on[0], off[0]
+    if ra != rb or ma != mb:
+        return None
+    if vb == 0 and va == ma:
+        return (ra, ma, None, False)
+    if va == 0 and vb == ma:
+        return (ra, ma, None, True)
+    return None
+
+
 def fmt_name(code: int) -> str:
     return {10: "raw8", 11: "raw10", 12: "raw12", 3: "yuv422", 4: "yuv422", 5: "yuv420",
             1: "rgb565", 2: "rgb565", 6: "rgb888", 13: "grey", 14: "jpeg"}.get(code, f"pixformat {code}")
@@ -269,11 +330,22 @@ class Fit:
         d["name"] = tr.name
         d["addr"] = self.ids.get(self.drv.addr_macro)
         d["reg_bits"] = max({e[4] for e in sets} or {16})
-        idr = [e for e in tr.detect if e[0] == "R"]
-        if len(idr) == 2 and idr[1][1] == idr[0][1] + 1:
-            d["id"] = (idr[0][1], tr.pid)
+        ev = tr.detect
+        first = next((k for k, e in enumerate(ev) if e[0] == "R"), None)
+        ids = []
+        k = first if first is not None else len(ev)
+        while k < len(ev) and ev[k][0] == "R":
+            ids.append(ev[k][1])
+            k += 1
+        pre = [(e[1], e[2]) if e[0] == "W" else (None, e[2]) for e in ev[: first or 0] if e[0] in ("W", "D")]
+        if len(ids) == 2 and ids[1] == ids[0] + 1:
+            d["id"] = (ids[0], tr.pid)
+        elif len(ids) in (1, 2):
+            d["id"] = (tuple(ids), tr.pid)
         else:
-            self.gap("control_map", "the ID isn't two consecutive registers, high byte first")
+            self.gap("control_map", "the ID is read from " + (", ".join(f"{r:#06x}" for r in ids) or "nowhere"))
+        if pre:
+            d["id_pre"] = pre
         self.fit_modes()
         self.fit_stream()
         self.fit_flip()
@@ -299,7 +371,7 @@ class Fit:
                     written.add(e[1])
                 elif e[0] == "R" and e[1] not in written:
                     reads.add(e[1])
-            reads = sorted(reads)
+            reads = sorted(reads - set(PRELOAD.get(self.drv.name, {})))
             if reads:
                 # Still harmless if it writes the same whatever the chip answers.
                 z = [s for _, s in self.phase(i, "format_zero")]
@@ -333,210 +405,231 @@ class Fit:
                 m["regs"] = m["regs"][len(pre):]
         self.desc["modes"] = modes
 
+    # --- bit controls: the stream, the flips and the test pattern ---------------
+
+    def bit_ops(self, i: int, name: str, arg: int) -> list | None:
+        """What a 0/1 control writes for `arg`, as (register, value) and (register, value, mask).
+
+        Each probe ran twice, with every read answering 0 and then all ones;
+        a bit the driver keeps from its read shows as the difference.
+        """
+        z = next((ev for a, ev in self.phase(i, f"{name}_zero") if a == arg), None)
+        o = next((ev for a, ev in self.phase(i, f"{name}_ones") if a == arg), None)
+        if z is None or o is None:
+            return None
+        r = ops_from(z, o)
+        return r if r is False else tuple(r)
+
     def fit_stream(self) -> None:
-        lists = set()
+        per = {}
         for i in self.bayer:
-            ph = self.phase(i, "stream")
-            on = next((ev for a, ev in ph if a == 1), None)
-            off = next((ev for a, ev in ph if a == 0), None)
+            on, off = self.bit_ops(i, "stream", 1), self.bit_ops(i, "stream", 0)
             if on is None or off is None:
                 continue
-            if any(e[0] == "R" for e in on + off):
-                self.gap("stream_rmw")
-            timers = [e[1] for e in on if e[0] == "T"]
+            timers = [e[1] for e in self.phase(i, "stream")[0][1] if e[0] == "T"] if self.phase(i, "stream") else []
             if timers:
                 self.gap("timer", "streaming starts " + ", ".join(timers))
-            lists.add((tuple(seq(on)), tuple(seq(off))))
-        if len(lists) > 1:
-            self.gap("stream_per_mode")
-        if any(on == off and on for on, off in lists):
+            per[i] = (on, off)
+        if not per:
+            return
+        if any(on is False or off is False for on, off in per.values()):
+            self.gap("stream_rmw", "the stream's reads aren't a mask")
+            return
+        if any(on == off and on for on, off in per.values()):
             self.gap("stream_toggle")
-        if lists:
-            on, off = sorted(lists, key=repr)[0]
-            self.desc["stream"] = (list(on), list(off))
+            return
+        common = max(set(per.values()), key=lambda p: list(per.values()).count(p))
+        self.desc["stream"] = (list(common[0]), list(common[1]))
+        # A mode that does it differently carries its own lists.
+        for k, i in enumerate(self.bayer):
+            if i in per and per[i] != common:
+                self.desc["modes"][k]["stream"] = (list(per[i][0]), list(per[i][1]))
 
-    def rmw(self, i: int, name: str) -> tuple | None:
-        """How a 0/1 control writes, from its probes against all-zero and all-one reads.
-
-        Returns ("rmw", register, mask, inverted), ("plain", on writes, off writes),
-        ("extra", registers) when it does more, or None when it wasn't probed.
-        """
-        ph = {}
-        for key in ("zero", "ones"):
-            for a, ev in self.phase(i, f"{name}_{key}"):
-                ph[(key, a)] = ev
-        if len(ph) != 4:
+    def fit_pair(self, name: str) -> tuple | None:
+        """(on, off) op lists for a bit control, equal in every mode, or None with a gap."""
+        def get(i: int, arg: int):
+            return self.bit_ops(i, name, arg)
+        pairs = {(get(i, 1), get(i, 0)) for i in self.bayer}
+        if len(pairs) != 1:
+            self.gap("control_map", f"{name} differs by mode")
             return None
-        if not any(e[0] == "R" for ev in ph.values() for e in ev):
-            if writes(ph[("zero", 1)]) == writes(ph[("ones", 1)]) and writes(ph[("zero", 0)]) == writes(ph[("ones", 0)]):
-                return ("plain", writes(ph[("zero", 1)]), writes(ph[("zero", 0)]))
-            return ("extra", sorted({e[1] for ev in ph.values() for e in ev}))
-        w = {k: writes(ev) for k, ev in ph.items()}
-        regs = {r for ws in w.values() for r, _ in ws}
-        if len(regs) != 1 or any(len(ws) != 1 for ws in w.values()):
-            return ("extra", sorted(regs))
-        reg = regs.pop()
-        z0, z1 = w[("zero", 0)][0][1], w[("zero", 1)][0][1]
-        o0, o1 = w[("ones", 0)][0][1], w[("ones", 1)][0][1]
-        mask = z0 ^ z1
-        if z0 == 0 and o1 == 0xFF and o0 == 0xFF ^ mask:
-            return ("rmw", reg, mask, False)
-        if z1 == 0 and o0 == 0xFF and o1 == 0xFF ^ mask:
-            return ("rmw", reg, mask, True)
-        return ("extra", [reg])
+        on, off = pairs.pop()
+        if not on or not off:
+            if on is False or off is False:
+                self.gap("control_map", f"{name} reads registers it keeps part of")
+            return None
+        return list(on), list(off)
 
     def fit_flip(self) -> None:
         params = self.tr.blocks[self.bayer[0]]["params"]
         names = [n for n in ("vflip", "hmirror") if n in params]
         if not names:
             return
-        fl = {}
-        for i in self.bayer:
-            for n in names:
-                r = self.rmw(i, n)
-                if r is None or r[0] != "rmw":
-                    self.gap("flip_extra", f"{n} writes {r[1] if r else 'nothing probed'}")
-                    return
-                if fl.setdefault(n, r) != r:
-                    self.gap("flip_extra", f"{n} differs by mode")
-                    return
-        if any(r[3] for r in fl.values()):
-            self.gap("flip_inverted", ", ".join(n for n, r in fl.items() if r[3]))
+        pairs = {}
+        for n in names:
+            p = self.fit_pair(n)
+            if p is None:
+                self.gap("flip_extra", f"{n} wasn't probed")
+                return
+            pairs[n] = p
+        simple = {n: single_mask(p) for n, p in pairs.items()}
+        regs = {s[0] for s in simple.values() if s}
+        if all(simple.values()) and len(regs) == 1 and not any(s[3] for s in simple.values()):
+            v, hm = simple.get("vflip"), simple.get("hmirror")
+            self.desc["flip"] = ((v or hm)[0], v[1] if v else 0, hm[1] if hm else 0)
             return
-        v, hm = fl.get("vflip"), fl.get("hmirror")
-        if v and hm and v[1] != hm[1]:
-            self.gap("flip_two_regs", f"{v[1]:#06x} and {hm[1]:#06x}")
-            return
-        self.desc["flip"] = ((v or hm)[1], v[2] if v else 0, hm[2] if hm else 0)
+        self.desc["flip"] = {"v": pairs.get("vflip"), "h": pairs.get("hmirror")}
 
     def fit_pattern(self) -> None:
-        r = self.rmw(self.bayer[0], "test_pattern")
-        if r is None:
+        if not any(self.phase(i, "test_pattern_zero") for i in self.bayer):
             return
-        if r[0] == "plain":
-            on, off = r[1], r[2]
+        p = self.fit_pair("test_pattern")
+        if p is None:
+            return
+        on, off = p
+        plain = lambda ops: all(len(o) == 2 and o[0] is not None for o in ops)
+        if plain(on) and plain(off):
             regs = [a for a, _ in on]
-            if regs and regs == [a for a, _ in off] and regs == list(range(regs[0], regs[0] + len(regs))):
+            if regs == [a for a, _ in off] and regs == list(range(regs[0], regs[0] + len(regs))):
                 self.desc["test_pattern"] = (regs[0], len(regs), concat(on), concat(off))
-            else:
-                self.gap("control_map", "test_pattern writes several registers")
-            return
-        if r[0] != "rmw":
-            self.gap("control_map", "test_pattern writes several registers")
-            return
-        _, reg, mask, inv = r
-        # The engine writes the whole register: right only when every mode
-        # leaves the same value in the bits it doesn't own.
-        bases = set()
-        for m in self.desc["modes"]:
-            last = None
-            for a, v in self.desc.get("init", []) + m["regs"]:
-                if a == reg:
-                    last = v
-            bases.add(last)
-        if len(bases) == 1 and None not in bases:
-            base = bases.pop()
-            on, off = (base & ~mask, base | mask) if inv else (base | mask, base & ~mask)
-            self.desc["test_pattern"] = (reg, 1, on, off)
-        else:
-            self.gap("test_pattern_rmw", f"{reg:#06x} mask {mask:#04x}")
-            self.proposed["test_pattern_bits"] = (Hex(reg), Hex(mask))
+                return
+        self.desc["test_pattern"] = (on, off)
+
+    # --- numeric controls ---------------------------------------------------------
 
     def fit_controls(self) -> None:
         p0 = self.tr.blocks[self.bayer[0]]["params"]
-        for name in sorted(p0):
-            if name in ("vflip", "hmirror"):
-                continue
+        names = [n for n in sorted(p0) if n not in ("vflip", "hmirror")]
+        gain_name = "angain" if "angain" in names else "gain"
+        for name in names:
             if name not in USED:
                 self.dropped.append(name)
                 continue
-            per_mode = [(i, self.tr.blocks[i]["params"].get(name), self.phase(i, name)) for i in self.bayer]
+            if name in ("angain", "gain") and name != gain_name:
+                continue
+            ctl = self.fit_control(name)
+            if ctl is None:
+                continue
             if name == "exposure_val":
-                self.fit_exposure(per_mode)
+                self.desc["exposure"] = ctl
+            elif name in ("angain", "gain"):
+                self.desc["gain"] = ctl
+            elif name in ENGINE_CONTROLS:
+                self.desc.setdefault("controls", {})[name] = ctl
             else:
-                self.fit_map(name, per_mode)
+                self.dropped.append(name)
 
-    def fit_exposure(self, per_mode: list) -> None:
-        shift = None
-        regs = None
-        offs, mins, defs = set(), set(), set()
-        for i, p, probes in per_mode:
-            offs.add(self.tr.formats[i]["vts"] - p["max"])
-            mins.add(p["min"])
-            defs.add(p["default"])
-            for v, ev in probes:
-                ws = writes(ev)
-                if any(e[0] == "R" for e in ev):
-                    self.gap("control_map", "exposure reads registers")
-                    return
-                r = [a for a, _ in ws]
-                regs = regs or r
-                if r != regs:
-                    self.gap("control_map", "exposure writes different registers by value")
-                    return
-                x = concat(ws)
-                s = next((s for s in range(16) if x == (v << s) & ((1 << 8 * len(ws)) - 1)), None)
-                if s is None or (shift is not None and s != shift):
-                    self.gap("control_map", "exposure isn't the value, shifted")
-                    return
-                shift = s
-        if not regs:
-            return
-        if regs != list(range(regs[0], regs[0] + len(regs))):
-            self.gap("exposure_order", " ".join(f"{a:#06x}" for a in regs))
-            return
-        if len(offs) != 1 or len(mins) != 1:
-            self.gap("control_map", "exposure's limits aren't a fixed distance from the frame length")
-            return
-        default = defs.pop() if len(defs) == 1 else None
-        ctrl = (Hex(regs[0]), len(regs), mins.pop(), -offs.pop(), default)
-        if shift:
-            self.gap("exposure_shift", f"value << {shift} in {regs[0]:#06x}..{regs[-1]:#06x}")
-            self.proposed["exposure_shifted"] = ctrl + (shift,)
+    def probes(self, i: int, name: str) -> tuple[list, list]:
+        """(value, ops) for a control in one mode: from the zero and ones reads when the
+        driver reads a register, else from the plain run. Returns the values that fit
+        a table too (all of them) as the second list."""
+        plain = [(v, ev) for v, ev in self.phase(i, name)]
+        rz = dict(self.phase(i, name + "_rz"))
+        ro = dict(self.phase(i, name + "_ro"))
+        reads = any(e[0] == "R" for _, ev in plain for e in ev)
+        if not reads:
+            return [(v, ops_from(ev, ev)) for v, ev in plain], []
+        return [(v, ops_from(rz[v], ro[v])) for v in rz if v in ro], []
+
+    def fit_control(self, name: str) -> object | None:
+        found = []
+        for i in self.bayer:
+            p = self.tr.blocks[i]["params"].get(name)
+            if p is None:
+                return None
+            rows, _ = self.probes(i, name)
+            if not rows or any(ops is False for _, ops in rows):
+                self.gap("control_map", f"{name} reads registers it keeps part of")
+                return None
+            found.append((i, p, rows))
+        # One fit over what every mode wrote: a mode with a short range never moves
+        # a high byte, and another that does shows it.
+        merged = {}
+        for _, _, rows in found:
+            for v, ops in rows:
+                if merged.setdefault(v, ops) != ops:
+                    self.gap("control_map", f"{name} differs by mode")
+                    return None
+        widest = max((p for _, p, _ in found), key=lambda p: p.get("max", p.get("count", 0)))
+        c = self.fit_rows(name, found[0][0], widest, sorted(merged.items()))
+        if c is None:
+            return None
+        ctls = [c]
+        return self.finish_limits(name, ctls, found)
+
+    def fit_rows(self, name: str, i: int, p: dict, rows: list) -> dict | None:
+        rows = sorted(rows, key=lambda r: r[0])
+        # Every probe writes the same registers in the same order.
+        layout = {tuple((o[0], None if len(o) == 2 else o[2]) for o in ops) for _, ops in rows}
+        if len(layout) != 1:
+            self.gap("control_map", f"{name} writes different registers by setting")
+            return None
+        layout = next(iter(layout))
+        if any(r is None for r, _ in layout):
+            self.gap("control_map", f"{name} waits between writes")
+            return None
+        n = len(layout)
+        data = [[ops[j][1] for _, ops in rows] for j in range(n)]
+        vals = [v for v, _ in rows]
+        masks = [m if m is not None else 0xFF for _, m in layout]
+        vary = [j for j in range(n) if len(set(data[j])) > 1]
+        if not vary:
+            self.gap("control_map", f"{name} writes the same whatever the value")
+            return None
+        const = [j for j in range(n) if j not in vary]
+        if any(masks[j] != 0xFF for j in const):
+            self.gap("control_map", f"{name} keeps part of a register it writes the same every time")
+            return None
+        shifts = {}
+        for j in vary:
+            s = next((s for s in range(-8, 24)
+                      if all(d == ((v >> s) if s >= 0 else (v << -s)) & 0xFF & masks[j] for v, d in zip(vals, data[j]))), None)
+            if s is None:
+                break
+            shifts[j] = s
         else:
-            self.desc["exposure"] = ctrl
+            # Linear: a constant write is a field with a zero mask whose "shift" is the value.
+            fields = tuple((layout[j][0], data[j][0], 0) if j in const else (layout[j][0], shifts[j], masks[j])
+                           for j in range(n))
+            return {"fields": fields, "table": None, "p": p, "vals": vals, "mode": i}
+        # A table: every setting from min to max has to have been probed.
+        first, last = (0, p["count"] - 1) if p["type"] == 3 else (p["min"], p["max"])
+        if vals != list(range(first, last + 1)):
+            self.gap("control_map", f"{name} isn't linear and only {len(vals)} of its settings were probed")
+            return None
+        fields = tuple((layout[j][0], data[j][0], 0) if j in const else (layout[j][0], 0, masks[j]) for j in range(n))
+        table = bytes(data[j][k] for k in range(len(vals)) for j in vary)
+        return {"fields": fields, "table": table, "p": p, "vals": vals, "mode": i}
 
-    def fit_map(self, name: str, per_mode: list) -> None:
-        """A control as registers and the values each setting writes, or one linear register."""
-        tables = set()
-        for i, p, probes in per_mode:
-            regs = None
-            rows = []
-            for v, ev in sorted(probes, key=lambda t: t[0]):
-                ws = writes(ev)
-                if any(e[0] == "R" for e in ev):
-                    self.gap("control_map", f"{name} is a read-modify-write")
-                    return
-                r = tuple(a for a, _ in ws)
-                regs = r if regs is None else regs
-                if r != regs:
-                    self.gap("control_map", f"{name} writes different registers by setting")
-                    return
-                rows.append((v, tuple(b for _, b in ws)))
-            tables.add((regs, tuple(rows), json.dumps(p, sort_keys=True)))
-        if len(tables) != 1:
-            self.gap("control_map", f"{name} differs by mode")
-            return
-        regs, rows, pj = tables.pop()
-        if not regs:
-            return
-        p = json.loads(pj)
-        consecutive = list(regs) == list(range(regs[0], regs[0] + len(regs)))
-        if name in ("angain", "gain") and p["type"] == 1 and consecutive and all(
-                concat(list(zip(regs, vs))) == v for v, vs in rows):
-            self.desc["gain"] = (regs[0], len(regs), p["min"], p["max"], p["default"])
-            return
-        values = bytes(b for _, vs in rows for b in vs)
-        lo = rows[0][0]
-        hi = rows[-1][0]
-        if name in ("angain", "gain"):
-            self.gap("gain_map", f"{len(rows)} settings over " + ", ".join(f"{a:#06x}" for a in regs))
-            self.proposed["gain_map"] = {"regs": tuple(Hex(a) for a in regs), "values": values,
-                                         "total": tuple(p.get("elements", ())), "default": p.get("default", 0)}
-            return
-        self.gap("control_map", name)
-        self.proposed.setdefault("controls", {})[name] = {
-            "regs": tuple(Hex(a) for a in regs), "min": lo, "max": hi, "default": p.get("default", lo), "values": values}
+    def finish_limits(self, name: str, ctls: list, found: list) -> dict:
+        c = ctls[0]
+        vts = [self.tr.formats[i]["vts"] for i, _, _ in found]
+        ps = [p for _, p, _ in found]
+        if ps[0]["type"] == 3:
+            lo = [0] * len(ps)
+            hi = [p["count"] - 1 for p in ps]
+        else:
+            lo = [p["min"] for p in ps]
+            hi = [p["max"] for p in ps]
+        df = [p.get("default", hi[k]) for k, p in enumerate(ps)]
+        out = {"fields": c["fields"], "table": c["table"], "min": lo[0]}
+        if len(set(lo)) != 1:
+            self.gap("control_map", f"{name}'s minimum differs by mode")
+        mul = next((m for m in (1, 2, 4, 8, 16) if len({h - m * v for h, v in zip(hi, vts)}) == 1), None)
+        if name == "exposure_val" and mul is not None and hi[0] - mul * vts[0] <= 0:
+            # A limit counted back from the frame length.
+            out["max"] = hi[0] - mul * vts[0]
+            if mul != 1:
+                out["vts_mul"] = mul
+        elif len(set(hi)) == 1:
+            out["max"] = hi[0]
+        else:
+            self.gap("control_map", f"{name}'s limit isn't constant or a multiple of the frame length less a constant")
+            out["max"] = hi[0]
+        out["default"] = df[0] if len(set(df)) == 1 else None
+        if out["default"] is None:
+            del out["default"]
+        return out
 
 
 # --- tuning ------------------------------------------------------------------
@@ -560,9 +653,10 @@ def tuning(drv: Driver, chip_rev: str) -> tuple[dict, Path | None, list[str]]:
     t = {}
     gt = aen.get("gamma", {}).get("table", [])
     if gt:
-        t["gamma"] = gt[len(gt) // 2]["gamma_param"]  # the middle of its steps by brightness
-        if not aen["gamma"].get("use_gamma_param", True):
-            gaps.append("gamma_curve")
+        if aen["gamma"].get("use_gamma_param", True):
+            t["gamma"] = gt[len(gt) // 2]["gamma_param"]  # the middle of its steps by brightness
+        else:
+            gaps.append("gamma_curve")  # a curve of 16 points, not a power: cameraif's default stays
     color = {}
     if aen.get("contrast"):
         color["contrast"] = aen["contrast"][0]["value"]  # at the lowest gain
@@ -597,17 +691,39 @@ def hx(v: int, reg_bits: int) -> str:
 def pack(regs: list) -> bytes:
     """A register list in the engine's packed form: three bytes an entry, the
     register high byte first, then its low byte, then the value. Register
-    0xFFFF waits `value` ms, so a longer wait takes several entries."""
+    0xFFFF waits `value` ms, so a longer wait takes several entries. A write
+    with a mask (register, value, mask) is preceded by an entry of register
+    0xFFFE whose value is the mask: a read-modify-write of those bits."""
     out = bytearray()
-    for a, v in regs:
+    for e in regs:
+        a, v = e[0], e[1]
         if a is None:
             while v > 0:
                 out += bytes((0xFF, 0xFF, min(v, 255)))
                 v -= 255
-        else:
-            assert 0 <= a < 0xFFFF and 0 <= v <= 0xFF, (a, v)
-            out += bytes((a >> 8, a & 0xFF, v))
+            continue
+        assert 0 <= a < 0xFFFE and 0 <= v <= 0xFF, e
+        if len(e) == 3 and e[2] != 0xFF:
+            out += bytes((0xFF, 0xFE, e[2]))
+        out += bytes((a >> 8, a & 0xFF, v))
     return bytes(out)
+
+
+def pack_fields(fields: tuple) -> bytes:
+    """A control's fields: register high, low, shift (a signed byte), mask."""
+    out = bytearray()
+    for reg, shift, mask in fields:
+        out += bytes((reg >> 8, reg & 0xFF, shift & 0xFF, mask))
+    return bytes(out)
+
+
+def blob_py(raw: bytes, indent: int, width: int = 18) -> str:
+    """Bytes as literals, `width` bytes to a line, in parentheses when it takes several."""
+    lines = ["b\"" + "".join(f"\\x{b:02x}" for b in raw[i:i + width]) + "\"" for i in range(0, len(raw), width)] or ["b\"\""]
+    if len(lines) == 1:
+        return lines[0]
+    pad = " " * (indent + 4)
+    return "(\n" + "\n".join(pad + ln for ln in lines) + "\n" + " " * indent + ")"
 
 
 def regs_py(regs: list, rb: int, indent: int) -> str:
@@ -657,13 +773,17 @@ def emit(fit: Fit, tune: dict, tune_src: Path | None, version: str, ecs: Path) -
     ]
     gaps = {k: v for k, v in fit.gaps.items() if k not in DROPPED}
     if gaps:
-        L += ["", "What cameraif's table engine can't do yet, so this leaves out:", ""]
+        L += ["", "What cameraif's table engine can't do, so this leaves out:", ""]
         L += [f"- {GAPS.get(k, k)}" + (f" ({v})" if v else "") + "." for k, v in sorted(gaps.items())]
     if fit.dropped:
         L += ["", "Controls cameraif doesn't use, left out: " + ", ".join(sorted(fit.dropped)) + "."]
     if "timer" in fit.gaps:
         L += ["", "The driver's timer only gathers statistics for esp_ipa, which cameraif",
               "doesn't run, so there is no timer here."]
+    if fit.drv.name in PRELOAD:
+        L += ["", "The driver reads " + ", ".join(f"{r:#06x}" for r in PRELOAD[fit.drv.name])
+              + " and acts on it; the value the chip holds before any write is fixed here:",
+              "  " + ", ".join(f"{r:#06x} = {v:#04x}" for r, v in PRELOAD[fit.drv.name].items()) + "."]
     L += ['"""', ""]
     if "init" in d:
         L += ["_INIT = (", regs_py(d["init"], rb, 4), ")  # fmt: skip", ""]
@@ -673,35 +793,58 @@ def emit(fit: Fit, tune: dict, tune_src: Path | None, version: str, ecs: Path) -
         for k in ("name", "width", "height", "fps", "format", "bayer", "lanes", "lane_hz", "pclk", "hts", "vts", "xclk"):
             if k in m:
                 L.append(f"        \"{k}\": {py(m[k])},")
+        if "stream" in m:
+            L.append("        \"stream\": (")
+            L += ["            " + blob_py(pack(lst), 12) + "," for lst in m["stream"]]
+            L.append("        ),")
         L += ["        \"regs\": (", regs_py(m["regs"], rb, 12), "        ),", "    },"]
     L += [")  # fmt: skip", "", "SENSOR = {"]
     L.append(f"    \"name\": {py(d['name'])},")
     L.append(f"    \"addr\": 0x{d['addr']:02X},")
     L.append(f"    \"reg_bits\": {rb},")
     if "id" in d:
-        L.append(f"    \"id\": ({hx(d['id'][0], rb)}, 0x{d['id'][1]:04X}),")
+        r, pid = d["id"]
+        r = "(" + ", ".join(hx(x, rb) for x in r) + ")" if isinstance(r, tuple) else hx(r, rb)
+        L.append(f"    \"id\": ({r}, 0x{pid:04X}),")
+    if "id_pre" in d:
+        L.append(f"    \"id_pre\": {blob_py(pack(d['id_pre']), 4)},")
     if "init" in d:
         L.append("    \"init\": _INIT,")
     L.append("    \"modes\": _MODES,")
     if "stream" in d:
-        on, off = d["stream"]
         L.append("    \"stream\": (")
-        for lst in (on, off):
-            L.append("        " + py(pack(lst)) + ",")
+        L += ["        " + blob_py(pack(lst), 8) + "," for lst in d["stream"]]
         L.append("    ),")
     for k in ("exposure", "gain"):
         if k in d:
-            r, n, lo, hi, df = d[k]
-            L.append(f"    \"{k}\": ({hx(r, rb)}, {n}, {lo}, {hi}, {py(df)}),")
+            L.append(f"    \"{k}\": {ctrl_py(d[k], rb, 4)},")
+    if "controls" in d:
+        L.append("    \"controls\": {")
+        for k, c in d["controls"].items():
+            L.append(f"        \"{k}\": {ctrl_py(c, rb, 8)},")
+        L.append("    },")
     if "flip" in d:
-        r, v, hm = d["flip"]
-        L.append(f"    \"flip\": ({hx(r, rb)}, 0x{v:02X}, 0x{hm:02X}),")
+        f = d["flip"]
+        if isinstance(f, dict):
+            L.append("    \"flip\": {")
+            for k, pair in f.items():
+                if pair:
+                    L.append(f"        \"{k}\": (")
+                    L += ["            " + blob_py(pack(lst), 12) + "," for lst in pair]
+                    L.append("        ),")
+            L.append("    },")
+        else:
+            r, v, hm = f
+            L.append(f"    \"flip\": ({hx(r, rb)}, 0x{v:02X}, 0x{hm:02X}),")
     if "test_pattern" in d:
-        r, n, on, off = d["test_pattern"]
-        L.append(f"    \"test_pattern\": ({hx(r, rb)}, {n}, 0x{on:X}, 0x{off:X}),")
-    if fit.proposed:
-        L.append("    # The shape the gaps above ask for. Today's engine ignores these keys.")
-        L += [f"    {py(k)}: {py(v)}," for k, v in fit.proposed.items()]
+        tp = d["test_pattern"]
+        if len(tp) == 4:
+            r, n, on, off = tp
+            L.append(f"    \"test_pattern\": ({hx(r, rb)}, {n}, 0x{on:X}, 0x{off:X}),")
+        else:
+            L.append("    \"test_pattern\": (")
+            L += ["        " + blob_py(pack(lst), 8) + "," for lst in tp]
+            L.append("    ),")
     if tune:
         L.append("    # Tuning, from Espressif's JSON for this sensor.")
         L += [f"    {py(k)}: {py(tune[k])}," for k in ("gamma", "color", "ccm") if k in tune]
@@ -710,6 +853,29 @@ def emit(fit: Fit, tune: dict, tune_src: Path | None, version: str, ecs: Path) -
                 L += [f"    \"{k}\": ("] + [f"        {py(row)}," for row in tune[k]] + ["    ),"]
     L.append("}")
     return "\n".join(L) + "\n"
+
+
+def ctrl_py(c: object, rb: int, indent: int) -> str:
+    """A control: a tuple when it is a plain value over consecutive registers, else a dict."""
+    f = c["fields"]
+    simple = (not c.get("table") and "vts_mul" not in c
+              and all(m == 0xFF for _, _, m in f)
+              and [r for r, _, _ in f] == list(range(f[0][0], f[0][0] + len(f)))
+              and [s for _, s, _ in f] == [8 * (len(f) - 1 - i) for i in range(len(f))])
+    df = c.get("default")
+    if simple:
+        return f"({hx(f[0][0], rb)}, {len(f)}, {c['min']}, {c['max']}, {py(df)})"
+    pad = " " * (indent + 4)
+    rows = [f"{pad}\"fields\": {blob_py(pack_fields(f), indent + 4)},"]
+    if c.get("table"):
+        rows.append(f"{pad}\"table\": {blob_py(c['table'], indent + 4, 24)},")
+    rows.append(f"{pad}\"min\": {c['min']},")
+    rows.append(f"{pad}\"max\": {c['max']},")
+    if df is not None:
+        rows.append(f"{pad}\"default\": {df},")
+    if "vts_mul" in c:
+        rows.append(f"{pad}\"vts_mul\": {c['vts_mul']},")
+    return "{\n" + "\n".join(rows) + "\n" + " " * indent + "}"
 
 
 # --- the commands ------------------------------------------------------------
@@ -788,6 +954,10 @@ def main() -> None:
             if "modes" not in fit.desc:
                 print(f"{n}: nothing to describe: {fit.gaps}", file=sys.stderr)
                 bad = True
+                continue
+            if "stream" not in fit.desc:
+                # The engine can't start it, so a description would give no picture.
+                print(f"{n}: no description: {GAPS.get('stream_toggle') if 'stream_toggle' in fit.gaps else fit.gaps}")
                 continue
             out = emit(fit, tune, src, version, ecs)
             dest = a.out / f"{n}.py"

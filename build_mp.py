@@ -2341,6 +2341,8 @@ def main():
         env["PYDEVICES_PYTHON_TO_ROMFS"] = romfs_list.as_posix()
     # The frozen pydevices leaves its host-only files off a board's image.
     env["PYDEVICES_PLATFORM"] = "desktop" if port in ("unix", "windows", "webassembly") else "board"
+    # Which target this is, for a module whose manifest freezes something for one board family only.
+    env["PYDEVICES_TARGET"] = f"{port}/{board}" if board else port
     if version:
         # makeversionhdr.py takes these instead of asking git, which a shallow clone can't answer.
         env["MICROPY_GIT_TAG"], env["MICROPY_GIT_HASH"] = version

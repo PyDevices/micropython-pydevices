@@ -29,10 +29,14 @@ new file mode 100644
 index 000000000..6c2e8bd74
 --- /dev/null
 +++ b/ports/esp32/boards/sdkconfig.p4_camera
-@@ -0,0 +1,214 @@
+@@ -0,0 +1,204 @@
 +# cameraif on the ESP32-P4: every MIPI-CSI sensor driver esp_cam_sensor has,
 +# so any camera works on any P4 board. cameraif probes them in turn and opens
 +# whichever answers.
++#
++# One is missing on purpose: the OV5647. Its description in cameraif's sensors/
++# is frozen into every P4 image instead, and cameraif tries it when no driver
++# answers.
 +#
 +# Each driver needs two options. Without CONFIG_CAMERA_<chip> the driver is
 +# not compiled; without its AUTO_DETECT option esp_cam_sensor does not emit the
@@ -46,20 +50,6 @@ index 000000000..6c2e8bd74
 +#
 +# cameraif's sdkconfig.esp32p4 carries the same settings for builds made with
 +# its build script, and its tests/check_sensor_configs.py keeps the two in step.
-+
-+# The OV5647 (the Waveshare boards' camera, the Raspberry Pi Camera (B) among
-+# them): the windows (800x800, 800x640, 800x1280, RAW8 at 50 fps), 1920x1080
-+# RAW10 at 30, and the whole sensor 2x2 binned, 1280x960 RAW10 at 45 -- the one
-+# whose flip and mirror turn the same picture over, and the quietest in a dim
-+# room.
-+CONFIG_CAMERA_OV5647=y
-+CONFIG_CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
-+CONFIG_CAMERA_OV5647_MIPI_RAW8_800X800_50FPS=y
-+CONFIG_CAMERA_OV5647_MIPI_RAW8_800X640_50FPS=y
-+CONFIG_CAMERA_OV5647_MIPI_RAW8_800X1280_50FPS=y
-+CONFIG_CAMERA_OV5647_MIPI_RAW10_1920X1080_30FPS=y
-+CONFIG_CAMERA_OV5647_MIPI_RAW10_1280X960_BINNING_45FPS=y
-+CONFIG_CAMERA_OV5647_MIPI_DEFAULT_FMT_RAW8_800X800_50FPS=y
 +
 +# The Bayer sensors: cameraif streams these through the P4's ISP. The OV2710
 +# is the ESP32-P4-EYE's.
