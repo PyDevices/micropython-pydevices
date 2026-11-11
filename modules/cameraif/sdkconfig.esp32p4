@@ -3,10 +3,10 @@
 # P4 board. cameraif probes them in turn and opens whichever answers; the board
 # names the pins, never the sensor.
 #
-# Two are missing on purpose: the OV2710 (the ESP32-P4-EYE's) and the OV5647
-# (the Waveshare boards' and the Raspberry Pi Camera (B)). Their descriptions in
-# sensors/ are frozen into every P4 image instead, and cameraif tries those
-# when no driver answers (see cameraif_sensors.py).
+# One is missing on purpose: the OV5647 (the Waveshare boards' and the Raspberry
+# Pi Camera (B)). Its description in sensors/ is frozen into every P4 image
+# instead, and cameraif tries it when no driver answers (see
+# cameraif_sensors.py).
 #
 # Each driver needs two options, failing differently when one is absent.
 # Without CONFIG_CAMERA_<chip> the driver is not compiled. Without its
@@ -24,7 +24,8 @@
 # tests/check_sensor_configs.py checks that the three agree, and that no
 # driver in the pinned esp_cam_sensor is missing.
 
-# The Bayer sensors: cameraif streams these through the P4's ISP.
+# The Bayer sensors: cameraif streams these through the P4's ISP. The OV2710
+# is the ESP32-P4-EYE's.
 CONFIG_CAMERA_ARDUCAM_IMX500=y
 CONFIG_CAMERA_ARDUCAM_IMX500_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
 CONFIG_CAMERA_ARDUCAM_IMX500_MIPI_RAW10_1920X1080_30FPS=y
@@ -73,6 +74,11 @@ CONFIG_CAMERA_OS04C10_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
 CONFIG_CAMERA_OS04C10_MIPI_RAW10_810X1080_30FPS=y
 CONFIG_CAMERA_OS04C10_MIPI_RAW10_960X1280_30FPS=y
 CONFIG_CAMERA_OS04C10_MIPI_RAW10_1280X720_25FPS=y
+
+CONFIG_CAMERA_OV2710=y
+CONFIG_CAMERA_OV2710_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
+CONFIG_CAMERA_OV2710_MIPI_RAW10_1280X720_25FPS=y
+CONFIG_CAMERA_OV2710_MIPI_RAW10_1920X1080_25FPS=y
 
 CONFIG_CAMERA_OV9281=y
 CONFIG_CAMERA_OV9281_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y

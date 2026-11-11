@@ -13,5 +13,5 @@ c_module(".")  # this directory holds the micropython.cmake / micropython.mk for
 
 # Only the P4 has a MIPI camera for cameraif to open.
 if os.environ.get("PYDEVICES_TARGET", "").startswith("esp32/ESP32_GENERIC_P4"):
-    freeze("sensors", ("ov2710.py", "ov5647.py"))
+    freeze("sensors", ("ov5647.py",))
     freeze("frozen", "cameraif_sensors.py")

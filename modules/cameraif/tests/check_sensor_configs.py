@@ -40,7 +40,7 @@ SETTING = re.compile(r"^(CONFIG_CAMERA_\w+)=(\S+)$")
 # Sensors whose C driver the MicroPython images leave out: their descriptions
 # in sensors/ are frozen in instead. The CircuitPython board has no cameraif and
 # keeps the driver.
-DESCRIBED = ("OV2710", "OV5647")
+DESCRIBED = ("OV5647",)
 
 
 def is_described(option):

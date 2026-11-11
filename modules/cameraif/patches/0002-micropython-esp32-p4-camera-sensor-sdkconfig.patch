@@ -29,14 +29,14 @@ new file mode 100644
 index 000000000..6c2e8bd74
 --- /dev/null
 +++ b/ports/esp32/boards/sdkconfig.p4_camera
-@@ -0,0 +1,199 @@
+@@ -0,0 +1,204 @@
 +# cameraif on the ESP32-P4: every MIPI-CSI sensor driver esp_cam_sensor has,
 +# so any camera works on any P4 board. cameraif probes them in turn and opens
 +# whichever answers.
 +#
-+# Two are missing on purpose: the OV2710 and the OV5647. Their descriptions in
-+# cameraif's sensors/ are frozen into every P4 image instead, and cameraif tries
-+# those when no driver answers.
++# One is missing on purpose: the OV5647. Its description in cameraif's sensors/
++# is frozen into every P4 image instead, and cameraif tries it when no driver
++# answers.
 +#
 +# Each driver needs two options. Without CONFIG_CAMERA_<chip> the driver is
 +# not compiled; without its AUTO_DETECT option esp_cam_sensor does not emit the
@@ -51,7 +51,8 @@ index 000000000..6c2e8bd74
 +# cameraif's sdkconfig.esp32p4 carries the same settings for builds made with
 +# its build script, and its tests/check_sensor_configs.py keeps the two in step.
 +
-+# The Bayer sensors: cameraif streams these through the P4's ISP.
++# The Bayer sensors: cameraif streams these through the P4's ISP. The OV2710
++# is the ESP32-P4-EYE's.
 +CONFIG_CAMERA_ARDUCAM_IMX500=y
 +CONFIG_CAMERA_ARDUCAM_IMX500_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
 +CONFIG_CAMERA_ARDUCAM_IMX500_MIPI_RAW10_1920X1080_30FPS=y
@@ -101,6 +102,10 @@ index 000000000..6c2e8bd74
 +CONFIG_CAMERA_OS04C10_MIPI_RAW10_960X1280_30FPS=y
 +CONFIG_CAMERA_OS04C10_MIPI_RAW10_1280X720_25FPS=y
 +
++CONFIG_CAMERA_OV2710=y
++CONFIG_CAMERA_OV2710_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
++CONFIG_CAMERA_OV2710_MIPI_RAW10_1280X720_25FPS=y
++CONFIG_CAMERA_OV2710_MIPI_RAW10_1920X1080_25FPS=y
 +
 +CONFIG_CAMERA_OV9281=y
 +CONFIG_CAMERA_OV9281_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y

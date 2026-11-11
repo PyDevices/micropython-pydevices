@@ -9,7 +9,6 @@ its chip ID. A sensor not listed here is a file to copy to the board and pass
 as `sensor=`.
 """
 
-from ov2710 import SENSOR as _ov2710
 from ov5647 import SENSOR as _ov5647
 
-SENSORS = (_ov2710, _ov5647)
+SENSORS = (_ov5647,)
