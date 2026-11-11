@@ -1,18 +1,21 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
 Date: Wed, 11 Nov 2026 00:00:00 -0600
-Subject: [PATCH] ncm_device: keep the NTB parameters in RAM.
+Subject: [PATCH] ncm_device: NTB parameters in RAM, and an out divisor Windows takes.
 
 The ESP32-P4's USB controller reads a control transfer's data by DMA,
 which can't reach the flash a const table lives in, so the host read
 zeros for GET_NTB_PARAMETERS and Windows' NCM driver refused to start.
 
+Windows' NCM driver (UsbNcm) also refuses an out divisor of 1 or 2 and
+reports the device as failed (Code 10) right after reading the table.
+It starts on 4 or 8; Linux' cdc_ncm takes any of them.
+
 ---
 diff --git a/src/class/net/ncm_device.c b/src/class/net/ncm_device.c
-index 7e1a7e8..32d5a2a 100644
 --- a/src/class/net/ncm_device.c
 +++ b/src/class/net/ncm_device.c
-@@ -166,7 +166,8 @@ TU_ATTR_WEAK bool tud_network_default_link_state_cb(void) {
+@@ -166,7 +166,8 @@
   * \attention
   *     We are lucky, that byte order is correct
   */
@@ -22,3 +25,14 @@ index 7e1a7e8..32d5a2a 100644
    .wLength                  = sizeof(ntb_parameters_t),
    .bmNtbFormatsSupported    = 0x01,// 16-bit NTB supported
    .dwNtbInMaxSize           = CFG_TUD_NCM_IN_NTB_MAX_SIZE,
+@@ -175,7 +176,9 @@
+   .wNdbInAlignment          = TUD_NCM_ALIGNMENT,
+   .wReserved                = 0,
+   .dwNtbOutMaxSize          = CFG_TUD_NCM_OUT_NTB_MAX_SIZE,
+-  .wNdbOutDivisor           = 1,
++  // Windows' NCM driver won't start on an out divisor of 1 or 2: it takes
++  // 4 or 8.
++  .wNdbOutDivisor           = 4,
+   .wNdbOutPayloadRemainder  = 0,
+   .wNdbOutAlignment         = TUD_NCM_ALIGNMENT,
+   .wNtbOutMaxDatagrams      = CFG_TUD_NCM_OUT_MAX_DATAGRAMS_PER_NTB,

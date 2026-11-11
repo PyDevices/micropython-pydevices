@@ -8,18 +8,21 @@ MICROPY_PY_NETWORK_USBD_NCM drives lwIP's raw API, which ESP-IDF allows only
 from its own tcpip task, so the esp32 port gets a driver of its own: an
 esp_netif with a custom I/O driver, a link-local address and ESP-IDF's DHCP
 server for the computer, and no gateway. Frames the stack sends are queued to
-the scheduler, where TinyUSB runs; received ones go to esp_netif_receive().
+the scheduler, where TinyUSB runs, and wait there while its transmit blocks are
+full; received ones are copied, since the stack holds on to a buffer past the
+callback, and go to esp_netif_receive(). Blocks are 8 KB on esp32, so one pass
+of the scheduler moves several frames.
 The shared pieces learn that ESP-IDF's lwipopts.h has no LWIP_MDNS_RESPONDER,
 that the MAC string is upper-case hex as Windows requires, and extmod's
 driver steps aside on esp32.
 ---
  extmod/network_usbd_ncm.c           |   4 +-
  ports/esp32/esp32_common.cmake      |   1 +
- ports/esp32/network_usbd_ncm.c      | 269 ++++++++++++++++++++++++++++
+ ports/esp32/network_usbd_ncm.c      | 306 ++++++++++++++++++++++++++++
  ports/esp32/usb.c                   |   8 +
  shared/tinyusb/mp_usbd_descriptor.c |   7 +
- shared/tinyusb/tusb_config.h        |  16 +-
- 6 files changed, 303 insertions(+), 2 deletions(-)
+ shared/tinyusb/tusb_config.h        |  17 +-
+ 6 files changed, 341 insertions(+), 2 deletions(-)
  create mode 100644 ports/esp32/network_usbd_ncm.c
 
 diff --git a/extmod/network_usbd_ncm.c b/extmod/network_usbd_ncm.c
@@ -54,7 +57,7 @@ new file mode 100644
 index 0000000..568fec6
 --- /dev/null
 +++ b/ports/esp32/network_usbd_ncm.c
-@@ -0,0 +1,269 @@
+@@ -0,0 +1,306 @@
 +/*
 + * This file is part of the MicroPython project, http://micropython.org/
 + *
@@ -89,8 +92,10 @@ index 0000000..568fec6
 +// leases the computer an address beside it from ESP-IDF's DHCP server, with no
 +// gateway so the computer's internet route doesn't move. TinyUSB runs from
 +// MicroPython's scheduler, so frames the network stack sends are copied into a
-+// queue and handed to it there, and received frames go to esp_netif_receive(),
-+// which copies them into the stack's own buffers.
++// queue and handed to it there. Received frames are copied out of TinyUSB's
++// buffer, which it reuses as soon as the callback returns, and handed to
++// esp_netif_receive(): the stack keeps that copy until it is done with it and
++// gives it back through ncm_free_rx_buffer().
 +
 +#include "py/runtime.h"
 +#include "py/mphal.h"
@@ -103,6 +108,7 @@ index 0000000..568fec6
 +#include "freertos/FreeRTOS.h"
 +#include "freertos/queue.h"
 +#include "esp_mac.h"
++#include "esp_timer.h"
 +#include "esp_netif.h"
 +#include "esp_netif_net_stack.h"
 +
@@ -125,11 +131,13 @@ index 0000000..568fec6
 +static esp_netif_t *ncm_netif;
 +static QueueHandle_t ncm_tx_queue;
 +static mp_sched_node_t ncm_tx_node;
++static esp_timer_handle_t ncm_tx_retry;
 +static volatile bool ncm_link;
 +
 +// Frames the network stack hands the driver: copy, queue, and let the
-+// scheduler carry them to TinyUSB. A full queue or a busy link drops the frame,
-+// which TCP sends again.
++// scheduler carry them to TinyUSB. A full queue drops the frame, which TCP
++// sends again. While TinyUSB's transmit blocks are full the frame stays
++// queued, and a timer tries again a moment later.
 +static void ncm_tx_callback(mp_sched_node_t *node);
 +static void ncm_set_link(bool up);
 +
@@ -149,14 +157,33 @@ index 0000000..568fec6
 +        return ESP_OK;
 +    }
 +    mp_sched_schedule_node(&ncm_tx_node, ncm_tx_callback);
++    // The stack runs in its own task: wake MicroPython's if it is waiting.
++    mp_hal_wake_main_task();
 +    return ESP_OK;
++}
++
++static void ncm_tx_retry_cb(void *arg) {
++    (void)arg;
++    mp_sched_schedule_node(&ncm_tx_node, ncm_tx_callback);
++    mp_hal_wake_main_task();
++}
++
++static void ncm_free_rx_buffer(void *handle, void *buffer) {
++    (void)handle;
++    free(buffer);
 +}
 +
 +static void ncm_tx_callback(mp_sched_node_t *node) {
 +    (void)node;
 +    ncm_frame_t *frame;
-+    while (xQueueReceive(ncm_tx_queue, &frame, 0) == pdTRUE) {
-+        if (tud_ready() && tud_network_can_xmit(frame->len)) {
++    while (xQueuePeek(ncm_tx_queue, &frame, 0) == pdTRUE) {
++        if (tud_ready() && !tud_network_can_xmit(frame->len)) {
++            // TinyUSB's blocks are full until the computer reads one.
++            esp_timer_start_once(ncm_tx_retry, 1000);
++            return;
++        }
++        xQueueReceive(ncm_tx_queue, &frame, 0);
++        if (tud_ready()) {
 +            tud_network_xmit(frame, frame->len);
 +        }
 +        free(frame);
@@ -173,7 +200,14 @@ index 0000000..568fec6
 +        ncm_set_link(true);
 +    }
 +    if (ncm_netif != NULL && ncm_link && size) {
-+        esp_netif_receive(ncm_netif, (void *)src, size, NULL);
++        // The stack holds on to the buffer it is given, past this callback,
++        // and frees it through ncm_free_rx_buffer(), so it gets a copy. A
++        // failed allocation drops the frame.
++        void *frame = malloc(size);
++        if (frame != NULL) {
++            memcpy(frame, src, size);
++            esp_netif_receive(ncm_netif, frame, size, NULL);
++        }
 +    }
 +    tud_network_recv_renew();
 +    return true;
@@ -218,6 +252,7 @@ index 0000000..568fec6
 +    static esp_netif_driver_ifconfig_t driver = {
 +        .handle = (void *)1,
 +        .transmit = ncm_transmit,
++        .driver_free_rx_buffer = ncm_free_rx_buffer,
 +    };
 +    const esp_netif_config_t config = {
 +        .base = &base,
@@ -229,6 +264,11 @@ index 0000000..568fec6
 +    if (ncm_tx_queue == NULL) {
 +        mp_raise_OSError(MP_ENOMEM);
 +    }
++    const esp_timer_create_args_t retry_args = {
++        .callback = ncm_tx_retry_cb,
++        .name = "ncm_tx",
++    };
++    check_esp_err(esp_timer_create(&retry_args, &ncm_tx_retry));
 +    ncm_netif = esp_netif_new(&config);
 +    if (ncm_netif == NULL) {
 +        mp_raise_OSError(MP_ENOMEM);
@@ -365,7 +405,7 @@ diff --git a/shared/tinyusb/tusb_config.h b/shared/tinyusb/tusb_config.h
 index 5432b9c..2f73902 100644
 --- a/shared/tinyusb/tusb_config.h
 +++ b/shared/tinyusb/tusb_config.h
-@@ -102,9 +102,23 @@
+@@ -102,9 +102,24 @@
  
  // NCM TinyUSB buffer configuration.
  // These depend on lwIP parameters (TCP_MSS, LWIP_MDNS_RESPONDER); lwipopts.h
@@ -381,8 +421,9 @@ index 5432b9c..2f73902 100644
 +#endif
 +
 +#ifdef ESP_PLATFORM
-+// Windows' NCM driver won't start on the smaller blocks the lwIP-derived size
-+// below gives.
++// TinyUSB runs from MicroPython's scheduler, which waits while a blocking
++// socket call does, so each pass should move as much as it can: blocks of
++// five full-size frames, where the lwIP-derived size below holds one.
 +#define CFG_TUD_NCM_IN_NTB_MAX_SIZE  (8192)
 +#define CFG_TUD_NCM_OUT_NTB_MAX_SIZE (8192)
 +#endif
