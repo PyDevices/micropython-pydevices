@@ -45,6 +45,8 @@ SETTLE_MS = 6000
 LED_PIN = 23
 # The OV2710's exposure, gain and AEC control registers, logged every frame.
 AE_REGS = (0x3500, 0x3501, 0x3502, 0x350A, 0x350B, 0x3503)
+# Save the full-size JPEG too; off, a run is the thumbnail and the logs.
+FULL_JPEG = True
 THUMB_W = 320
 THUMB_H = 180
 
@@ -91,7 +93,10 @@ def _log(cam, thumb, ms):
 
 
 def _mode_regs():
-    """The registers the description's modes write, in order, each once."""
+    """The registers the description's modes write, in order, each once.
+
+    Needs ov2710.py on the board even for the driver arm, which only reads it here.
+    """
     from ov2710 import SENSOR
 
     seen = []
@@ -117,7 +122,13 @@ def run(arm):
     led = Pin(LED_PIN, Pin.OUT, value=0)
     out = "%s/%s" % (OUT, arm)
     _mkdirs(out)
-    thumb = bytearray(THUMB_W * THUMB_H * 2)
+    # The PPA writes the thumbnail by DMA, so it must be 64-byte aligned.
+    import uctypes
+
+    n = THUMB_W * THUMB_H * 2
+    raw = bytearray(n + 64)
+    off = (-uctypes.addressof(raw)) % 64
+    thumb = memoryview(raw)[off : off + n]
     for mode in MODES:
         name = "%dx%d" % mode
         cam = _open(arm, mode)
@@ -140,11 +151,12 @@ def run(arm):
             record["controls"] = cam.controls()
             record["stats"] = cam.stats()
             record["regs"] = [[r, cam.reg(r)] for r in _mode_regs()]
-            with open("%s/%s.jpg" % (out, name), "wb") as f:
-                f.write(cam.capture_jpeg(95))
+            if FULL_JPEG:
+                with open("%s/%s.jpg" % (out, name), "wb") as f:
+                    f.write(cam.capture_jpeg(95))
             cam.capture_scaled(thumb, THUMB_W, THUMB_H)
             with open("%s/%s.rgb565" % (out, name), "wb") as f:
-                f.write(thumb)
+                f.write(bytes(thumb))
             with open("%s/%s.json" % (out, name), "w") as f:
                 json.dump(record, f)
             print(arm, name, "settled luma %.1f" % record["led_off"][-1][1])

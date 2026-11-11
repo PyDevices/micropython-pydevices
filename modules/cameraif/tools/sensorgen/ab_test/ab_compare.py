@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Compare ab_capture.py's runs: does the description drive the OV2710 as the C driver does?
 
-    python3 ab_compare.py <folder with driver/, description/ and frozen/>
+    python3 ab_compare.py <folder with driver/, description/ and frozen/> [arm folders...]
 
 For each mode it prints, per arm, the settled brightness and mean colour, how
 long exposure took to settle from cold and after each step of the LED, the
@@ -82,7 +82,9 @@ def compare(root: Path, mode: str) -> None:
     frames = {}
     base = None
     for arm, run in runs.items():
-        rgb = np.asarray(Image.open(root / arm / f"{mode}.jpg").convert("RGB"))
+        jpg = root / arm / f"{mode}.jpg"
+        # A run saved without its full-size JPEG is judged from the thumbnail.
+        rgb = np.asarray(Image.open(jpg).convert("RGB")) if jpg.exists() else thumb(root / arm / f"{mode}.rgb565", (320, 180))
         frames[arm] = rgb
         h = histogram(thumb(root / arm / f"{mode}.rgb565", (320, 180)))
         if base is None:
@@ -129,7 +131,11 @@ def compare(root: Path, mode: str) -> None:
 
 
 def main() -> None:
+    global ARMS
     root = Path(sys.argv[1])
+    # Folder names after the root replace the three arms; the first is the baseline.
+    if len(sys.argv) > 2:
+        ARMS = tuple(sys.argv[2:])
     modes = sorted({p.stem for arm in ARMS for p in (root / arm).glob("*.json")})
     for mode in modes:
         compare(root, mode)
