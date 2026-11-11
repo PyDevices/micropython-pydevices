@@ -438,7 +438,7 @@ class Assemble(unittest.TestCase):
         doc = self.run_assemble()
         fs = {b["id"]: (b.get("fs_offset"), b.get("fs_bytes")) for b in doc["builds"]}
         self.assertEqual(fs["mp-s3-lcd7"], ("0x560000", 2688 * 1024))
-        self.assertEqual(fs["mp-p4-panel"], ("0x5c0000", 26880 * 1024))
+        self.assertEqual(fs["mp-p4-panel"], ("0x600000", 26624 * 1024))
         self.assertEqual(fs["cp-s3-lcd7"], (None, None))
 
     def rewrite(self, cell_id, role, data):
@@ -637,7 +637,7 @@ class DraftRelease(unittest.TestCase):
         text = rf.notes(self.doc)
         self.assertIn("| ESP32-S3-Touch-LCD-7 | MicroPython v1.30.0-preview | ", text)
         self.assertIn(" | 2,688 KB at 0x560000 |", text)
-        self.assertIn(" | 26,880 KB at 0x5c0000 |", text)
+        self.assertIn(" | 26,624 KB at 0x600000 |", text)
         self.assertNotIn("This release moves the filesystem", text)
 
     def test_a_release_that_moves_a_filesystem_says_which_board(self):
@@ -660,7 +660,7 @@ class DraftRelease(unittest.TestCase):
         p.write_text(json.dumps(previous))
         out = self.root / "notes.md"
         self.assertEqual(rf.main(["notes", str(j), "--previous", str(p), "--out", str(out)]), 0)
-        self.assertIn("- ESP32-P4-WIFI6-Touch-LCD-4B, MicroPython: 26,880 KB at 0x5c0000, was 0 KB at 0x5c0000",
+        self.assertIn("- ESP32-P4-WIFI6-Touch-LCD-4B, MicroPython: 26,624 KB at 0x600000, was 0 KB at 0x600000",
                       out.read_text())
 
     def test_a_final_set_has_no_staged_banner(self):

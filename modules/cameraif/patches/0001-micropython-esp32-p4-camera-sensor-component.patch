@@ -2,18 +2,29 @@ diff --git a/ports/esp32/main/idf_component.yml b/ports/esp32/main/idf_component
 index 3c352a833..dbcdf47f4 100644
 --- a/ports/esp32/main/idf_component.yml
 +++ b/ports/esp32/main/idf_component.yml
-@@ -21,6 +21,14 @@ dependencies:
+@@ -21,6 +21,25 @@ dependencies:
      rules:
        - if: "target == esp32p4"
      version: "0.15.2"
 +  # cameraif: the MIPI-CSI sensor drivers. ESP-IDF ships the CSI *controller*
 +  # (esp_driver_cam) but no sensor drivers; the OV5647 on the P4 panel's CSI
 +  # port comes from here. P4 only -- no other supported target has a CSI
-+  # controller for it to drive.
++  # controller for it to drive. Exactly the versions DEPENDENCIES.lock names,
++  # the two it needs included: cameraif's sensor settings turn on every
++  # MIPI-CSI driver this version has (modules/cameraif/tests/
++  # check_sensor_configs.py), so a newer one waits for them.
 +  espressif/esp_cam_sensor:
 +    rules:
 +      - if: "target == esp32p4"
-+    version: ">=0.5.0"
++    version: "2.7.0"
++  espressif/esp_sccb_intf:
++    rules:
++      - if: "target == esp32p4"
++    version: "1.0.0"
++  espressif/cmake_utilities:
++    rules:
++      - if: "target == esp32p4"
++    version: "0.5.3"
    espressif/lan867x:
      version: "~1.0.0"
      rules:

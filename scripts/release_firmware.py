@@ -82,7 +82,7 @@ CELLS = [
          chip="esp32p4", offset=0x2000, kind="esp32", deps="idf", fs="10176K"),
     dict(id="mp-p4-panel", label="ESP32-P4-WIFI6-Touch-LCD-4B", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_P4", variant="PRE_REV3_C6_WIFI", flash="32MB", modules="all",
-         chip="esp32p4", offset=0x2000, kind="esp32", deps="idf", fs="26880K"),
+         chip="esp32p4", offset=0x2000, kind="esp32", deps="idf", fs="26624K"),
     dict(id="mp-s3-lcd7", label="ESP32-S3-Touch-LCD-7", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_S3", variant="LCD_7", flash="8MB", modules="all",
          chip="esp32s3", offset=0, kind="esp32", deps="idf", fs="2688K"),

@@ -26,10 +26,10 @@ index 876a186de..d61916f2a 100644
  )
 diff --git a/ports/esp32/boards/sdkconfig.p4_camera b/ports/esp32/boards/sdkconfig.p4_camera
 new file mode 100644
-index 000000000..03d492a20
+index 000000000..6c2e8bd74
 --- /dev/null
 +++ b/ports/esp32/boards/sdkconfig.p4_camera
-@@ -0,0 +1,209 @@
+@@ -0,0 +1,214 @@
 +# cameraif on the ESP32-P4: every MIPI-CSI sensor driver esp_cam_sensor has,
 +# so any camera works on any P4 board. cameraif probes them in turn and opens
 +# whichever answers.
@@ -83,6 +83,11 @@ index 000000000..03d492a20
 +CONFIG_CAMERA_GC4053=y
 +CONFIG_CAMERA_GC4053_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
 +CONFIG_CAMERA_GC4053_MIPI_RAW10_1440X1440_25FPS=y
++
++CONFIG_CAMERA_JXH63P=y
++CONFIG_CAMERA_JXH63P_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
++CONFIG_CAMERA_JXH63P_MIPI_RAW10_1280X720_30FPS=y
++CONFIG_CAMERA_JXH63P_MIPI_RAW10_640X480_30FPS=y
 +
 +CONFIG_CAMERA_MIRA220=y
 +CONFIG_CAMERA_MIRA220_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
