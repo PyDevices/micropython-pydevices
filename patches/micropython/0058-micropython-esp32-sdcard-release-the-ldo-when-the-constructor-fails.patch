@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 00:00:00 -0500
+Subject: [PATCH] esp32/machine_sdcard: Release the LDO when the constructor fails.
+
+On chips with an on-chip LDO for the SD pins (the ESP32-P4), the
+constructor takes the LDO channel before it initialises the host. If the
+host or slot init then fails, the constructor raises, the half-made object
+has no HOST_INIT_DONE flag, and nothing ever releases the channel, so
+every later SDCard() call fails with ESP_ERR_INVALID_ARG until a reset
+instead of reporting the real error. A failure after host init left the
+host, the slot and the LDO to the garbage collector.
+
+Release everything taken so far on any exception in the constructor, and
+let deinit() use the same function, which now also drops the LDO when the
+host was never initialised.
+
+diff --git a/ports/esp32/machine_sdcard.c b/ports/esp32/machine_sdcard.c
+index c78cbcf1c..5cb2f0a0a 100644
+--- a/ports/esp32/machine_sdcard.c
++++ b/ports/esp32/machine_sdcard.c
+@@ -258,6 +258,31 @@ static esp_err_t sdcard_ensure_card_init(sdcard_card_obj_t *self, bool force) {
+ //
+ // Consult machine.SDCard docs for more details.
+ 
++// Undo whatever the constructor or the object has done so far. Safe to call
++// again, and at any point: a constructor that fails before host init has
++// still taken the on-chip LDO, and the object it leaves behind would never
++// release it, so the next constructor call fails with ESP_ERR_INVALID_ARG.
++static void sdcard_release(sdcard_card_obj_t *self) {
++    if (self->flags & SDCARD_CARD_FLAGS_HOST_INIT_DONE) {
++        if (self->host.flags & SDMMC_HOST_FLAG_DEINIT_ARG) {
++            self->host.deinit_p(self->host.slot);
++        } else {
++            self->host.deinit();
++        }
++        if (self->host.flags & SDMMC_HOST_FLAG_SPI) {
++            // SD card used a (dedicated) SPI bus, so free that SPI bus.
++            spi_bus_free(self->host.slot);
++        }
++        self->flags &= ~SDCARD_CARD_FLAGS_HOST_INIT_DONE;
++    }
++    #if SOC_SDMMC_IO_POWER_EXTERNAL
++    if (self->host.pwr_ctrl_handle) {
++        sd_pwr_ctrl_del_on_chip_ldo(self->host.pwr_ctrl_handle);
++        self->host.pwr_ctrl_handle = NULL;
++    }
++    #endif
++}
++
+ static mp_obj_t machine_sdcard_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+     // check arguments
+     enum {
+@@ -368,6 +393,15 @@ static mp_obj_t machine_sdcard_make_new(const mp_obj_type_t *type, size_t n_args
+     sdcard_card_obj_t *self = mp_obj_malloc_with_finaliser(sdcard_card_obj_t, &machine_sdcard_type);
+     self->flags = 0;
+     self->bounce = NULL;
++    #if SOC_SDMMC_IO_POWER_EXTERNAL
++    self->host.pwr_ctrl_handle = NULL;
++    #endif
++    // Any error from here on releases what was taken before it is re-raised.
++    nlr_buf_t nlr;
++    if (nlr_push(&nlr) != 0) {
++        sdcard_release(self);
++        nlr_jump(nlr.ret_val);
++    }
+     // Note that these defaults are macros that expand to structure
+     // constants so we can't directly assign them to fields.
+     int freq = arg_vals[ARG_freq].u_int;
+@@ -529,6 +563,7 @@ static mp_obj_t machine_sdcard_make_new(const mp_obj_type_t *type, size_t n_args
+     }
+     #endif // SOC_SDMMC_HOST_SUPPORTED
+ 
++    nlr_pop();
+     DEBUG_printf("  Returning new card object: %p", self);
+     return MP_OBJ_FROM_PTR(self);
+ }
+@@ -538,23 +573,7 @@ static mp_obj_t sd_deinit(mp_obj_t self_in) {
+ 
+     DEBUG_printf("De-init host\n");
+ 
+-    if (self->flags & SDCARD_CARD_FLAGS_HOST_INIT_DONE) {
+-        if (self->host.flags & SDMMC_HOST_FLAG_DEINIT_ARG) {
+-            self->host.deinit_p(self->host.slot);
+-        } else {
+-            self->host.deinit();
+-        }
+-        if (self->host.flags & SDMMC_HOST_FLAG_SPI) {
+-            // SD card used a (dedicated) SPI bus, so free that SPI bus.
+-            spi_bus_free(self->host.slot);
+-        }
+-        #if SOC_SDMMC_IO_POWER_EXTERNAL
+-        if (self->host.pwr_ctrl_handle) {
+-            check_esp_err(sd_pwr_ctrl_del_on_chip_ldo(self->host.pwr_ctrl_handle));
+-        }
+-        #endif
+-        self->flags &= ~SDCARD_CARD_FLAGS_HOST_INIT_DONE;
+-    }
++    sdcard_release(self);
+     if (self->bounce) {
+         heap_caps_free(self->bounce);
+         self->bounce = NULL;
