@@ -24,19 +24,15 @@ Results go to /bc_<name>_<arm>.json, and a JPEG of the first mode beside it.
 import json
 import time
 
-import cameraif
-
 
 def _list_regs(raw):
     """Registers a packed list writes."""
     out = []
-    mask = False
     for i in range(0, len(raw), 3):
         reg = raw[i] << 8 | raw[i + 1]
         if reg == 0xFFFF:
             continue
         if reg == 0xFFFE:
-            mask = True
             continue
         out.append(reg)
     return out
