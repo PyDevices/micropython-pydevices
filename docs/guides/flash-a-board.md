@@ -51,10 +51,19 @@ above, and the release notes list the lines with the names filled in. Its
 
 The `DISPLAY_SHIELD` firmware runs its USB-C port on TinyUSB, so a program can
 add USB interfaces at run time with `machine.USBDevice`, such as a MIDI device
-with micropython-lib's `usb-device-midi`. The REPL's serial port and the
-`/flash` drive are there as before, but Windows sees a new device the first
-time and gives the serial port a new COM number. `machine.bootloader()` still
-reaches the DFU bootloader.
+with micropython-lib's `usb-device-midi`. The port starts as the REPL's serial
+port alone, with no `/flash` drive, and Windows gives the serial port a new COM
+number the first time. To get a drive, present one from code with
+`usb.device.msc`, which the ROMFS carries:
+
+```python
+import machine, usb.device
+from usb.device.msc import MSCInterface
+
+usb.device.get().init(MSCInterface(machine.RAMBlockDev(512, 256)), builtin_driver=True)
+```
+
+`machine.bootloader()` still reaches the DFU bootloader.
 
 `firmware1.bin` holds the radio's firmware for Wi-Fi and for Bluetooth, and
 only changes when the Wi-Fi driver does, so after the first time you can leave

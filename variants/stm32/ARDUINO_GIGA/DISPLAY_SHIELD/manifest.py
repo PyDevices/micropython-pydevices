@@ -14,6 +14,24 @@ include("../../../../modules/manifest.py", board_manifest=False)
 require("bundle-networking")
 require("logging")
 
+# The USB device classes a program adds from code with machine.USBDevice, the
+# set modules/micropython-lib/manifest.py freezes elsewhere, with usb-device-msc
+# for a drive (the port starts as the REPL alone). They go in the ROMFS as a
+# set, because a usb package found in /rom hides any usb/device/ in /lib. There
+# is no usb-device-net: this port has no NCM driver or network interface to
+# hand it frames.
+for _pkg in (
+    "usb-device",
+    "usb-device-cdc",
+    "usb-device-hid",
+    "usb-device-keyboard",
+    "usb-device-midi",
+    "usb-device-mouse",
+):
+    require(_pkg)
+include("../../../../modules/library.py")
+require("usb-device-msc", library="omnipython-lib")
+
 # Built by build_mp.py, none of it is frozen: every Python module above goes
 # to the board's ROMFS partition on its QSPI flash, and internal flash is left
 # to LVGL and the C modules. This writes the list for build_mp.py, which
