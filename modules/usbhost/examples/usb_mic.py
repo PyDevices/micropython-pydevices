@@ -23,6 +23,10 @@ Run it:
 Then speak into the microphone.
 
 Tested on: a C-Media USB microphone.
+Also on a Waveshare ESP32-P4-WIFI6-DEV-KIT on MicroPython
+v1.30.0-preview.160.gb70ae1aca6 (built 2026-11-11), behind its onboard hub, with
+FULL_SPEED = True, hosting an Arduino GIGA R1 WiFi presenting a microphone
+(``usb.device.audio``) with a 500 Hz tone: 3 s captured, the tone at its full level.
 """
 
 import time

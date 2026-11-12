@@ -25,7 +25,7 @@ anything. Host mode is proven at full speed on the ESP32-S3, and at high
 speed on the ESP32-P4 with a webcam on a port that supplies 5 V; behind a hub
 the P4 reaches full-speed devices when you start the host with
 `full_speed=True` (see [below](#keyboards-and-midi-controllers-behind-a-hub-on-the-esp32-p4)). MSC now mounts as a filesystem, read-write
-([`examples/usb_drive_mount.py`](../examples/usb_drive_mount.py) lists a hosted stick; [`usb_drive_log.py`](../examples/usb_drive_log.py)
+([`examples/usb_host_msc_simpletest.py`](../examples/usb_host_msc_simpletest.py) is the shortest, and [`examples/usb_drive_mount.py`](../examples/usb_drive_mount.py) lists a hosted stick; [`usb_drive_log.py`](../examples/usb_drive_log.py)
 appends sensor lines to one and reads them back after a remount;
 [`usb_drive_read.py`](../examples/usb_drive_read.py) reads a file end to end and checks its SHA-256), with
 Bulk-Only Reset Recovery and REQUEST SENSE behind it, both exercised by
