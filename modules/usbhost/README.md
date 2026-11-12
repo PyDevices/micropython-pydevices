@@ -33,7 +33,7 @@ beside `midiports`, and installs with `mip`:
 
 - `usb-core`: `usb.core`, `usb.util` and `usb_host`, in PyUSB's and
   CircuitPython's shape.
-- `usb-host-msc`, `usb-host-hid`, `usb-host-cdc`, `usb-host-audio`,
+- `usb-host-msc`, `usb-host-hid`, `usb-host-cdc`, `usb-host-audio`, `usb-host-mtp`, `usb-host-dfu`,
   `usb-host-video`, `usb-host-net`: a drive, a keyboard or mouse, a USB serial
   device, a speaker or microphone, a webcam, and the internet through a
   phone's USB tethering.
