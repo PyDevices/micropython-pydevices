@@ -233,10 +233,9 @@ out:
     return r;
 }
 
-// Release with the lock held. Retries while the client pump retires the
+// Give the interface up, retrying while the client pump retires the
 // cancellations.
-static int usbhost_xfer_release_locked(usbhost_xfer_claim_t *c) {
-    usbhost_xfer_drop_pipes(c->dev, c->itf, false);
+static esp_err_t usbhost_xfer_give_up(usbhost_xfer_claim_t *c) {
     esp_err_t err = ESP_FAIL;
     const TickType_t limit = USBHOST_MS_TICKS(250);
     for (TickType_t i = 0; i < limit; i++) {
@@ -247,6 +246,23 @@ static int usbhost_xfer_release_locked(usbhost_xfer_claim_t *c) {
         int held = usbhost_host_lock_suspend();
         vTaskDelay(1);
         usbhost_host_lock_resume(held);
+    }
+    return err;
+}
+
+// Release with the lock held. An interface left at a streaming alternate
+// setting goes back to alternate 0 first (the library sends SET_INTERFACE when
+// an interface is claimed at another alternate): a camera still streaming when
+// the board resets, on a socket whose 5 V has no switch, was left wedged until
+// someone unplugged it.
+static int usbhost_xfer_release_locked(usbhost_xfer_claim_t *c) {
+    usbhost_xfer_drop_pipes(c->dev, c->itf, false);
+    esp_err_t err = usbhost_xfer_give_up(c);
+    if (err == ESP_OK && c->alt != 0) {
+        if (usb_host_interface_claim(usbhost_host_client_get(), c->dev, c->itf, 0) == ESP_OK) {
+            c->alt = 0;
+            usbhost_xfer_give_up(c);
+        }
     }
     c->in_use = false;
     return err == ESP_OK ? 0 : -MP_EBUSY;

@@ -62,6 +62,7 @@
 #include "usbhost_host_stream.h"
 #include "usbhost_ticks.h"
 #include "esp_timer.h"
+#include "esp_system.h"
 
 #if defined(MICROPY_HW_ENABLE_USBDEV) && MICROPY_HW_ENABLE_USBDEV
 #include "tusb.h"
@@ -93,7 +94,9 @@ extern void usb_phy_otg_device_mode(void);
 // audio -- and above MicroPython's task so events keep flowing while the
 // interpreter is busy, which is the transport's whole reason to exist.
 #define USBHOST_HOST_TASK_PRIO (7)
-#define USBHOST_HOST_TASK_STACK (8192)
+// Measured with a camera streaming and a soft reset tearing it down: about
+// 900 bytes of 8192 were ever used.
+#define USBHOST_HOST_TASK_STACK (4096)
 
 typedef struct {
     bool in_use;
@@ -134,6 +137,18 @@ static TaskHandle_t usbhost_host_task_handle;
 static int usbhost_api_lock_depth;
 volatile uint32_t usbhost_host_pump_count;
 volatile int usbhost_host_stage;
+
+// A board reset (machine.reset(), a WebREPL reset) with a camera streaming
+// leaves the camera wedged, because its 5 V stays on: it never leaves the
+// streaming alternate setting. Stop the streams and put every interface back
+// to alternate 0 on the way down.
+static bool usbhost_host_shutdown_registered;
+static void usbhost_host_shutdown(void) {
+    if (usbhost_host_task_handle != NULL) {
+        usbhost_stream_close_all();
+        usbhost_xfer_close();
+    }
+}
 
 void usbhost_host_lock(void) {
     if (usbhost_host_client_mutex != NULL) {
@@ -1011,6 +1026,9 @@ int usbhost_host_start_c(void) {
         }
     }
 
+    if (!usbhost_host_shutdown_registered) {
+        usbhost_host_shutdown_registered = esp_register_shutdown_handler(usbhost_host_shutdown) == ESP_OK;
+    }
     usbhost_host_install_result = USBHOST_HOST_INSTALL_PENDING;
     usbhost_host_tearing_down = false;
     usbhost_host_task_running = true;
