@@ -325,7 +325,7 @@ is there for when you do mean the sensor's own numbers.
 | `bayer()` | The colour order the ISP opened with |
 | `awb(on=None)` | Automatic white balance. A bool |
 | `wb_gains(red=None, blue=None)` | The white balance's red and blue gains (green is 1). Setting them turns `awb` off |
-| `test_pattern(on=None)` | The sensor's internal pattern |
+| `test_pattern(on=None)` | The sensor's internal pattern: a bool, or a menu number for a sensor that lists several |
 | `auto_exposure(on=None, *, target=None)` | `(on, target, brightness)`: exposure, then gain, moved every frame toward `target` (0–255, after gamma). Setting `exposure()` or `gain()` turns it off |
 | `black_level(level=None)` | The black taken off each channel before gamma, allowing for white balance and the colour matrix |
 | `ccm(matrix=None)` | The colour matrix, nine numbers row by row. On a P4 before revision 3 white balance scales its red and blue columns, so a highlight the sensor clips can take a tint; from revision 3 white balance runs in the ISP's own gain block, ahead of the clip |
@@ -391,7 +391,8 @@ The flips and the `espcamera` properties are the exception: where the driver
 can't read one back, they return what you last set (the camera sets both
 flips when it opens), and `None` only for a control nobody has set.
 
-`test_pattern()` reads back what was last *asked for*, not what the sensor
+`test_pattern(n)` with a number shows the nth pattern of the sensor's menu, if its
+description has one ([below](#a-camera-described-in-python)). `test_pattern()` reads back what was last *asked for*, not what the sensor
 reports — the ioctl behind it has no read side. Said plainly here because a
 reader who assumed otherwise would trust it during exactly the debugging
 session it exists for.
@@ -569,6 +570,7 @@ in the firmware, and `JPEG` needs
 | `whitebal` | `awb` | `AWB`; without one, the ISP's white balance (`awb()`) | yes, the ISP's |
 | `gain_ctrl` | `agc` | `AGC` | no |
 | `exposure_ctrl`, `ae_level`, `wb_mode`, `special_effect`, `lenc` | the same | `AE_CONTROL`, `AE_LEVEL`, `WB`, `SPECIAL_EFFECT`, `LENC` | no |
+| `digital_gain` | the same | `DGAIN` | no |
 | `colorbar` | | the sensor's test pattern (`test_pattern()`) | yes |
 | `quality` | | `take()`'s JPEG quality, 1-100 | yes |
 
@@ -741,9 +743,9 @@ cam = cameraif.Camera(7, 8, i2c=1, reset=21, sensor=SENSOR)
 | `modes` | A list of dicts: `name`, `width`, `height`, `fps`, `format` (`"raw8"`, `"raw10"`, `"raw12"`), `bayer`, `lanes`, `lane_hz`, `pclk`, `hts`, `vts`, and the mode's `regs`, a register list |
 | `stream` | `(register list on, register list off)`; a mode may carry its own `stream` instead |
 | `exposure`, `gain` | `(register, bytes, minimum, maximum, default)`; a maximum of `-n` is the mode's `vts` less `n`, a default of `None` the maximum. A dict for anything else ([below](#a-control)) |
-| `controls` | `{name: control}` for the others a sensor has: `ae_level`, `brightness`, `contrast`, `saturation`, `sharpness`, `denoise`, `special_effect`, `wb` |
+| `controls` | `{name: control}` for the others a sensor has: `ae_level`, `digital_gain`, `brightness`, `contrast`, `saturation`, `sharpness`, `denoise`, `special_effect`, `wb` |
 | `flip` | `(register, vertical bits, horizontal bits)`; or `{"v": (on, off), "h": (on, off)}` of register lists, when the two are in different registers or write more than their bits |
-| `test_pattern` | `(register, bytes, on value, off value)`; or `(register list on, register list off)` |
+| `test_pattern` | `(register, bytes, on value, off value)`; or `(register list on, register list off)`. A fifth item, `(register, bytes, on, off, menu)`, is a tuple of register values: `test_pattern(n)` writes `menu[n]`, so entry 0 is off and entry 1 should be the on value |
 | `auto_exposure`, `black_level`, `gamma`, `ccm`, `ccm_table`, `awb_table`, `color` | The camera's tuning ([above](#colour-tuning-per-sensor)); `tuning=` and the other arguments to `Camera()` override it |
 
 ### A register list

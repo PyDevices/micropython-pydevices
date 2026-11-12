@@ -139,7 +139,7 @@ typedef struct {
     volatile int8_t fb_filling;  // index the driver is writing
     volatile int8_t fb_held;     // index Python is reading, or -1
     volatile int8_t fb_done;     // index of the most recently completed frame
-    bool test_pattern;           // last requested; the ioctl has no read side
+    int test_pattern;            // last requested (0 off, 1 on, or a menu entry); the ioctl has no read side
     esp_cam_ctlr_handle_t cam;
     isp_proc_handle_t isp;
     ppa_mod_client_t *ppa;       // ppa's client: the PPA, for capture_scaled/capture_yuy2
@@ -283,10 +283,24 @@ static const cameraif_ctl_t cameraif_ctls[] = {
     { MP_QSTR_gain_ctrl,      MP_QSTR_agc,            ESP_CAM_SENSOR_AGC,           CAMERAIF_CTL_BOOL },
     { MP_QSTR_exposure_ctrl,  MP_QSTR_exposure_ctrl,  ESP_CAM_SENSOR_AE_CONTROL,    CAMERAIF_CTL_BOOL },
     { MP_QSTR_ae_level,       MP_QSTR_ae_level,       ESP_CAM_SENSOR_AE_LEVEL,      CAMERAIF_CTL_INT },
+    { MP_QSTR_digital_gain,   MP_QSTR_digital_gain,   ESP_CAM_SENSOR_DGAIN,         CAMERAIF_CTL_INT },
     { MP_QSTR_wb_mode,        MP_QSTR_wb_mode,        ESP_CAM_SENSOR_WB,            CAMERAIF_CTL_INT },
     { MP_QSTR_special_effect, MP_QSTR_special_effect, ESP_CAM_SENSOR_SPECIAL_EFFECT, CAMERAIF_CTL_INT },
     { MP_QSTR_lenc,           MP_QSTR_lenc,           ESP_CAM_SENSOR_LENC,          CAMERAIF_CTL_BOOL },
 };
+// A test pattern argument: a bool is off or on, an int a menu entry the sensor
+// describes (0 off, 1 the same as on).
+static int cameraif_pattern_arg(mp_obj_t v) {
+    if (mp_obj_is_bool(v)) {
+        return mp_obj_is_true(v) ? 1 : 0;
+    }
+    mp_int_t n = mp_obj_get_int(v);
+    if (n < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("test pattern is off, on or a menu entry"));
+    }
+    return n;
+}
+
 _Static_assert(MP_ARRAY_SIZE(cameraif_ctls) <= 24, "ctl_last holds one value per row");
 
 // espcamera's PixelFormat and FrameSize. take() hands back RGB565, grey or a
@@ -2353,15 +2367,15 @@ static mp_obj_t cameraif_test_pattern(size_t n_args, const mp_obj_t *args) {
         // than what the sensor reports. Said here because a reader who
         // assumes otherwise would trust it during exactly the debugging
         // session it was added for.
-        return mp_obj_new_bool(c->test_pattern);
+        return c->test_pattern > 1 ? MP_OBJ_NEW_SMALL_INT(c->test_pattern) : mp_obj_new_bool(c->test_pattern);
     }
-    int on = mp_obj_is_true(args[1]) ? 1 : 0;
+    int on = cameraif_pattern_arg(args[1]);
     if (esp_cam_sensor_ioctl(c->sensor, ESP_CAM_SENSOR_IOC_S_TEST_PATTERN,
             &on) != ESP_OK) {
         mp_raise_msg(&mp_type_OSError,
             MP_ERROR_TEXT("sensor has no test pattern"));
     }
-    c->test_pattern = (on != 0);
+    c->test_pattern = on;
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(cameraif_test_pattern_obj, 1, 2,
@@ -3153,13 +3167,13 @@ static bool cameraif_prop(cameraif_obj_t *c, qstr attr, mp_obj_t val, mp_obj_t *
         // The sensor's test pattern. Reads back what was last asked for: the
         // ioctl behind it has no read side.
         if (store) {
-            int on = mp_obj_is_true(val) ? 1 : 0;
+            int on = cameraif_pattern_arg(val);
             if (esp_cam_sensor_ioctl(c->sensor, ESP_CAM_SENSOR_IOC_S_TEST_PATTERN, &on) != ESP_OK) {
                 cameraif_no_control(c, attr);
             }
-            c->test_pattern = on != 0;
+            c->test_pattern = on;
         } else {
-            *out = mp_obj_new_bool(c->test_pattern);
+            *out = c->test_pattern > 1 ? MP_OBJ_NEW_SMALL_INT(c->test_pattern) : mp_obj_new_bool(c->test_pattern);
         }
         return true;
     }
