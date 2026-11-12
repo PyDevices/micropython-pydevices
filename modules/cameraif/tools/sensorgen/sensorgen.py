@@ -66,7 +66,7 @@ PRELOAD = {
 # other description is "written from esp_cam_sensor data, not yet run on a
 # sensor". Set by hand when a board check passes.
 CONFIRMED = {
-    "ov2710": "an ESP32-P4-EYE, 2026-11-11: every register of its two modes and the flip, mirror and test pattern states read back equal to the driver's, found by auto-detect with no driver in the image, and a 1920x1080 frame looks right; the ae_level table was not set on the board",
+    "ov2710": "an ESP32-P4-EYE, 2026-11-11: every register of its two modes and the flip, mirror and test pattern states read back equal to the driver's, found by auto-detect with no driver in the image, and a 1920x1080 frame looks right; its ae_level table set from Python (cam.ae_level = n) at all 234 levels, each level's six registers reading back as the driver wrote them, and frames get darker and brighter across the range",
     "ov5647": "an ESP32-P4 Devkit, 2026-11-11: every register of its five modes, exposure, flip, mirror and the test pattern read back equal to the driver's, found by auto-detect with no driver in the image",
 }
 
