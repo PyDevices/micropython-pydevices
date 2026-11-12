@@ -600,7 +600,7 @@ What stays this module's own: the constructor, `frame()`, `capture()`,
 | [`camera_espcamera.py`](examples/camera_espcamera.py) | espcamera's API: `take()`, `reconfigure()`, `vflip` and `hmirror`, a JPEG |
 | [`camera_snapshot.py`](examples/camera_snapshot.py) | A still to the filesystem as hardware-encoded JPEG |
 | [`camera_mjpeg.py`](examples/camera_mjpeg.py) | An MJPEG server any browser can open |
-| [`camera_send_simpletest.py`](examples/camera_send_simpletest.py) | A JPEG on request to another board's screen or a computer, over TCP |
+| [`camera_send.py`](examples/camera_send.py) | A JPEG on request to another board's screen or a computer, over TCP |
 | [`camera_still.py`](examples/camera_still.py) | Live view, BOOT button takes the picture. The one that feels like a camera |
 | [`camera_controls.py`](examples/camera_controls.py) | Discovering what a sensor supports, then sweeping it on screen |
 | [`camera_color.py`](examples/camera_color.py) | `color()`: contrast, saturation, brightness and hue on the live picture |
@@ -651,7 +651,7 @@ DMA scaler and a 97 ms wait that should not have existed:
 
 ## Sending pictures over the network
 
-[`camera_send_simpletest.py`](examples/camera_send_simpletest.py) sends one JPEG each time the viewer asks for one,
+[`camera_send.py`](examples/camera_send.py) sends one JPEG each time the viewer asks for one,
 so every picture costs a round trip on the network as well as its bytes. On a
 Waveshare ESP32-P4 WIFI6 DEV-KIT with an OV5647, sending 27 KB pictures at
 quality 60 to CPython on a PC, 20 pictures a run:
@@ -673,7 +673,7 @@ them as slow. If pictures still crawl, move the board nearer the access point
 or use Ethernet.
 
 With another board as the viewer, the same DEV-KIT (at -61 to -65 dBm) sent to
-a LilyGO T-Embed (ESP32-S3) running `jpegio_viewer_simpletest.py` at -83 to
+a LilyGO T-Embed (ESP32-S3) running `jpegio_viewer.py` at -83 to
 -85 dBm, two runs of 20 pictures for each setting. The times are from the
 viewer's request to the last byte of the JPEG. Decoding at an eighth of the
 size and showing the picture took another 86 ms on the S3.
