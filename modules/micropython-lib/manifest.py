@@ -50,5 +50,7 @@ if any(n in ("all", "usbhost") or os.path.realpath(n) == _usbhost for n in _name
         "usb-host-hid",
         "usb-host-msc",
         "usb-host-cdc",
+        "usb-host-mtp",
+        "usb-host-dfu",
     ):
         require(_pkg, library="omnipython-lib")
