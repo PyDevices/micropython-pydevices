@@ -17,7 +17,7 @@ an ESP32-S3, and a CDC device on the host port.
 
 Run it:
 
-    mpftp run examples/usb_serial.py
+    mpftp run examples/usb_host_cdc_simpletest.py
 
 Tested on: an ESP32-P4-WIFI6-DEV-KIT on MicroPython
 v1.30.0-preview.160.gb70ae1aca6 (built 2026-10-21),

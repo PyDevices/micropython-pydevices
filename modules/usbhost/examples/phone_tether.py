@@ -22,10 +22,12 @@ Needs: a board with USB host support (firmware built with usbhost) and the
 high-speed port, directly or through a hub, and on an ESP32-S3's full-speed
 port.
 
-Run it, and watch what it prints while it waits for the phone:
+Run it:
 
     mpftp run examples/phone_tether.py
     mpftp monitor --seconds 150
+
+Watch what it prints while it waits for the phone.
 
 ``run`` starts the program and returns; ``monitor`` shows its output.
 

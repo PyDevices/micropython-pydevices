@@ -10,11 +10,12 @@ pairing is the same scripts on two boards, not a special `pair_*` file.
 |---|---|---|
 | **UAC** | [`usb_soundcard.py`](usb_soundcard.py) (through audiodsp's pump) | [`usb_speaker.py`](usb_speaker.py), [`usb_mic.py`](usb_mic.py) |
 | **UVC** | [`usb_webcam.py`](usb_webcam.py) (MJPEG or YUY2, at the size the host picks) | [`uvc_display.py`](uvc_display.py) (MJPEG via `jpegio` when present; its machinery is in [`uvc_display_helpers.py`](uvc_display_helpers.py)) |
-| **MIDI** | [`midi_harmonizer.py`](midi_harmonizer.py), [`midi_harmonizer_ui.py`](midi_harmonizer_ui.py), [`midi_device_in.py`](midi_device_in.py) | [`midi_host.py`](midi_host.py) (a keyboard, or an Android phone in USB MIDI mode) |
-| **HID** | [`hid_keyboard.py`](hid_keyboard.py), [`hid_mouse.py`](hid_mouse.py) | [`hid_host.py`](hid_host.py) |
-| **MSC** | [`sd_drive.py`](sd_drive.py), [`ram_drive.py`](ram_drive.py) | [`usb_drive_mount.py`](usb_drive_mount.py), [`usb_drive_read.py`](usb_drive_read.py), [`usb_drive_log.py`](usb_drive_log.py) |
-| **CDC** | MicroPython's own console | [`usb_serial.py`](usb_serial.py) |
-| **NET** | — | [`phone_tether.py`](phone_tether.py) (the internet through an Android phone's USB tethering) |
+| **MIDI** | [`midi_harmonizer.py`](midi_harmonizer.py), [`midi_harmonizer_ui.py`](midi_harmonizer_ui.py), [`midi_device_in.py`](midi_device_in.py) | [`usb_host_midi_simpletest.py`](usb_host_midi_simpletest.py), [`midi_host.py`](midi_host.py) (a keyboard, or an Android phone in USB MIDI mode) |
+| **HID** | [`usb_device_hid_simpletest.py`](usb_device_hid_simpletest.py), [`hid_mouse.py`](hid_mouse.py) | [`hid_host.py`](hid_host.py) |
+| **MSC** | [`sd_drive.py`](sd_drive.py), [`usb_device_msc_simpletest.py`](usb_device_msc_simpletest.py) | [`usb_drive_mount.py`](usb_drive_mount.py), [`usb_drive_read.py`](usb_drive_read.py), [`usb_drive_log.py`](usb_drive_log.py) |
+| **CDC** | MicroPython's own console | [`usb_host_cdc_simpletest.py`](usb_host_cdc_simpletest.py) |
+| **NET** | — | [`usb_host_net_simpletest.py`](usb_host_net_simpletest.py), [`phone_tether.py`](phone_tether.py) (the internet through an Android phone's USB tethering) |
+| **MTP** | — | [`usb_host_mtp_simpletest.py`](usb_host_mtp_simpletest.py) (list a phone's photos and save one) |
 | **enum** | — | [`usbhost_simpletest.py`](usbhost_simpletest.py) (the shortest list of what is plugged in), [`host_enum.py`](host_enum.py) (names each device, watches attach and detach) |
 
 ## Board-to-board pairings
@@ -31,7 +32,7 @@ power in, so it can't host without 5 V from outside.
 | **P4** | [`usb_webcam.py`](usb_webcam.py) | **S3** | [`uvc_display.py`](uvc_display.py) | Camera → panel |
 | **P4** | [`sd_drive.py`](sd_drive.py) | **S3** | [`usb_drive_mount.py`](usb_drive_mount.py), [`usb_drive_read.py`](usb_drive_read.py) | Shared storage |
 | **P4** / **S3** | [`midi_harmonizer.py`](midi_harmonizer.py) | **S3** | [`midi_host.py`](midi_host.py) | MIDI effect / instrument |
-| **S3** | [`hid_keyboard.py`](hid_keyboard.py) | **S3** | [`hid_host.py`](hid_host.py) | Control surface (needs two S3s, or S3-device + PC) |
+| **S3** | [`usb_device_hid_simpletest.py`](usb_device_hid_simpletest.py) | **S3** | [`hid_host.py`](hid_host.py) | Control surface (needs two S3s, or S3-device + PC) |
 
 A PC can replace either end. That is the point of standard classes.
 
