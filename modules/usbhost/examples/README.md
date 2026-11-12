@@ -16,6 +16,7 @@ pairing is the same scripts on two boards, not a special `pair_*` file.
 | **CDC** | MicroPython's own console | [`usb_host_cdc_simpletest.py`](usb_host_cdc_simpletest.py) |
 | **NET** | — | [`usb_host_net_simpletest.py`](usb_host_net_simpletest.py), [`phone_tether.py`](phone_tether.py) (the internet through an Android phone's USB tethering) |
 | **MTP** | — | [`usb_host_mtp_simpletest.py`](usb_host_mtp_simpletest.py) (list a phone's photos and save one) |
+| **DFU** | — | [`usb_host_dfu_simpletest.py`](usb_host_dfu_simpletest.py) (read a board's flash through its bootloader) |
 | **enum** | — | [`usbhost_simpletest.py`](usbhost_simpletest.py) (the shortest list of what is plugged in), [`host_enum.py`](host_enum.py) (names each device, watches attach and detach) |
 
 ## Board-to-board pairings
