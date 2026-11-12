@@ -196,8 +196,8 @@ cameraif's `capture_jpeg()` does.
 ### Hardware decode (ESP32-P4)
 
 `JpegDecoder(hardware=True)` decodes on the P4's JPEG engine when it can, up
-to ten times faster than TJpgDec (320x240: 5–6 ms against 30–60 ms; 640x480: 16 ms against 155 ms): a
-whole baseline image into a buffer at `scale=0`, with
+to seventeen times faster than TJpgDec (320x240: 5–6 ms against 30–60 ms;
+640x480: 9 ms against 155 ms): a whole baseline image into a buffer at `scale=0`, with
 `x`, `y` and `stride` as usual. Everything else (a callable target, a nonzero
 scale, a JPEG the engine refuses) quietly goes to TJpgDec as before. After a
 call, the decoder's `hardware` attribute says which one ran. A path or stream
@@ -214,9 +214,13 @@ JPEG's blacks and clips its whites. The engine's 2D-DMA takes its colour matrix
 from registers, so jpegio loads JPEG's full-range one while a decode runs
 (the link wraps the driver's setup call for that) and the engine writes
 RGB565 itself, to within one level of TJpgDec's. A 640x480 frame takes about
-16 ms: 4 ms in the engine and 11 ms copying its padded rows into your
-buffer. Converting the engine's YUV in software, as this did before, took
-45 ms.)
+9 ms: 4 ms in the engine and 5 ms for a DMA copy into your buffer. When your
+buffer is exactly the image (no `x`, `y` or `stride`), sits in PSRAM and starts
+on a 64-byte boundary, the engine writes into it directly and the frame takes
+4 ms; `memoryview(buf)[off:off + w * h * 2]` with `off = -uctypes.addressof(buf)
+% 64` over a `bytearray(w * h * 2 + 64)` gives you one. A window into a wider
+buffer is still copied a row at a time, 15 ms in all. Converting the engine's
+YUV in software, as this did before, took 45 ms.)
 
 ## Errors
 

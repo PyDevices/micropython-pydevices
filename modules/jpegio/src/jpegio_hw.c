@@ -4,11 +4,12 @@
 //
 // The engine reads and writes through the 2D-DMA, so the pixels it reads and
 // the bytes it writes live in buffers of its own (jpeg_alloc_*_mem: aligned,
-// DMA-capable). A Python buffer is copied in unless it is already plain
-// native RGB565 or GRAY in DMA-capable memory; the copy is also where stride
-// and swap are applied. Those buffers are kept between calls, so a stream of
-// same-sized frames allocates once, and are given back when a much smaller
-// image would leave most of one idle.
+// DMA-capable), except that a decode target which is exactly the engine's
+// output, cache-line aligned in PSRAM, takes it directly. A Python buffer is
+// copied in unless it is already plain native RGB565 or GRAY in DMA-capable
+// memory; the copy is also where stride and swap are applied. Those buffers
+// are kept between calls, so a stream of same-sized frames allocates once, and
+// are given back when a much smaller image would leave most of one idle.
 
 #include <string.h>
 
@@ -29,6 +30,10 @@
 #include "esp_attr.h"
 #include "esp_err.h"
 #include "hal/dma2d_ll.h"
+#include "esp_async_memcpy.h"
+#include "esp_dma_utils.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #endif
 
 // 1 where the link wraps the 2D-DMA colour-matrix setup (micropython.cmake):
@@ -263,6 +268,50 @@ esp_err_t IRAM_ATTR __wrap_dma2d_configure_color_space_conversion(void *chan, co
 
 #endif // JPEGIO_HW_WRAP
 
+// A decoded frame goes on to the caller's buffer through the AXI GDMA, which
+// copies PSRAM to PSRAM in half the time the CPU's memcpy takes (5 ms for
+// 640x480 against 10). The channel is taken on the first copy and kept.
+static async_memcpy_handle_t jpegio_hw_mcp;
+static SemaphoreHandle_t jpegio_hw_mcp_done;
+
+static IRAM_ATTR bool jpegio_hw_mcp_cb(async_memcpy_handle_t mcp, async_memcpy_event_t *event, void *arg) {
+    BaseType_t woken = pdFALSE;
+    xSemaphoreGiveFromISR(jpegio_hw_mcp_done, &woken);
+    return woken == pdTRUE;
+}
+
+// NULL once n bytes are at dst. *refused is set, and nothing copied, when the
+// DMA can't address dst (the caller then copies with the CPU).
+static const char *jpegio_hw_dma_copy(void *dst, const void *src, size_t n, bool *refused) {
+    *refused = false;
+    if (jpegio_hw_mcp_done == NULL) {
+        jpegio_hw_mcp_done = xSemaphoreCreateBinary();
+        if (jpegio_hw_mcp_done == NULL) {
+            return "no memory for the copy's semaphore";
+        }
+    }
+    if (jpegio_hw_mcp == NULL) {
+        async_memcpy_config_t cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
+        cfg.dma_burst_size = 64;
+        if (esp_async_memcpy_install_gdma_axi(&cfg, &jpegio_hw_mcp) != ESP_OK) {
+            jpegio_hw_mcp = NULL;
+            return "no AXI GDMA channel for the copy";
+        }
+    }
+    esp_err_t err = esp_async_memcpy(jpegio_hw_mcp, dst, (void *)src, n, jpegio_hw_mcp_cb, NULL);
+    if (err == ESP_ERR_INVALID_ARG) {
+        *refused = true;
+        return NULL;
+    }
+    if (err != ESP_OK) {
+        return "the copy's DMA would not start";
+    }
+    if (xSemaphoreTake(jpegio_hw_mcp_done, pdMS_TO_TICKS(JPEGIO_HW_TIMEOUT_MS)) != pdTRUE) {
+        return "the copy's DMA did not finish";
+    }
+    return NULL;
+}
+
 const char *jpegio_hw_decode(const uint8_t *data, size_t len, int width, int height,
     uint16_t *pixels, size_t stride, int x, int y) {
     if (!JPEGIO_HW_WRAP) {
@@ -296,8 +345,20 @@ const char *jpegio_hw_decode(const uint8_t *data, size_t len, int width, int hei
         memcpy(jpegio_hw_dec_in.buf, data, len);
         data = jpegio_hw_dec_in.buf;
     }
-    if (!jpegio_hw_reserve(&jpegio_hw_dec_out, pw * ph * 2, false, JPEG_DEC_ALLOC_OUTPUT_BUFFER)) {
-        return "no memory for the engine's output";
+    // Straight into the caller's pixels when they are the engine's whole
+    // output, in memory it can write: no copy at all.
+    uint16_t *dst = pixels + (size_t)y * stride + x;
+    size_t out_size = pw * ph * 2;
+    // The driver's own test of an output buffer (jpeg_decoder_process).
+    esp_dma_mem_info_t dma_info = { .dma_alignment_bytes = 4 };
+    bool direct = pw == (size_t)width && ph == (size_t)height && stride == (size_t)width
+        && esp_ptr_external_ram(dst) && esp_dma_is_buffer_alignment_satisfied(dst, out_size, dma_info);
+    uint8_t *out = (uint8_t *)dst;
+    if (!direct) {
+        if (!jpegio_hw_reserve(&jpegio_hw_dec_out, out_size, false, JPEG_DEC_ALLOC_OUTPUT_BUFFER)) {
+            return "no memory for the engine's output";
+        }
+        out = jpegio_hw_dec_out.buf;
     }
     jpeg_decode_cfg_t cfg = {
         .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,   // full range: see the wrap above
@@ -307,18 +368,31 @@ const char *jpegio_hw_decode(const uint8_t *data, size_t len, int width, int hei
     uint32_t out_len = 0;
     jpegio_hw_full_range = true;
     esp_err_t err = jpeg_decoder_process(jpegio_hw_decoder, &cfg, data, len,
-        jpegio_hw_dec_out.buf, jpegio_hw_dec_out.size, &out_len);
+        out, direct ? out_size : jpegio_hw_dec_out.size, &out_len);
     jpegio_hw_full_range = false;
     if (err != ESP_OK) {
         return "the engine refused this JPEG (baseline only)";
     }
-    if (out_len != pw * ph * 2) {
+    if (out_len != out_size) {
         return "the engine's output is not the size its MCUs imply";
     }
+    if (direct) {
+        return NULL;
+    }
+    // A target whose rows run on from each other takes one DMA copy; a
+    // narrower window into a wider buffer is copied a row at a time.
     const uint8_t *src = jpegio_hw_dec_out.buf;
-    uint16_t *dst = pixels + (size_t)y * stride + x;
-    for (int r = 0; r < height; r++, src += pw * 2, dst += stride) {
-        memcpy(dst, src, (size_t)width * 2);
+    bool refused = true;
+    if (pw == (size_t)width && stride == (size_t)width) {
+        const char *why = jpegio_hw_dma_copy(dst, src, (size_t)width * height * 2, &refused);
+        if (why != NULL) {
+            return why;
+        }
+    }
+    if (refused) {
+        for (int r = 0; r < height; r++, src += pw * 2, dst += stride) {
+            memcpy(dst, src, (size_t)width * 2);
+        }
     }
     return NULL;
 }
