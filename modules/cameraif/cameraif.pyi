@@ -96,7 +96,7 @@ class Camera:
     sensor's own controls (`vflip`, `hmirror`, `aec_value`, `agc_gain`,
     `brightness`, `contrast`, `saturation`, `sharpness`, `denoise`,
     `whitebal`, `gain_ctrl`, `exposure_ctrl`, `ae_level`, `wb_mode`,
-    `special_effect` and `lenc`) read and write the sensor's own units, and
+    `special_effect`, `lenc` and `digital_gain`) read and write the sensor's own units, and
     raise `AttributeError` on a sensor whose driver lacks one; `controls()`
     says which it has.
     """
@@ -113,8 +113,9 @@ class Camera:
     """Height of what `take()` returns."""
     quality: int
     """`take()`'s JPEG quality, 1 to 100. Raises `ValueError` outside that."""
-    colorbar: bool
-    """The sensor's test pattern. Reads back what was last set."""
+    colorbar: bool | int
+    """The sensor's test pattern. Reads back what was last set: a bool, or a
+    menu number above 1."""
     sensor_name: str
     """The sensor's name."""
     address: int
@@ -151,6 +152,7 @@ class Camera:
     wb_mode: int | None
     special_effect: int | None
     lenc: bool | None
+    digital_gain: int | None
 
     gain_ceiling: int
     """Always raises `AttributeError`: no sensor driver has one."""
@@ -395,8 +397,13 @@ class Camera:
         """Read or set the sensor's vertical flip."""
     def mirror(self, on: bool | None = None) -> bool | None:
         """Read or set the sensor's horizontal mirror."""
-    def test_pattern(self, on: bool | None = None) -> bool:
-        """Read or set the sensor's test pattern. Reads back what was last set."""
+    def test_pattern(self, on: bool | int | None = None) -> bool | int:
+        """Read or set the sensor's test pattern. Reads back what was last set.
+
+        A bool turns the sensor's colour bars on or off. A number picks an
+        entry from the menu the sensor's description lists: 0 is off, 1 the
+        same as `True`, and `ValueError` is raised for a negative one.
+        """
     def bayer(self) -> str:
         """Return the ISP's colour order the camera opened with."""
     def awb(self, on: bool | None = None) -> bool:

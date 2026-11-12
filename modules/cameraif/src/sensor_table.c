@@ -95,6 +95,8 @@ typedef struct {
     bool stream_toggle;             // on and off are one write: only when the state changes
     table_ctrl_t exposure, gain;
     table_list_t pattern[2];        // on, off
+    table_list_t *menu;             // one list for each entry of a test pattern menu
+    size_t n_menu;
     bool have_pattern;
     table_list_t vflip_l[2], hmirror_l[2];  // on, off
     bool have_flip_lists;
@@ -378,6 +380,10 @@ static void table_free(table_t *t) {
     table_free_list(&t->stream_off);
     table_free_ctrl(&t->exposure);
     table_free_ctrl(&t->gain);
+    for (size_t i = 0; i < t->n_menu; i++) {
+        table_free_list(&t->menu[i]);
+    }
+    free(t->menu);
     for (int i = 0; i < 2; i++) {
         table_free_list(&t->pattern[i]);
         table_free_list(&t->vflip_l[i]);
@@ -391,6 +397,7 @@ static void table_free(table_t *t) {
 
 static const struct { qstr key; int id; } table_extra_ids[] = {
     { MP_QSTR_ae_level, ESP_CAM_SENSOR_AE_LEVEL },
+    { MP_QSTR_digital_gain, ESP_CAM_SENSOR_DGAIN },
     { MP_QSTR_brightness, ESP_CAM_SENSOR_BRIGHTNESS },
     { MP_QSTR_contrast, ESP_CAM_SENSOR_CONTRAST },
     { MP_QSTR_saturation, ESP_CAM_SENSOR_SATURATION },
@@ -399,6 +406,22 @@ static const struct { qstr key; int id; } table_extra_ids[] = {
     { MP_QSTR_special_effect, ESP_CAM_SENSOR_SPECIAL_EFFECT },
     { MP_QSTR_wb, ESP_CAM_SENSOR_WB },
 };
+
+// A value written big-endian over consecutive registers, as a one-entry-a-byte list.
+static void table_value_list(table_list_t *l, int reg, int bytes, int v) {
+    uint8_t *w = malloc(bytes * TABLE_ENTRY + 1);
+    if (w == NULL) {
+        mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("sensor table"));
+    }
+    l->data = w;
+    l->owned = true;
+    l->n = bytes;
+    for (int i = 0; i < bytes; i++) {
+        *w++ = (reg + i) >> 8;
+        *w++ = (reg + i) & 0xFF;
+        *w++ = v >> (8 * (bytes - 1 - i));
+    }
+}
 
 void *cameraif_table_parse(mp_obj_t desc, uint8_t *addr) {
     if (!mp_obj_is_dict_or_ordereddict(desc)) {
@@ -483,29 +506,30 @@ void *cameraif_table_parse(mp_obj_t desc, uint8_t *addr) {
         mp_obj_t tp = table_get(desc, MP_QSTR_test_pattern);
         if (tp != MP_OBJ_NULL && tp != mp_const_none) {
             mp_obj_get_array(tp, &n, &it);
-            if (n == 4) {       // (register, bytes, on, off): a value over consecutive registers
+            if (n == 4 || n == 5) {     // (register, bytes, on, off[, menu]): a value over consecutive registers
                 int reg = mp_obj_get_int(it[0]);
                 int bytes = mp_obj_get_int(it[1]);
                 for (int k = 0; k < 2; k++) {
-                    int v = mp_obj_get_int(it[2 + k]);
-                    uint8_t *w = malloc(bytes * TABLE_ENTRY + 1);
-                    if (w == NULL) {
+                    table_value_list(&t->pattern[k], reg, bytes, mp_obj_get_int(it[2 + k]));
+                }
+                if (n == 5) {   // the menu: entry i is the value test_pattern(i) writes; 0 is off and 1 the same as on
+                    mp_obj_t *vals;
+                    size_t nv;
+                    mp_obj_get_array(it[4], &nv, &vals);
+                    t->menu = calloc(nv ? nv : 1, sizeof(table_list_t));
+                    if (t->menu == NULL) {
                         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("sensor table"));
                     }
-                    t->pattern[k].data = w;
-                    t->pattern[k].owned = true;
-                    t->pattern[k].n = bytes;
-                    for (int i = 0; i < bytes; i++) {
-                        *w++ = (reg + i) >> 8;
-                        *w++ = (reg + i) & 0xFF;
-                        *w++ = v >> (8 * (bytes - 1 - i));
+                    t->n_menu = nv;
+                    for (size_t k = 0; k < nv; k++) {
+                        table_value_list(&t->menu[k], reg, bytes, mp_obj_get_int(vals[k]));
                     }
                 }
             } else if (n == 2) {    // (list on, list off)
                 table_parse_list(it[0], &t->pattern[0]);
                 table_parse_list(it[1], &t->pattern[1]);
             } else {
-                mp_raise_ValueError(MP_ERROR_TEXT("test_pattern is (register, bytes, on, off) or (on, off)"));
+                mp_raise_ValueError(MP_ERROR_TEXT("test_pattern is (register, bytes, on, off[, menu]) or (on, off)"));
             }
             t->have_pattern = true;
         }
@@ -930,7 +954,14 @@ static esp_err_t table_priv_ioctl(esp_cam_sensor_device_t *dev, uint32_t cmd, vo
             if (!t->have_pattern) {
                 return ESP_ERR_NOT_SUPPORTED;
             }
-            return table_write_list(dev, &t->pattern[*(int *)arg ? 0 : 1]);
+            {
+                // 0 off, 1 on, and from 2 the sensor's own menu, if it has one
+                int v = *(int *)arg;
+                if (v >= 2) {
+                    return (size_t)v < t->n_menu ? table_write_list(dev, &t->menu[v]) : ESP_ERR_INVALID_ARG;
+                }
+                return table_write_list(dev, &t->pattern[v ? 0 : 1]);
+            }
         case ESP_CAM_SENSOR_IOC_S_REG:
             r = (esp_cam_sensor_reg_val_t *)arg;
             return table_write(dev, r->regaddr, r->value);
