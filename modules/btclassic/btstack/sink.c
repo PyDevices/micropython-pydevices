@@ -65,6 +65,16 @@ static uint32_t cover_serial;
 
 static btstack_packet_callback_registration_t hci_cb;
 
+// Calling the sender back after a lost link, as a speaker does.
+#define CALL_BACK_MS 6000           // between calls, after each one fails
+#define CALL_BACK_FOR_MS 72000      // how long to keep calling, about a minute
+static bool call_back_on;            // the sink's reconnect setting
+static btstack_timer_source_t call_back_timer;
+static bool calling_back;
+static uint32_t call_back_until;
+static hci_con_handle_t link_con = HCI_CON_HANDLE_INVALID;  // the sender's link, past the A2DP release
+static bool let_go;                 // disconnect() asked for the link to end
+
 static void set_text(btc_sink_text_t which, const uint8_t *value, size_t len) {
     if (len > TEXT_MAX - 1) {
         len = TEXT_MAX - 1;
@@ -422,6 +432,50 @@ static void on_avrcp_tg(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
     }
 }
 
+// ---- calling the sender back ----
+
+static void call_back_stop(void) {
+    calling_back = false;
+    btstack_run_loop_remove_timer(&call_back_timer);
+}
+
+static void call_back(btstack_timer_source_t *ts);
+
+static void call_back_later(void) {
+    btstack_run_loop_remove_timer(&call_back_timer);
+    if ((int32_t)(call_back_until - btstack_run_loop_get_time_ms()) <= 0) {
+        calling_back = false;
+        btc_log("the last sender didn't answer");
+        return;
+    }
+    btstack_run_loop_set_timer_handler(&call_back_timer, call_back);
+    btstack_run_loop_set_timer(&call_back_timer, CALL_BACK_MS);
+    btstack_run_loop_add_timer(&call_back_timer);
+}
+
+static void call_back(btstack_timer_source_t *ts) {
+    (void)ts;
+    if (!started || !calling_back || st.connected) {
+        calling_back = false;
+        return;
+    }
+    // A failed call reports through the A2DP signaling event, which calls
+    // again later. One that can't start (the sender is unpaired, or the
+    // radio is busy) is tried again from here.
+    if (btc_sink_connect(NULL) != BTC_OK) {
+        call_back_later();
+    }
+}
+
+// Why a link ended, from the HCI disconnection reason. The sender (0x13) or
+// the board (0x16) ending it is deliberate; anything else, a supervision
+// timeout (0x08), an LMP timeout (0x22) or the sender's radio going off
+// (0x15), lost the link.
+static bool link_was_lost(uint8_t reason) {
+    return reason != ERROR_CODE_REMOTE_USER_TERMINATED_CONNECTION
+        && reason != ERROR_CODE_CONNECTION_TERMINATED_BY_LOCAL_HOST;
+}
+
 // ---- A2DP ----
 
 static avdtp_stream_endpoint_t *local_ep;
@@ -456,10 +510,16 @@ static void on_a2dp(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint
             a2dp_subevent_signaling_connection_established_get_bd_addr(packet, addr);
             btc_log("a2dp signaling %s status 0x%02x", bd_addr_to_str(addr), status);
             if (status != ERROR_CODE_SUCCESS) {
+                if (calling_back) {
+                    call_back_later();
+                }
                 break;
             }
+            call_back_stop();
+            let_go = false;
             a2dp_cid = a2dp_subevent_signaling_connection_established_get_a2dp_cid(packet);
             a2dp_con = a2dp_subevent_signaling_connection_established_get_con_handle(packet);
+            link_con = a2dp_con;
             memcpy(st.peer, addr, 6);
             st.connected = true;
             btc_radio_remember_peer(addr);
@@ -536,6 +596,41 @@ static void on_hci(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint1
         return;
     }
     switch (hci_event_packet_get_type(packet)) {
+        case HCI_EVENT_DISCONNECTION_COMPLETE: {
+            // The A2DP release carries no reason; the link's end does. The
+            // sender went out of range or its radio went off: call it back
+            // for a minute, so it finds the board when it returns. One that
+            // disconnected on purpose is left alone, or it could never let
+            // go of the board.
+            if (hci_event_disconnection_complete_get_status(packet) != ERROR_CODE_SUCCESS
+                || hci_event_disconnection_complete_get_connection_handle(packet) != link_con) {
+                break;
+            }
+            link_con = HCI_CON_HANDLE_INVALID;
+            bool lost = link_was_lost(hci_event_disconnection_complete_get_reason(packet));
+            btc_log("sender %s", lost ? "lost: calling it back" : "disconnected");
+            if (lost && call_back_on && !let_go) {
+                calling_back = true;
+                call_back_until = btstack_run_loop_get_time_ms() + CALL_BACK_FOR_MS;
+                call_back_later();
+            }
+            break;
+        }
+        case HCI_EVENT_IO_CAPABILITY_REQUEST:
+        case HCI_EVENT_PIN_CODE_REQUEST:
+            // A call back to a sender that still has the board's key
+            // reconnects without pairing. One that pairs instead has
+            // forgotten the board, so calling again only gets in the way of
+            // pairing it afresh.
+            if (calling_back) {
+                bd_addr_t addr, last;
+                reverse_bd_addr(&packet[2], addr);
+                if (btc_radio_last_peer(last) && memcmp(addr, last, 6) == 0) {
+                    call_back_stop();
+                    btc_log("the last sender has forgotten the board: not calling it back");
+                }
+            }
+            break;
         case HCI_EVENT_REMOTE_NAME_REQUEST_COMPLETE: {
             bd_addr_t addr;
             hci_event_remote_name_request_complete_get_bd_addr(packet, addr);
@@ -578,6 +673,9 @@ int btc_sink_start(size_t ring_frames, bool reconnect) {
     clear_track();
     changed = 0;
     a2dp_con = HCI_CON_HANDLE_INVALID;
+    link_con = HCI_CON_HANDLE_INVALID;
+    calling_back = false;
+    let_go = false;
     ring_buf = btc_btstack_alloc(ring_frames * 2 * sizeof(int16_t));
     if (ring_buf == NULL) {
         return BTC_ERR_NOMEM;
@@ -619,6 +717,7 @@ int btc_sink_start(size_t ring_frames, bool reconnect) {
     hci_add_event_handler(&hci_cb);
 
     started = true;
+    call_back_on = reconnect;
     btc_radio_profile(BTC_PROFILE_SINK, true, 0);
     if (reconnect) {
         btc_sink_connect(NULL);
@@ -632,6 +731,7 @@ void btc_sink_stop(void) {
     }
     btc_radio_profile(BTC_PROFILE_SINK, false, 0);
     btc_sink_disconnect();
+    call_back_stop();
     btstack_run_loop_remove_timer(&poll_timer);
     sdp_unregister_service(big_endian_read_32(sdp_a2dp, 9));
     sdp_unregister_service(big_endian_read_32(sdp_avrcp_ct, 9));
@@ -803,6 +903,8 @@ int btc_sink_connect(const uint8_t *addr) {
 }
 
 int btc_sink_disconnect(void) {
+    let_go = true;
+    call_back_stop();
     if (!a2dp_cid && !avrcp_cid) {
         return BTC_ERR_STATE;
     }
@@ -817,6 +919,8 @@ int btc_sink_disconnect(void) {
 
 void btc_sink_radio_lost(void) {
     started = false;
+    call_back_stop();
+    link_con = HCI_CON_HANDLE_INVALID;
     local_ep = NULL;
     sbc_ready = false;
     avrcp_cid = 0;
