@@ -21,7 +21,7 @@ Install it with ``mip`` if your firmware doesn't freeze it:
 
 Run it:
 
-    mpftp run examples/ram_drive.py
+    mpftp run examples/usb_device_msc_simpletest.py
 
 The board's serial port stays up beside the drive (``builtin_driver=True``),
 so the REPL keeps working over the same cable.

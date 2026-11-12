@@ -16,6 +16,12 @@ instructions per pixel and needs no buffer beyond one band of rows.
 
 Needs: the same board as ``uvc_display.py``, and this file copied next to it
 (``mpftp put uvc_display_helpers.py /uvc_display_helpers.py``).
+
+Run it:
+
+    import uvc_display_helpers
+
+Tested on: the runs of ``uvc_display.py``, which imports it.
 """
 
 import time

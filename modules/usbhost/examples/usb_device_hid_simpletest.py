@@ -17,12 +17,18 @@ doesn't freeze them:
     mip.install("github:PyDevices/pydevices/usb-hid")
     mip.install("github:PyDevices/pydevices/bledev_hid")
 
-Run it, with a text box focused on the computer:
+Run it:
 
-    mpftp run examples/hid_keyboard.py
+    mpftp run examples/usb_device_hid_simpletest.py
+
+Keep a text box focused on the computer while it runs.
 
 The board's serial port stays up beside the keyboard, so the REPL keeps
 working over the same cable.
+
+Tested on: Waveshare ESP32-P4-WIFI6-DEV-KIT on MicroPython
+v1.30.0-preview.160.gb70ae1aca6 (built 2026-11-11), plugged into a Windows 11
+computer: a keyboard hook there saw the whole greeting arrive.
 """
 
 import time

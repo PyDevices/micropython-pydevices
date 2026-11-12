@@ -25,9 +25,11 @@ device, and the P4's high-speed port can't reach one through a hub without a
 transaction translator, which the ESP-IDF host lacks. At full speed the hub
 passes it straight through.
 
-Run it, then play on the instrument:
+Run it:
 
     mpftp run examples/midi_host.py
+
+Then play on the instrument.
 
 Tested on: an ESP32-P4-WIFI6-DEV-KIT on MicroPython
 v1.30.0-preview.160.gb70ae1aca6 (built 2026-10-21),

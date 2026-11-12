@@ -16,7 +16,9 @@ Run it:
 
     mpftp run btclassic_serial_client.py
 
-Tested on:
+Tested on: Pimoroni Pico Plus 2 W on MicroPython
+v1.30.0-preview.160.gb70ae1aca6 (built 2026-11-11) calling an Adafruit QT Py
+ESP32 Pico running btclassic_serial_echo.py: ten lines came back in upper case.
 """
 
 import time

@@ -27,7 +27,10 @@ Run it:
 The board's serial port stays up beside the speaker. Ctrl-C stops the card.
 Another board can be the computer: run ``usb_speaker.py`` on it.
 
-Tested on: an ESP32-P4 panel with an ES8311 codec.
+Tested on: Waveshare ESP32-P4-WIFI6-DEV-KIT (ES8311 codec) on MicroPython
+v1.30.0-preview.160.gb70ae1aca6 (built 2026-11-11), plugged into a Windows 11
+computer: it listed the board as a speaker. An ESP32-P4 panel with an ES8311
+codec played the computer's audio.
 """
 
 import time

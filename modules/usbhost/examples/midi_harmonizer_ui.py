@@ -21,9 +21,11 @@ Needs: a board with a touchscreen and USB device support, a firmware with
 LVGL, a ``display_driver`` module that sets up the display and touch, and
 the ``usb-device-midi`` and ``adafruit_midi`` packages.
 
-Run it, then play into the board's MIDI port:
+Run it:
 
     mpftp run examples/midi_harmonizer_ui.py
+
+Then play into the board's MIDI port.
 
 Tested on: an ESP32-P4 panel board, played from a Windows computer: four notes
 with their note-offs and a controller change came back as 24 harmonized notes

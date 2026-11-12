@@ -15,9 +15,11 @@ Needs: a board with USB device support, the ``usb-device-midi`` and
 ``adafruit_midi`` packages, and a computer or keyboard that sends MIDI to the
 board.
 
-Run it, then play into the board's MIDI port:
+Run it:
 
     mpftp run examples/midi_harmonizer.py
+
+Then play into the board's MIDI port.
 
 Interrupt to stop. To keep the board as an instrument, copy the file to the
 board as ``/main.py``: it then starts at boot, needs no console and runs until

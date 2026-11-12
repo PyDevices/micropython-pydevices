@@ -16,9 +16,11 @@ full-speed device, and the P4's high-speed port can't reach one through a hub
 without a transaction translator, which the ESP-IDF host lacks. At full speed
 the hub passes it straight through.
 
-Run it, and speak into the microphone:
+Run it:
 
     mpftp run examples/usb_mic.py
+
+Then speak into the microphone.
 
 Tested on: a C-Media USB microphone.
 """
