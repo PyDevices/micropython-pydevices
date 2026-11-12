@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 19:00:00 -0600
+Subject: [PATCH] shared/netutils/dhcpserver: answer only on the interface that
+ owns the server's address.
+
+Each DHCP server bound its socket to every interface. With the Wi-Fi access
+point and USB networking both up, each server answered on both, so a Wi-Fi
+client could get a USB network address (169.254.x.y) instead of one from
+the access point's 192.168.4.0/24. The second server could not even bind
+port 67, so the first one answered everywhere. Both servers now share the
+port, and each binds its socket to the netif that holds the address it
+serves.
+---
+ shared/netutils/dhcpserver.c | 12 ++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/shared/netutils/dhcpserver.c b/shared/netutils/dhcpserver.c
+--- a/shared/netutils/dhcpserver.c
++++ b/shared/netutils/dhcpserver.c
+@@ -300,7 +300,23 @@
+     if (dhcp_socket_new_dgram(&d->udp, d, dhcp_server_process) != 0) {
+         return;
+     }
++    // The server on the other interface already holds port 67, and lwIP
++    // refuses a second bind unless both sockets allow sharing it. That
++    // refusal is why only one server ever answered.
++    ip_set_option(d->udp, SOF_REUSEADDR);
+     dhcp_socket_bind(&d->udp, 0, PORT_DHCP_SERVER);
++
++    // Answer only on the interface that owns the server's address. Without
++    // this, a broadcast that arrives on any other interface reaches the server
++    // too, and a second server on that interface hands out leases from the
++    // wrong network.
++    struct netif *netif;
++    NETIF_FOREACH(netif) {
++        if (ip_addr_eq(&netif->ip_addr, &d->ip)) {
++            udp_bind_netif(d->udp, netif);
++            break;
++        }
++    }
+ }
+ 
+ void dhcp_server_deinit(dhcp_server_t *d) {
+-- 
+2.43.0

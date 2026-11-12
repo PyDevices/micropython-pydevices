@@ -184,6 +184,9 @@
   },
   "0061-micropython-shared-dhcpserver-find-the-message-type-anywhere.patch": {
    "sha256": "bac318df36758216572fefd356b3b8a0c2a71b1ad4aae792fa8f1805bad32270"
+  },
+  "0062-micropython-shared-dhcpserver-answer-only-on-the-interface-that-owns-its-address.patch": {
+   "sha256": "db39eba7b92cb333870ed1a99bb0957c6dcbe2dc3ff2aba196a5becff276ee29"
   }
  },
  "tinyusb_patches": {
