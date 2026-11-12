@@ -57,11 +57,16 @@ number the first time. To get a drive, present one from code with
 `usb.device.msc`, which the ROMFS carries:
 
 ```python
-import machine, usb.device
-from usb.device.msc import MSCInterface
+import usb.device, vfs
+from usb.device.msc import MSCInterface, RAMBlockDev
 
-usb.device.get().init(MSCInterface(machine.RAMBlockDev(512, 256)), builtin_driver=True)
+disk = RAMBlockDev(1024)  # 512 KB of RAM; any block device works
+vfs.VfsFat.mkfs(disk)
+usb.device.get().init(MSCInterface(disk), builtin_driver=True)
 ```
+
+The computer then lists a drive. Don't mount the same block device on the board
+while the computer has it.
 
 `machine.bootloader()` still reaches the DFU bootloader.
 
