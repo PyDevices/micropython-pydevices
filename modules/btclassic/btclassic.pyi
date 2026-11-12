@@ -445,12 +445,13 @@ class AudioSink:
             audio pump, nothing reads late, and 500 is plenty. The default
             depends on the board: 500 where there is PSRAM, 250 otherwise.
         reconnect: call the last sender back, if it is still paired, as a
-            speaker does: when the sink starts, and on the classic ESP32
-            whenever the link is lost (the sender went out of range), every
-            few seconds for about a minute. A sender that disconnects on
-            purpose isn't called back, so it can let the board go. It stops
-            early when the sender has forgotten the board, so the sender can
-            pair again. `disconnect` doesn't call back.
+            speaker does: when the sink starts, and whenever the link is
+            lost (the sender went out of range), every few seconds for about
+            a minute. A sender that disconnects on purpose isn't called back,
+            so it can let the board go; a phone turning its Bluetooth off
+            disconnects on purpose first. It stops early when the sender has
+            forgotten the board, so the sender can pair again. `disconnect`
+            doesn't call back.
     """
 
     connected: bool
