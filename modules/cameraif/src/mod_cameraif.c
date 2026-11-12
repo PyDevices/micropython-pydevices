@@ -142,6 +142,8 @@ typedef struct {
     int test_pattern;            // last requested (0 off, 1 on, or a menu entry); the ioctl has no read side
     esp_cam_ctlr_handle_t cam;
     isp_proc_handle_t isp;
+    isp_proc_handle_t isp_bypass;  // raw=True: the ISP's input stage with its pipeline off
+    uint8_t raw_bits;              // 8, 10 or 12 bits a pixel of a raw frame
     ppa_mod_client_t *ppa;       // ppa's client: the PPA, for capture_scaled/capture_yuy2
     uint8_t *yuy2_buf;           // where the PPA writes YUY2 before the caller's buffer
     size_t yuy2_len;
@@ -453,6 +455,10 @@ static void cameraif_teardown(void) {
         esp_isp_del_ae_controller(c->ae);
         c->ae = NULL;
     }
+    if (c->isp_bypass) {
+        esp_isp_del_processor(c->isp_bypass);
+        c->isp_bypass = NULL;
+    }
     if (c->isp) {
         if (c->color_on) {
             esp_isp_color_disable(c->isp);  // off before the processor goes, as the gain block is
@@ -596,6 +602,10 @@ void cameraif_reset(void) {
 // and that isn't always upright: every OV5647 table in esp_cam_sensor sets
 // 0x3821 bit 1, so each mode opens mirrored and its GBRG is the mirrored
 // cell. `table_mirror` says so, and only a change from it swaps columns.
+static cam_ctlr_color_t cameraif_cam_raw_type(int bits) {
+    return bits == 12 ? CAM_CTLR_COLOR_RAW12 : bits == 10 ? CAM_CTLR_COLOR_RAW10 : CAM_CTLR_COLOR_RAW8;
+}
+
 static const char *const cameraif_bayer_names[] = { "BGGR", "GBRG", "GRBG", "RGGB" };  // color_raw_element_order_t
 
 static int cameraif_bayer_for(const esp_cam_sensor_format_t *f, bool flip, bool mirror, bool table_mirror) {
@@ -1599,8 +1609,12 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
                 MP_ERROR_TEXT("pixel_format must be 'rgb565' or 'rgb888'"));
         }
     }
+    // A raw frame is the sensor's bits as they arrive: RAW10 packs four
+    // pixels into five bytes, RAW12 two into three.
+    isp_color_t raw_type = isp_in;
     if (c->raw) {
         c->bytes_per_px = 1;
+        c->raw_bits = raw_type == ISP_COLOR_RAW12 ? 12 : raw_type == ISP_COLOR_RAW10 ? 10 : 8;
     }
     if (c->raw || c->bytes_per_px != 2) {
         if (args[ARG_pixel_format].u_obj != pf_in || take_size >= 0) {
@@ -1628,7 +1642,9 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
         }
         c->bayer = i;
     }
-    c->frame_bytes = (size_t)c->width * c->height * c->bytes_per_px;
+    c->frame_bytes = c->raw
+        ? (size_t)c->width * c->height * c->raw_bits / 8
+        : (size_t)c->width * c->height * c->bytes_per_px;
 
     size_t align = 0;
     esp_cache_get_alignment(0, &align);
@@ -1663,12 +1679,13 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
         // ESP_ERR_NOT_SUPPORTED. With the ISP in the path the bridge receives
         // the ISP's output, so its input is RGB565 too and it passes the
         // frames through, as esp_video configures it on 6.0.
-        .input_data_color_type = c->raw ? CAM_CTLR_COLOR_RAW8
+        .input_data_color_type = c->raw ? cameraif_cam_raw_type(c->raw_bits)
                                         : CAM_CTLR_COLOR_RGB565,
         #else
-        .input_data_color_type = CAM_CTLR_COLOR_RAW8,
+        .input_data_color_type = c->raw ? cameraif_cam_raw_type(c->raw_bits)
+                                        : CAM_CTLR_COLOR_RAW8,
         #endif
-        .output_data_color_type = c->raw ? CAM_CTLR_COLOR_RAW8
+        .output_data_color_type = c->raw ? cameraif_cam_raw_type(c->raw_bits)
                                          : CAM_CTLR_COLOR_RGB565,
         .data_lane_num = chosen->mipi_info.lane_num,
         .byte_swap_en = false,
@@ -1693,7 +1710,30 @@ static mp_obj_t cameraif_make_new(const mp_obj_type_t *type, size_t n_args,
         mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("CSI enable failed (%s, 0x%x)"), esp_err_to_name(err), (unsigned)err);
     }
 
-    if (!c->raw) {
+    if (c->raw) {
+        // The bridge hands its bytes to the ISP's input stage, and only that
+        // stage's DMA path reaches memory: without a processor the stream
+        // never arrives, and the camera gives no frame. A bypassed processor
+        // passes the bytes on untouched (its input and output type must
+        // match) and is never enabled, as esp_isp_enable() refuses one.
+        esp_isp_processor_cfg_t bp_cfg = {
+            .clk_hz = 80 * 1000 * 1000,
+            .input_data_source = ISP_INPUT_DATA_SOURCE_CSI,
+            .input_data_color_type = raw_type,
+            .output_data_color_type = raw_type,
+            .has_line_start_packet = false,
+            .has_line_end_packet = false,
+            .h_res = c->width,
+            .v_res = c->height,
+            .bayer_order = (color_raw_element_order_t)c->bayer,
+            .flags.bypass_isp = true,
+        };
+        err = esp_isp_new_processor(&bp_cfg, &c->isp_bypass);
+        if (err != ESP_OK) {
+            cameraif_teardown();
+            mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("ISP bypass init failed (%s, 0x%x)"), esp_err_to_name(err), (unsigned)err);
+        }
+    } else {
         esp_isp_processor_cfg_t isp_cfg = {
             .clk_hz = 80 * 1000 * 1000,
             .input_data_source = ISP_INPUT_DATA_SOURCE_CSI,
