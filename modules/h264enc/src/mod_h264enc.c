@@ -25,6 +25,7 @@
 // The PPA and the encoder are separate engines, so a frame costs about the
 // longer of the two rather than their sum.
 
+#include <stdio.h>
 #include <string.h>
 
 #include "py/runtime.h"
@@ -285,11 +286,24 @@ static const char *h264enc_open_pipelined(h264enc_session_t **out, int width, in
     if (herr != ESP_H264_ERR_OK) {
         s->enc = NULL;
         // Its reference rows need one block of internal RAM, 1,152 bytes per
-        // 16 pixels of width (92 KB at 1280), so this is usually memory:
-        // free in total, but in pieces.
-        why = herr == ESP_H264_ERR_MEM
-            ? "not enough internal RAM in one piece for the encoder (restart, or a narrower picture)"
-            : "the encoder refused these settings (qp_min <= qp_max <= 51?)";
+        // 16 pixels of width (92 KB at 1280); the canvases and the output
+        // buffer come from PSRAM. Either pool can be short, free in total but
+        // in pieces, so say which one and how big its largest piece is.
+        if (herr == ESP_H264_ERR_MEM) {
+            static char msg[112];
+            const size_t need = (size_t)((cw + 15) / 16) * 1152;
+            const size_t internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+            if (internal < need) {
+                snprintf(msg, sizeof(msg), "not enough internal RAM in one piece for the encoder (needs %u bytes, largest free piece %u)",
+                    (unsigned)need, (unsigned)internal);
+            } else {
+                snprintf(msg, sizeof(msg), "not enough PSRAM in one piece for the encoder (largest free piece %u bytes)",
+                    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+            }
+            why = msg;
+        } else {
+            why = "the encoder refused these settings (qp_min <= qp_max <= 51?)";
+        }
         goto fail;
     }
     if (esp_h264_enc_open(s->enc) != ESP_H264_ERR_OK) {
