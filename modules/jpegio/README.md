@@ -44,6 +44,8 @@ ask: `JpegDecoder(hardware=True)`. See [Encoding](#encoding) and
 
 [`examples/jpegio_simpletest.py`](examples/jpegio_simpletest.py) encodes a picture to JPEG and decodes it back, at full size and at one eighth.
 
+[`examples/jpegio_viewer.py`](examples/jpegio_viewer.py) shows the JPEGs another board or a computer sends on a screen, decoding each one at the size the screen needs.
+
 ## API
 
 ### `jpegio.JpegDecoder(*, hardware=False)`

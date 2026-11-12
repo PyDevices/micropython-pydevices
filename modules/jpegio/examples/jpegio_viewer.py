@@ -4,11 +4,12 @@
 """Show pictures that arrive over the network on the board's display.
 
 The board listens on PORT for a sender. It asks for a picture by sending
-one byte, and the sender answers with a 4-byte length followed by a JPEG. It decodes each one with ``jpegio.JpegDecoder``,
-shrinking it by a half, a quarter or an eighth until it fits the display,
-and shows it in the middle of the screen.
+one byte, and the sender answers with a 4-byte length followed by a JPEG.
+It decodes each one with ``jpegio.JpegDecoder``, shrinking it by a half,
+a quarter or an eighth until it fits the display, and shows it in the
+middle of the screen.
 
-The sender can be another board running camera_send_simpletest.py, or a
+The sender can be another board running camera_send.py, or a
 computer sending photos: a few lines of Python that wait for each byte, then
 send a file's length and the file.
 
@@ -18,11 +19,11 @@ own jpegio decodes into a displayio Bitmap instead, so this example is for
 MicroPython.
 
 Run it:
-    mpremote run jpegio_viewer_simpletest.py
+    mpremote run jpegio_viewer.py
 
 Tested on: a Waveshare ESP32-S3-Touch-LCD-4.3 on MicroPython 1.30 preview,
 showing photos sent from CPython 3.14 on Windows, and pictures from an
-ESP32-P4 running camera_send_simpletest.py.
+ESP32-P4 running camera_send.py.
 """
 
 import socket

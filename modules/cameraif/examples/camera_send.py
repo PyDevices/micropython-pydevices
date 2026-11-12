@@ -8,7 +8,7 @@ byte to ask for a picture, the board captures a JPEG in hardware and sends
 it as a 4-byte length followed by the JPEG. It prints how many it sent and
 how fast.
 
-The viewer can be another board running jpegio_viewer_simpletest.py, or a
+The viewer can be another board running jpegio_viewer.py, or a
 computer: anything that sends a byte, then reads the length and that many
 bytes, can save or show the pictures.
 
@@ -17,7 +17,7 @@ board_config has a camera (an ESP32-P4 with a MIPI-CSI camera), already
 connected to Wi-Fi. Start the viewer first.
 
 Run it:
-    mpremote run camera_send_simpletest.py
+    mpremote run camera_send.py
 
 Each picture waits for a request, so it pays a full round trip on the
 network. How long that takes on Wi-Fi and on Ethernet is in the cameraif
@@ -25,7 +25,7 @@ README, under "Sending pictures over the network".
 
 Tested on: Waveshare ESP32-P4 boards with an OV5647 or IMX219 camera on
 MicroPython 1.30 preview, sending to an ESP32-S3 board running
-jpegio_viewer_simpletest.py, and to CPython 3.14 on Windows over Wi-Fi
+jpegio_viewer.py, and to CPython 3.14 on Windows over Wi-Fi
 and over Ethernet.
 """
 
