@@ -30,6 +30,7 @@
 
 #if defined(CONFIG_SOC_USB_OTG_SUPPORTED) && CONFIG_SOC_USB_OTG_SUPPORTED
 
+#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -259,7 +260,9 @@ static int usbhost_xfer_release_locked(usbhost_xfer_claim_t *c) {
     usbhost_xfer_drop_pipes(c->dev, c->itf, false);
     esp_err_t err = usbhost_xfer_give_up(c);
     if (err == ESP_OK && c->alt != 0) {
-        if (usb_host_interface_claim(usbhost_host_client_get(), c->dev, c->itf, 0) == ESP_OK) {
+        esp_err_t back = usb_host_interface_claim(usbhost_host_client_get(), c->dev, c->itf, 0);
+        printf("usbhost_xfer: interface %d back to alternate 0 -> 0x%x\n", c->itf, (unsigned)back);
+        if (back == ESP_OK) {
             c->alt = 0;
             usbhost_xfer_give_up(c);
         }
