@@ -150,14 +150,14 @@ jobs:
       - name: Build CircuitPython's unix port with our C modules
         run: |
           python3 build_mp.py --interpreter circuitpython --port unix \
-            --modules pygraphics,audiodsp,displayif,pydevices,pdwidgets,palettes,pngio,tsmux,ppa,jpegio,cameraif,mdns,usbhost,castif,h264enc
+            --modules pygraphics,audiodsp,displayif,pydevices,pdwidgets,palettes,pngio,svgio,tsmux,ppa,jpegio,cameraif,mdns,usbhost,castif,h264enc
 
       - name: Every module imports
         run: |
           cat > imports.py <<'PY'
           import sys
           assert sys.implementation.name == "circuitpython"
-          import pygraphics, usdl2, pngio, tsmux, ppa, cameraif, mdns, _usbhost
+          import pygraphics, usdl2, pngio, svgio, tsmux, ppa, cameraif, mdns, _usbhost
           import jpegio, audiodynamics, audiograph
           # audiopump.Ring is the stream sample: Python-made audio CircuitPython's mixer can play.
           from audiopump import Ring
@@ -176,7 +176,7 @@ jobs:
                   pass
               else:
                   raise AssertionError(name + " should exist only on the ESP32-P4")
-          print("imported: pygraphics usdl2 pngio tsmux ppa cameraif mdns _usbhost jpegio audiodynamics audiograph audiopump.Ring")
+          print("imported: pygraphics usdl2 pngio svgio tsmux ppa cameraif mdns _usbhost jpegio audiodynamics audiograph audiopump.Ring")
           PY
           ./builds/circuitpython/unix/coverage/micropython imports.py
 
@@ -239,10 +239,11 @@ jobs:
           PY
           timeout 60 ./builds/circuitpython/unix/coverage/micropython sdl_display.py
 
-      - name: pngio, tsmux and ppa pass their own tests
+      - name: pngio, svgio, tsmux and ppa pass their own tests
         run: |
           MP=./builds/circuitpython/unix/coverage/micropython
           timeout 300 $MP -X heapsize=32M modules/pngio/tests/test_pngio.py
+          timeout 300 $MP -X heapsize=32M modules/svgio/tests/test_svgio.py
           timeout 300 $MP modules/tsmux/tests/test_tsmux.py
           timeout 300 $MP -X heapsize=16M modules/ppa/tests/test_ppa.py
 

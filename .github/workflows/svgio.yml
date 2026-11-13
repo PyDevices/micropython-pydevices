@@ -1,0 +1,92 @@
+# svgio from a bare clone on the unix port: the API test, every render
+# against resvg's reference PNGs, then beside LVGL as its SVG image decoder.
+name: svgio
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/svgio/**'
+      - '!modules/svgio/*.md'
+      - '!modules/svgio/examples/**'
+      - 'build_mp.py'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
+      - '.github/workflows/svgio.yml'
+  pull_request:
+    paths:
+      - 'modules/svgio/**'
+      - '!modules/svgio/*.md'
+      - '!modules/svgio/examples/**'
+      - 'build_mp.py'
+      - 'scripts/pins.py'
+      - 'DEPENDENCIES.lock'
+      - '.github/workflows/svgio.yml'
+  # Everything, weekly: the path filters skip what a change can't reach.
+  schedule:
+    - cron: '55 6 * * 1'
+  workflow_dispatch:
+
+# A new push to a pull request cancels the run it supersedes. A push to main is
+# never cancelled: each one keeps its own record.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the unix port's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev pkg-config
+
+      - name: Build the unix port with svgio
+        run: python3 build_mp.py --port unix --modules svgio
+
+      - name: Sizes, sources, placement, blending and errors
+        run: |
+          mkdir -p svgout
+          timeout 300 ./builds/unix/standard/micropython -X heapsize=32M modules/svgio/tests/test_svgio.py --out svgout
+
+      - name: Every render matches resvg's
+        run: |
+          python3 -m pip install numpy pillow
+          python3 modules/svgio/tests/check_svgio_references.py svgout
+
+      - name: The example runs
+        run: timeout 60 ./builds/unix/standard/micropython modules/svgio/examples/svgio_simpletest.py
+
+      - name: The LVGL-less contract (must print SKIP)
+        run: |
+          ./builds/unix/standard/micropython modules/svgio/tests/test_svgio_lvgl.py | tee lvgl.out
+          grep -q 'register_lvgl_decoder() -> RuntimeError' lvgl.out
+          grep -q 'lvgl_decoders() == ()' lvgl.out
+          grep -q '^SKIP' lvgl.out
+
+  unix-lvgl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the unix port's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev pkg-config
+
+      - name: Build the unix port with svgio and lvgl
+        run: python3 build_mp.py --port unix --modules svgio,lvgl
+
+      - name: The API test, unchanged beside LVGL
+        run: timeout 300 ./builds/unix/standard/micropython -X heapsize=32M modules/svgio/tests/test_svgio.py
+
+      - name: SVGs through lv.image
+        run: timeout 300 ./builds/unix/standard/micropython -X heapsize=32M modules/svgio/tests/test_svgio_lvgl.py
