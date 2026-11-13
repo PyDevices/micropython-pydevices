@@ -8,10 +8,11 @@ os.dupterm_notify() moves every character a dupterm stream holds into
 stdin_ringbuf, and ringbuf_put() drops each one that doesn't fit. On the
 esp32 port, WebREPL's socket calls it whenever a poll finds the socket
 readable, and that can be right after a timer callback has run inside
-the REPL's wait for input. A command that arrived during the callback,
-which mpremote and other tools send in one piece, is then cut to what
-fits in the buffer plus whatever arrives later: the REPL runs a broken
-command, or never sees its Ctrl-D and the tool waits for its timeout.
+the REPL's wait for input. A command that arrived in one piece during
+the callback, as a raw-REPL command does from a tool that doesn't use
+raw-paste, is then cut to what fits in the buffer plus whatever arrives
+later: the REPL runs a broken command, or never sees its Ctrl-D and the
+tool waits for its timeout.
 
 While the REPL waits for input no interrupt character is set, and a
 port whose mp_hal_stdin_rx_chr() reads the dupterm streams once
