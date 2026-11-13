@@ -122,11 +122,11 @@ static double svgio_pow(double base, double exp) {
         }
         b *= b;
     }
-    return r;
+    return (double)r;
 }
 
 static double svgio_sqrt(double x) {
-    return sqrtf((float)x);
+    return (double)sqrtf((float)x);
 }
 
 // --- colours -----------------------------------------------------------------
