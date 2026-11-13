@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 12:00:00 -0600
+Subject: [PATCH] esp32: a soft reset clears the dupterm slots before the heap
+ sweep.
+
+The soft reset swept the heap, then wrote "MPY: soft reboot", and only then
+did mp_init() clear the dupterm slots. A stream written in Python and
+attached with os.dupterm() had already been freed when that message reached
+its write() method, so the call ran on freed memory: on an ESP32-S3 it ended
+in a LoadProhibited panic, or in an AttributeError from whatever object had
+reused the memory, after which dupterm deactivated the slot. The slots are
+now cleared before the sweep, as stm32 and rp2 effectively do by printing
+the message first.
+---
+ ports/esp32/main.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/ports/esp32/main.c b/ports/esp32/main.c
+--- a/ports/esp32/main.c
++++ b/ports/esp32/main.c
+@@ -216,6 +216,15 @@
+     mp_usbd_deinit();
+     #endif
+ 
++    #if MICROPY_PY_OS_DUPTERM
++    // The sweep below frees every dupterm stream, but the slots are only
++    // cleared in mp_init(), after the "soft reboot" message has been written
++    // to them. Clear them first, or that write calls into freed memory.
++    for (size_t i = 0; i < MICROPY_PY_OS_DUPTERM; ++i) {
++        MP_STATE_VM(dupterm_objs[i]) = MP_OBJ_NULL;
++    }
++    #endif
++
+     gc_sweep_all();
+ 
+     // Free any native code pointers that point to iRAM.

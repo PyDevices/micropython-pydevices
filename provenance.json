@@ -193,6 +193,9 @@
   },
   "0064-micropython-extmod-modos-keep-the-input-dupterm-notify-has-no-room-for.patch": {
    "sha256": "b87c0edeea4c4d2b0057f499b0f2122b7986fb08b06db27b302b90fda5def245"
+  },
+  "0065-micropython-esp32-soft-reset-clears-dupterm-before-the-heap-sweep.patch": {
+   "sha256": "aefcf6ae72412b67d9547c99db155e7d2bce99f6c603c9bcf479fc4cfddd5ec7"
   }
  },
  "tinyusb_patches": {
