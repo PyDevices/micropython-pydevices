@@ -188,14 +188,14 @@
   "0062-micropython-shared-dhcpserver-answer-only-on-the-interface-that-owns-its-address.patch": {
    "sha256": "db39eba7b92cb333870ed1a99bb0957c6dcbe2dc3ff2aba196a5becff276ee29"
   },
-  "0063-micropython-esp32-soft-reset-clears-dupterm-before-the-heap-sweep.patch": {
-   "sha256": "aefcf6ae72412b67d9547c99db155e7d2bce99f6c603c9bcf479fc4cfddd5ec7"
-  },
   "0063-micropython-shared-runtime-pyexec-say-how-long-the-repl-has-waited.patch": {
    "sha256": "6de964989a7e25b71a28c5bf6ddfafedc5630d57b79c50279a2b1a97f6af26d0"
   },
   "0064-micropython-extmod-modos-keep-the-input-dupterm-notify-has-no-room-for.patch": {
    "sha256": "b87c0edeea4c4d2b0057f499b0f2122b7986fb08b06db27b302b90fda5def245"
+  },
+  "0065-micropython-esp32-soft-reset-clears-dupterm-before-the-heap-sweep.patch": {
+   "sha256": "aefcf6ae72412b67d9547c99db155e7d2bce99f6c603c9bcf479fc4cfddd5ec7"
   }
  },
  "tinyusb_patches": {
