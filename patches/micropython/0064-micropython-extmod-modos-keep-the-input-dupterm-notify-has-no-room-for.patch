@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 08:19:28 -0600
+Subject: [PATCH] extmod/modos: keep the input os.dupterm_notify() has no room
+ for.
+
+os.dupterm_notify() moves every character a dupterm stream holds into
+stdin_ringbuf, and ringbuf_put() drops each one that doesn't fit. On the
+esp32 port, WebREPL's socket calls it whenever a poll finds the socket
+readable, and that can be right after a timer callback has run inside
+the REPL's wait for input. A command that arrived during the callback,
+which mpremote and other tools send in one piece, is then cut to what
+fits in the buffer plus whatever arrives later: the REPL runs a broken
+command, or never sees its Ctrl-D and the tool waits for its timeout.
+
+While the REPL waits for input no interrupt character is set, and
+nothing needs the rest read early: mp_hal_stdin_rx_chr() reads the
+stream itself once the buffer is empty. So stop when the buffer is full.
+While code runs, keep reading as before, so that a Ctrl-C behind a full
+buffer still interrupts it.
+---
+ extmod/modos.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/extmod/modos.c b/extmod/modos.c
+index c330162..12bb259 100644
+--- a/extmod/modos.c
++++ b/extmod/modos.c
+@@ -60,6 +60,10 @@
+ #include "genhdr/mpversion.h"
+ #endif
+ 
++#if MICROPY_PY_OS_DUPTERM_NOTIFY
++#include "shared/runtime/interrupt_char.h"
++#endif
++
+ #ifdef MICROPY_PY_OS_INCLUDEFILE
+ #include MICROPY_PY_OS_INCLUDEFILE
+ #endif
+@@ -134,6 +138,14 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mp_os_uname_obj, mp_os_uname);
+ static mp_obj_t mp_os_dupterm_notify(mp_obj_t obj_in) {
+     (void)obj_in;
+     for (;;) {
++        // A character read with no room left in stdin_ringbuf is lost. While
++        // the REPL waits for input (no interrupt character is set), leave the
++        // rest in the stream: mp_hal_stdin_rx_chr() reads it from there once
++        // the buffer is empty. While code runs, keep reading so that a Ctrl-C
++        // behind a full buffer still interrupts it.
++        if (mp_interrupt_char < 0 && ringbuf_free(&stdin_ringbuf) == 0) {
++            break;
++        }
+         int c = mp_os_dupterm_rx_chr();
+         if (c < 0) {
+             break;
+-- 
+2.43.0
+

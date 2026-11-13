@@ -187,6 +187,9 @@
   },
   "0062-micropython-shared-dhcpserver-answer-only-on-the-interface-that-owns-its-address.patch": {
    "sha256": "db39eba7b92cb333870ed1a99bb0957c6dcbe2dc3ff2aba196a5becff276ee29"
+  },
+  "0064-micropython-extmod-modos-keep-the-input-dupterm-notify-has-no-room-for.patch": {
+   "sha256": "392efc25f4a7bc27d8007a239619827ba28567e2fb0ef4c451e17c9e70801029"
   }
  },
  "tinyusb_patches": {
