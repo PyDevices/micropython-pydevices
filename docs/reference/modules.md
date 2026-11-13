@@ -19,6 +19,7 @@ tracked here or linked from a sibling checkout or cloned at the commit in
 | [`picotts`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/picotts) | Text to speech on the SVOX Pico engine, with the API of Adafruit's `adafruit_picotts`. Opt-in, and it needs PSRAM. |
 | [`pngio`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/pngio) | PNG encode and decode, RGB565 in and out. |
 | [`ppa`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/ppa) | Scale, rotate, convert and fill pixel buffers, on the ESP32-P4's Pixel Processing Accelerator or in portable C elsewhere. |
+| [`svgio`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/svgio) | SVG decode at any size, RGB565 with alpha, and an LVGL image decoder. |
 | [`tsmux`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/tsmux) | MPEG-TS and HLS segments from H.264. |
 | [`usbhost`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/usbhost) | The USB host port and isochronous streams that `usb.core` and the `usb.host.*` packages are built on (ESP32-S2, S3 and P4, and the Arduino GIGA R1's USB-A port without isochronous streams). |
 
@@ -49,6 +50,7 @@ it is. "Unix" is CircuitPython's unix port, built and imported in
 | audiodsp | yes | the four ESP32 cells | The modules CircuitPython lacks, `audiograph` and `audiopump.Ring` (Python-made audio that `audiobusio.I2SOut` plays) among them; its audiocore, synthio and the rest stay CircuitPython's. With all of it, a LilyGO T-Embed S3 build fits that board's 2 MB app slot only with `CIRCUITPY_ULAB=0` on the make line. |
 | displayif | yes (`usdl2`) | no, on purpose | Boards have CircuitPython's own `displayio` and display buses. pydevices' `SDLDisplay` runs on top of `usdl2`. |
 | pngio | yes | all five | Decodes with CircuitPython's older uzlib. |
+| svgio | yes | no | Not named in the board cells yet. |
 | tsmux | yes | all five | |
 | ppa | yes (software) | ESP32-P4 | The hardware path on the P4. |
 | jpegio | yes | ESP32-P4 | Adds only the encoder's C API: CircuitPython has its own `jpegio` decoder. |

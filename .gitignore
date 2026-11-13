@@ -27,6 +27,7 @@
 !/modules/jpegio/
 !/modules/mdns/
 !/modules/pngio/
+!/modules/svgio/
 !/modules/picotts/
 !/modules/tflite/
 !/modules/vision/

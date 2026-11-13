@@ -1,0 +1,20 @@
+NanoSVG, by Mikko Mononen
+Upstream: https://github.com/memononen/nanosvg
+Taken from: commit 239e102ec2c691f2902e20ace2ed36ee4a35cfe6 (2026-07-09)
+Files: src/nanosvg.h, src/nanosvgrast.h and LICENSE.txt, verbatim apart from
+the change below.
+
+Changes:
+
+1. nanosvg.h, nsvg__createGradient: in objectBoundingBox units (a gradient's
+   default), a coordinate with no unit is a fraction of the shape's box, so
+   x2="1" is its right edge and r="0.5" half of it. Upstream reads such a
+   number as user-space pixels, which drew a gradient from x1="0" to x2="1"
+   as its last colour. The new nsvg__bboxFraction turns those coordinates
+   into the percentages they mean before they're converted. Each changed
+   place is marked "svgio:".
+
+src/svgio_nanosvg.c compiles both headers with the C library calls they make
+pointed at svgio's own (the MicroPython heap for memory, and small number,
+colour and sort routines that every port can link), by macros defined before
+the headers are included.
