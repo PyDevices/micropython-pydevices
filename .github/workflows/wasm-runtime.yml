@@ -65,7 +65,7 @@ jobs:
           import sys
           print(sys.implementation)
           for name in ("displaydev", "lvgl",
-                       "audioinstruments", "audioeffects", "pdwidgets", "palettes", "iconkit", "ulab"):
+                       "audioinstruments", "audioeffects", "pdwidgets", "palettes", "iconkit", "ulab", "svgio"):
               __import__(name)
               print("imports", name)
           EOF

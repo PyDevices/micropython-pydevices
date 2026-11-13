@@ -1,0 +1,9 @@
+svgio
+Copyright (c) 2026 PyDevices, MIT License (see the repository's LICENSE).
+
+This module includes code from another project. Its folder under
+third_party/ carries the project's license and an ORIGIN.txt naming the
+upstream commit and every change made.
+
+third_party/nanosvg/
+  NanoSVG, Copyright (c) 2013-14 Mikko Mononen. zlib license.

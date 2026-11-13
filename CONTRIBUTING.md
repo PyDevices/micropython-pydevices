@@ -11,7 +11,7 @@ fix is a good first contribution.
 |---|---|
 | [`build_mp.py`](build_mp.py) | The build command. |
 | [`DEPENDENCIES.lock`](DEPENDENCIES.lock) | Everything a build fetches when it's missing, one pin per line: the MicroPython commit the patches apply to, the modules, omnipython-lvgl, esp-vision and the toolchains. [`scripts/pins.py`](scripts/pins.py) reads it for every script and workflow. |
-| [`modules/`](modules) | The module manifest, `all/`, `tflite/` and `vision/` (esp-vision's), the modules linked or cloned, and the C modules that live only here: `audioif`, `cameraif`, `castif`, `displayif`, `h264enc`, `jpegio`, `mdns`, `pngio`, `ppa`, `tsmux`, `usbhost`. Each has its own README and tests. |
+| [`modules/`](modules) | The module manifest, `all/`, `tflite/` and `vision/` (esp-vision's), the modules linked or cloned, and the C modules that live only here: `audioif`, `cameraif`, `castif`, `displayif`, `h264enc`, `jpegio`, `mdns`, `pngio`, `ppa`, `svgio`, `tsmux`, `usbhost`. Each has its own README and tests. |
 | `modules/.omnipython-lvgl` | LVGL, its bindings and its ports, which `--modules lvgl` compiles: the sibling checkout, linked, or its `DEPENDENCIES.lock` commit, fetched. |
 | [`patches/`](patches) | The patch series and `apply_patches.py`. |
 | [`variants/`](variants), [`boards/`](boards) | Our variants and CircuitPython boards. |
