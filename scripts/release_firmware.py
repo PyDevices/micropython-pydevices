@@ -76,6 +76,9 @@ MB = 1024 * 1024
 # filesystem that moved: a board that updated to that would come up with an
 # empty one. Changing `fs` moves the filesystem on that board, so it is done on
 # purpose, and the notes of the release that ships it say so (`notes --previous`).
+# A cell with `autosize=True` and no `fs` lets build_mp.py grow the app slot to
+# the image instead, so the filesystem is whatever flash is left: it can move
+# with any release, and the notes say so whenever it does.
 CELLS = [
     dict(id="mp-p4-devkit", label="ESP32-P4-WIFI6-DEV-KIT", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_P4", variant="WIFI6_DEV_KIT_H2", flash="16MB", modules="all",
@@ -85,10 +88,10 @@ CELLS = [
          chip="esp32p4", offset=0x2000, kind="esp32", deps="idf", fs="26624K"),
     dict(id="mp-s3-lcd7", label="ESP32-S3-Touch-LCD-7", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_S3", variant="LCD_7", flash="8MB", modules="all",
-         chip="esp32s3", offset=0, kind="esp32", deps="idf", fs="2688K"),
+         chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
     dict(id="mp-s3-lcd43", label="ESP32-S3-Touch-LCD-4.3", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_S3", variant="LCD_4_3", flash="8MB", modules="all",
-         chip="esp32s3", offset=0, kind="esp32", deps="idf", fs="2688K"),
+         chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
     dict(id="mp-s3-tembed", label="LilyGO T-Embed S3", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_S3", variant="T_EMBED", flash="16MB", modules="all",
          chip="esp32s3", offset=0, kind="esp32", deps="idf", fs="10880K"),
@@ -204,10 +207,13 @@ def keeps_fs(c):
 
 
 def check_cells():
-    """Every cell whose filesystem build_mp.py places names the size it keeps."""
+    """Every cell whose filesystem build_mp.py places names the size it keeps,
+    or says it autosizes."""
     problems = []
     for c in CELLS:
-        if keeps_fs(c) and not size_bytes(c.get("fs")):
+        if c.get("autosize") and (c.get("fs") or c["kind"] != "esp32"):
+            problems.append(f"{c['id']}: autosize is for an esp32 cell that names no fs")
+        elif keeps_fs(c) and not c.get("autosize") and not size_bytes(c.get("fs")):
             problems.append(f"{c['id']}: names no filesystem to keep (fs={c.get('fs')!r}), so a release "
                             "could move it and empty every board that updates")
         elif not keeps_fs(c) and "fs" in c:
@@ -414,7 +420,8 @@ def uf2_end(blob):
 
 def check_fs(c, meta, data, flash_bytes):
     """A cell that keeps its filesystem: the build put it where the cell says,
-    so a board that updates keeps its files. Adds fs_offset and fs_bytes to meta."""
+    so a board that updates keeps its files. An autosize cell has no size to keep:
+    its filesystem is recorded, not checked. Adds fs_offset and fs_bytes to meta."""
     want = size_bytes(c.get("fs"))
     if c["kind"] == "esp32":
         if "partitions" not in data:
@@ -427,7 +434,7 @@ def check_fs(c, meta, data, flash_bytes):
         offset = flash_bytes - size
     meta["fs_offset"], meta["fs_bytes"] = hex(offset), size
     problems = []
-    if size != want or offset != flash_bytes - want:
+    if want is not None and (size != want or offset != flash_bytes - want):
         problems.append(f"{c['id']}: the filesystem is {size // 1024} KB at {offset:#x}, not the {c['fs']} at "
                         f"{flash_bytes - want:#x} the cell keeps: a board that updates would come up with an empty one")
     if "uf2" in data and uf2_end(data["uf2"].read_bytes()) > XIP_BASE + offset:
@@ -552,7 +559,7 @@ def check_cell(d, c):
             problems.append(f"{c['id']}: {data['uf2'].name} has no UF2 block magic")
         elif len(blob) // 512 * 256 > flash_bytes:
             problems.append(f"{c['id']}: {data['uf2'].name} carries more than the {c['flash']} flash holds")
-    if c.get("fs"):
+    if c.get("fs") or c.get("autosize"):
         problems += check_fs(c, meta, data, flash_bytes)
     for role in ("elf", "map"):
         if role in data and data[role].stat().st_size < 1024:

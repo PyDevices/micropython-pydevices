@@ -39,9 +39,14 @@ def table_bin(rows):
                     for name, t, st, off, size in rows) + b"\xff" * 64
 
 
+# What an autosize cell's filesystem comes to after build_mp.py grew the app slot.
+AUTOSIZED_FS = 2624 * 1024
+
+
 def kept_table(c):
-    """The table a cell's build makes: the app partition up to the filesystem it keeps."""
-    flash, fs = int(c["flash"][:-2]) * rf.MB, rf.size_bytes(c["fs"])
+    """The table a cell's build makes: the app partition up to the filesystem it keeps,
+    or up to the one an autosize cell was left with."""
+    flash, fs = int(c["flash"][:-2]) * rf.MB, rf.size_bytes(c.get("fs")) or AUTOSIZED_FS
     return table_bin([("nvs", 1, 2, 0x9000, 0x6000), ("phy_init", 1, 1, 0xF000, 0x1000),
                       ("factory", 0, 0, 0x10000, flash - fs - 0x10000)])
 
@@ -130,7 +135,8 @@ class Table(unittest.TestCase):
     def test_every_micropython_esp32_and_rp2_cell_keeps_its_filesystem(self):
         rf.check_cells()
         kept = [c["id"] for c in rf.CELLS if c.get("fs")]
-        self.assertEqual(len(kept), 7)
+        self.assertEqual(len(kept), 5)
+        self.assertEqual([c["id"] for c in rf.CELLS if c.get("autosize")], ["mp-s3-lcd7", "mp-s3-lcd43"])
         for c in rf.CELLS:
             args = rf.build_args(c)
             if c.get("fs"):
@@ -141,11 +147,17 @@ class Table(unittest.TestCase):
     def test_a_cell_that_names_no_filesystem_is_caught(self):
         for planted in (None, "2690K", "big"):
             cells = [dict(c) for c in rf.CELLS]
-            cells[2]["fs"] = planted
+            next(c for c in cells if c["id"] == "mp-s3-tembed")["fs"] = planted
             with mock.patch.object(rf, "CELLS", cells):
                 with self.assertRaises(rf.Failed) as cm:
                     rf.matrix(False)
-                self.assertIn("mp-s3-lcd7: names no filesystem to keep", str(cm.exception))
+                self.assertIn("mp-s3-tembed: names no filesystem to keep", str(cm.exception))
+
+    def test_an_autosize_cell_that_also_names_a_filesystem_is_caught(self):
+        cells = [dict(c, fs="2688K") if c["id"] == "mp-s3-lcd7" else c for c in rf.CELLS]
+        with mock.patch.object(rf, "CELLS", cells):
+            with self.assertRaisesRegex(rf.Failed, "mp-s3-lcd7: autosize is for an esp32 cell that names no fs"):
+                rf.check_cells()
 
     def test_a_filesystem_on_a_cell_that_cannot_keep_one_is_caught(self):
         cells = [dict(c, fs="1536K") if c["id"] == "cp-feather-rp2040" else c for c in rf.CELLS]
@@ -437,7 +449,9 @@ class Assemble(unittest.TestCase):
     def test_firmware_json_says_where_each_filesystem_is(self):
         doc = self.run_assemble()
         fs = {b["id"]: (b.get("fs_offset"), b.get("fs_bytes")) for b in doc["builds"]}
-        self.assertEqual(fs["mp-s3-lcd7"], ("0x560000", 2688 * 1024))
+        self.assertEqual(fs["mp-s3-lcd7"], ("0x570000", AUTOSIZED_FS))
+        self.assertEqual(fs["mp-s3-lcd43"], ("0x570000", AUTOSIZED_FS))
+        self.assertEqual(fs["mp-s3-tembed"], ("0x560000", 10880 * 1024))
         self.assertEqual(fs["mp-p4-panel"], ("0x600000", 26624 * 1024))
         self.assertEqual(fs["cp-s3-lcd7"], (None, None))
 
@@ -449,12 +463,20 @@ class Assemble(unittest.TestCase):
         meta["files"][role].update(size=len(data), sha256=rf.sha256(f))
         (d / "cell.json").write_text(json.dumps(meta))
 
-    def test_a_filesystem_that_moved_is_caught(self):
-        # autosize's table for a bigger image: the app grown by 64 KB, the filesystem after it.
+    def test_an_autosize_cell_may_grow_its_app_and_move_its_filesystem(self):
         self.rewrite("mp-s3-lcd7", "partitions", table_bin([
             ("nvs", 1, 2, 0x9000, 0x6000), ("phy_init", 1, 1, 0xF000, 0x1000),
             ("factory", 0, 0, 0x10000, 0x550000), ("coredump", 1, 3, 0x560000, 0x10000)]))
-        self.fails_with("mp-s3-lcd7: the filesystem is 2624 KB at 0x570000, not the 2688K at 0x560000")
+        doc = self.run_assemble()
+        lcd7 = next(b for b in doc["builds"] if b["id"] == "mp-s3-lcd7")
+        self.assertEqual((lcd7["fs_offset"], lcd7["fs_bytes"]), ("0x570000", 2624 * 1024))
+
+    def test_a_filesystem_that_moved_is_caught(self):
+        # autosize's table for a bigger image: the app grown by 64 KB, the filesystem after it.
+        self.rewrite("mp-s3-tembed", "partitions", table_bin([
+            ("nvs", 1, 2, 0x9000, 0x6000), ("phy_init", 1, 1, 0xF000, 0x1000),
+            ("factory", 0, 0, 0x10000, 0x550000), ("coredump", 1, 3, 0x560000, 0x10000)]))
+        self.fails_with("mp-s3-tembed: the filesystem is 10816 KB at 0x570000, not the 10880K at 0x560000")
 
     def test_a_named_filesystem_in_the_wrong_place_is_caught(self):
         self.rewrite("mp-p4-devkit", "partitions", table_bin([
@@ -636,7 +658,7 @@ class DraftRelease(unittest.TestCase):
     def test_the_notes_give_each_micropython_board_its_filesystem(self):
         text = rf.notes(self.doc)
         self.assertIn("| ESP32-S3-Touch-LCD-7 | MicroPython v1.30.0-preview | ", text)
-        self.assertIn(" | 2,688 KB at 0x560000 |", text)
+        self.assertIn(" | 2,624 KB at 0x570000 |", text)
         self.assertIn(" | 26,624 KB at 0x600000 |", text)
         self.assertNotIn("This release moves the filesystem", text)
 
@@ -648,7 +670,7 @@ class DraftRelease(unittest.TestCase):
         lcd7.update(fs_offset="0x5a0000", fs_bytes=2432 * 1024)
         text = rf.notes(self.doc, previous)
         self.assertIn("**This release moves the filesystem** on the boards below. Updating one from v1.30.0-20261101", text)
-        self.assertIn("- ESP32-S3-Touch-LCD-7, MicroPython: 2,688 KB at 0x560000, was 2,432 KB at 0x5a0000", text)
+        self.assertIn("- ESP32-S3-Touch-LCD-7, MicroPython: 2,624 KB at 0x570000, was 2,432 KB at 0x5a0000", text)
         self.assertNotIn("- ESP32-S3-Touch-LCD-4.3", text)
 
     def test_the_command_reads_the_previous_set(self):
