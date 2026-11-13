@@ -366,7 +366,9 @@ int nsvg__parseXML(char* input,
 
 /* Simple SVG parser. */
 
+#ifndef NSVG_MAX_ATTR	// svgio: let the build choose the depth
 #define NSVG_MAX_ATTR 128
+#endif
 
 enum NSVGgradientUnits {
 	NSVG_USER_SPACE = 0,

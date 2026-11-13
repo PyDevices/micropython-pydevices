@@ -300,6 +300,10 @@ static size_t svgio_fread(void *buf, size_t size, size_t n, FILE *fp) {
 #pragma GCC diagnostic ignored "-Wfloat-equal"
 #endif
 
+// Nested groups the parser tracks. Each level holds about 300 bytes for the
+// whole parse, so upstream's 128 cost 41 KB even for a 24 px icon. Deeper
+// groups than this lose track of their styles.
+#define NSVG_MAX_ATTR 32
 #define NANOSVG_IMPLEMENTATION
 #include "nanosvg.h"
 #define NANOSVGRAST_IMPLEMENTATION

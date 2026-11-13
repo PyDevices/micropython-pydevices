@@ -14,6 +14,11 @@ Changes:
    into the percentages they mean before they're converted. Each changed
    place is marked "svgio:".
 
+2. nanosvg.h: NSVG_MAX_ATTR, the depth of nested groups the parser tracks,
+   is defined only when the build hasn't defined it. Every level is a
+   300-byte block held for the whole parse, so 128 levels cost about 41 KB
+   for any file; svgio_nanosvg.c asks for 32.
+
 src/svgio_nanosvg.c compiles both headers with the C library calls they make
 pointed at svgio's own (the MicroPython heap for memory, and small number,
 colour and sort routines that every port can link), by macros defined before

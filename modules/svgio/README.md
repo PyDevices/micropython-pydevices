@@ -20,7 +20,8 @@ fb.blit_alpha(mask, 10, 10, w, h, 0xFFFF)           # filled with one colour
 ```
 
 The same code runs on every runtime. On MicroPython it's this C module, on
-every port (`--modules all` has it). On CPython, `svgio.py` in
+every port; name it in the build (`--modules all,svgio`), since `all` leaves
+it out to save its 42 KB of flash. On CPython, `svgio.py` in
 pydevices-desktop gives the same API over resvg, so `pip install resvg-py
 pillow` is all a desktop needs.
 
@@ -34,7 +35,8 @@ That covers the icons and gauges most design tools export.
 
 It leaves out text, `<use>`, clip paths, masks, patterns, filters and
 embedded images. Convert text to paths before you export, and expand `<use>`
-(Inkscape's "Unlink clone", or `svgo` with its default plugins).
+(Inkscape's "Unlink clone", or `svgo` with its default plugins). Groups can
+nest 32 deep; deeper than that, styles go wrong.
 
 ## API
 
