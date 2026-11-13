@@ -187,6 +187,9 @@
   },
   "0062-micropython-shared-dhcpserver-answer-only-on-the-interface-that-owns-its-address.patch": {
    "sha256": "db39eba7b92cb333870ed1a99bb0957c6dcbe2dc3ff2aba196a5becff276ee29"
+  },
+  "0063-micropython-shared-runtime-pyexec-say-how-long-the-repl-has-waited.patch": {
+   "sha256": "324c299c811d15991de230177a4de3606df2b2353a86b4e85072c2796ad60622"
   }
  },
  "tinyusb_patches": {
