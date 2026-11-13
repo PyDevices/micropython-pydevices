@@ -1,0 +1,3 @@
+Opt-in: name svgio to build it; --modules all leaves it out.
+It adds about 42 KB of flash on an ESP32-S3 (NanoSVG's parser and rasterizer),
+which only a project that draws SVG wants.

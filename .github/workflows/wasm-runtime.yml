@@ -1,5 +1,6 @@
 # The website (PyDevices.github.io) and workbench serve a WebAssembly build of
-# this repository: the webassembly port, pydevices variant, every module. Its
+# this repository: the webassembly port, pydevices variant, every module, with
+# svgio named too (`all` leaves it out to save flash on boards). Its
 # sources move here, in DEPENDENCIES.lock, the patch series and the module
 # manifests, and nothing on either site notices. So when main changes what
 # goes into that build, this rebuilds it from the pins, checks it starts and
@@ -56,7 +57,7 @@ jobs:
           push: never
           runCmd: |
             set -e
-            ./build_mp.py --port webassembly --variant pydevices --modules all
+            ./build_mp.py --port webassembly --variant pydevices --modules all,svgio
 
       - name: It starts and imports what it freezes
         run: |
@@ -65,7 +66,7 @@ jobs:
           import sys
           print(sys.implementation)
           for name in ("displaydev", "lvgl",
-                       "audioinstruments", "audioeffects", "pdwidgets", "palettes", "iconkit", "ulab"):
+                       "audioinstruments", "audioeffects", "pdwidgets", "palettes", "iconkit", "ulab", "svgio"):
               __import__(name)
               print("imports", name)
           EOF

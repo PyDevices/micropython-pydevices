@@ -16,7 +16,7 @@ Run it:
 
     mpremote run svgio_simpletest.py
 
-Tested on: the MicroPython unix port, built with ``--modules all``.
+Tested on: the MicroPython unix port, built with ``--modules svgio``.
 """
 
 import svgio
