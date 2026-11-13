@@ -189,8 +189,10 @@ static void put_rows(void *ctx, const uint8_t *rgba, int y, int rows, int width)
     svgio_lvgl_target_t *t = ctx;
     for (int r = 0; r < rows; r++) {
         size_t row = (size_t)(y + r);
+        // LVGL's draw buffer is aligned and the stride is even, so every row
+        // starts on a 16-bit boundary; the void * says so to -Wcast-align.
         svgio_rgba_to_565(rgba + (size_t)r * width * 4, width,
-            (uint16_t *)(t->pixels + row * t->stride), t->alpha + row * (t->stride / 2));
+            (uint16_t *)(void *)(t->pixels + row * t->stride), t->alpha + row * (t->stride / 2));
     }
 }
 
