@@ -23,9 +23,9 @@ The option is off by default, and the esp32 port turns it on.
  ports/esp32/mpconfigport.h |  1 +
  py/modmicropython.c        | 14 ++++++++++++++
  py/mpconfig.h              |  6 ++++++
- shared/runtime/pyexec.c    | 34 ++++++++++++++++++++++++++++++++++
+ shared/runtime/pyexec.c    | 33 +++++++++++++++++++++++++++++++++
  shared/runtime/pyexec.h    |  5 +++++
- 6 files changed, 68 insertions(+)
+ 6 files changed, 67 insertions(+)
 
 diff --git a/extmod/modwebrepl.c b/extmod/modwebrepl.c
 index bac223d95..406ac7560 100644
@@ -122,10 +122,10 @@ index 1edc0804e..dcef01f26 100644
  #ifndef MICROPY_PY_MICROPYTHON_RINGIO
  #define MICROPY_PY_MICROPYTHON_RINGIO (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
 diff --git a/shared/runtime/pyexec.c b/shared/runtime/pyexec.c
-index bbb85543c..c132fe5b1 100644
+index bbb85543c..b0bce54bb 100644
 --- a/shared/runtime/pyexec.c
 +++ b/shared/runtime/pyexec.c
-@@ -42,6 +42,34 @@
+@@ -42,6 +42,33 @@
  
  pyexec_mode_kind_t pyexec_mode_kind = PYEXEC_MODE_FRIENDLY_REPL;
  
@@ -152,15 +152,14 @@ index bbb85543c..c132fe5b1 100644
 +    return quiet < 0x3fffffff ? (mp_int_t)quiet : 0x3fffffff;
 +}
 +#else
-+static inline void repl_wait(bool waiting) {
-+    (void)waiting;
-+}
++// A macro rather than a function, since an event-driven REPL never calls it.
++#define repl_wait(waiting) ((void)(waiting))
 +#endif
 +
  #if MICROPY_REPL_INFO
  static bool repl_display_debugging_info = 0;
  #endif
-@@ -562,7 +590,9 @@ raw_repl_reset:
+@@ -562,7 +589,9 @@ raw_repl_reset:
          vstr_reset(&line);
          mp_hal_stdout_tx_str(">");
          for (;;) {
@@ -170,7 +169,7 @@ index bbb85543c..c132fe5b1 100644
              if (c == CHAR_CTRL_A) {
                  // reset raw REPL
                  if (vstr_len(&line) == 2 && vstr_str(&line)[0] == CHAR_CTRL_E) {
-@@ -655,7 +685,9 @@ friendly_repl_reset:
+@@ -655,7 +684,9 @@ friendly_repl_reset:
          MP_STATE_THREAD(gc_lock_depth) = 0;
  
          vstr_reset(&line);
@@ -180,7 +179,7 @@ index bbb85543c..c132fe5b1 100644
          mp_parse_input_kind_t parse_input_kind = MP_PARSE_SINGLE_INPUT;
  
          if (ret == CHAR_CTRL_A) {
-@@ -710,7 +742,9 @@ friendly_repl_reset:
+@@ -710,7 +741,9 @@ friendly_repl_reset:
              // got a line with non-zero length, see if it needs continuing
              while (mp_repl_continue_with_input(vstr_null_terminated_str(&line))) {
                  vstr_add_byte(&line, '\n');
