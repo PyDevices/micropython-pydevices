@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
-Date: Fri, 13 Nov 2026 08:19:28 -0600
+Date: Fri, 13 Nov 2026 08:30:17 -0600
 Subject: [PATCH] extmod/modos: keep the input os.dupterm_notify() has no room
  for.
 
@@ -13,45 +13,74 @@ which mpremote and other tools send in one piece, is then cut to what
 fits in the buffer plus whatever arrives later: the REPL runs a broken
 command, or never sees its Ctrl-D and the tool waits for its timeout.
 
-While the REPL waits for input no interrupt character is set, and
-nothing needs the rest read early: mp_hal_stdin_rx_chr() reads the
-stream itself once the buffer is empty. So stop when the buffer is full.
-While code runs, keep reading as before, so that a Ctrl-C behind a full
-buffer still interrupts it.
+While the REPL waits for input no interrupt character is set, and a
+port whose mp_hal_stdin_rx_chr() reads the dupterm streams once
+stdin_ringbuf is empty doesn't need the rest read early. The new option
+MICROPY_PY_OS_DUPTERM_NOTIFY_STOP_WHEN_FULL makes os.dupterm_notify()
+stop at a full buffer then and leave the rest in the stream. While code
+runs it keeps reading as before, so that a Ctrl-C behind a full buffer
+still interrupts it. The option is off by default and on for esp32.
+rp2 and mimxrt read their streams the same way but haven't been tried
+with it. esp8266 must leave it off: its mp_hal_stdin_rx_chr() reads
+only stdin_ringbuf, so the rest would wait for the next packet.
 ---
- extmod/modos.c | 12 ++++++++++++
- 1 file changed, 12 insertions(+)
+ extmod/modos.c             | 23 +++++++++++++++++++++++
+ ports/esp32/mpconfigport.h |  1 +
+ 2 files changed, 24 insertions(+)
 
 diff --git a/extmod/modos.c b/extmod/modos.c
-index c330162..12bb259 100644
+index c330162..3d4e2d4 100644
 --- a/extmod/modos.c
 +++ b/extmod/modos.c
-@@ -60,6 +60,10 @@
+@@ -60,6 +60,20 @@
  #include "genhdr/mpversion.h"
  #endif
  
 +#if MICROPY_PY_OS_DUPTERM_NOTIFY
++// A port whose mp_hal_stdin_rx_chr() reads the dupterm streams itself once
++// stdin_ringbuf is empty can set this to 1. os.dupterm_notify() then stops
++// at a full buffer while no interrupt character is set, as while the REPL
++// waits for input, and what doesn't fit stays in its stream instead of
++// being dropped.
++#ifndef MICROPY_PY_OS_DUPTERM_NOTIFY_STOP_WHEN_FULL
++#define MICROPY_PY_OS_DUPTERM_NOTIFY_STOP_WHEN_FULL (0)
++#endif
++#if MICROPY_PY_OS_DUPTERM_NOTIFY_STOP_WHEN_FULL
 +#include "shared/runtime/interrupt_char.h"
++#endif
 +#endif
 +
  #ifdef MICROPY_PY_OS_INCLUDEFILE
  #include MICROPY_PY_OS_INCLUDEFILE
  #endif
-@@ -134,6 +138,14 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mp_os_uname_obj, mp_os_uname);
+@@ -134,6 +148,15 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mp_os_uname_obj, mp_os_uname);
  static mp_obj_t mp_os_dupterm_notify(mp_obj_t obj_in) {
      (void)obj_in;
      for (;;) {
++        #if MICROPY_PY_OS_DUPTERM_NOTIFY_STOP_WHEN_FULL
 +        // A character read with no room left in stdin_ringbuf is lost. While
-+        // the REPL waits for input (no interrupt character is set), leave the
-+        // rest in the stream: mp_hal_stdin_rx_chr() reads it from there once
-+        // the buffer is empty. While code runs, keep reading so that a Ctrl-C
-+        // behind a full buffer still interrupts it.
++        // the REPL waits for input, leave the rest in the stream for
++        // mp_hal_stdin_rx_chr() to read. While code runs, keep reading so
++        // that a Ctrl-C behind a full buffer still interrupts it.
 +        if (mp_interrupt_char < 0 && ringbuf_free(&stdin_ringbuf) == 0) {
 +            break;
 +        }
++        #endif
          int c = mp_os_dupterm_rx_chr();
          if (c < 0) {
              break;
+diff --git a/ports/esp32/mpconfigport.h b/ports/esp32/mpconfigport.h
+index ecdc4b2..f73514f 100644
+--- a/ports/esp32/mpconfigport.h
++++ b/ports/esp32/mpconfigport.h
+@@ -114,6 +114,7 @@
+ #define MICROPY_PY_RANDOM_SEED_INIT_FUNC    (esp_random())
+ #define MICROPY_PY_OS_DUPTERM               (1)
+ #define MICROPY_PY_OS_DUPTERM_NOTIFY        (1)
++#define MICROPY_PY_OS_DUPTERM_NOTIFY_STOP_WHEN_FULL (1)
+ #define MICROPY_PY_OS_SYNC                  (1)
+ #define MICROPY_PY_OS_UNAME                 (1)
+ #define MICROPY_PY_OS_URANDOM               (1)
 -- 
 2.43.0
 

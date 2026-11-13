@@ -189,7 +189,7 @@
    "sha256": "db39eba7b92cb333870ed1a99bb0957c6dcbe2dc3ff2aba196a5becff276ee29"
   },
   "0064-micropython-extmod-modos-keep-the-input-dupterm-notify-has-no-room-for.patch": {
-   "sha256": "392efc25f4a7bc27d8007a239619827ba28567e2fb0ef4c451e17c9e70801029"
+   "sha256": "c3ce60d686bf234a19f51171aba58a60f0079fd817a40e49c0cbf9028671ccbe"
   }
  },
  "tinyusb_patches": {
