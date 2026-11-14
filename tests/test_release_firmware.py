@@ -494,8 +494,8 @@ class Assemble(unittest.TestCase):
         # autosize's table for a bigger image: the app grown by 64 KB, the filesystem after it.
         self.rewrite("mp-p4-panel", "partitions", table_bin([
             ("nvs", 1, 2, 0x9000, 0x6000), ("phy_init", 1, 1, 0xF000, 0x1000),
-            ("factory", 0, 0, 0x10000, 0x600000), ("coredump", 1, 3, 0x610000, 0x10000)]))
-        self.fails_with("mp-p4-panel: the filesystem is 26496 KB at 0x620000, not the 26624K at 0x600000")
+            ("factory", 0, 0, 0x10000, 0x910000), ("coredump", 1, 3, 0x920000, 0x10000)]))
+        self.fails_with("mp-p4-panel: the filesystem is 23360 KB at 0x930000, not the 23488K at 0x910000")
 
     def test_a_named_filesystem_in_the_wrong_place_is_caught(self):
         self.rewrite("mp-p4-devkit", "partitions", table_bin([
@@ -507,8 +507,8 @@ class Assemble(unittest.TestCase):
         d = self.indir / "mp-p4-panel"
         meta = json.loads((d / "cell.json").read_text())
         flash = (d / meta["files"]["flash"]["file"]).read_bytes()
-        self.rewrite("mp-p4-panel", "flash", flash + b"\xff" * (0x600000 - len(flash) + 1))
-        self.fails_with("mp-p4-panel: flash.bin writes past 0x600000, into the filesystem")
+        self.rewrite("mp-p4-panel", "flash", flash + b"\xff" * (0x910000 - len(flash) + 1))
+        self.fails_with("mp-p4-panel: flash.bin writes past 0x910000, into the filesystem")
 
     def pico2_set(self):
         for c in rf.wanted(True):
