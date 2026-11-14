@@ -112,12 +112,12 @@ CELLS = [
     dict(id="mp-s3-octal", label="ESP32-S3 with octal PSRAM (Qualia ESP32-S3, T-Display-S3, T-HMI)",
          interpreter="micropython", port="esp32", board="ESP32_GENERIC_S3", variant="SPIRAM_OCT", flash="16MB",
          modules="all", chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
-    # Quad PSRAM (or none found), 8 MB flash: Adafruit QT Py ESP32-S3 (8 MB flash, 2 MB PSRAM),
+    # Quad PSRAM (or none found), 8 MB flash: the Adafruit QT Py ESP32-S3 that has PSRAM (2 MB),
     # WT32-SC01 Plus, Unexpected Maker FeatherS3 and the other quad-PSRAM boards. The octal image
     # finds no PSRAM on those two, and the FeatherS3 boot-loops on it. 8 MB is the floor that fits
     # the most: an image written with an 8 MB header runs on a board with 16 MB or more, keeping
     # the rest of its flash unused, but a 16 MB image won't boot on an 8 MB board.
-    dict(id="mp-s3", label="ESP32-S3 with quad PSRAM (QT Py ESP32-S3, WT32-SC01 Plus, FeatherS3, most 8 MB S3 boards)",
+    dict(id="mp-s3", label="ESP32-S3 with quad PSRAM (QT Py ESP32-S3 with PSRAM, WT32-SC01 Plus, FeatherS3, most 8 MB S3 boards)",
          interpreter="micropython", port="esp32", board="ESP32_GENERIC_S3", variant=None, flash="8MB",
          modules="all", chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
     # No PSRAM, 8 MB flash: an S3 board with only its internal RAM, such as the Adafruit QT Py
@@ -125,7 +125,7 @@ CELLS = [
     # NO_PSRAM variant, which keeps it in internal RAM and Wi-Fi joins a WPA2 network. "all" is
     # left out because LVGL, the camera, the H.264 encoder and the audio instruments want
     # megabytes of heap; this set is what runs in a few hundred KB.
-    dict(id="mp-s3-8mb", label="ESP32-S3 with no PSRAM, 8 MB flash (QT Py ESP32-S3 without PSRAM)",
+    dict(id="mp-s3-8mb", label="ESP32-S3 with no PSRAM, 8 MB flash (QT Py ESP32-S3 with no PSRAM)",
          interpreter="micropython", port="esp32", board="ESP32_GENERIC_S3", variant="NO_PSRAM", flash="8MB",
          modules="pydevices,displayif,pngio,palettes,iconkit,svgio,mdns",
          chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
@@ -815,6 +815,12 @@ def notes(doc, previous=None):
                   "because a deploy replaces the whole partition: "
                   f"[the flash guide](https://github.com/{REPO_SLUG}/blob/main/docs/guides/flash-a-board.md"
                   "#stm32-arduino-giga-r1-wifi) has the steps."]
+    if any(b["id"] == "mp-s3-8mb" for b in doc["builds"]):
+        lines += ["",
+                  "Some QT Py ESP32-S3 boards have no PSRAM, and they need the no-PSRAM image: on the quad-PSRAM one "
+                  "they boot but can't join a WPA2 network. Run `esptool chip-id` with the board plugged in. A board "
+                  "with PSRAM has an `Embedded PSRAM` entry on its Features line (take the quad-PSRAM image); one "
+                  "without it has none (take the no-PSRAM image)."]
     lines += ["",
               "Each build also ships its `.elf` and `.map`, and the ESP32 builds their `.app.bin` (the application "
               "alone, for a board that keeps its other partitions) and partition table. The `.elf` that matches a "

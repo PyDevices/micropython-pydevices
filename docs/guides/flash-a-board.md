@@ -11,9 +11,16 @@ S3. For another chip, the build folder's `flasher_args.json` has the
 bootloader's offset.
 
 ```bash
-esptool --chip esp32p4 write-flash 0x2000 builds/esp32/ESP32_GENERIC_P4/WIFI6_DEV_KIT_H2/firmware.bin
-esptool --chip esp32s3 write-flash 0x0 builds/esp32/ESP32_GENERIC_S3/SPIRAM_OCT/firmware.bin
+esptool --chip esp32p4 --baud 460800 write-flash 0x2000 builds/esp32/ESP32_GENERIC_P4/WIFI6_DEV_KIT_H2/firmware.bin
+esptool --chip esp32s3 --baud 460800 write-flash 0x0 builds/esp32/ESP32_GENERIC_S3/SPIRAM_OCT/firmware.bin
 ```
+
+Erase the whole flash first on a board that has run something else, or an
+older layout of this firmware: `esptool --chip esp32s3 erase-flash`. The write
+only covers the image, so anything left from before can sit where the new
+filesystem starts, and MicroPython then says the filesystem looks corrupted and
+mounts nothing. The erase takes your files too, `secrets.py` among them, so copy
+them off first.
 
 ## RP2
 
