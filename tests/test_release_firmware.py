@@ -146,6 +146,11 @@ class Table(unittest.TestCase):
         self.assertEqual(args[args.index("--variant") + 1], "LCD_7")
         self.assertEqual(args[args.index("--modules") + 1], "all")
 
+    def test_the_p4_cells_carry_the_opt_in_ml_modules(self):
+        for cell_id in ("mp-p4-devkit", "mp-p4-panel", "mp-p4-eye"):
+            args = rf.build_args(rf.cell(cell_id))
+            self.assertEqual(args[args.index("--modules") + 1], "all,vision,tflite", cell_id)
+
     def test_every_micropython_esp32_and_rp2_cell_keeps_its_filesystem(self):
         rf.check_cells()
         kept = [c["id"] for c in rf.CELLS if c.get("fs")]
@@ -465,7 +470,7 @@ class Assemble(unittest.TestCase):
         fs = {b["id"]: (b.get("fs_offset"), b.get("fs_bytes")) for b in doc["builds"]}
         self.assertEqual(fs["mp-s3-lcd7"], ("0x570000", AUTOSIZED_FS))
         self.assertEqual(fs["mp-s3-lcd43"], ("0x570000", AUTOSIZED_FS))
-        self.assertEqual(fs["mp-p4-panel"], ("0x600000", 26624 * 1024))
+        self.assertEqual(fs["mp-p4-panel"], ("0x910000", 23488 * 1024))
         self.assertEqual(fs["mp-p4-eye"], ("0x910000", 7104 * 1024))
         self.assertEqual(fs["cp-s3-lcd7"], (None, None))
 
@@ -673,7 +678,7 @@ class DraftRelease(unittest.TestCase):
         text = rf.notes(self.doc)
         self.assertIn("| ESP32-S3-Touch-LCD-7 | MicroPython v1.30.0-preview | ", text)
         self.assertIn(" | 2,624 KB at 0x570000 |", text)
-        self.assertIn(" | 26,624 KB at 0x600000 |", text)
+        self.assertIn(" | 23,488 KB at 0x910000 |", text)
         self.assertNotIn("This release moves the filesystem", text)
 
     def test_a_release_that_moves_a_filesystem_says_which_board(self):
@@ -696,7 +701,7 @@ class DraftRelease(unittest.TestCase):
         p.write_text(json.dumps(previous))
         out = self.root / "notes.md"
         self.assertEqual(rf.main(["notes", str(j), "--previous", str(p), "--out", str(out)]), 0)
-        self.assertIn("- ESP32-P4-WIFI6-Touch-LCD-4B (P4 before revision 3), MicroPython: 26,624 KB at 0x600000, was 0 KB at 0x600000",
+        self.assertIn("- ESP32-P4-WIFI6-Touch-LCD-4B (P4 before revision 3), MicroPython: 23,488 KB at 0x910000, was 0 KB at 0x910000",
                       out.read_text())
 
     def test_a_final_set_has_no_staged_banner(self):
