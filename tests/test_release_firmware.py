@@ -126,7 +126,7 @@ class Table(unittest.TestCase):
         self.assertEqual((by["mp-s3-octal"]["variant"], by["mp-s3-octal"]["flash"]), ("SPIRAM_OCT", "16MB"))
         self.assertEqual((by["mp-s3"]["variant"], by["mp-s3"]["flash"]), (None, "8MB"))
         self.assertEqual((by["mp-s3-8mb"]["variant"], by["mp-s3-8mb"]["flash"]), ("NO_PSRAM", "8MB"))
-        self.assertEqual(by["cp-s3-qualia"]["board"], "adafruit_qualia_s3_rgb666")
+        self.assertEqual(by["cp-s3-qualia"]["board"], "adafruit_qualia_s3_rgb666_single_app")
         for cid, board in (("mp-s3-octal", "Qualia"), ("mp-s3", "QT Py"), ("mp-s3-8mb", "QT Py"), ("cp-s3-qualia", "Qualia")):
             self.assertIn(board, by[cid]["label"])
 

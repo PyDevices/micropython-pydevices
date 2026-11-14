@@ -1,0 +1,35 @@
+# Adafruit Qualia ESP32-S3 for RGB666 displays (ESP32-S3, 16 MB flash, 8 MB
+# octal PSRAM) with one large app partition. The rest is CircuitPython's own
+# adafruit_qualia_s3_rgb666 board, copied unchanged: board.c, pins.c and
+# mpconfigboard.h.
+#
+# CircuitPython's 16 MB layout has two 2 MB OTA slots and a UF2 bootloader.
+# With LVGL (about 1 MB) beside audiodsp and pygraphics, the firmware no
+# longer fits 2 MB, so this layout has one 4 MB app partition and a 12 MB
+# CIRCUITPY instead, and no UF2 bootloader: flash it with esptool. Over-the-air
+# updates need two slots, so this board has none.
+USB_VID = 0x239A
+USB_PID = 0x8148
+USB_PRODUCT = "Qualia-S3-RGB666"
+USB_MANUFACTURER = "Adafruit"
+
+IDF_TARGET = esp32s3
+
+CIRCUITPY_ESP_FLASH_SIZE = 16MB
+CIRCUITPY_ESP_FLASH_MODE = qio
+CIRCUITPY_ESP_FLASH_FREQ = 120m
+
+CIRCUITPY_ESP_PSRAM_SIZE = 8MB
+CIRCUITPY_ESP_PSRAM_MODE = opi
+CIRCUITPY_ESP_PSRAM_FREQ = 120m
+
+UF2_BOOTLOADER = 0
+FLASH_SIZE_SDKCONFIG = boards/$(BOARD)/sdkconfig-flash.defaults
+# Neither CIRCUITPY nor an update can use a second app slot that isn't there.
+CIRCUITPY_STORAGE_EXTEND = 0
+CIRCUITPY_DUALBANK = 0
+
+# LVGL links its own AnimatedGIF decoder (omnipython-lvgl's ports/circuitpython/micropython.mk).
+CIRCUITPY_GIFIO = 0
+
+CIRCUITPY_DOTCLOCKFRAMEBUFFER = 1

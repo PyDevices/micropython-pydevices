@@ -80,6 +80,7 @@ ours, in [`boards/circuitpython/`](https://github.com/PyDevices/micropython-pyde
 | `feather_rp2040_lvgl` | A Feather RP2040 with room for LVGL. |
 | `waveshare_esp32s3_touch_lcd_7` | The 800x480 panel as `board.DISPLAY`, one 4 MB app slot. |
 | `waveshare_esp32s3_touch_lcd_43` | The same 800x480 panel as `board.DISPLAY` and one 4 MB app slot, like the LCD-7. |
+| `adafruit_qualia_s3_rgb666_single_app` | The Adafruit Qualia ESP32-S3 for RGB666 displays with one 4 MB app slot and no UF2 bootloader, so LVGL fits; flash it with esptool. |
 | `lilygo_twatch_s3_single_app` | The T-Watch S3 with one 4 MB app slot, so LVGL fits. |
 | `waveshare_esp32p4_wifi6_dev_kit` | A revision 3 chip, console on USB Serial/JTAG, one 6 MB app slot. |
 | `waveshare_esp32p4_wifi6_touch_lcd_4b` | Revision 1, console on the CH343 UART, one 6 MB app slot. Its panel isn't set up. |
