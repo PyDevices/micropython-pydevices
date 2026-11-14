@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 22:00:00 -0600
+Subject: [PATCH] py/scheduler: A Ctrl-C that lands in a scheduled callback
+ also stops the code it interrupted.
+
+A Ctrl-C is raised at the next branch of whatever Python code runs, and
+that is often a scheduled callback (a soft machine.Timer's, a
+micropython.schedule() call's) rather than the command at the REPL. The
+callback stops, mp_sched_run_pending() prints the KeyboardInterrupt and
+carries on, and the command runs on. A program whose callbacks take most
+of the time loses nearly every press: on an ESP32-S3 drawing animation
+frames from a timer, a busy loop at the REPL needed 14 to 90 presses
+over the UART. Over WebREPL the poll that reads the Ctrl-C (patch 0011)
+runs from the scheduler as a C task, and a Python callback queued behind
+it then runs in the same pass and takes the exception: one press stopped
+the loop 4 times in 10. With this patch one press stopped it 10 times in
+10 both ways.
+
+Remember that mp_handle_pending() raised the Ctrl-C exception while a
+Python callback ran, and once the callback returns, however it ended,
+mark the Ctrl-C pending again, so the code the callback interrupted gets
+it at its next branch or wait. A callback that caught it to clean up
+(multimer keeps it for the program's next idle point) still stops the
+command. A callback that never returns is still stopped by the Ctrl-C,
+as before, and the command after it.
+
+Only the main thread's code is sent a Ctrl-C, so a callback that runs on
+another thread passes nothing on. A port whose signal handler raises the
+Ctrl-C itself (MICROPY_ASYNC_KBD_INTR, the unix port) doesn't go through
+mp_handle_pending() and is unchanged.
+
+diff --git a/py/scheduler.c b/py/scheduler.c
+index e2ebaaff1..cefce2503 100644
+--- a/py/scheduler.c
++++ b/py/scheduler.c
+@@ -44,6 +44,12 @@ void MICROPY_WRAP_MP_SCHED_EXCEPTION(mp_sched_exception)(mp_obj_t exc) {
+     #endif
+ }
+ 
++#if MICROPY_KBD_EXCEPTION && MICROPY_ENABLE_SCHEDULER
++// Set when mp_handle_pending() raises the Ctrl-C exception, so the scheduler can
++// tell that one landed inside the Python callback it ran.
++static bool sched_kbd_raised;
++#endif
++
+ #if MICROPY_KBD_EXCEPTION
+ // This function may be called asynchronously at any time so only do the bare minimum.
+ void MICROPY_WRAP_MP_SCHED_KEYBOARD_INTERRUPT(mp_sched_keyboard_interrupt)(void) {
+@@ -123,7 +129,24 @@ static inline void mp_sched_run_pending(void) {
+         MP_STATE_VM(sched_idx) = IDX_MASK(MP_STATE_VM(sched_idx) + 1);
+         --MP_STATE_VM(sched_len);
+         MICROPY_END_ATOMIC_SECTION(atomic_state);
++        #if MICROPY_KBD_EXCEPTION
++        sched_kbd_raised = false;
++        #endif
+         mp_call_function_1_protected(item.func, item.arg);
++        #if MICROPY_KBD_EXCEPTION
++        // A Ctrl-C raised inside the callback stopped only the callback, which
++        // may have printed it or kept it. It was meant for the code the callback
++        // interrupted, so raise it again there. Only the main thread's code gets
++        // a Ctrl-C, so a callback run on another thread passes nothing on.
++        if (sched_kbd_raised
++            #if MICROPY_PY_THREAD
++            && mp_thread_is_main_thread()
++            #endif
++            ) {
++            sched_kbd_raised = false;
++            mp_sched_keyboard_interrupt();
++        }
++        #endif
+     } else {
+         MICROPY_END_ATOMIC_SECTION(atomic_state);
+     }
+@@ -245,6 +268,11 @@ void mp_handle_pending(mp_handle_pending_behaviour_t behavior) {
+         if (obj != MP_OBJ_NULL) {
+             MP_STATE_THREAD(mp_pending_exception) = MP_OBJ_NULL;
+             if (raise_exceptions) {
++                #if MICROPY_KBD_EXCEPTION && MICROPY_ENABLE_SCHEDULER
++                if (obj == MP_OBJ_FROM_PTR(&MP_STATE_VM(mp_kbd_exception))) {
++                    sched_kbd_raised = true;
++                }
++                #endif
+                 MICROPY_END_ATOMIC_SECTION(atomic_state);
+                 nlr_raise(obj);
+             }
+-- 
+2.43.0
