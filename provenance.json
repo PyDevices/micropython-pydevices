@@ -196,6 +196,9 @@
   },
   "0065-micropython-esp32-soft-reset-clears-dupterm-before-the-heap-sweep.patch": {
    "sha256": "aefcf6ae72412b67d9547c99db155e7d2bce99f6c603c9bcf479fc4cfddd5ec7"
+  },
+  "0066-micropython-py-scheduler-a-ctrl-c-in-a-callback-reaches-the-running-code.patch": {
+   "sha256": "e2616de1a842051c529040b2561249879e839f18bcc2f89c3c9f07dacb0e9a14"
   }
  },
  "tinyusb_patches": {
