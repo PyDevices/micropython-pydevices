@@ -22,6 +22,9 @@
 // usbhost_host.c: the host task's devices and the client lock.
 int usbhost_host_dev_lookup(uint32_t dev_id, usb_device_handle_t *out);
 usb_host_client_handle_t usbhost_host_client_get(void);
+// The largest IN and periodic OUT packet the installed FIFO split takes, in
+// bytes; 0 for IN when the board's Kconfig bias chose the split.
+void usbhost_host_fifo_limits(uint32_t *in_bytes, uint32_t *ptx_bytes);
 void usbhost_host_lock(void);
 void usbhost_host_unlock(void);
 void usbhost_host_lock_debug(const char *tag);

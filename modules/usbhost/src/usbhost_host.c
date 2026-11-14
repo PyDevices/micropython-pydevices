@@ -588,14 +588,23 @@ static volatile int usbhost_host_install_result = USBHOST_HOST_INSTALL_PENDING;
 // the presets compete: a camera wants IN room, a speaker wants periodic OUT
 // room, and the board's Kconfig bias serves one of them. So a session for
 // "uvc" leans IN; one for "uac" without "uvc" gets a split that carries both
-// a speaker's packet (a 2.0 device sends a millisecond plus one frame, 196
-// bytes at 48 kHz stereo) and a microphone's; anything else keeps the
+// a speaker's packet (the size its endpoint declares, which can be twice
+// what it sends) and a microphone's; anything else keeps the
 // Kconfig bias (all zeros = "decide from Kconfig" to IDF). The line counts
 // follow IDF's own formulas (hcd_dwc.c _calculate_fifo_from_bias) over the
 // 200 lines its Kconfig table accounts for on the S2/S3 (IN 600 = (152-2)*4,
 // non-periodic OUT 64 = 16*4, periodic OUT 128 = 32*4); a split that uses
 // fewer lines than the hardware has is valid, one that uses more aborts in
 // the HAL. The P4's high-speed controller has four times the FIFO.
+// The split this session installed, in lines (rx, nptx, ptx); all zero when
+// the Kconfig bias chose it.
+static uint32_t usbhost_host_fifo_lines[3];
+
+void usbhost_host_fifo_limits(uint32_t *in_bytes, uint32_t *ptx_bytes) {
+    *in_bytes = usbhost_host_fifo_lines[0] ? (usbhost_host_fifo_lines[0] - 2) * 4 : 0;
+    *ptx_bytes = usbhost_host_fifo_lines[2] * 4;
+}
+
 static void usbhost_host_fifo_for(uint16_t classes, usb_host_config_t *config) {
     #if defined(CONFIG_IDF_TARGET_ESP32P4)
     const uint32_t k = 4;
@@ -621,11 +630,21 @@ static void usbhost_host_fifo_for(uint16_t classes, usb_host_config_t *config) {
         why = uac ? "uvc asked for, so IN-leaning; a 2.0 speaker's packet will not fit"
                   : "uvc asked for, so IN-leaning";
     } else if (uac) {
-        // IN 528, non-periodic OUT 64, periodic OUT 200: a speaker at 48 kHz
-        // stereo (196) and a microphone (192) in the same session.
+        #if defined(CONFIG_IDF_TARGET_ESP32P4)
+        // Four times the S2/S3's lines: IN 1880, periodic OUT 800 bytes.
         config->fifo_settings_custom.rx_fifo_lines = 134 * k - rx_cut;
         config->fifo_settings_custom.nptx_fifo_lines = nptx;
         config->fifo_settings_custom.ptx_fifo_lines = 50 * k;
+        #else
+        // IN 344, non-periodic OUT 64, periodic OUT 384, all 200 lines. A
+        // speaker's endpoint is claimed at the packet size it declares, not
+        // the one it sends, and store-bought USB-C dongles declare 384 bytes
+        // for 48 kHz stereo (192 sent): 200 refused them. A microphone at
+        // 48 kHz stereo, 16 or 24 bits (196 or 294), still fits IN.
+        config->fifo_settings_custom.rx_fifo_lines = 88;
+        config->fifo_settings_custom.nptx_fifo_lines = nptx;
+        config->fifo_settings_custom.ptx_fifo_lines = 96;
+        #endif
         why = "uac asked for without uvc, so periodic OUT gets the room a speaker needs";
     } else {
         why = "the board's Kconfig bias";
@@ -636,6 +655,9 @@ static void usbhost_host_fifo_for(uint16_t classes, usb_host_config_t *config) {
     // readable from this line alone.
     const unsigned rx = config->fifo_settings_custom.rx_fifo_lines;
     const unsigned ptx = config->fifo_settings_custom.ptx_fifo_lines;
+    usbhost_host_fifo_lines[0] = rx;
+    usbhost_host_fifo_lines[1] = config->fifo_settings_custom.nptx_fifo_lines;
+    usbhost_host_fifo_lines[2] = ptx;
     printf("usbhost_host: FIFO split rx=%u nptx=%u ptx=%u lines (%s)",
         rx, (unsigned)config->fifo_settings_custom.nptx_fifo_lines, ptx, why);
     if (rx) {

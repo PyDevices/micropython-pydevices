@@ -11,8 +11,11 @@ Which device classes the packages drive, and which boards run them, are in
 The controller's
 FIFO split is fixed when the host starts, so `usb.core.start(classes=...)` chooses it
 from what was asked for (`uvc` leans IN; `uac` without `uvc` makes room for a
-speaker's 196-byte packet and a microphone's; otherwise the board's Kconfig
-bias), and a camera and a USB Audio 2.0 speaker cannot share one `start()`;
+speaker that declares packets of up to 384 bytes on the S2/S3, as 48 kHz
+stereo dongles do, and a microphone's; otherwise the board's Kconfig
+bias), and a camera and a USB Audio 2.0 speaker cannot share one `start()`.
+An endpoint bigger than the split takes is refused with `OSError` E2BIG,
+and the host prints the split's limits;
 concurrent sessions are bounded by a
 *channel budget*, not by class -- the ESP32-S3 has eight host channels
 (`OTG_NUM_HOST_CHAN`), a bulk pair costs two and an interrupt IN costs
