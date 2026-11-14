@@ -59,6 +59,13 @@ can test `CIRCUITPY`, which every CircuitPython port sets, unix included.
 pygraphics also passes its own define from its `micropython.mk`, so it knows it
 came in as a user C module and not through CircuitPython's shared-bindings.
 
+A module's `MP_QSTR_` names mean what they say, as on MicroPython.
+CircuitPython's own C reads an HTML entity name between underscores as a
+character (`MP_QSTR_UTF_hyphen_8` is `"UTF-8"`), and without patch
+`0011-qstrs-from-user-c-modules-keep-their-names.patch` it read a user C
+module's names the same way, so LVGL's `set_style_image_recolor` came out as
+`set_styleℑrecolor`.
+
 Two things a module's C has to absorb on CircuitPython's MCU ports. They append
 `-Werror` warnings (`sign-compare`, `float-equal`, `cast-align` on atmel-samd;
 `float-equal`, `double-promotion`, `cast-align` on espressif) after the module's

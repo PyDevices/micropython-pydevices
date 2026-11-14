@@ -1,0 +1,77 @@
+CircuitPython's makeqstrdefs.py reads an HTML entity name between underscores
+in an MP_QSTR_ name as an escaped character, so CircuitPython's own C can write
+MP_QSTR_UTF_hyphen_8 for "UTF-8". A user C module is written for MicroPython,
+where a qstr is its name as written, and LVGL's binding has hundreds of names
+that contain an entity by chance: set_style_image_recolor became
+set_styleℑrecolor, add_subject_set_int_event add_subject_set∫event,
+style_prop_get_default style∝get_default, get_style_space_bottom
+"get_style bottom". mkrules.mk now lists the user C module sources
+(SRC_USERMOD_C and SRC_USERMOD_CXX) in a file, and makeqstrdefs.py takes the
+qstrs in those sources as written. CircuitPython's own sources are unescaped as
+before.
+
+diff --git a/py/makeqstrdefs.py b/py/makeqstrdefs.py
+index 3bc81bf596..ca11d34f85 100644
+--- a/py/makeqstrdefs.py
++++ b/py/makeqstrdefs.py
+@@ -163,6 +163,18 @@ def qstr_unescape(qstr):
+     return qstr
+ 
+ 
++# CIRCUITPY-CHANGE: added. A user C module is written for MicroPython, where the
++# qstr MP_QSTR_set_style_image_recolor names is "set_style_image_recolor", so
++# the escapes above aren't undone in its sources. QSTR_VERBATIM_SOURCES names
++# a file listing them, written by py/mkrules.mk.
++def verbatim_sources():
++    listing = os.environ.get("QSTR_VERBATIM_SOURCES")
++    if not listing:
++        return frozenset()
++    with open(listing) as f:
++        return frozenset(os.path.realpath(p) for p in f.read().split())
++
++
+ # CIRCUITPY-CHANGE: output_filename as an arg
+ def process_file(f, output_filename=None):
+     # match gcc-like output (# n "file") and msvc-like output (#line n "file")
+@@ -181,6 +193,9 @@ def process_file(f, output_filename=None):
+     re_translate = re.compile(r"MP_COMPRESSED_ROM_TEXT\(\"((?:(?=(\\?))\2.)*?)\"\)")
+     output = []
+     last_fname = None
++    # CIRCUITPY-CHANGE: added
++    verbatim = verbatim_sources()
++    unescape = True
+     for line in f:
+         if line.isspace():
+             continue
+@@ -189,6 +204,8 @@ def process_file(f, output_filename=None):
+             fname = m.group(1)
+             if not is_c_source(fname) and not is_cxx_source(fname):
+                 continue
++            # CIRCUITPY-CHANGE: added
++            unescape = os.path.realpath(fname) not in verbatim
+             if fname != last_fname and output_filename is None:
+                 write_out(last_fname, output)
+                 output = []
+@@ -198,7 +215,7 @@ def process_file(f, output_filename=None):
+             if args.mode == _MODE_QSTR:
+                 name = match.replace("MP_QSTR_", "")
+                 # CIRCUITPY-CHANGE: undo character escapes in qstrs in C code
+-                output.append("Q(" + qstr_unescape(name) + ")")
++                output.append("Q(" + (qstr_unescape(name) if unescape else name) + ")")
+             elif args.mode in (_MODE_COMPRESS, _MODE_MODULE, _MODE_ROOT_POINTER):
+                 output.append(match)
+ 
+diff --git a/py/mkrules.mk b/py/mkrules.mk
+index fe4bf9a3d1..166595972b 100644
+--- a/py/mkrules.mk
++++ b/py/mkrules.mk
+@@ -158,7 +158,8 @@ $(HEADER_BUILD)/qstr.i.last: $(SRC_QSTR) $(QSTR_GLOBAL_DEPENDENCIES) | $(QSTR_GL
+ 
+ $(HEADER_BUILD)/qstr.split: $(HEADER_BUILD)/qstr.i.last
+ 	$(STEPECHO) "GEN $@"
+-	$(Q)$(PYTHON) $(PY_SRC)/makeqstrdefs.py split qstr $< $(HEADER_BUILD)/qstr _
++	$(file >$(HEADER_BUILD)/qstr.verbatim,$(SRC_USERMOD_C) $(SRC_USERMOD_CXX))
++	$(Q)QSTR_VERBATIM_SOURCES=$(HEADER_BUILD)/qstr.verbatim $(PYTHON) $(PY_SRC)/makeqstrdefs.py split qstr $< $(HEADER_BUILD)/qstr _
+ 	$(Q)$(TOUCH) $@
+ 
+ $(QSTR_DEFS_COLLECTED): $(HEADER_BUILD)/qstr.split
