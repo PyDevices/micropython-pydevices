@@ -39,7 +39,7 @@ omnipython-lvgl   https://github.com/PyDevices/omnipython-lvgl.git    f7d90cc385
 # repository until the rename. The packages the library builds from other
 # repositories (audiocomponents' two) are pinned by tag in its lib-lock.json,
 # not here.
-omnipython-lib    https://github.com/PyDevices/pydevices.git          1bc89d6c9ffad92c6c13dbc84a55b9194aec7256
+omnipython-lib    https://github.com/PyDevices/pydevices.git          72c79d2446e2413fbc4a0b923ca52e444cd77e04
 
 # esp-vision (espressif/esp-vision, Apache-2.0): the source of the tflite
 # module and, later, its image stack. modules/.esp-vision/fetch.sh puts it at

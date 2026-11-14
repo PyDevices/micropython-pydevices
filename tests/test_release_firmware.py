@@ -149,8 +149,8 @@ class Table(unittest.TestCase):
     def test_every_micropython_esp32_and_rp2_cell_keeps_its_filesystem(self):
         rf.check_cells()
         kept = [c["id"] for c in rf.CELLS if c.get("fs")]
-        self.assertEqual(len(kept), 6)
-        self.assertEqual([c["id"] for c in rf.CELLS if c.get("autosize")], ["mp-s3-lcd7", "mp-s3-lcd43", "mp-s3-octal", "mp-s3", "mp-s3-8mb"])
+        self.assertEqual(len(kept), 5)
+        self.assertEqual([c["id"] for c in rf.CELLS if c.get("autosize")], ["mp-s3-lcd7", "mp-s3-lcd43", "mp-s3-octal", "mp-s3", "mp-s3-8mb", "mp-s3-tembed"])
         for c in rf.CELLS:
             args = rf.build_args(c)
             if c.get("fs"):
@@ -161,11 +161,11 @@ class Table(unittest.TestCase):
     def test_a_cell_that_names_no_filesystem_is_caught(self):
         for planted in (None, "2690K", "big"):
             cells = [dict(c) for c in rf.CELLS]
-            next(c for c in cells if c["id"] == "mp-s3-tembed")["fs"] = planted
+            next(c for c in cells if c["id"] == "mp-p4-panel")["fs"] = planted
             with mock.patch.object(rf, "CELLS", cells):
                 with self.assertRaises(rf.Failed) as cm:
                     rf.matrix(False)
-                self.assertIn("mp-s3-tembed: names no filesystem to keep", str(cm.exception))
+                self.assertIn("mp-p4-panel: names no filesystem to keep", str(cm.exception))
 
     def test_an_autosize_cell_that_also_names_a_filesystem_is_caught(self):
         cells = [dict(c, fs="2688K") if c["id"] == "mp-s3-lcd7" else c for c in rf.CELLS]
@@ -339,7 +339,7 @@ class Assemble(unittest.TestCase):
         self.fails_with("magic 0xE9")
 
     def test_an_app_that_is_not_in_the_flash_image_is_caught(self):
-        d = self.indir / "mp-s3-tembed"
+        d = self.indir / "mp-p4-panel"
         meta = json.loads((d / "cell.json").read_text())
         f = d / meta["files"]["app"]["file"]
         f.write_bytes(b"\xe9" + b"\x01" * 100000)
@@ -465,7 +465,6 @@ class Assemble(unittest.TestCase):
         fs = {b["id"]: (b.get("fs_offset"), b.get("fs_bytes")) for b in doc["builds"]}
         self.assertEqual(fs["mp-s3-lcd7"], ("0x570000", AUTOSIZED_FS))
         self.assertEqual(fs["mp-s3-lcd43"], ("0x570000", AUTOSIZED_FS))
-        self.assertEqual(fs["mp-s3-tembed"], ("0x560000", 10880 * 1024))
         self.assertEqual(fs["mp-p4-panel"], ("0x600000", 26624 * 1024))
         self.assertEqual(fs["mp-p4-eye"], ("0x910000", 7104 * 1024))
         self.assertEqual(fs["cp-s3-lcd7"], (None, None))
@@ -488,10 +487,10 @@ class Assemble(unittest.TestCase):
 
     def test_a_filesystem_that_moved_is_caught(self):
         # autosize's table for a bigger image: the app grown by 64 KB, the filesystem after it.
-        self.rewrite("mp-s3-tembed", "partitions", table_bin([
+        self.rewrite("mp-p4-panel", "partitions", table_bin([
             ("nvs", 1, 2, 0x9000, 0x6000), ("phy_init", 1, 1, 0xF000, 0x1000),
-            ("factory", 0, 0, 0x10000, 0x550000), ("coredump", 1, 3, 0x560000, 0x10000)]))
-        self.fails_with("mp-s3-tembed: the filesystem is 10816 KB at 0x570000, not the 10880K at 0x560000")
+            ("factory", 0, 0, 0x10000, 0x600000), ("coredump", 1, 3, 0x610000, 0x10000)]))
+        self.fails_with("mp-p4-panel: the filesystem is 26496 KB at 0x620000, not the 26624K at 0x600000")
 
     def test_a_named_filesystem_in_the_wrong_place_is_caught(self):
         self.rewrite("mp-p4-devkit", "partitions", table_bin([
@@ -500,11 +499,11 @@ class Assemble(unittest.TestCase):
         self.fails_with("mp-p4-devkit: the filesystem is 11200 KB at 0x510000")
 
     def test_a_flash_image_that_runs_into_the_filesystem_is_caught(self):
-        d = self.indir / "mp-s3-tembed"
+        d = self.indir / "mp-p4-panel"
         meta = json.loads((d / "cell.json").read_text())
         flash = (d / meta["files"]["flash"]["file"]).read_bytes()
-        self.rewrite("mp-s3-tembed", "flash", flash + b"\xff" * (0x560000 - len(flash) + 1))
-        self.fails_with("mp-s3-tembed: flash.bin writes past 0x560000, into the filesystem")
+        self.rewrite("mp-p4-panel", "flash", flash + b"\xff" * (0x600000 - len(flash) + 1))
+        self.fails_with("mp-p4-panel: flash.bin writes past 0x600000, into the filesystem")
 
     def pico2_set(self):
         for c in rf.wanted(True):
