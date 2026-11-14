@@ -31,7 +31,15 @@
 #include "esp_err.h"
 #include "hal/dma2d_ll.h"
 #include "esp_async_memcpy.h"
+#include "esp_idf_version.h"
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+#include "esp_cache.h"
+#if defined(CONFIG_SECURE_FLASH_ENC_ENABLED)
+#include "esp_psram.h"
+#endif
+#else
 #include "esp_dma_utils.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #endif
@@ -77,8 +85,17 @@ static bool jpegio_hw_reserve(jpegio_hw_buf_t *b, size_t need, bool encoder, int
     return b->buf != NULL;
 }
 
+// ESP-IDF 6 (CircuitPython) refuses any engine buffer in encrypted PSRAM.
+static bool jpegio_hw_unencrypted(const void *p) {
+    #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0) && defined(CONFIG_SECURE_FLASH_ENC_ENABLED)
+    return !esp_ptr_external_ram(p) || esp_psram_ptr_is_no_enc(p);
+    #else
+    return true;
+    #endif
+}
+
 static bool jpegio_hw_dma_readable(const void *p) {
-    return esp_ptr_dma_capable(p) || esp_ptr_dma_ext_capable(p);
+    return (esp_ptr_dma_capable(p) || esp_ptr_dma_ext_capable(p)) && jpegio_hw_unencrypted(p);
 }
 
 // --- encode ------------------------------------------------------------------
@@ -312,6 +329,26 @@ static const char *jpegio_hw_dma_copy(void *dst, const void *src, size_t n, bool
     return NULL;
 }
 
+// jpeg_decoder_process's own test of an output buffer, which ESP-IDF 6 made
+// stricter: there the address and the size are aligned to the cache line of
+// that address and to the 2D-DMA's 16 bytes, in unencrypted PSRAM; ESP-IDF 5.5
+// asks for its DMA alignment of 4 and the cache's.
+static bool jpegio_hw_dec_writable(void *p, size_t size) {
+    if (!esp_ptr_external_ram(p)) {
+        return false;
+    }
+    #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+    size_t align = esp_cache_get_line_size_by_addr(p);
+    if (align < 16) {
+        align = 16;
+    }
+    return (((uintptr_t)p | size) & (align - 1)) == 0 && jpegio_hw_unencrypted(p);
+    #else
+    esp_dma_mem_info_t info = { .dma_alignment_bytes = 4 };
+    return esp_dma_is_buffer_alignment_satisfied(p, size, info);
+    #endif
+}
+
 const char *jpegio_hw_decode(const uint8_t *data, size_t len, int width, int height,
     uint16_t *pixels, size_t stride, int x, int y) {
     if (!JPEGIO_HW_WRAP) {
@@ -349,10 +386,8 @@ const char *jpegio_hw_decode(const uint8_t *data, size_t len, int width, int hei
     // output, in memory it can write: no copy at all.
     uint16_t *dst = pixels + (size_t)y * stride + x;
     size_t out_size = pw * ph * 2;
-    // The driver's own test of an output buffer (jpeg_decoder_process).
-    esp_dma_mem_info_t dma_info = { .dma_alignment_bytes = 4 };
     bool direct = pw == (size_t)width && ph == (size_t)height && stride == (size_t)width
-        && esp_ptr_external_ram(dst) && esp_dma_is_buffer_alignment_satisfied(dst, out_size, dma_info);
+        && jpegio_hw_dec_writable(dst, out_size);
     uint8_t *out = (uint8_t *)dst;
     if (!direct) {
         if (!jpegio_hw_reserve(&jpegio_hw_dec_out, out_size, false, JPEG_DEC_ALLOC_OUTPUT_BUFFER)) {
