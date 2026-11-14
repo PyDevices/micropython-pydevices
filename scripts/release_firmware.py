@@ -80,22 +80,24 @@ MB = 1024 * 1024
 # the image instead, so the filesystem is whatever flash is left: it can move
 # with any release, and the notes say so whenever it does.
 CELLS = [
+    # The three P4 images add the opt-in vision and tflite modules ("all" leaves them out) for the
+    # object-detection and wake-word programs.
     # One image for the revision 3 P4 boards with a C6 on the DEV-KIT's pins: the DEV-KIT (16 MB) and
     # the Pico-sized ESP32-P4-WIFI6 (32 MB). The size of PSRAM is read at boot, and a 16 MB image is
     # the one a 16 MB board can start (an image written for 32 MB doesn't start on 16), so a 32 MB
     # board runs it and keeps the table it has when you write only the app.
     dict(id="mp-p4-devkit", label="ESP32-P4-WIFI6-DEV-KIT and ESP32-P4-WIFI6 (Pico-sized)", interpreter="micropython", port="esp32",
-         board="ESP32_GENERIC_P4", variant="WIFI6_DEV_KIT_H2", flash="16MB", modules="all",
-         chip="esp32p4", offset=0x2000, kind="esp32", deps="idf", fs="10176K"),
+         board="ESP32_GENERIC_P4", variant="WIFI6_DEV_KIT_H2", flash="16MB", modules="all,vision,tflite",
+         chip="esp32p4", offset=0x2000, kind="esp32", deps="idf", fs="7104K"),
     # A P4 before chip revision 3: the bootloader refuses a revision 3 image on it, and a revision 3
     # chip refuses this one.
     dict(id="mp-p4-panel", label="ESP32-P4-WIFI6-Touch-LCD-4B (P4 before revision 3)", interpreter="micropython", port="esp32",
-         board="ESP32_GENERIC_P4", variant="PRE_REV3_C6_WIFI", flash="32MB", modules="all",
-         chip="esp32p4", offset=0x2000, kind="esp32", deps="idf", fs="26624K"),
+         board="ESP32_GENERIC_P4", variant="PRE_REV3_C6_WIFI", flash="32MB", modules="all,vision,tflite",
+         chip="esp32p4", offset=0x2000, kind="esp32", deps="idf", fs="23488K"),
     # The P4X-EYE wires its C6 to other pins than the DEV-KIT's (compiled into the image) and puts the
     # REPL on the USB Serial/JTAG port the DEV-KIT's image moves, so it can't share one.
     dict(id="mp-p4-eye", label="ESP32-P4X-EYE", interpreter="micropython", port="esp32",
-         board="ESP32_GENERIC_P4", variant="P4X_EYE", flash="16MB", modules="all,vision",
+         board="ESP32_GENERIC_P4", variant="P4X_EYE", flash="16MB", modules="all,vision,tflite",
          chip="esp32p4", offset=0x2000, kind="esp32", deps="idf", fs="7104K"),
     dict(id="mp-s3-lcd7", label="ESP32-S3-Touch-LCD-7", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_S3", variant="LCD_7", flash="8MB", modules="all",

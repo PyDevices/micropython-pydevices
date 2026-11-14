@@ -922,7 +922,8 @@ class Esp32KeepFs(unittest.TestCase):
         # The app partitions the release workflow's set of 2026-11-09 shipped with,
         # each grown by autosize but the DEV-KIT's, and the Touch-LCD-4B's grown
         # 256 KB more for esp_cam_sensor 2.7.0's JX-H63P.
-        shipped = {"mp-p4-devkit": 0x600000, "mp-p4-panel": 0x5F0000, "mp-s3-lcd7": 0x540000,
+        # The P4 cells have since grown to the P4X-EYE's 9 MB slot for tflite and vision.
+        shipped = {"mp-p4-devkit": 0x900000, "mp-p4-panel": 0x900000, "mp-s3-lcd7": 0x540000,
                    "mp-s3-lcd43": 0x540000, "mp-p4-eye": 0x900000}
         for c in rf.CELLS:
             if c["interpreter"] != "micropython" or c["kind"] != "esp32" or "fs" not in c:
