@@ -220,6 +220,23 @@ int usbhost_xfer_claim(uint32_t dev_id, uint8_t itf, uint8_t alt) {
     }
     usbhost_xfer_audio_fs_interval(dev, itf, alt);
     esp_err_t err = usb_host_interface_claim(usbhost_host_client_get(), dev, itf, alt);
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        // IDF refuses an endpoint whose declared packet is bigger than the
+        // controller's FIFO for it. Say so with the sizes, and raise E2BIG
+        // rather than a busy that sends the reader looking for another claim.
+        uint32_t in_b, ptx_b;
+        usbhost_host_fifo_limits(&in_b, &ptx_b);
+        if (in_b) {
+            printf("usbhost_xfer: interface %d alternate %d has an endpoint bigger than this host's FIFO "
+                "takes (IN up to %u B, periodic OUT up to %u B)\n", itf, alt, (unsigned)in_b, (unsigned)ptx_b);
+        } else {
+            printf("usbhost_xfer: interface %d alternate %d has an endpoint bigger than this host's FIFO "
+                "takes (the board's Kconfig split; start the host with classes=(\"uac\",) for a speaker)\n",
+                itf, alt);
+        }
+        r = -MP_E2BIG;
+        goto out;
+    }
     if (err != ESP_OK) {
         r = err == ESP_ERR_NOT_FOUND ? -MP_ENOENT : -MP_EBUSY;
         goto out;
