@@ -125,7 +125,7 @@ CELLS = [
     # megabytes of heap; this set is what runs in a few hundred KB.
     dict(id="mp-s3-8mb", label="ESP32-S3 with no PSRAM, 8 MB flash (QT Py ESP32-S3 without PSRAM)",
          interpreter="micropython", port="esp32", board="ESP32_GENERIC_S3", variant="NO_PSRAM", flash="8MB",
-         modules="pydevices,displayif,pngio,palettes,iconkit,svgio,audioif,mdns",
+         modules="pydevices,displayif,pngio,palettes,iconkit,svgio,mdns",
          chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
     dict(id="mp-s3-tembed", label="LilyGO T-Embed S3", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_S3", variant="T_EMBED", flash="16MB", modules="all",
