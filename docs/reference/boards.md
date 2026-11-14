@@ -18,8 +18,8 @@ top. Add `--modules` to any of these:
 | LilyGO T-Embed S3 | `--port esp32 --board ESP32_GENERIC_S3 --variant T_EMBED --flash 16MB` |
 | Ai-Thinker ESP32-Audio-Kit (ESP32-A1S), CPU at 240 MHz, flash and PSRAM at 80 MHz | `--port esp32 --board ESP32_GENERIC --variant AUDIO_KIT --flash 4MB` (write the bootloader with the app) |
 | Adafruit Qualia ESP32-S3, LilyGO T-Display-S3, LilyGO T-HMI: S3 boards with octal PSRAM | `--port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 16MB`; every release carries this image |
-| Adafruit QT Py ESP32-S3 (8 MB flash, 2 MB PSRAM), WT32-SC01 Plus, Unexpected Maker FeatherS3 and other S3 boards with quad PSRAM | `--port esp32 --board ESP32_GENERIC_S3 --flash 8MB`; every release carries this image, and a board with more flash runs it too |
-| An S3 board with no PSRAM, such as the QT Py ESP32-S3 without it | `--port esp32 --board ESP32_GENERIC_S3 --variant NO_PSRAM --flash 8MB --modules pydevices,displayif,pngio,palettes,iconkit,svgio,mdns`; every release carries this image |
+| Adafruit QT Py ESP32-S3 that has 2 MB of PSRAM, WT32-SC01 Plus, Unexpected Maker FeatherS3 and other S3 boards with quad PSRAM | `--port esp32 --board ESP32_GENERIC_S3 --flash 8MB`; every release carries this image, and a board with more flash runs it too |
+| An S3 board with no PSRAM, such as the QT Py ESP32-S3 that has none | `--port esp32 --board ESP32_GENERIC_S3 --variant NO_PSRAM --flash 8MB --modules pydevices,displayif,pngio,palettes,iconkit,svgio,mdns`; every release carries this image |
 | Adafruit QT Py ESP32 Pico (8 MB flash, 2 MB PSRAM), CPU at 240 MHz, flash and PSRAM at 80 MHz | `--port esp32 --board ESP32_GENERIC --variant QTPY_PICO --flash 8MB` (write the bootloader with the app) |
 | Raspberry Pi Pico (RP2040) | `--port rp2 --board RPI_PICO` (not `--modules all`: [it doesn't fit](../guides/fit-firmware-on-a-small-flash.md)) |
 | Raspberry Pi Pico 2 (RP2350) | `--port rp2 --board RPI_PICO2` |
@@ -43,6 +43,14 @@ Wi-Fi can't join a WPA2 network. Most S3 boards have PSRAM. For one that
 doesn't, build the `NO_PSRAM` variant, which keeps TLS in internal RAM. It
 leaves out LVGL and the other modules that want megabytes of heap, so name the
 modules you need.
+
+Adafruit sells the QT Py ESP32-S3 with and without PSRAM, and the two need
+different images. To tell which you have, plug the board in and run
+`esptool chip-id`: a board with PSRAM has an `Embedded PSRAM` entry on its
+Features line, and one without has none. With it, take the quad-PSRAM image
+(`ESP32_GENERIC_S3`, no variant); without it, the `NO_PSRAM` image. The
+quad-PSRAM image boots on a board with none, but the board can't join a WPA2
+network.
 
 For a board that isn't listed, see [Build for a board](../guides/build-for-a-board.md#a-board-that-isnt-in-the-table).
 
