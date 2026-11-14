@@ -17,8 +17,8 @@ top. Add `--modules` to any of these:
 | Waveshare ESP32-S3-Touch-LCD-4.3 | `--port esp32 --board ESP32_GENERIC_S3 --variant LCD_4_3 --flash 8MB` |
 | LilyGO T-Embed S3 | `--port esp32 --board ESP32_GENERIC_S3 --variant T_EMBED --flash 16MB` |
 | Ai-Thinker ESP32-Audio-Kit (ESP32-A1S), CPU at 240 MHz, flash and PSRAM at 80 MHz | `--port esp32 --board ESP32_GENERIC --variant AUDIO_KIT --flash 4MB` (write the bootloader with the app) |
-| Adafruit Qualia ESP32-S3, LilyGO T-Display-S3, LilyGO T-HMI, WT32-SC01 Plus, Unexpected Maker FeatherS3: S3 boards with octal PSRAM | `--port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 16MB`; every release carries this image |
-| Adafruit QT Py ESP32-S3 (8 MB flash, 2 MB PSRAM) and other S3 boards with quad PSRAM | `--port esp32 --board ESP32_GENERIC_S3 --flash 8MB`; every release carries this image, and a board with more flash runs it too |
+| Adafruit Qualia ESP32-S3, LilyGO T-Display-S3, LilyGO T-HMI: S3 boards with octal PSRAM | `--port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 16MB`; every release carries this image |
+| Adafruit QT Py ESP32-S3 (8 MB flash, 2 MB PSRAM), WT32-SC01 Plus, Unexpected Maker FeatherS3 and other S3 boards with quad PSRAM | `--port esp32 --board ESP32_GENERIC_S3 --flash 8MB`; every release carries this image, and a board with more flash runs it too |
 | An S3 board with no PSRAM, such as the QT Py ESP32-S3 without it | `--port esp32 --board ESP32_GENERIC_S3 --variant NO_PSRAM --flash 8MB --modules pydevices,displayif,pngio,palettes,iconkit,svgio,mdns`; every release carries this image |
 | Adafruit QT Py ESP32 Pico (8 MB flash, 2 MB PSRAM), CPU at 240 MHz, flash and PSRAM at 80 MHz | `--port esp32 --board ESP32_GENERIC --variant QTPY_PICO --flash 8MB` (write the bootloader with the app) |
 | Raspberry Pi Pico (RP2040) | `--port rp2 --board RPI_PICO` (not `--modules all`: [it doesn't fit](../guides/fit-firmware-on-a-small-flash.md)) |
