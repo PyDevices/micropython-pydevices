@@ -923,7 +923,7 @@ class Esp32KeepFs(unittest.TestCase):
         # each grown by autosize but the DEV-KIT's, and the Touch-LCD-4B's grown
         # 256 KB more for esp_cam_sensor 2.7.0's JX-H63P.
         shipped = {"mp-p4-devkit": 0x600000, "mp-p4-panel": 0x5F0000, "mp-s3-lcd7": 0x540000,
-                   "mp-s3-lcd43": 0x540000, "mp-s3-tembed": 0x540000}
+                   "mp-s3-lcd43": 0x540000, "mp-s3-tembed": 0x540000, "mp-p4-eye": 0x900000}
         for c in rf.CELLS:
             if c["interpreter"] != "micropython" or c["kind"] != "esp32" or "fs" not in c:
                 continue  # a cell with no fs autosizes its filesystem: nothing is kept

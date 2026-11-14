@@ -80,17 +80,52 @@ MB = 1024 * 1024
 # the image instead, so the filesystem is whatever flash is left: it can move
 # with any release, and the notes say so whenever it does.
 CELLS = [
-    dict(id="mp-p4-devkit", label="ESP32-P4-WIFI6-DEV-KIT", interpreter="micropython", port="esp32",
+    # One image for the revision 3 P4 boards with a C6 on the DEV-KIT's pins: the DEV-KIT (16 MB) and
+    # the Pico-sized ESP32-P4-WIFI6 (32 MB). The size of PSRAM is read at boot, and a 16 MB image is
+    # the one a 16 MB board can start (an image written for 32 MB doesn't start on 16), so a 32 MB
+    # board runs it and keeps the table it has when you write only the app.
+    dict(id="mp-p4-devkit", label="ESP32-P4-WIFI6-DEV-KIT and ESP32-P4-WIFI6 (Pico-sized)", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_P4", variant="WIFI6_DEV_KIT_H2", flash="16MB", modules="all",
          chip="esp32p4", offset=0x2000, kind="esp32", deps="idf", fs="10176K"),
-    dict(id="mp-p4-panel", label="ESP32-P4-WIFI6-Touch-LCD-4B", interpreter="micropython", port="esp32",
+    # A P4 before chip revision 3: the bootloader refuses a revision 3 image on it, and a revision 3
+    # chip refuses this one.
+    dict(id="mp-p4-panel", label="ESP32-P4-WIFI6-Touch-LCD-4B (P4 before revision 3)", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_P4", variant="PRE_REV3_C6_WIFI", flash="32MB", modules="all",
          chip="esp32p4", offset=0x2000, kind="esp32", deps="idf", fs="26624K"),
+    # The P4X-EYE wires its C6 to other pins than the DEV-KIT's (compiled into the image) and puts the
+    # REPL on the USB Serial/JTAG port the DEV-KIT's image moves, so it can't share one.
+    dict(id="mp-p4-eye", label="ESP32-P4X-EYE", interpreter="micropython", port="esp32",
+         board="ESP32_GENERIC_P4", variant="P4X_EYE", flash="16MB", modules="all,vision",
+         chip="esp32p4", offset=0x2000, kind="esp32", deps="idf", fs="7104K"),
     dict(id="mp-s3-lcd7", label="ESP32-S3-Touch-LCD-7", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_S3", variant="LCD_7", flash="8MB", modules="all",
          chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
     dict(id="mp-s3-lcd43", label="ESP32-S3-Touch-LCD-4.3", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_S3", variant="LCD_4_3", flash="8MB", modules="all",
+         chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
+    # The generic S3 images, for the boards that have no cell of their own. Each is a plain
+    # upstream board with our S3 settings, no board variant.
+    # Octal PSRAM, 16 MB flash: Adafruit Qualia ESP32-S3, LilyGO T-Display-S3, Sunton/LilyGO T-HMI,
+    # WT32-SC01 Plus (with 8 MB flash it fits too), Unexpected Maker FeatherS3 and other
+    # octal-PSRAM S3 boards.
+    dict(id="mp-s3-octal", label="ESP32-S3 with octal PSRAM (Qualia ESP32-S3, T-Display-S3, T-HMI, WT32-SC01 Plus, FeatherS3)",
+         interpreter="micropython", port="esp32", board="ESP32_GENERIC_S3", variant="SPIRAM_OCT", flash="16MB",
+         modules="all", chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
+    # Quad PSRAM (or none found), 8 MB flash: Adafruit QT Py ESP32-S3 (8 MB flash, 2 MB PSRAM) and
+    # the other 8 MB boards. 8 MB is the floor that fits the most: an image written with an 8 MB
+    # header runs on a board with 16 MB or more, keeping the rest of its flash unused, but a
+    # 16 MB image won't boot on an 8 MB board.
+    dict(id="mp-s3", label="ESP32-S3 with quad PSRAM (QT Py ESP32-S3, most 8 MB S3 boards)",
+         interpreter="micropython", port="esp32", board="ESP32_GENERIC_S3", variant=None, flash="8MB",
+         modules="all", chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
+    # No PSRAM, 8 MB flash: an S3 board with only its internal RAM, such as the Adafruit QT Py
+    # ESP32-S3 with no PSRAM. Our S3 builds put the TLS library in PSRAM, so this one is the
+    # NO_PSRAM variant, which keeps it in internal RAM and Wi-Fi joins a WPA2 network. "all" is
+    # left out because LVGL, the camera, the H.264 encoder and the audio instruments want
+    # megabytes of heap; this set is what runs in a few hundred KB.
+    dict(id="mp-s3-8mb", label="ESP32-S3 with no PSRAM, 8 MB flash (QT Py ESP32-S3 without PSRAM)",
+         interpreter="micropython", port="esp32", board="ESP32_GENERIC_S3", variant="NO_PSRAM", flash="8MB",
+         modules="pydevices,displayif,pngio,palettes,iconkit,svgio,mdns",
          chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
     dict(id="mp-s3-tembed", label="LilyGO T-Embed S3", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_S3", variant="T_EMBED", flash="16MB", modules="all",
@@ -105,6 +140,12 @@ CELLS = [
          chip="esp32s3", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-s3-lcd43", label="ESP32-S3-Touch-LCD-4.3", interpreter="circuitpython", port="espressif",
          board="waveshare_esp32s3_touch_lcd_43", variant=None, flash="8MB",
+         modules="audiodsp,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl",
+         chip="esp32s3", offset=0, kind="espressif", deps="cp-esp"),
+    # The Adafruit Qualia ESP32-S3 for RGB666 displays: 16 MB flash, 8 MB octal PSRAM, with one 4 MB
+    # app slot so LVGL fits (CircuitPython's own board has 2 MB ones).
+    dict(id="cp-s3-qualia", label="Adafruit Qualia ESP32-S3 RGB666", interpreter="circuitpython", port="espressif",
+         board="adafruit_qualia_s3_rgb666_single_app", variant=None, flash="16MB",
          modules="audiodsp,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl",
          chip="esp32s3", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-twatch", label="LilyGO T-Watch S3", interpreter="circuitpython", port="espressif",

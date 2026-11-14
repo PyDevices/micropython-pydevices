@@ -1,0 +1,13 @@
+# An S3 with no PSRAM: nothing to put the TLS library or Wi-Fi buffers in, so
+# they stay in internal RAM, where Wi-Fi can join a WPA2 network. The other S3
+# builds move them into PSRAM (sdkconfig.esp32s3), and fail without it.
+CONFIG_SPIRAM=n
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=n
+CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=n
+
+# Internal RAM is all there is, so undo what sdkconfig.esp32s3 spends on speed:
+# the caches go back to the port's sizes and Wi-Fi takes fewer receive buffers.
+CONFIG_ESP32S3_DATA_CACHE_32KB=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB=y
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
