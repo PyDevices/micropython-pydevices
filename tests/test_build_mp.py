@@ -11,6 +11,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -350,6 +351,83 @@ class Lvgl(unittest.TestCase):
             finally:
                 build_mp.REPO, build_mp.MODULES_DIR = saved
             self.assertIn("full 40-character commit", str(cm.exception))
+
+
+class ModulesFollowTheLock(unittest.TestCase):
+    """A module build_mp.py cloned itself moves to the commit DEPENDENCIES.lock
+    pins on every build, and a checkout it can't move safely stops the build."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.upstream = GitRepo.git_repo(self.tmp / "up")
+        self.old = self.commit(self.upstream)
+        (self.upstream / "f.py").write_text("x = 2\n")
+        self.git(self.upstream, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "two")
+        self.new = self.commit(self.upstream)
+        (self.tmp / "modules").mkdir()
+        saved = build_mp.REPO, build_mp.MODULES_DIR
+        build_mp.REPO, build_mp.MODULES_DIR = self.tmp, self.tmp / "modules"
+        self.addCleanup(lambda: setattr(build_mp, "REPO", saved[0]) or setattr(build_mp, "MODULES_DIR", saved[1]))
+        self.dest = self.tmp / "modules" / "pygraphics"
+
+    @staticmethod
+    def git(path, *args):
+        subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True)
+
+    @staticmethod
+    def commit(path):
+        return subprocess.run(["git", "-C", str(path), "rev-parse", "HEAD"], text=True,
+                              capture_output=True, check=True).stdout.strip()
+
+    def pin_at(self, commit):
+        (self.tmp / "DEPENDENCIES.lock").write_text(f"pygraphics {self.upstream.as_uri()} {commit}\n")
+
+    def build(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            build_mp.ensure_modules(None)
+        return out.getvalue()
+
+    def test_a_cloned_module_follows_a_moved_pin(self):
+        self.pin_at(self.old)
+        self.build()
+        self.assertEqual(self.commit(self.dest), self.old)
+        self.pin_at(self.new)
+        said = self.build()
+        self.assertEqual(self.commit(self.dest), self.new)
+        self.assertEqual((self.dest / "f.py").read_text(), "x = 2\n")
+        self.assertIn(f"pygraphics: moved from {self.old[:12]} to {self.new[:12]}", said)
+
+    def test_a_module_at_its_pin_is_left_alone(self):
+        self.pin_at(self.old)
+        self.build()
+        self.assertNotIn("moved", self.build())
+
+    def test_a_module_with_local_changes_stops_the_build(self):
+        self.pin_at(self.old)
+        self.build()
+        (self.dest / "f.py").write_text("mine\n")
+        self.pin_at(self.new)
+        with self.assertRaises(SystemExit) as cm:
+            self.build()
+        self.assertIn("local changes", str(cm.exception))
+        self.assertEqual((self.dest / "f.py").read_text(), "mine\n")
+
+    def test_a_pin_that_cannot_be_fetched_stops_the_build(self):
+        self.pin_at(self.old)
+        self.build()
+        self.pin_at("0" * 40)
+        with self.assertRaises(SystemExit) as cm:
+            self.build()
+        self.assertIn("could not fetch", str(cm.exception))
+        self.assertEqual(self.commit(self.dest), self.old)
+
+    def test_a_linked_module_wins_over_the_pin(self):
+        self.pin_at(self.new)
+        (self.dest).symlink_to(self.upstream)
+        self.build()
+        self.assertTrue(self.dest.is_symlink())
 
 
 class LibraryPackages(unittest.TestCase):
@@ -847,8 +925,8 @@ class Esp32KeepFs(unittest.TestCase):
         shipped = {"mp-p4-devkit": 0x600000, "mp-p4-panel": 0x5F0000, "mp-s3-lcd7": 0x540000,
                    "mp-s3-lcd43": 0x540000, "mp-s3-tembed": 0x540000}
         for c in rf.CELLS:
-            if c["interpreter"] != "micropython" or c["kind"] != "esp32":
-                continue
+            if c["interpreter"] != "micropython" or c["kind"] != "esp32" or "fs" not in c:
+                continue  # a cell with no fs autosizes its filesystem: nothing is kept
             table = build_mp.esp32_table(c["chip"], c["board"], c["variant"])
             self.assertIsNotNone(table, f"{c['id']} needs a table build_mp.py knows before it builds")
             parts = self.keep(rf.size_bytes(c["fs"]), int(c["flash"][:-2]), src=table)
