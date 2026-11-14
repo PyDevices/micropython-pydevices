@@ -925,8 +925,8 @@ class Esp32KeepFs(unittest.TestCase):
         shipped = {"mp-p4-devkit": 0x600000, "mp-p4-panel": 0x5F0000, "mp-s3-lcd7": 0x540000,
                    "mp-s3-lcd43": 0x540000, "mp-s3-tembed": 0x540000}
         for c in rf.CELLS:
-            if c["interpreter"] != "micropython" or c["kind"] != "esp32":
-                continue
+            if c["interpreter"] != "micropython" or c["kind"] != "esp32" or "fs" not in c:
+                continue  # a cell with no fs autosizes its filesystem: nothing is kept
             table = build_mp.esp32_table(c["chip"], c["board"], c["variant"])
             self.assertIsNotNone(table, f"{c['id']} needs a table build_mp.py knows before it builds")
             parts = self.keep(rf.size_bytes(c["fs"]), int(c["flash"][:-2]), src=table)
