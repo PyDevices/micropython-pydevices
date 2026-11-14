@@ -107,17 +107,17 @@ CELLS = [
          chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
     # The generic S3 images, for the boards that have no cell of their own. Each is a plain
     # upstream board with our S3 settings, no board variant.
-    # Octal PSRAM, 16 MB flash: Adafruit Qualia ESP32-S3, LilyGO T-Display-S3, Sunton/LilyGO T-HMI,
-    # WT32-SC01 Plus (with 8 MB flash it fits too), Unexpected Maker FeatherS3 and other
-    # octal-PSRAM S3 boards.
-    dict(id="mp-s3-octal", label="ESP32-S3 with octal PSRAM (Qualia ESP32-S3, T-Display-S3, T-HMI, WT32-SC01 Plus, FeatherS3)",
+    # Octal PSRAM, 16 MB flash: Adafruit Qualia ESP32-S3, LilyGO T-Display-S3, Sunton/LilyGO T-HMI
+    # and other octal-PSRAM S3 boards.
+    dict(id="mp-s3-octal", label="ESP32-S3 with octal PSRAM (Qualia ESP32-S3, T-Display-S3, T-HMI)",
          interpreter="micropython", port="esp32", board="ESP32_GENERIC_S3", variant="SPIRAM_OCT", flash="16MB",
          modules="all", chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
-    # Quad PSRAM (or none found), 8 MB flash: Adafruit QT Py ESP32-S3 (8 MB flash, 2 MB PSRAM) and
-    # the other 8 MB boards. 8 MB is the floor that fits the most: an image written with an 8 MB
-    # header runs on a board with 16 MB or more, keeping the rest of its flash unused, but a
-    # 16 MB image won't boot on an 8 MB board.
-    dict(id="mp-s3", label="ESP32-S3 with quad PSRAM (QT Py ESP32-S3, most 8 MB S3 boards)",
+    # Quad PSRAM (or none found), 8 MB flash: Adafruit QT Py ESP32-S3 (8 MB flash, 2 MB PSRAM),
+    # WT32-SC01 Plus, Unexpected Maker FeatherS3 and the other quad-PSRAM boards. The octal image
+    # finds no PSRAM on those two, and the FeatherS3 boot-loops on it. 8 MB is the floor that fits
+    # the most: an image written with an 8 MB header runs on a board with 16 MB or more, keeping
+    # the rest of its flash unused, but a 16 MB image won't boot on an 8 MB board.
+    dict(id="mp-s3", label="ESP32-S3 with quad PSRAM (QT Py ESP32-S3, WT32-SC01 Plus, FeatherS3, most 8 MB S3 boards)",
          interpreter="micropython", port="esp32", board="ESP32_GENERIC_S3", variant=None, flash="8MB",
          modules="all", chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
     # No PSRAM, 8 MB flash: an S3 board with only its internal RAM, such as the Adafruit QT Py
