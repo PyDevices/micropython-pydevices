@@ -261,10 +261,33 @@ LVGL_MODULE = "lvgl"
 LVGL_OLD_NAMES = ("lvgl-micropython", "lvgl-circuitpython", "lvgl-bindings")
 
 
+def move_to_pin(name, url, commit, dest):
+    """Check out `commit` in a module checkout that build_mp.py cloned, when it
+    is somewhere else. Local changes or a pin that can't be fetched stop the
+    build: building the old code under the new commit's name is what this
+    prevents."""
+    have = git_out(dest, "rev-parse", "HEAD")
+    if not have or have == commit:
+        return
+    if git_out(dest, "status", "--porcelain", "--untracked-files=no"):
+        die(f"{dest} is at {have[:12]}, not at {pins.LOCK}'s {commit[:12]}, and has local changes that "
+            f"moving it would lose: commit or discard them (git -C {dest} status), or delete {dest} to clone it again")
+    for verb, cmd in (("fetch", ["fetch", "-q", "--depth", "1", "origin", commit]),
+                      ("checkout", ["-c", "advice.detachedHead=false", "checkout", "-q", "--detach", commit])):
+        r = subprocess.run(["git", "-C", str(dest), *cmd], text=True, capture_output=True, check=False)
+        if r.returncode:
+            die(f"could not fetch {url} at {commit} into {dest} (git {verb}: "
+                f"{r.stderr.strip() or r.returncode}); is {pins.LOCK}'s {name} commit on GitHub?")
+    say(f"{name}: moved from {have[:12]} to {commit[:12]} to match {pins.LOCK}")
+
+
 def ensure_modules(ws):
     for name, url, commit, _ in (p for p in lock().values() if p.group == "modules"):
         dest = MODULES_DIR / name
-        if dest.exists() or dest.is_symlink():
+        if dest.is_symlink():
+            continue
+        if dest.exists():
+            move_to_pin(name, url, commit, dest)
             continue
         if ws and (ws / name).is_dir():
             link(dest, ws / name)
