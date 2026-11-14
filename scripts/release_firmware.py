@@ -142,11 +142,12 @@ CELLS = [
          board="waveshare_esp32s3_touch_lcd_43", variant=None, flash="8MB",
          modules="audiodsp,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl",
          chip="esp32s3", offset=0, kind="espressif", deps="cp-esp"),
-    # The Adafruit Qualia ESP32-S3 for RGB666 displays: 16 MB flash, 8 MB octal PSRAM.
+    # The Adafruit Qualia ESP32-S3 for RGB666 displays: 16 MB flash, 8 MB octal PSRAM. CircuitPython's
+    # own board: LVGL links its own GIF decoder, so the build turns gifio off with `make`.
     dict(id="cp-s3-qualia", label="Adafruit Qualia ESP32-S3 RGB666", interpreter="circuitpython", port="espressif",
          board="adafruit_qualia_s3_rgb666", variant=None, flash="16MB",
          modules="audiodsp,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl",
-         chip="esp32s3", offset=0, kind="espressif", deps="cp-esp"),
+         make=["CIRCUITPY_GIFIO=0"], chip="esp32s3", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-twatch", label="LilyGO T-Watch S3", interpreter="circuitpython", port="espressif",
          board="lilygo_twatch_s3_single_app", variant=None, flash="16MB",
          modules="audiodsp,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl",
@@ -336,7 +337,7 @@ def build_args(c):
     if c.get("fs"):
         args += ["--keep-fs", c["fs"]]
     args += ["--modules", c["modules"]]
-    return args
+    return args + c.get("make", [])
 
 
 def build(cell_id, out):

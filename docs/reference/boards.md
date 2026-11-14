@@ -9,9 +9,9 @@ top. Add `--modules` to any of these:
 |---|---|
 | Waveshare ESP32-P4-WIFI6-DEV-KIT, USB device on a USB-C wired to header P6 | `--port esp32 --board ESP32_GENERIC_P4 --variant WIFI6_DEV_KIT --flash 16MB` |
 | Waveshare ESP32-P4-WIFI6-DEV-KIT, USB device on its USB-C marked "USB" | `--port esp32 --board ESP32_GENERIC_P4 --variant WIFI6_DEV_KIT_H2 --flash 16MB` |
-| Waveshare ESP32-P4-WIFI6, the Pico-sized board, USB device on header pins 19 (D-) and 20 (D+) | `--port esp32 --board ESP32_GENERIC_P4 --variant WIFI6_DEV_KIT_H2 --flash 32MB` |
+| Waveshare ESP32-P4-WIFI6, the Pico-sized board, USB device on header pins 19 (D-) and 20 (D+) | `--port esp32 --board ESP32_GENERIC_P4 --variant WIFI6_DEV_KIT_H2 --flash 32MB`; the release's DEV-KIT image runs on it too (it reads its PSRAM at boot), but is built for 16 MB of flash, so write only its app (`.app.bin`) to keep a 32 MB filesystem |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-4B | `--port esp32 --board ESP32_GENERIC_P4 --variant PRE_REV3_C6_WIFI --flash 32MB`; its released images now keep a 26,624 KB filesystem at 0x600000, 256 KB smaller than before, so copy your files off before you first flash one |
-| Espressif ESP32-P4X-EYE | `--port esp32 --board ESP32_GENERIC_P4 --variant P4X_EYE --flash 16MB`; the camera, the H.264 encoder and the detectors come with `--modules all,vision` |
+| Espressif ESP32-P4X-EYE | `--port esp32 --board ESP32_GENERIC_P4 --variant P4X_EYE --flash 16MB`; the camera, the H.264 encoder and the detectors come with `--modules all,vision`, which is the image every release carries |
 | Another ESP32-P4 board, chip revision 3 or later, with an ESP32-C6 for Wi-Fi | `--port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB` |
 | Waveshare ESP32-S3-Touch-LCD-7 | `--port esp32 --board ESP32_GENERIC_S3 --variant LCD_7 --flash 8MB` |
 | Waveshare ESP32-S3-Touch-LCD-4.3 | `--port esp32 --board ESP32_GENERIC_S3 --variant LCD_4_3 --flash 8MB` |
