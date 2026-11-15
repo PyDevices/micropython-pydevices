@@ -14,7 +14,8 @@ It checks what one runtime can check alone:
 - a path, bytes and a stream read alike;
 - decode() with an alpha buffer, with alpha alone, and blended over what the
   target holds; at (x, y) with a stride, touching nothing outside the image;
-  and twice from one open();
+  and twice from one open(), the second time from the outlines the first one
+  kept, so in well under its time (on MicroPython);
 - bad arguments and data that isn't SVG raise, naming the problem.
 
 With --out, every render in cases.py is written there, raw, for
@@ -113,6 +114,24 @@ assert alpha[0] == 0
 again_p, again_a = bytearray(w * h * 2), bytearray(w * h)
 d.decode(again_p, again_a)
 assert again_p == pixels and again_a == alpha
+
+# The second decode() draws from the outlines the first one kept, so it skips
+# the flattening that takes most of a small icon's time. Best of seven, each
+# from a fresh open(); without the outlines the two take the same time.
+if sys.implementation.name == "micropython":
+    first_us = again_us = 1 << 30
+    for _ in range(7):
+        t = svgio.SvgDecoder()
+        tw, th = t.open(svg_path("wifi"), width=24)
+        tp, ta = bytearray(tw * th * 2), bytearray(tw * th)
+        t0 = ticks_us()
+        t.decode(tp, ta)
+        t1 = ticks_us()
+        t.decode(tp, ta)
+        t2 = ticks_us()
+        first_us, again_us = min(first_us, t1 - t0), min(again_us, t2 - t1)
+    print("wifi-24: first decode %d us, again %d us" % (first_us, again_us))
+    assert again_us * 2 < first_us, "a second decode should reuse the first one's outlines"
 
 # Placed at (x, y) in a wider buffer: the same pixels, and nothing else
 # touched.

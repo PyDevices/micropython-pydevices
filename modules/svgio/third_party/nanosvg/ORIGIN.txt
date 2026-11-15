@@ -2,7 +2,7 @@ NanoSVG, by Mikko Mononen
 Upstream: https://github.com/memononen/nanosvg
 Taken from: commit 239e102ec2c691f2902e20ace2ed36ee4a35cfe6 (2026-07-09)
 Files: src/nanosvg.h, src/nanosvgrast.h and LICENSE.txt, verbatim apart from
-the change below.
+the changes below.
 
 Changes:
 
@@ -18,6 +18,15 @@ Changes:
    is defined only when the build hasn't defined it. Every level is a
    300-byte block held for the whole parse, so 128 levels cost about 41 KB
    for any file; svgio_nanosvg.c asks for 32.
+
+3. nanosvgrast.h: four speedups that leave every pixel as it was.
+   nsvg__scanlineSolid skips pixels nothing covers, and writes an opaque
+   colour that covers a pixel fully without blending it.
+   nsvg__rasterizeSortedEdges clears the scanline only where a row wrote,
+   and skips the rows above, between and below a shape's edges.
+   nsvg__unpremultiplyAlpha leaves opaque pixels alone. Each is marked
+   "svgio:" and guarded by SVGIO_OPT(bit), which is always on unless a
+   profiling build (SVGIO_BENCH in svgio_core.h) switches it at run time.
 
 src/svgio_nanosvg.c compiles both headers with the C library calls they make
 pointed at svgio's own (the MicroPython heap for memory, and small number,

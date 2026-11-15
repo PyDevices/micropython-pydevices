@@ -81,6 +81,11 @@ void nsvgDeleteRasterizer(NSVGrasterizer*);
 #include <string.h>
 
 #define NSVG__SUBSAMPLES	5
+// svgio: SVGIO_OPT(bit) turns one of svgio's speedups on; a profiling build
+// can switch each off at run time. Upstream's code is the path with it off.
+#ifndef SVGIO_OPT
+#define SVGIO_OPT(bit) 1
+#endif
 #define NSVG__FIXSHIFT		10
 #define NSVG__FIX			(1 << NSVG__FIXSHIFT)
 #define NSVG__FIXMASK		(NSVG__FIX-1)
@@ -1004,6 +1009,36 @@ static void nsvg__scanlineSolid(unsigned char* dst, int count, unsigned char* co
 		cb = (cache->colors[0] >> 16) & 0xff;
 		ca = (cache->colors[0] >> 24) & 0xff;
 
+		// svgio: where nothing covers a pixel the blend leaves it as it was,
+		// and where an opaque colour covers it fully the blend gives the
+		// colour, so both skip the arithmetic. The results are the same.
+		if (SVGIO_OPT(1)) {
+			for (i = 0; i < count; i++, cover++, dst += 4) {
+				int c = cover[0];
+				if (c == 0)
+					continue;
+				if (c == 255 && ca == 255) {
+					dst[0] = (unsigned char)cr;
+					dst[1] = (unsigned char)cg;
+					dst[2] = (unsigned char)cb;
+					dst[3] = 255;
+					continue;
+				}
+				int r,g,b;
+				int a = nsvg__div255(c * ca);
+				int ia = 255 - a;
+				r = nsvg__div255(cr * a) + nsvg__div255(ia * (int)dst[0]);
+				g = nsvg__div255(cg * a) + nsvg__div255(ia * (int)dst[1]);
+				b = nsvg__div255(cb * a) + nsvg__div255(ia * (int)dst[2]);
+				a += nsvg__div255(ia * (int)dst[3]);
+				dst[0] = (unsigned char)r;
+				dst[1] = (unsigned char)g;
+				dst[2] = (unsigned char)b;
+				dst[3] = (unsigned char)a;
+			}
+			return;
+		}
+
 		for (i = 0; i < count; i++) {
 			int r,g,b;
 			int a = nsvg__div255((int)cover[0] * ca);
@@ -1041,6 +1076,12 @@ static void nsvg__scanlineSolid(unsigned char* dst, int count, unsigned char* co
 
 		for (i = 0; i < count; i++) {
 			int r,g,b,a,ia;
+			if (SVGIO_OPT(1) && cover[0] == 0) {	// svgio: nothing to blend
+				cover++;
+				dst += 4;
+				fx += dx;
+				continue;
+			}
 			gy = fx*t[1] + fy*t[3] + t[5];
 			c = cache->colors[(int)nsvg__clampf(gy*255.0f, 0, 255.0f)];
 			cr = (c) & 0xff;
@@ -1086,6 +1127,12 @@ static void nsvg__scanlineSolid(unsigned char* dst, int count, unsigned char* co
 
 		for (i = 0; i < count; i++) {
 			int r,g,b,a,ia;
+			if (SVGIO_OPT(1) && cover[0] == 0) {	// svgio: nothing to blend
+				cover++;
+				dst += 4;
+				fx += dx;
+				continue;
+			}
 			gx = fx*t[0] + fy*t[2] + t[4];
 			gy = fx*t[1] + fy*t[3] + t[5];
 			gd = sqrtf(gx*gx + gy*gy);
@@ -1129,8 +1176,26 @@ static void nsvg__rasterizeSortedEdges(NSVGrasterizer *r, float tx, float ty, fl
 	int maxWeight = (255 / NSVG__SUBSAMPLES);  // weight per vertical scanline
 	int xmin, xmax;
 
-	for (y = 0; y < r->height; y++) {
+	// svgio: the scanline is cleared once here and then only where a row
+	// wrote, and rows above, between and below the shape's edges are skipped:
+	// a shape a few rows high in a tall strip cost every row of it before.
+	if (SVGIO_OPT(2))
 		memset(r->scanline, 0, r->width);
+
+	for (y = 0; y < r->height; y++) {
+		if (!SVGIO_OPT(2)) {
+			memset(r->scanline, 0, r->width);
+		} else if (active == NULL) {
+			int next;
+			if (e >= r->nedges)
+				break;
+			// No edge starts before row `next`'s first sample.
+			next = (int)(r->edges[e].y0 / NSVG__SUBSAMPLES) - 1;
+			if (next > y)
+				y = next;
+			if (y >= r->height)
+				break;
+		}
 		xmin = r->width;
 		xmax = 0;
 		for (s = 0; s < NSVG__SUBSAMPLES; ++s) {
@@ -1204,6 +1269,8 @@ static void nsvg__rasterizeSortedEdges(NSVGrasterizer *r, float tx, float ty, fl
 		if (xmax > r->width-1) xmax = r->width-1;
 		if (xmin <= xmax) {
 			nsvg__scanlineSolid(&r->bitmap[y * r->stride] + xmin*4, xmax-xmin+1, &r->scanline[xmin], xmin, y, tx,ty, scale, cache);
+			if (SVGIO_OPT(2))	// svgio: every write was inside xmin..xmax
+				memset(&r->scanline[xmin], 0, xmax-xmin+1);
 		}
 	}
 
@@ -1218,7 +1285,7 @@ static void nsvg__unpremultiplyAlpha(unsigned char* image, int w, int h, int str
 		unsigned char *row = &image[y*stride];
 		for (x = 0; x < w; x++) {
 			int r = row[0], g = row[1], b = row[2], a = row[3];
-			if (a != 0) {
+			if (a != 0 && (a != 255 || !SVGIO_OPT(8))) {	// svgio: x*255/255 is x
 				row[0] = (unsigned char)(r*255/a);
 				row[1] = (unsigned char)(g*255/a);
 				row[2] = (unsigned char)(b*255/a);

@@ -73,6 +73,12 @@ wrong. A parse or a strip that doesn't fit in the heap raises `MemoryError`.
 RGBA, so an 800x480 picture never needs a full-screen buffer beyond your
 own.
 
+The first `decode()` after an `open()` flattens the shapes' curves into
+edges and keeps up to 64 KB of them, which covers any icon, so drawing the
+same image again skips that work. The LVGL decoder below keeps the last SVG
+it drew the same way, parsed and flattened, until a different source comes
+along.
+
 On a desktop, an 800x480 gauge with gradients draws in a few milliseconds,
 and an icon in well under one.
 
@@ -117,7 +123,7 @@ RGBA. svgio turns each strip into RGB565 and alpha, or blends it. NanoSVG's
 memory comes from the MicroPython heap, so running out raises `MemoryError`
 instead of failing in a C library, and its few C library calls go to small
 local versions, so every port links it. The vendored copy, its commit and
-one fix to it are in [`third_party/nanosvg/ORIGIN.txt`](third_party/nanosvg/ORIGIN.txt); its licence is
+the changes made to it are in [`third_party/nanosvg/ORIGIN.txt`](third_party/nanosvg/ORIGIN.txt); its licence is
 in [`NOTICE`](NOTICE).
 
 ## Tests
