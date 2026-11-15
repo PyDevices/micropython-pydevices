@@ -14,7 +14,8 @@ It checks what one runtime can check alone:
 - a path, bytes and a stream read alike;
 - decode() with an alpha buffer, with alpha alone, and blended over what the
   target holds; at (x, y) with a stride, touching nothing outside the image;
-  and twice from one open();
+  and twice from one open(), the second time from the outlines the first one
+  kept, so in well under its time (on MicroPython);
 - bad arguments and data that isn't SVG raise, naming the problem.
 
 With --out, every render in cases.py is written there, raw, for
@@ -113,6 +114,23 @@ assert alpha[0] == 0
 again_p, again_a = bytearray(w * h * 2), bytearray(w * h)
 d.decode(again_p, again_a)
 assert again_p == pixels and again_a == alpha
+
+# The first decode() keeps the outlines it flattened, on the heap, so the
+# next one at the same size draws from them; without them nothing stays.
+if sys.implementation.name == "micropython":
+    import gc
+
+    t = svgio.SvgDecoder()
+    tw, th = t.open(svg_path("wifi"), width=24)
+    tp, ta = bytearray(tw * th * 2), bytearray(tw * th)
+    gc.collect()
+    before = gc.mem_alloc()
+    t.decode(tp, ta)
+    gc.collect()
+    kept = gc.mem_alloc() - before
+    print("wifi-24: outlines kept %d bytes" % kept)
+    assert kept > 0, "decode() should keep the outlines it flattened"
+    t = tp = ta = None
 
 # Placed at (x, y) in a wider buffer: the same pixels, and nothing else
 # touched.

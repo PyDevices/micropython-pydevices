@@ -18,6 +18,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <math.h>
+#include <stdbool.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -26,6 +27,7 @@
 #include <string.h>
 
 #include "py/gc.h"
+#include "py/mphal.h"
 
 #include "svgio_core.h"
 
@@ -69,6 +71,16 @@ static void *svgio_realloc(void *p, size_t n) {
         svgio_count(q, 1);
     }
     return q;
+}
+
+void *svgio_mem_alloc(size_t n) {
+    return svgio_malloc(n);
+}
+
+void svgio_mem_free(void *p) {
+    if (p != NULL) {
+        svgio_free(p);
+    }
 }
 
 void svgio_mem_reset(void) {
@@ -304,6 +316,20 @@ static size_t svgio_fread(void *buf, size_t size, size_t n, FILE *fp) {
 // whole parse, so upstream's 128 cost 41 KB even for a 24 px icon. Deeper
 // groups than this lose track of their styles.
 #define NSVG_MAX_ATTR 32
+
+// A profiling build (SVGIO_BENCH=1) can switch each speedup off at run time
+// and times each phase, through svgio._opts() and svgio._profile().
+#if SVGIO_BENCH
+unsigned svgio_opts = ~0u;
+uint32_t svgio_phase_us[SVGIO_PHASES];
+#define SVGIO_OPT(bit) (svgio_opts & (bit))
+static mp_uint_t svgio_t0;
+#define SVGIO_TIME_START() (svgio_t0 = mp_hal_ticks_us())
+#define SVGIO_TIME_END(phase) (svgio_phase_us[phase] += mp_hal_ticks_us() - svgio_t0)
+#else
+#define SVGIO_TIME_START() do {} while (0)
+#define SVGIO_TIME_END(phase) do {} while (0)
+#endif
 #define NANOSVG_IMPLEMENTATION
 #include "nanosvg.h"
 #define NANOSVGRAST_IMPLEMENTATION
@@ -316,7 +342,9 @@ static size_t svgio_fread(void *buf, size_t size, size_t n, FILE *fp) {
 // --- svgio's use of it -------------------------------------------------------
 
 svgio_image_t *svgio_parse(char *text, float *width, float *height) {
+    SVGIO_TIME_START();
     NSVGimage *img = nsvgParse(text, "px", 96.0f);
+    SVGIO_TIME_END(SVGIO_PHASE_PARSE);
     if (img != NULL) {
         *width = img->width;
         *height = img->height;
@@ -330,22 +358,206 @@ void svgio_image_free(svgio_image_t *image) {
     }
 }
 
-const char *svgio_render(svgio_image_t *image, float scale, int width, int height,
+// One shape's fill or stroke, flattened to edges at the output scale. The
+// edges are sorted by their top and not yet moved to a strip, so every strip
+// and every later decode() at this scale uses them as they are; edges is NULL
+// when they didn't fit SVGIO_KEEP_BYTES and are flattened again per strip.
+typedef struct {
+    NSVGshape *shape;
+    NSVGedge *edges;
+    int nedges;
+    bool stroke;
+    float top, bottom;      // the rows, in output pixels, the edges span
+} svgio_pass_t;
+
+struct svgio_prepared {
+    float scale;
+    int npasses;
+    svgio_pass_t pass[];
+};
+
+// The fills and strokes NanoSVG paints, in its order: into pass when it isn't
+// NULL, and how many either way.
+static int svgio_passes(NSVGimage *image, float scale, svgio_pass_t *pass) {
+    int n = 0;
+    for (NSVGshape *shape = image->shapes; shape != NULL; shape = shape->next) {
+        if (!(shape->flags & NSVG_FLAGS_VISIBLE)) {
+            continue;
+        }
+        for (int j = 0; j < 3; j++) {
+            int order = (shape->paintOrder >> (2 * j)) & 0x03;
+            bool fill = order == NSVG_PAINT_FILL && shape->fill.type != NSVG_PAINT_NONE;
+            bool stroke = order == NSVG_PAINT_STROKE && shape->stroke.type != NSVG_PAINT_NONE
+                && shape->strokeWidth * scale > 0.01f;
+            if (fill || stroke) {
+                if (pass != NULL) {
+                    pass[n] = (svgio_pass_t) { shape, NULL, 0, stroke, 0.0f, 0.0f };
+                }
+                n++;
+            }
+        }
+    }
+    return n;
+}
+
+// The pass's edges into r->edges, unmoved and sorted. False when the heap ran out.
+static bool svgio_flatten(NSVGrasterizer *r, NSVGshape *shape, bool stroke, float scale) {
+    nsvg__resetPool(r);
+    r->freelist = NULL;
+    r->nedges = 0;
+    if (stroke) {
+        nsvg__flattenShapeStroke(r, shape, scale);
+    } else {
+        nsvg__flattenShape(r, shape, scale);
+    }
+    if (r->edges == NULL && r->cedges > 0) {
+        return false;
+    }
+    if (r->nedges != 0) {
+        qsort(r->edges, r->nedges, sizeof(NSVGedge), nsvg__cmpEdge);
+    }
+    return true;
+}
+
+svgio_prepared_t *svgio_prepare(svgio_image_t *image_in, float scale) {
+    NSVGimage *image = (NSVGimage *)image_in;
+    int n = svgio_passes(image, scale, NULL);
+    svgio_prepared_t *p = malloc(sizeof(svgio_prepared_t) + n * sizeof(svgio_pass_t));
+    NSVGrasterizer *r = nsvgCreateRasterizer();
+    if (p == NULL || r == NULL) {
+        free(p);
+        if (r != NULL) {
+            nsvgDeleteRasterizer(r);
+        }
+        return NULL;
+    }
+    SVGIO_TIME_START();
+    p->scale = scale;
+    p->npasses = svgio_passes(image, scale, p->pass);
+    size_t kept = 0;
+    bool ok = true;
+    for (int k = 0; k < p->npasses && ok; k++) {
+        svgio_pass_t *ps = &p->pass[k];
+        ok = svgio_flatten(r, ps->shape, ps->stroke, scale);
+        if (!ok || r->nedges == 0) {
+            continue;
+        }
+        ps->nedges = r->nedges;
+        ps->top = r->edges[0].y0;
+        ps->bottom = ps->top;
+        for (int i = 0; i < r->nedges; i++) {
+            ps->bottom = r->edges[i].y1 > ps->bottom ? r->edges[i].y1 : ps->bottom;
+        }
+        size_t bytes = r->nedges * sizeof(NSVGedge);
+        if (kept + bytes <= SVGIO_KEEP_BYTES) {
+            ps->edges = malloc(bytes);
+            ok = ps->edges != NULL;
+            if (ok) {
+                memcpy(ps->edges, r->edges, bytes);
+                kept += bytes;
+            }
+        }
+    }
+    nsvgDeleteRasterizer(r);
+    SVGIO_TIME_END(SVGIO_PHASE_PREPARE);
+    if (!ok) {
+        svgio_prepared_free(p);
+        return NULL;
+    }
+    return p;
+}
+
+void svgio_prepared_free(svgio_prepared_t *p) {
+    if (p != NULL) {
+        for (int i = 0; i < p->npasses; i++) {
+            free(p->pass[i].edges);
+        }
+        free(p);
+    }
+}
+
+float svgio_prepared_scale(const svgio_prepared_t *p) {
+    return p->scale;
+}
+
+// One strip, rows -ty up, of every pass that reaches it: NanoSVG's
+// nsvgRasterize, with the flattening done once in svgio_prepare.
+static const char *svgio_strip(NSVGrasterizer *r, svgio_prepared_t *p,
+    float scale, float ty, uint8_t *dst, int w, int h) {
+    r->bitmap = dst;
+    r->width = w;
+    r->height = h;
+    r->stride = w * 4;
+    memset(dst, 0, (size_t)w * h * 4);
+    for (int k = 0; k < p->npasses; k++) {
+        svgio_pass_t *ps = &p->pass[k];
+        if (ps->nedges == 0 || (ty + ps->bottom) * NSVG__SUBSAMPLES <= 0
+            || (ty + ps->top) * NSVG__SUBSAMPLES >= h * NSVG__SUBSAMPLES) {
+            continue;       // nothing of it in this strip
+        }
+        SVGIO_TIME_START();
+        if (ps->edges != NULL) {
+            if (r->cedges < ps->nedges) {
+                NSVGedge *e = realloc(r->edges, sizeof(NSVGedge) * ps->nedges);
+                if (e == NULL) {
+                    return "not enough memory to render";
+                }
+                r->edges = e;
+                r->cedges = ps->nedges;
+            }
+            memcpy(r->edges, ps->edges, sizeof(NSVGedge) * ps->nedges);
+            r->nedges = ps->nedges;
+            nsvg__resetPool(r);
+            r->freelist = NULL;
+        } else if (!svgio_flatten(r, ps->shape, ps->stroke, scale)) {
+            return "not enough memory to render";
+        }
+        SVGIO_TIME_END(SVGIO_PHASE_EDGES);
+        SVGIO_TIME_START();
+        // Moved to the strip, in subsamples, as nsvgRasterize does.
+        for (int i = 0; i < r->nedges; i++) {
+            NSVGedge *e = &r->edges[i];
+            e->y0 = (ty + e->y0) * NSVG__SUBSAMPLES;
+            e->y1 = (ty + e->y1) * NSVG__SUBSAMPLES;
+        }
+        NSVGcachedPaint cache;
+        nsvg__initPaint(&cache, ps->stroke ? &ps->shape->stroke : &ps->shape->fill, ps->shape->opacity);
+        nsvg__rasterizeSortedEdges(r, 0.0f, ty, scale, &cache, ps->stroke ? NSVG_FILLRULE_NONZERO : ps->shape->fillRule);
+        SVGIO_TIME_END(SVGIO_PHASE_RASTER);
+    }
+    SVGIO_TIME_START();
+    nsvg__unpremultiplyAlpha(dst, w, h, w * 4);
+    SVGIO_TIME_END(SVGIO_PHASE_UNPREMULTIPLY);
+    return NULL;
+}
+
+const char *svgio_render(svgio_image_t *image, svgio_prepared_t *prepared, float scale, int width, int height,
     uint8_t *strip, int strip_rows, svgio_rows_fn rows, void *ctx) {
     NSVGrasterizer *r = nsvgCreateRasterizer();
     if (r == NULL) {
         return "not enough memory to render";
     }
-    const char *why = NULL;
+    r->scanline = malloc(width);
+    r->cscanline = width;
+    const char *why = r->scanline == NULL ? "not enough memory to render" : NULL;
     for (int y = 0; y < height && why == NULL; y += strip_rows) {
         int n = height - y < strip_rows ? height - y : strip_rows;
         // A strip is the picture moved up by y and cut to n rows.
-        nsvgRasterize(r, (NSVGimage *)image, 0.0f, (float)-y, scale, strip, width, n, width * 4);
-        if (r->scanline == NULL) {
-            why = "not enough memory to render";
-            break;
+        if (prepared != NULL && SVGIO_OPT(4)) {
+            why = svgio_strip(r, prepared, scale, (float)-y, strip, width, n);
+        } else {
+            SVGIO_TIME_START();
+            nsvgRasterize(r, (NSVGimage *)image, 0.0f, (float)-y, scale, strip, width, n, width * 4);
+            SVGIO_TIME_END(SVGIO_PHASE_RASTER);
+            if (r->scanline == NULL) {
+                why = "not enough memory to render";
+            }
         }
-        rows(ctx, strip, y, n, width);
+        if (why == NULL) {
+            SVGIO_TIME_START();
+            rows(ctx, strip, y, n, width);
+            SVGIO_TIME_END(SVGIO_PHASE_CONVERT);
+        }
     }
     nsvgDeleteRasterizer(r);
     return why;

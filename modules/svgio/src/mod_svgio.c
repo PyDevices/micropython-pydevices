@@ -34,6 +34,7 @@
 typedef struct {
     mp_obj_base_t base;
     svgio_image_t *image;   // the parsed SVG, kept for any number of decodes
+    svgio_prepared_t *prepared;     // its outlines at scale, from the first decode
     float scale;
     int width, height;      // the size open() chose, in pixels
 } svgio_decoder_obj_t;
@@ -42,6 +43,7 @@ static mp_obj_t svgio_decoder_make_new(const mp_obj_type_t *type, size_t n_args,
     mp_arg_check_num(n_args, n_kw, 0, 0, false);
     svgio_decoder_obj_t *self = mp_obj_malloc(svgio_decoder_obj_t, type);
     self->image = NULL;
+    self->prepared = NULL;
     self->scale = 0;
     self->width = self->height = 0;
     return MP_OBJ_FROM_PTR(self);
@@ -88,6 +90,8 @@ static mp_obj_t svgio_decoder_open(size_t n_args, const mp_obj_t *pos, mp_map_t 
         mp_raise_ValueError(MP_ERROR_TEXT("give one of width, height and scale"));
     }
 
+    svgio_prepared_free(self->prepared);
+    self->prepared = NULL;
     svgio_image_free(self->image);
     self->image = NULL;
     self->width = self->height = 0;
@@ -213,7 +217,22 @@ static mp_obj_t svgio_decoder_decode(size_t n_args, const mp_obj_t *pos, mp_map_
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("svgio: not enough memory to render"));
     }
     svgio_mem_reset();
-    const char *why = svgio_render(self->image, self->scale, w, h, strip, rows, svgio_put_rows, &t);
+    #if SVGIO_BENCH
+    const bool prepare = svgio_opts & 4;
+    #else
+    const bool prepare = true;
+    #endif
+    if (prepare && self->prepared == NULL) {
+        // Flattened once here, the outlines serve every strip and every
+        // later decode() until the next open().
+        self->prepared = svgio_prepare(self->image, self->scale);
+        if (self->prepared == NULL) {
+            m_del(uint8_t, strip, strip_len);
+            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("svgio: not enough memory to render"));
+        }
+    }
+    const char *why = svgio_render(self->image, prepare ? self->prepared : NULL, self->scale, w, h,
+        strip, rows, svgio_put_rows, &t);
     m_del(uint8_t, strip, strip_len);
     if (why != NULL) {
         mp_raise_msg_varg(&mp_type_MemoryError, MP_ERROR_TEXT("svgio: %s"), why);
@@ -251,6 +270,15 @@ MP_DEFINE_CONST_OBJ_TYPE(
     attr, svgio_decoder_attr,
     locals_dict, &svgio_decoder_locals
     );
+
+// The LVGL decoder's last SVG (lvgl_decoder.c). Registered on every build, as
+// the module's names are, because the CMake ports' QSTR pass can't see what
+// lives only inside #if SVGIO_LVGL_DECODER.
+MP_REGISTER_ROOT_POINTER(void *svgio_kept);
+
+void **svgio_kept_slot(void) {
+    return &MP_STATE_VM(svgio_kept);
+}
 
 // --- LVGL image decoder --------------------------------------------------------
 //
@@ -313,6 +341,28 @@ static mp_obj_t svgio_mem_peak_fn(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(svgio_mem_peak_obj, svgio_mem_peak_fn);
 
+#if SVGIO_BENCH
+// _opts(mask): which speedups run (svgio_core.h lists the bits), in a
+// profiling build.
+static mp_obj_t svgio_opts_fn(mp_obj_t mask) {
+    svgio_opts = mp_obj_get_int(mask);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(svgio_opts_obj, svgio_opts_fn);
+
+// _profile() -> (parse, prepare, edges, raster, unpremultiply, convert): the
+// microseconds each phase took since the last call, in a profiling build.
+static mp_obj_t svgio_profile_fn(void) {
+    mp_obj_t t[SVGIO_PHASES];
+    for (int i = 0; i < SVGIO_PHASES; i++) {
+        t[i] = mp_obj_new_int_from_uint(svgio_phase_us[i]);
+        svgio_phase_us[i] = 0;
+    }
+    return mp_obj_new_tuple(SVGIO_PHASES, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(svgio_profile_obj, svgio_profile_fn);
+#endif
+
 // svgio.__revision__: which svgio this firmware was built from (git describe).
 #ifndef SVGIO_REVISION
 #define SVGIO_REVISION "unknown"
@@ -329,6 +379,10 @@ static const mp_rom_map_elem_t svgio_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_register_lvgl_decoder), MP_ROM_PTR(&svgio_register_lvgl_decoder_obj) },
     { MP_ROM_QSTR(MP_QSTR_lvgl_decoders), MP_ROM_PTR(&svgio_lvgl_decoders_obj) },
     { MP_ROM_QSTR(MP_QSTR__mem_peak), MP_ROM_PTR(&svgio_mem_peak_obj) },
+    #if SVGIO_BENCH
+    { MP_ROM_QSTR(MP_QSTR__opts), MP_ROM_PTR(&svgio_opts_obj) },
+    { MP_ROM_QSTR(MP_QSTR__profile), MP_ROM_PTR(&svgio_profile_obj) },
+    #endif
 };
 static MP_DEFINE_CONST_DICT(svgio_module_globals, svgio_module_globals_table);
 

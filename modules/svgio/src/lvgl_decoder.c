@@ -9,6 +9,11 @@
 // LV_COLOR_FORMAT_RGB565A8: the colour plane, native-order RGB565, then the
 // alpha plane, a byte a pixel, so anti-aliased edges blend over what's behind.
 //
+// LVGL asks a decoder for an image's size and then opens it, one after the
+// other, and asks again whenever its image cache has let the drawn pixels go.
+// The decoder keeps the last SVG it read, parsed and flattened, so the second
+// ask and any redraw of the same source cost only the raster.
+//
 // What it claims is what LVGL's own SVG decoder claims: a file whose name
 // ends in .svg, or a variable source whose text starts with an XML
 // declaration or an <svg> tag. Anything else falls through to the next
@@ -101,6 +106,19 @@ static bool is_svg_file(const lv_image_decoder_dsc_t *dsc) {
     return ext != NULL && (strcmp(ext, "svg") == 0 || strcmp(ext, "SVG") == 0);
 }
 
+// A file's size in bytes, 0 when it can't be read.
+static uint32_t file_size(const char *path) {
+    lv_fs_file_t f;
+    uint32_t size = 0;
+    if (lv_fs_open(&f, path, LV_FS_MODE_RD) == LV_FS_RES_OK) {
+        if (lv_fs_seek(&f, 0, LV_FS_SEEK_END) != LV_FS_RES_OK || lv_fs_tell(&f, &size) != LV_FS_RES_OK) {
+            size = 0;
+        }
+        lv_fs_close(&f);
+    }
+    return size;
+}
+
 // The SVG's text, NUL-terminated, in a buffer the caller frees with lv_free.
 // NULL when the source isn't SVG or can't be read.
 static char *read_source(const lv_image_decoder_dsc_t *dsc, size_t *len) {
@@ -140,13 +158,67 @@ static char *read_source(const lv_image_decoder_dsc_t *dsc, size_t *len) {
     return text;
 }
 
-// Parse the source. NULL when it isn't SVG, or doesn't parse to a size.
-static svgio_image_t *parse_source(const lv_image_decoder_dsc_t *dsc, int *w, int *h) {
+// --- the SVG it keeps -------------------------------------------------------
+//
+// One source, parsed, and its outlines once open() has drawn it. It lives on
+// the MicroPython heap, where NanoSVG's memory comes from, and is reached from
+// a root pointer (svgio_kept_slot()) so the garbage collector keeps it.
+
+typedef struct {
+    lv_image_src_t src_type;
+    const void *var;            // a variable source: its descriptor,
+    const void *data;           // its data and
+    uint32_t size;              // its size in bytes, or a file's size
+    char *path;                 // a file source: its path
+    svgio_image_t *image;
+    svgio_prepared_t *prepared; // at 1:1, after the first open()
+    int w, h;
+} svgio_kept_t;
+
+static svgio_kept_t *kept(void) {
+    return *svgio_kept_slot();
+}
+
+static void forget(void) {
+    svgio_kept_t *k = kept();
+    if (k != NULL) {
+        *svgio_kept_slot() = NULL;
+        svgio_prepared_free(k->prepared);
+        svgio_image_free(k->image);
+        svgio_mem_free(k->path);
+        svgio_mem_free(k);
+    }
+}
+
+// The kept SVG when it is dsc's source, unchanged.
+static svgio_kept_t *find(const lv_image_decoder_dsc_t *dsc) {
+    svgio_kept_t *k = kept();
+    if (k == NULL || k->src_type != dsc->src_type) {
+        return NULL;
+    }
+    if (dsc->src_type == LV_IMAGE_SRC_VARIABLE) {
+        const lv_image_dsc_t *img = dsc->src;
+        return k->var == img && k->data == img->data && k->size == img->data_size ? k : NULL;
+    }
+    if (dsc->src_type == LV_IMAGE_SRC_FILE && strcmp(k->path, dsc->src) == 0 && file_size(dsc->src) == k->size) {
+        return k;
+    }
+    return NULL;
+}
+
+// dsc's source parsed, kept in place of the last one. NULL when it isn't SVG,
+// doesn't parse to a size, or the heap ran out.
+static svgio_kept_t *parse_source(const lv_image_decoder_dsc_t *dsc) {
+    svgio_kept_t *k = find(dsc);
+    if (k != NULL) {
+        return k;
+    }
     size_t len = 0;
     char *text = read_source(dsc, &len);
     if (text == NULL) {
         return NULL;
     }
+    forget();
     float fw = 0, fh = 0;
     svgio_image_t *image = svgio_parse(text, &fw, &fh);
     lv_free(text);
@@ -155,27 +227,47 @@ static svgio_image_t *parse_source(const lv_image_decoder_dsc_t *dsc, int *w, in
         svgio_image_free(image);
         return NULL;
     }
-    *w = (int)(fw + 0.5f);
-    *h = (int)(fh + 0.5f);
-    *w = *w < 1 ? 1 : *w;
-    *h = *h < 1 ? 1 : *h;
-    return image;
+    k = svgio_mem_alloc(sizeof(svgio_kept_t));
+    const char *path = dsc->src_type == LV_IMAGE_SRC_FILE ? dsc->src : NULL;
+    char *copy = path != NULL ? svgio_mem_alloc(strlen(path) + 1) : NULL;
+    if (k == NULL || (path != NULL && copy == NULL)) {
+        svgio_mem_free(k);
+        svgio_image_free(image);
+        return NULL;
+    }
+    memset(k, 0, sizeof(*k));
+    k->src_type = dsc->src_type;
+    if (path != NULL) {
+        strcpy(copy, path);
+        k->path = copy;
+        k->size = (uint32_t)len;
+    } else {
+        const lv_image_dsc_t *img = dsc->src;
+        k->var = img;
+        k->data = img->data;
+        k->size = img->data_size;
+    }
+    k->image = image;
+    k->w = (int)(fw + 0.5f);
+    k->h = (int)(fh + 0.5f);
+    k->w = k->w < 1 ? 1 : k->w;
+    k->h = k->h < 1 ? 1 : k->h;
+    *svgio_kept_slot() = k;
+    return k;
 }
 
 // --- LVGL decoder callbacks -------------------------------------------------
 
 static lv_result_t decoder_info(lv_image_decoder_t *decoder, lv_image_decoder_dsc_t *dsc, lv_image_header_t *header) {
     LV_UNUSED(decoder);
-    int w, h;
-    svgio_image_t *image = parse_source(dsc, &w, &h);
-    if (image == NULL) {
+    svgio_kept_t *k = parse_source(dsc);
+    if (k == NULL) {
         return LV_RESULT_INVALID;
     }
-    svgio_image_free(image);
     header->cf = LV_COLOR_FORMAT_RGB565A8;
-    header->w = w;
-    header->h = h;
-    header->stride = (uint32_t)w * 2;
+    header->w = k->w;
+    header->h = k->h;
+    header->stride = (uint32_t)k->w * 2;
     return LV_RESULT_OK;
 }
 
@@ -197,11 +289,19 @@ static void put_rows(void *ctx, const uint8_t *rgba, int y, int rows, int width)
 }
 
 static lv_result_t decoder_open(lv_image_decoder_t *decoder, lv_image_decoder_dsc_t *dsc) {
-    int w, h;
-    svgio_image_t *image = parse_source(dsc, &w, &h);
-    if (image == NULL) {
+    svgio_kept_t *k = parse_source(dsc);
+    if (k == NULL) {
         return LV_RESULT_INVALID;
     }
+    if (k->prepared == NULL) {
+        k->prepared = svgio_prepare(k->image, 1.0f);
+        if (k->prepared == NULL) {
+            LV_LOG_WARN("svgio: not enough memory");
+            forget();
+            return LV_RESULT_INVALID;
+        }
+    }
+    const int w = k->w, h = k->h;
     lv_draw_buf_t *decoded = lv_draw_buf_create_ex(image_cache_draw_buf_handlers, w, h,
         LV_COLOR_FORMAT_RGB565A8, LV_STRIDE_AUTO);
     int rows = SVGIO_STRIP_BYTES / (w * 4);
@@ -212,10 +312,9 @@ static lv_result_t decoder_open(lv_image_decoder_t *decoder, lv_image_decoder_ds
         svgio_lvgl_target_t t = {
             decoded->data, decoded->data + (size_t)decoded->header.stride * h, decoded->header.stride,
         };
-        why = svgio_render(image, 1.0f, w, h, strip, rows, put_rows, &t);
+        why = svgio_render(k->image, k->prepared, 1.0f, w, h, strip, rows, put_rows, &t);
         lv_free(strip);
     }
-    svgio_image_free(image);
     if (why != NULL) {
         LV_LOG_WARN("svgio: %s", why);
         if (decoded != NULL) {
