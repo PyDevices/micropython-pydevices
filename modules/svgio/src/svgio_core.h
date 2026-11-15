@@ -7,6 +7,7 @@
 #ifndef SVGIO_CORE_H
 #define SVGIO_CORE_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -25,6 +26,13 @@ typedef void (*svgio_rows_fn)(void *ctx, const uint8_t *rgba, int y, int rows, i
 // runs out; otherwise the image, and its size in pixels at 96 dpi.
 svgio_image_t *svgio_parse(char *text, float *width, float *height);
 void svgio_image_free(svgio_image_t *image);
+
+// The compact form (svgio_compact.c): a drawing as records of numbers. True
+// when src starts as one does.
+bool svgio_is_compact(const uint8_t *src, size_t len);
+// The SVG text it stands for, NUL-terminated, from svgio_mem_alloc(), and its
+// length in *out_len; or NULL and why not.
+char *svgio_expand(const uint8_t *src, size_t len, size_t *out_len, const char **why);
 
 // The most a prepared image keeps of its flattened outlines, in bytes. Past
 // it, the rest are flattened again for each strip.

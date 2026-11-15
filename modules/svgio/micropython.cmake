@@ -22,6 +22,7 @@ target_include_directories(usermod_svgio INTERFACE
 target_sources(usermod_svgio INTERFACE
     ${SVGIO_DIR}/mod_svgio.c
     ${SVGIO_DIR}/svgio_nanosvg.c
+    ${SVGIO_DIR}/svgio_compact.c
 )
 target_link_libraries(usermod INTERFACE usermod_svgio)
 

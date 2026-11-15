@@ -57,7 +57,8 @@ class SvgDecoder:
         side follows the SVG's aspect ratio, rounded to a whole pixel.
 
         Args:
-            source: A path, the SVG's bytes, or a binary stream.
+            source: A path, the SVG's bytes, or a binary stream. The bytes
+                may be a drawing in the compact form instead of SVG text.
             width: Draw it this many pixels wide.
             height: Draw it this many pixels high.
             scale: Draw it this many times its own size.
@@ -67,8 +68,9 @@ class SvgDecoder:
 
         Raises:
             ValueError: More than one of `width`, `height` and `scale`, a size
-                outside 1 to 32767 pixels a side, or data that isn't an SVG
-                with a size.
+                outside 1 to 32767 pixels a side, data that isn't an SVG
+                with a size, or a compact drawing whose records are cut short
+                or were made for another size of float.
             MemoryError: The parsed SVG doesn't fit in the heap.
         """
     def decode(
@@ -129,6 +131,26 @@ class SvgDecoder:
         Larger than `memory` when a picture didn't fit and the rest came from
         the heap.
         """
+
+def expand(drawing: bytes | bytearray | memoryview) -> bytes:
+    """Give the SVG text a drawing in the compact form stands for.
+
+    The compact form is SVG with its numbers left as numbers: records that
+    `struct.pack` makes, which `SvgDecoder.open()` takes where it takes text.
+    This is the text `open()` parses for one, each number written as
+    ``"%.5g"`` prints it. The module's README lists the records.
+
+    Args:
+        drawing: The records, starting ``b"\\x01SVG"`` and the size of a float.
+
+    Returns:
+        The SVG text, as bytes.
+
+    Raises:
+        ValueError: Not a compact drawing, one cut short, or one made for
+            another size of float.
+        MemoryError: No room for the text.
+    """
 
 def register_lvgl_decoder() -> bool:
     """Add this module's decoder to the running LVGL.
