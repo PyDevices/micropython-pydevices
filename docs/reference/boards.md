@@ -86,9 +86,9 @@ ours, in [`boards/circuitpython/`](https://github.com/PyDevices/micropython-pyde
 | Board | What it is |
 |---|---|
 | `feather_rp2040_lvgl` | A Feather RP2040 with room for LVGL. |
-| `waveshare_esp32s3_touch_lcd_7` | The 800x480 panel as `board.DISPLAY`, one 4 MB app slot. |
-| `waveshare_esp32s3_touch_lcd_43` | The same 800x480 panel as `board.DISPLAY` and one 4 MB app slot, like the LCD-7. |
-| `adafruit_qualia_s3_rgb666_single_app` | The Adafruit Qualia ESP32-S3 for RGB666 displays with one 4 MB app slot and no UF2 bootloader, so LVGL fits; flash it with esptool. |
-| `lilygo_twatch_s3_single_app` | The T-Watch S3 with one 4 MB app slot, so LVGL fits. |
+| `waveshare_esp32s3_touch_lcd_7` | The 800x480 panel as `board.DISPLAY`, one 5.5 MB app slot that holds audioinstruments and audioeffects; CIRCUITPY is now 2,496 KB at 0x590000, so copy your files off before you first flash one. |
+| `waveshare_esp32s3_touch_lcd_43` | The same 800x480 panel as `board.DISPLAY` and one 5.5 MB app slot, like the LCD-7, and the same smaller CIRCUITPY. |
+| `adafruit_qualia_s3_rgb666_single_app` | The Adafruit Qualia ESP32-S3 for RGB666 displays with one 6 MB app slot and no UF2 bootloader, so LVGL and the audio packages fit; flash it with esptool. CIRCUITPY is now 10,176 KB at 0x610000, so copy your files off before you first flash one. |
+| `lilygo_twatch_s3_single_app` | The T-Watch S3 with one 6 MB app slot, so LVGL and the audio packages fit, and the Qualia's 10,176 KB CIRCUITPY. |
 | `waveshare_esp32p4_wifi6_dev_kit` | A revision 3 chip, console on USB Serial/JTAG, one 6 MB app slot. |
 | `waveshare_esp32p4_wifi6_touch_lcd_4b` | Revision 1, console on the CH343 UART, one 6 MB app slot. Its panel isn't set up. |

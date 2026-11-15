@@ -27,9 +27,11 @@ CIRCUITPY_ESP_PSRAM_FREQ = 80m
 
 CIRCUITPY_DOTCLOCKFRAMEBUFFER = 1
 
-# One 4 MB app partition and a 4 MB CIRCUITPY, in place of the 8 MB layout's
-# two 2 MB OTA slots: LVGL alone is about 1 MB, and with it the firmware no
-# longer fits 2 MB. Over-the-air updates need two slots, so this board has none.
+# One 5.5 MB app partition and a 2.4 MB CIRCUITPY, in place of the 8 MB
+# layout's two 2 MB OTA slots: LVGL alone is about 1 MB, and the frozen
+# audioinstruments and audioeffects about 1.2 MB more, which a drive would
+# otherwise hold as files. Over-the-air updates need two slots, so this board
+# has none.
 FLASH_SIZE_SDKCONFIG = boards/$(BOARD)/sdkconfig-flash.defaults
 # Neither CIRCUITPY nor an update can use a second app slot that isn't there.
 CIRCUITPY_STORAGE_EXTEND = 0
