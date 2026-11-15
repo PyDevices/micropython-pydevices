@@ -778,8 +778,9 @@ big-endian into consecutive registers, and a dict when it doesn't:
 `sensors/` holds descriptions of the cameras `esp_cam_sensor` has drivers
 for, written by `tools/sensorgen/sensorgen.py` from Espressif's own source. It
 runs each driver on a desktop against a pretend chip, and `replay_check.py`
-plays every description back against that driver, register for register. Each
-file's header says whether the description was run on a sensor (the OV5647's
+plays every description back against that driver, register for register.
+`tests/check_sensor_descriptions.py --download` runs both, and checks that
+every description is the shape `Camera()` accepts, with no camera; CI runs it. Each file's header says whether the description was run on a sensor (the OV5647's
 and the OV2710's were, read back against their drivers on a board) or written
 from the data and not yet run on one, and where it differs from the driver.
 They are frozen into every ESP32-P4 image in place of the drivers
