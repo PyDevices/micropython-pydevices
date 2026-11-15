@@ -1802,8 +1802,9 @@ def cp_frozen_manifest_dir(d):
     through USER_C_MODULES), and it isn't one of MicroPython's own."""
     real = d.resolve()
     manifest = real / "manifest.py"
+    # A whole word: audioinstruments' manifest calls exec_module(), which ends in c_module(.
     return (manifest.is_file() and module_name(d) not in MP_ONLY_MODULES
-            and "c_module(" not in manifest.read_text())
+            and not re.search(r"(?<![\w.])c_module\(", manifest.read_text()))
 
 
 def cp_board_frozen_dirs(cp, port, board):

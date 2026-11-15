@@ -3,9 +3,9 @@
 # copied unchanged: board.c, pins.c, mpconfigboard.h and the frozen libraries.
 #
 # CircuitPython's 16 MB layout has two 2 MB OTA slots and a UF2 bootloader.
-# With LVGL (about 1 MB) beside audiodsp and pygraphics, the firmware no
-# longer fits 2 MB, so this layout has one 4 MB app partition and a 12 MB
-# CIRCUITPY instead, and no UF2 bootloader: flash it with esptool. Over-the-air
+# With LVGL (about 1 MB), audiodsp, pygraphics and the frozen audioinstruments
+# and audioeffects (about 1.2 MB), the firmware no longer fits 2 MB, so this
+# layout has one 6 MB app partition and a 10 MB CIRCUITPY instead, and no UF2 bootloader: flash it with esptool. Over-the-air
 # updates need two slots, so this board has none.
 USB_VID = 0x303A
 USB_PID = 0x821C
