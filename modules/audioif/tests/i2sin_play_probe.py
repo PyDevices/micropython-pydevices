@@ -97,13 +97,13 @@ def play(source, seconds=0.25, name="play"):
 
 # --- take= on record() -----------------------------------------------------
 
-for take, want, label in ((0, L16, "left"), (1, R16, "right"),
-                          (2, MIX16, "their average")):
+for take, want, label in ((0, L16, "left slot"), (1, R16, "right slot"),
+                          (2, MIX16, "average of the two")):
     buf = array.array("h", [0] * N)
     with audioi2sin.I2SIn(*PINS, take=take, source=SRC16) as mic:
         n = mic.record(buf, N)
         cc = mic.channel_count
-    check("record, take=%d: the %s slot" % (take, label),
+    check("record, take=%d: the %s" % (take, label),
           n == N and cc == 1 and list(buf) == want)
 
 buf = array.array("h", [0] * (2 * N))
@@ -168,10 +168,11 @@ mic = audioi2sin.I2SIn(*PINS, sample_rate=RATE, samples_signed=False,
                        source=SRC16)
 playing, got = play(mic, name="unsigned")
 mic.deinit()
+frames = len(got) // 2
 check("play(mic), unsigned: converted back, left in both channels",
-      len(got) > 2000
-      and list(got[0::2]) == looped(L16, len(got) // 2)
-      and list(got[1::2]) == looped(L16, len(got) // 2))
+      frames > 1000
+      and [got[2 * i] for i in range(frames)] == looped(L16, frames)
+      and [got[2 * i + 1] for i in range(frames)] == looped(L16, frames))
 
 # A 24-bit microphone plays at 16 bits: the top 16 of its 24.
 L24 = [((i * 104729) % (1 << 24)) - (1 << 23) for i in range(N)]
@@ -192,12 +193,18 @@ mixer.voice[0].play(mic)
 playing, got = play(mixer, name="mixer")
 mixer.deinit()
 mic.deinit()
-# The mixer may pull a block ahead of the output, so the stream is matched
-# from wherever it starts; every value in L16 is distinct.
+# A mixer opens with a few samples of silence, a RawSample's voice as much
+# as this one, so the stream is matched from its first sound. No value in L16
+# is zero, and each is distinct, which says where in the loop it starts.
+lead = 0
+while lead < len(got) and got[lead] == 0:
+    lead += 1
+got = got[lead:]
 at = L16.index(got[0]) if len(got) and got[0] in L16 else 0
-check("a mixer voice plays the mic",
-      len(got) > 1000 and max(abs(got[i] - L16[(at + i) % N])
-                              for i in range(len(got))) <= 1)
+check("a mixer voice plays the mic, sample for sample",
+      lead < 512 and len(got) > 1000
+      and list(got) == looped(L16[at:] + L16[:at], len(got)),
+      "%d samples of silence first" % lead)
 
 # deinit() while it plays: the output goes on, in silence, and nothing hangs.
 mic = audioi2sin.I2SIn(*PINS, sample_rate=RATE, source=SRC16)
