@@ -1447,8 +1447,19 @@ class Coredump(unittest.TestCase):
     ON = "CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y"
     cells = [c for c in rf.CELLS if c["interpreter"] == "micropython" and c["port"] == "esp32"]
 
+    class CellLibrary:
+        """Stands in for the library checkout, which a unit test doesn't fetch:
+        it has whatever a cell names that isn't in modules/ (pygraphics)."""
+
+        def __init__(self, spec):
+            self._names = {n for n in spec.split(",") if n not in ("all", build_mp.LVGL_MODULE)
+                           and not (build_mp.MODULES_DIR / n).is_dir()}
+
+        def names(self):
+            return self._names
+
     def fragment(self, c, coredump):
-        _, module_dirs, _ = build_mp.resolve_modules(c["modules"])
+        _, module_dirs, _ = build_mp.resolve_modules(c["modules"], self.CellLibrary(c["modules"]))
         text, _ = build_mp.esp32_fragment(c["chip"], module_dirs, c["board"], c["variant"], c["flash"], None, coredump)
         return text
 

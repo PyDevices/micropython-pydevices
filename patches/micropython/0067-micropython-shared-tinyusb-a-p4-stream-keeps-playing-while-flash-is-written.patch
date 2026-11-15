@@ -1,0 +1,392 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 12:00:00 -0600
+Subject: [PATCH] shared/tinyusb: on the ESP32-P4 a stream keeps playing while
+ flash is written.
+
+TinyUSB's device interrupt runs from IRAM on the ESP32-P4 and keeps going
+while a flash write has the cache off, but only if what it touches is in
+internal RAM. A Ring's state, and its buffer up to 64 KB when internal RAM
+has room, now come from internal RAM there, and so do a stream's packet
+buffers; the driver table the interrupt reads moves to RAM too. A bigger
+ring, or one internal RAM can't hold, stays in the heap, and its stream
+sends empty packets (IN) or counts drops (OUT) while the cache is off, as
+before. So does a C sink outside internal RAM. Other ports keep the heap.
+
+On an ESP32-P4X-EYE with flash auto-suspend off, a headset looping the
+host's playback to its microphone lost about 300 of 640 microframes
+(three gaps of about 14 ms) during each 8 KB file write; now it loses
+none.
+---
+--- a/shared/tinyusb/mp_usbd_runtime.c	2026-11-15 04:28:08.210044876 -0600
++++ b/shared/tinyusb/mp_usbd_runtime.c	2026-11-15 05:02:12.078648018 -0600
+@@ -416,26 +416,69 @@
+ #if defined(ESP_PLATFORM)
+ #include "esp_attr.h"
+ #define MP_USBD_ISR_ATTR IRAM_ATTR
++#define MP_USBD_ISR_DATA_ATTR DRAM_ATTR
+ #else
+ #define MP_USBD_ISR_ATTR
++#define MP_USBD_ISR_DATA_ATTR
+ #endif
+ 
+-typedef struct _mp_usbd_ring_obj_t {
+-    mp_obj_base_t base;
++// TinyUSB's TUP_DCD_ISR_IN_IRAM, decided here from sdkconfig so that the qstr
++// pass, which doesn't see TinyUSB's settings, agrees with the build.
++#if defined(CONFIG_IDF_TARGET_ESP32P4) && CONFIG_IDF_TARGET_ESP32P4
++#define MP_USBD_ISR_IN_IRAM (1)
++#else
++#define MP_USBD_ISR_IN_IRAM (0)
++#endif
++#if !defined(NO_QSTR) && MP_USBD_ISR_IN_IRAM != defined(TUP_DCD_ISR_IN_IRAM)
++#error "MP_USBD_ISR_IN_IRAM must match TinyUSB's TUP_DCD_ISR_IN_IRAM"
++#endif
++
++#if MP_USBD_ISR_IN_IRAM
++// On the ESP32-P4 the transfer interrupt runs from IRAM, and goes on while a
++// flash write or erase has the cache off (TinyUSB's dcd_dwc2.c), so a sound
++// card doesn't drop out when a file is written. Then it must not touch memory
++// behind the cache: PSRAM, where the GC heap is, or flash. So a stream's state
++// and packet buffer are in internal RAM, and so is a ring of up to
++// MP_USBD_RING_INTERNAL_MAX bytes when internal RAM has room for it. A bigger
++// ring (video frames), or one internal RAM can't hold, stays in the heap, and
++// its stream sends empty packets or drops what comes while the cache is off,
++// as every stream did before; so does a C sink outside internal RAM.
++#include "esp_heap_caps.h"
++#include "esp_memory_utils.h"
++#include "esp_private/cache_utils.h"
++#define MP_USBD_RING_INTERNAL_MAX (64 * 1024)
++#define MP_USBD_INTERNAL (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
++
++static inline __attribute__((always_inline)) bool isr_reaches(const void *p) {
++    return esp_ptr_internal(p) || spi_flash_cache_enabled();
++}
++#else
++#define isr_reaches(p) (true)
++#endif
++
++// What the interrupt touches. It lives apart from the Python object, so that
++// it can be in internal RAM (see above).
++typedef struct {
+     uint8_t *buf;
+     uint32_t mask;              // size - 1; size is a power of two
+     volatile uint32_t head;     // free-running: the producer's count
+     volatile uint32_t tail;     // free-running: the consumer's count
+     volatile uint32_t overflows;    // writes refused for want of room
+     volatile uint32_t underflows;   // reads that found less than asked
++} mp_usbd_ring_t;
++
++typedef struct _mp_usbd_ring_obj_t {
++    mp_obj_base_t base;
++    mp_usbd_ring_t *r;
++    uint8_t *heap_buf;          // keeps a buf in the heap reachable when r isn't
+ } mp_usbd_ring_obj_t;
+ 
+-static MP_USBD_ISR_ATTR uint32_t ring_used(mp_usbd_ring_obj_t *r) {
++static MP_USBD_ISR_ATTR uint32_t ring_used(mp_usbd_ring_t *r) {
+     return r->head - r->tail;
+ }
+ 
+ // Copy n bytes in, all or nothing. Single producer.
+-static MP_USBD_ISR_ATTR bool ring_write(mp_usbd_ring_obj_t *r, const uint8_t *src, uint32_t n) {
++static MP_USBD_ISR_ATTR bool ring_write(mp_usbd_ring_t *r, const uint8_t *src, uint32_t n) {
+     uint32_t size = r->mask + 1;
+     if (size - ring_used(r) < n) {
+         r->overflows++;
+@@ -451,7 +494,7 @@
+ }
+ 
+ // Copy up to n bytes out. Single consumer.
+-static MP_USBD_ISR_ATTR uint32_t ring_read(mp_usbd_ring_obj_t *r, uint8_t *dst, uint32_t n) {
++static MP_USBD_ISR_ATTR uint32_t ring_read(mp_usbd_ring_t *r, uint8_t *dst, uint32_t n) {
+     uint32_t avail = ring_used(r);
+     if (avail < n) {
+         r->underflows++;
+@@ -468,25 +511,28 @@
+ }
+ 
+ // The ring from C (mp_usbd.h), for another module's producer or consumer.
++#define RING_OF(ring) (((mp_usbd_ring_obj_t *)(ring))->r)
++
+ uint32_t mp_usbd_ring_size(void *ring) {
+-    return ((mp_usbd_ring_obj_t *)ring)->mask + 1;
++    return RING_OF(ring)->mask + 1;
+ }
+ 
+ uint32_t mp_usbd_ring_used(void *ring) {
+-    return ring_used(ring);
++    return ring_used(RING_OF(ring));
+ }
+ 
+ bool mp_usbd_ring_put(void *ring, const uint8_t *src, uint32_t n) {
+-    return ring_write(ring, src, n);
++    return ring_write(RING_OF(ring), src, n);
+ }
+ 
+ uint32_t mp_usbd_ring_get(void *ring, uint8_t *dst, uint32_t n) {
+-    uint32_t avail = ring_used(ring);
+-    return ring_read(ring, dst, n < avail ? n : avail);
++    mp_usbd_ring_t *r = RING_OF(ring);
++    uint32_t avail = ring_used(r);
++    return ring_read(r, dst, n < avail ? n : avail);
+ }
+ 
+ bool mp_usbd_ring_stage(void *ring, uint32_t offset, const uint8_t *src, uint32_t n) {
+-    mp_usbd_ring_obj_t *r = ring;
++    mp_usbd_ring_t *r = RING_OF(ring);
+     uint32_t size = r->mask + 1;
+     if (offset > size - ring_used(r) || n > size - ring_used(r) - offset) {
+         return false;
+@@ -499,13 +545,13 @@
+ }
+ 
+ void mp_usbd_ring_commit(void *ring, uint32_t n) {
+-    mp_usbd_ring_obj_t *r = ring;
++    mp_usbd_ring_t *r = RING_OF(ring);
+     __sync_synchronize();
+     r->head += n;
+ }
+ 
+ void mp_usbd_ring_overflow(void *ring) {
+-    ((mp_usbd_ring_obj_t *)ring)->overflows++;
++    RING_OF(ring)->overflows++;
+ }
+ 
+ // USBDevice.Ring(nbytes): rounded up to a power of two.
+@@ -519,17 +565,51 @@
+     while (size < (uint32_t)want) {
+         size <<= 1;
+     }
++    #if MP_USBD_ISR_IN_IRAM
++    mp_usbd_ring_obj_t *self = mp_obj_malloc_with_finaliser(mp_usbd_ring_obj_t, type);
++    self->r = NULL;
++    self->heap_buf = NULL;
++    mp_usbd_ring_t *r = NULL;
++    if (size <= MP_USBD_RING_INTERNAL_MAX) {
++        r = heap_caps_malloc(sizeof(mp_usbd_ring_t) + size, MP_USBD_INTERNAL);
++    }
++    if (r != NULL) {
++        r->buf = (uint8_t *)(r + 1);
++    } else {
++        self->heap_buf = m_new(uint8_t, size);
++        r = heap_caps_malloc(sizeof(mp_usbd_ring_t), MP_USBD_INTERNAL);
++        if (r == NULL) {
++            m_malloc_fail(sizeof(mp_usbd_ring_t));
++        }
++        r->buf = self->heap_buf;
++    }
++    self->r = r;
++    #else
+     mp_usbd_ring_obj_t *self = mp_obj_malloc(mp_usbd_ring_obj_t, type);
+-    self->buf = m_new(uint8_t, size);
+-    self->mask = size - 1;
+-    self->head = self->tail = self->overflows = self->underflows = 0;
++    mp_usbd_ring_t *r = m_new_obj(mp_usbd_ring_t);
++    r->buf = m_new(uint8_t, size);
++    self->r = r;
++    self->heap_buf = NULL;
++    #endif
++    r->mask = size - 1;
++    r->head = r->tail = r->overflows = r->underflows = 0;
+     return MP_OBJ_FROM_PTR(self);
+ }
+ 
++#if MP_USBD_ISR_IN_IRAM
++static mp_obj_t mp_usbd_ring_del(mp_obj_t self_in) {
++    mp_usbd_ring_obj_t *self = MP_OBJ_TO_PTR(self_in);
++    heap_caps_free(self->r);
++    self->r = NULL;
++    return mp_const_none;
++}
++static MP_DEFINE_CONST_FUN_OBJ_1(mp_usbd_ring_del_obj, mp_usbd_ring_del);
++#endif
++
+ // ring.any(): bytes waiting.
+ static mp_obj_t mp_usbd_ring_any(mp_obj_t self_in) {
+     mp_usbd_ring_obj_t *self = MP_OBJ_TO_PTR(self_in);
+-    return mp_obj_new_int_from_uint(ring_used(self));
++    return mp_obj_new_int_from_uint(ring_used(self->r));
+ }
+ static MP_DEFINE_CONST_FUN_OBJ_1(mp_usbd_ring_any_obj, mp_usbd_ring_any);
+ 
+@@ -545,8 +625,8 @@
+             n = lim;
+         }
+     }
+-    uint32_t avail = ring_used(self);
+-    return mp_obj_new_int_from_uint(ring_read(self, bi.buf, n < avail ? n : avail));
++    uint32_t avail = ring_used(self->r);
++    return mp_obj_new_int_from_uint(ring_read(self->r, bi.buf, n < avail ? n : avail));
+ }
+ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_usbd_ring_readinto_obj, 2, 3, mp_usbd_ring_readinto);
+ 
+@@ -555,18 +635,19 @@
+     mp_usbd_ring_obj_t *self = MP_OBJ_TO_PTR(self_in);
+     mp_buffer_info_t bi;
+     mp_get_buffer_raise(buf_in, &bi, MP_BUFFER_READ);
+-    return MP_OBJ_NEW_SMALL_INT(ring_write(self, bi.buf, bi.len) ? (mp_int_t)bi.len : 0);
++    return MP_OBJ_NEW_SMALL_INT(ring_write(self->r, bi.buf, bi.len) ? (mp_int_t)bi.len : 0);
+ }
+ static MP_DEFINE_CONST_FUN_OBJ_2(mp_usbd_ring_write_obj, mp_usbd_ring_write);
+ 
+ // ring.stats(): (size, waiting, overflows, underflows).
+ static mp_obj_t mp_usbd_ring_stats(mp_obj_t self_in) {
+     mp_usbd_ring_obj_t *self = MP_OBJ_TO_PTR(self_in);
++    mp_usbd_ring_t *r = self->r;
+     mp_obj_t items[4] = {
+-        mp_obj_new_int_from_uint(self->mask + 1),
+-        mp_obj_new_int_from_uint(ring_used(self)),
+-        mp_obj_new_int_from_uint(self->overflows),
+-        mp_obj_new_int_from_uint(self->underflows),
++        mp_obj_new_int_from_uint(r->mask + 1),
++        mp_obj_new_int_from_uint(ring_used(r)),
++        mp_obj_new_int_from_uint(r->overflows),
++        mp_obj_new_int_from_uint(r->underflows),
+     };
+     return mp_obj_new_tuple(4, items);
+ }
+@@ -577,6 +658,9 @@
+     { MP_ROM_QSTR(MP_QSTR_readinto), MP_ROM_PTR(&mp_usbd_ring_readinto_obj) },
+     { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&mp_usbd_ring_write_obj) },
+     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&mp_usbd_ring_stats_obj) },
++    #if MP_USBD_ISR_IN_IRAM
++    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&mp_usbd_ring_del_obj) },
++    #endif
+ };
+ static MP_DEFINE_CONST_DICT(mp_usbd_ring_locals_dict, mp_usbd_ring_locals_dict_table);
+ 
+@@ -602,7 +686,7 @@
+     void *sink_ctx;
+     uint32_t frame_pos;         // video: bytes of the current frame sent
+     uint8_t fid;                // video: the frame ID bit, toggled per frame
+-    mp_usbd_ring_obj_t *ring;   // data streams
++    mp_usbd_ring_t *ring;       // data streams
+     uint8_t *pkt;               // the transfer's buffer
+     uint8_t *queued;            // the buffer last queued on last_ep
+     uint8_t fb_len;
+@@ -626,6 +710,8 @@
+     if (s->feedback) {
+         memcpy(s->pkt, s->fb, s->fb_len);
+         n = s->fb_len;
++    } else if (tu_edpt_dir(s->ep) == TUSB_DIR_IN && !isr_reaches(s->ring->buf)) {
++        n = 0;                                  // the cache is off (see above)
+     } else if (tu_edpt_dir(s->ep) == TUSB_DIR_IN && s->frame) {
+         // A UVC payload: a 2-byte header (length, then FID and, on a frame's
+         // last packet, EOF) and the next part of the frame. A frame starts
+@@ -686,10 +772,11 @@
+         s->bytes += xferred_bytes;
+         if (!s->feedback && tu_edpt_dir(ep_addr) == TUSB_DIR_OUT && xferred_bytes) {
+             if (s->sink != NULL) {
+-                if (s->sink(s->sink_ctx, s->pkt, xferred_bytes) < xferred_bytes) {
++                if (!isr_reaches((const void *)s->sink) || !isr_reaches(s->sink_ctx)
++                    || s->sink(s->sink_ctx, s->pkt, xferred_bytes) < xferred_bytes) {
+                     s->drops++;
+                 }
+-            } else if (!ring_write(s->ring, s->pkt, xferred_bytes)) {
++            } else if (!isr_reaches(s->ring->buf) || !ring_write(s->ring, s->pkt, xferred_bytes)) {
+                 s->drops++;
+             }
+         }
+@@ -708,10 +795,66 @@
+ // stream, and one replaced while it may still be queued is kept in
+ // stream_objs[i][2] until it can't be.
+ 
++#if MP_USBD_ISR_IN_IRAM
++// A packet buffer in internal RAM (see above), freed with its object.
++typedef struct {
++    mp_obj_base_t base;
++    uint8_t *items;
++    size_t len;
++} mp_usbd_packet_buf_t;
++
++static mp_obj_t mp_usbd_packet_buf_del(mp_obj_t self_in) {
++    mp_usbd_packet_buf_t *self = MP_OBJ_TO_PTR(self_in);
++    heap_caps_free(self->items);
++    self->items = NULL;
++    return mp_const_none;
++}
++static MP_DEFINE_CONST_FUN_OBJ_1(mp_usbd_packet_buf_del_obj, mp_usbd_packet_buf_del);
++
++static const mp_rom_map_elem_t mp_usbd_packet_buf_locals_dict_table[] = {
++    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&mp_usbd_packet_buf_del_obj) },
++};
++static MP_DEFINE_CONST_DICT(mp_usbd_packet_buf_locals_dict, mp_usbd_packet_buf_locals_dict_table);
++
++static MP_DEFINE_CONST_OBJ_TYPE(
++    mp_usbd_packet_buf_type,
++    MP_QSTR_PacketBuffer,
++    MP_TYPE_FLAG_NONE,
++    locals_dict, &mp_usbd_packet_buf_locals_dict
++    );
++
++static mp_obj_t stream_new_buffer(uint16_t size) {
++    mp_usbd_packet_buf_t *b = mp_obj_malloc_with_finaliser(mp_usbd_packet_buf_t, &mp_usbd_packet_buf_type);
++    b->len = 0;
++    b->items = heap_caps_malloc(size, MP_USBD_INTERNAL);
++    if (b->items == NULL) {
++        m_malloc_fail(size);
++    }
++    b->len = size;
++    return MP_OBJ_FROM_PTR(b);
++}
++
++static uint8_t *stream_items(mp_obj_t buf) {
++    return ((mp_usbd_packet_buf_t *)MP_OBJ_TO_PTR(buf))->items;
++}
++
++static size_t stream_items_len(mp_obj_t buf) {
++    return ((mp_usbd_packet_buf_t *)MP_OBJ_TO_PTR(buf))->len;
++}
++#else
++static mp_obj_t stream_new_buffer(uint16_t size) {
++    return mp_obj_new_bytearray_by_ref(size, m_new(uint8_t, size));
++}
++
+ static uint8_t *stream_items(mp_obj_t buf) {
+     return ((mp_obj_array_t *)MP_OBJ_TO_PTR(buf))->items;
+ }
+ 
++static size_t stream_items_len(mp_obj_t buf) {
++    return ((mp_obj_array_t *)MP_OBJ_TO_PTR(buf))->len;
++}
++#endif
++
+ // Whether the controller may still write to (or send from) buf.
+ static bool stream_holds(mp_usbd_stream_t *s, mp_obj_t buf) {
+     return buf != mp_const_none && s->last_ep != 0 && s->queued == stream_items(buf)
+@@ -748,11 +891,11 @@
+     if (!stream_holds(s, objs[2])) {
+         objs[2] = mp_const_none;
+     }
+-    if (objs[1] == mp_const_none || ((mp_obj_array_t *)MP_OBJ_TO_PTR(objs[1]))->len < size) {
++    if (objs[1] == mp_const_none || stream_items_len(objs[1]) < size) {
+         if (stream_holds(s, objs[1])) {
+             objs[2] = objs[1];
+         }
+-        objs[1] = mp_obj_new_bytearray_by_ref(size, m_new(uint8_t, size));
++        objs[1] = stream_new_buffer(size);
+     }
+     s->pkt = stream_items(objs[1]);
+     s->last_ep = ep_addr;
+@@ -784,7 +927,7 @@
+     s->active = false;
+     stream_buffer(usbd, i, ep_addr, packet);
+     usbd->stream_objs[i][0] = ring;
+-    s->ring = MP_OBJ_TO_PTR(ring);
++    s->ring = ((mp_usbd_ring_obj_t *)MP_OBJ_TO_PTR(ring))->r;
+     s->packet = packet;
+     s->sink = NULL;
+     s->frame = frame;
+@@ -879,7 +1022,8 @@
+     }
+ }
+ 
+-static usbd_class_driver_t const _runtime_dev_driver =
++// Read by TinyUSB's interrupt (xfer_isr), so in RAM.
++static MP_USBD_ISR_DATA_ATTR usbd_class_driver_t const _runtime_dev_driver =
+ {
+     #if CFG_TUSB_DEBUG >= 2
+     .name = "runtime_dev",
+-- 
+2.43.0
