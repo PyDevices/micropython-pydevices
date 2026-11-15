@@ -327,7 +327,8 @@ if MICROPYTHON:
     big, roomy = svgio.Buffer(1 << 20), svgio.SvgDecoder(memory=1 << 20)
     outside = gc.mem_alloc() - before < (1 << 19)
     print("memory outside the heap: %s" % ("yes" if outside else "no, the heap serves"))
-    if sys.platform in ("linux", "darwin", "win32"):
+    if sys.platform in ("linux", "darwin", "win32") and sys.implementation.name == "micropython":
+        # (CircuitPython keeps all of its memory in its own heap.)
         assert outside, "a desktop has memory outside the heap"
     if outside:
         assert svgio._outside() == held + 2
