@@ -9,9 +9,9 @@ or missing for you, open an
 - **Your own firmware from the firmware page.** A build you made, in a
   codespace or anywhere else, goes onto your board from the browser; it's
   planned on the [site's roadmap](https://github.com/PyDevices/PyDevices.github.io/blob/main/ROADMAP.md).
-- **Python packages in a ROMFS partition on a 4 MB ESP32.** Put instruments or
-  an app's modules in flash beside the firmware and run them in place, where a
-  LittleFS filesystem has no room for that many files.
+- **Your own packages run from flash on an ESP32, with no firmware build.**
+  Compile them to `.mpy` on a computer and deploy them to a ROMFS partition, where
+  they run in place like frozen code and use almost no RAM.
 
 ## Watching a board
 
