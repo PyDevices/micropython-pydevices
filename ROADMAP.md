@@ -30,15 +30,16 @@ ours to port.
 - **castif casting on the ESP32-P4.** castif and h264enc build and encode there,
   but a cast can't start until CircuitPython drives the boards' ESP32-C6 radio.
 - **More of usbhost on an ESP32-P4.** A wireless keyboard-and-mouse dongle
-  works on the WIFI6 DEV-KIT; a drive, a webcam and a phone come next.
+  works on the WIFI6 DEV-KIT and a webcam enumerates; reading a drive and a
+  webcam's stream haven't been tried on CircuitPython there yet.
 - **The USB host drivers on CircuitPython's own `usb.core`**, on the RP2040
   and i.MX: planned in [pydevices](https://github.com/PyDevices/pydevices/blob/main/ROADMAP.md#usb).
 
 ## tflite models
 
-- **Small int8 models on the ESP32-P4 and S3:** the microWakeWord wake words,
-  micro_speech, person_detection, MobileNet-v2 int8 and yamnet-cry-distill.
-  Each has run on a P4; the S3 is judged from the ops, not yet run.
+- **Small int8 models on the ESP32-S3:** the microWakeWord wake words,
+  micro_speech, person_detection, MobileNet-v2 int8 and yamnet-cry-distill,
+  which each run on an ESP32-P4 today.
 - **More to try:** efficientdet-lite0, silero-vad, MoveNet and the MLPerf Tiny
   models, and int8 conversions of fp16 and fp32 models such as YuNet.
 - **YAMNet's full 521-class int8 model.** The published yamnet-mel-int8-tflm
