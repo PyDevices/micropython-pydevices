@@ -335,7 +335,7 @@ COMPACT = b"".join(
         struct.pack("<B3" + F, 1, 80, 20, 12.125) + style(GRADIENT + 1, 0x000000, 1.5),
         struct.pack("<B" + F + "H", 6, 0.5, 14) + b"translate(2 1)",
         struct.pack("<B5" + F, 2, 50, 40, 20, 9.5, 30) + style(NONE, 0xFF0000, 3),
-        struct.pack("<B5" + F, 2, 50, 40, 8, 4, 0) + style(0x00FF00, extra=b'fill-opacity="0.5"'),
+        struct.pack("<B5" + F, 2, 50, 40, 8, 4, 0) + style(0x00FF00, 0x0000FF, 2, extra=b'stroke-linecap="butt"'),
         b"\x07",
         struct.pack("<B4" + F + "B", 8, 12, 5, 15, 0.5, 1),
         struct.pack("<B4" + F + "B", 8, 3, 3, 0, 1, 0),
@@ -359,7 +359,8 @@ EXPANDED = (
     b'<g transform="translate(2 1)" opacity="0.5">'
     b'<ellipse cx="50" cy="40" rx="20" ry="9.5" fill="none" stroke="#ff0000" stroke-width="3"'
     b' stroke-linecap="round" stroke-linejoin="round" transform="rotate(30 50 40)"/>'
-    b'<ellipse cx="50" cy="40" rx="8" ry="4" fill="#00ff00" fill-opacity="0.5"/></g>'
+    b'<ellipse cx="50" cy="40" rx="8" ry="4" fill="#00ff00" stroke="#0000ff" stroke-width="2"'
+    b' stroke-linejoin="round" stroke-linecap="butt"/></g>'
     b'<g transform="translate(12 5) rotate(15) scale(-0.5 0.5)"><g transform="translate(3 3)">'
     b'<path d="M10 70.5L30 70.5Q40 60 30 50C25 45 15 45 10 50ZM60 60L70 62.25L64 72a4 4 0 0 1 -4 -12z"'
     b' fill="#336699" stroke="#ffffff" stroke-width="0.75" stroke-linecap="round" stroke-linejoin="round"/>'

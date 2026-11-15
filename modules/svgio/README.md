@@ -196,7 +196,7 @@ shape's box.
 A style is `fill` : paint, `stroke` : paint, `width` : F, `opacity` : F,
 `n` : u16, then `n` bytes of extra attributes as text. A `stroke` of
 `0xFFFFFFFE` is no stroke; with one, caps and joins are round unless the
-extra attributes say otherwise. `opacity` is written when it's under 1.
+extra attributes name `stroke-linecap` or `stroke-linejoin`. `opacity` is written when it's under 1.
 
 Path data is segments: `M x y`, `L x y`, `Q` with four numbers, `C` with six,
 `Z`, `P x y` (the two numbers with no letter, to carry on a run), and

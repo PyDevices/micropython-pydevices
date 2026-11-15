@@ -15,8 +15,9 @@
 //
 //   style = fill:paint stroke:paint width:F opacity:F n:u16 extra[n]
 //           stroke 0xFFFFFFFE writes no stroke attributes; with a stroke the
-//           caps and joins are round. opacity is written when under 1. extra
-//           is attributes as text, written after a space.
+//           caps and joins are round, unless extra names stroke-linecap or
+//           stroke-linejoin. opacity is written when under 1. extra is
+//           attributes as text, written after a space.
 //    1 circle   cx cy r :F, style
 //    2 ellipse  cx cy rx ry rot :F, style      rot turns it about its centre
 //    3 rect     x y w h r :F, style            r, if not 0, is its rx
@@ -172,6 +173,17 @@ static void svgio_attr(svgio_expander_t *e, const char *name, mp_float_t v) {
     svgio_puts(e, "\"");
 }
 
+// True when the n bytes at s hold word.
+static bool svgio_holds(const uint8_t *s, size_t n, const char *word) {
+    size_t w = strlen(word);
+    for (size_t i = 0; i + w <= n; i++) {
+        if (memcmp(s + i, word, w) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // --- records -----------------------------------------------------------------
 
 // A shape's style, and its extra attributes: before them goes `first` (a
@@ -188,7 +200,14 @@ static void svgio_style(svgio_expander_t *e, const char *first, mp_float_t first
         svgio_puts(e, " stroke=\"");
         svgio_put_paint(e, stroke);
         svgio_attr(e, "\" stroke-width=\"", width);
-        svgio_puts(e, " stroke-linecap=\"round\" stroke-linejoin=\"round\"");
+        // An attribute given twice is an error to a strict XML reader.
+        const size_t have = (size_t)(e->end - e->p) < n ? 0 : n;
+        if (!svgio_holds(e->p, have, "stroke-linecap")) {
+            svgio_puts(e, " stroke-linecap=\"round\"");
+        }
+        if (!svgio_holds(e->p, have, "stroke-linejoin")) {
+            svgio_puts(e, " stroke-linejoin=\"round\"");
+        }
     }
     if (opacity < 1) {
         svgio_attr(e, " opacity=\"", opacity);
