@@ -4,9 +4,12 @@
 
 """scripts/pins.py: DEPENDENCIES.lock, read the one way every script and workflow reads it."""
 
+import os
 import subprocess
 import sys
 import unittest
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
@@ -80,6 +83,37 @@ class TheFile(unittest.TestCase):
         self.assertEqual(len(run("--key", "toolchains").stdout.strip()), 16)
         self.assertNotEqual(run("SDL2", "commit").returncode, 0)
         self.assertNotEqual(run("no-such-pin").returncode, 0)
+
+
+class FrozenLibrary(unittest.TestCase):
+    """What the pinned library freezes, read from pydevices on GitHub.
+
+    A frozen package hides one of the same name in /lib, so a module the
+    library's frozen packages lack can't be added to a board with mip. Offline
+    the checks skip; PYDEVICES_REQUIRE_NETWORK=1 makes that a failure.
+    """
+
+    def has(self, path):
+        pin = pins.read(HERE)["omnipython-lib"]
+        repo = pin.url.removeprefix("https://github.com/").removesuffix(".git")
+        url = "https://raw.githubusercontent.com/%s/%s/%s" % (repo, pin.ref, path)
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=20):
+                return True
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return False
+            raise
+        except urllib.error.URLError as e:
+            if os.environ.get("PYDEVICES_REQUIRE_NETWORK") == "1":
+                raise
+            self.skipTest("no network to read %s: %s" % (url, e.reason))
+
+    def test_the_frozen_usb_package_reads_gamepads(self):
+        # The firmware's usb package carries usb.host.hid_generic, the gamepad
+        # and joystick reader: a copy in /lib/usb would never be imported.
+        self.assertTrue(self.has("packages/usb/usb-host-hid/usb/host/hid_generic.py"),
+                        "the pinned omnipython-lib has no usb.host.hid_generic")
 
 
 if __name__ == "__main__":
