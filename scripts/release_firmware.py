@@ -124,10 +124,12 @@ CELLS = [
     # ESP32-S3 with no PSRAM. Our S3 builds put the TLS library in PSRAM, so this one is the
     # NO_PSRAM variant, which keeps it in internal RAM and Wi-Fi joins a WPA2 network. "all" is
     # left out because LVGL, the camera, the H.264 encoder and the audio instruments want
-    # megabytes of heap; this set is what runs in a few hundred KB.
+    # megabytes of heap, and the audio modules take about 8 KB of the heap at boot and more
+    # at import. This set is C modules that run from flash and take no heap to import (pygraphics
+    # takes 48 bytes), which is what runs in a few hundred KB.
     dict(id="mp-s3-8mb", label="ESP32-S3 with no PSRAM, 8 MB flash (QT Py ESP32-S3 with no PSRAM)",
          interpreter="micropython", port="esp32", board="ESP32_GENERIC_S3", variant="NO_PSRAM", flash="8MB",
-         modules="pydevices,displayif,pngio,palettes,iconkit,svgio,mdns",
+         modules="pydevices,displayif,pygraphics,pngio,palettes,iconkit,svgio,mdns,jpegio,ulab",
          chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
     dict(id="mp-s3-tembed", label="LilyGO T-Embed S3", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_S3", variant="T_EMBED", flash="16MB", modules="all",
