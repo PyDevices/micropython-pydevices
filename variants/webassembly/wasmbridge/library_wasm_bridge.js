@@ -15,6 +15,7 @@ mergeInto(LibraryManager.library, {
         timerDeliveries: [],
         audioContext: null,
         audioEnabled: false,
+        audioUnlock: null,
         microphoneEnabled: false,
         audioEnd: 0,
         audioSources: new Set(),
@@ -218,7 +219,7 @@ mergeInto(LibraryManager.library, {
         state.animation = requestAnimationFrame(pydevices_paint);
     },
 
-    $pydevices_export_host__deps: ['$pydevices_state', '$pydevices_release_canvas'],
+    $pydevices_export_host__deps: ['$pydevices_state', '$pydevices_release_canvas', '$pydevices_disarm_audio_unlock', '$pydevices_enable_audio'],
     $pydevices_export_host: () => {
         if (Module.pydevicesBridge) return;
         Module.pydevicesBridge = {
@@ -255,6 +256,7 @@ mergeInto(LibraryManager.library, {
                     try { source.stop(); } catch (_) { /* already finished */ }
                 }
                 state.audioSources.clear();
+                pydevices_disarm_audio_unlock();
                 state.audioQueuedBytes = 0;
                 state.inputFrames.length = 0;
                 if (state.processor) { try { state.processor.disconnect(); } catch (_) {} }
@@ -270,29 +272,7 @@ mergeInto(LibraryManager.library, {
                 }
                 state.audioEnabled = false;
             },
-            enableAudio: async (microphone=false) => {
-                const state = pydevices_state;
-                const AudioContext = globalThis.AudioContext || globalThis.webkitAudioContext;
-                if (!AudioContext) throw new Error('Web Audio is unavailable');
-                state.audioContext ||= new AudioContext();
-                await state.audioContext.resume();
-                state.audioEnabled = state.audioContext.state === 'running';
-                if (microphone) {
-                    state.mediaStream = await navigator.mediaDevices.getUserMedia({audio:true});
-                    state.mediaNode = state.audioContext.createMediaStreamSource(state.mediaStream);
-                    state.processor = state.audioContext.createScriptProcessor(1024, 2, 2);
-                    state.processor.onaudioprocess = (event) => {
-                        const channels = [];
-                        for (let c = 0; c < event.inputBuffer.numberOfChannels; c++) channels.push(new Float32Array(event.inputBuffer.getChannelData(c)));
-                        state.inputFrames.push({channels, rate:event.inputBuffer.sampleRate, offset:0});
-                        if (state.inputFrames.length > 64) state.inputFrames.shift();
-                    };
-                    state.mediaNode.connect(state.processor);
-                    state.processor.connect(state.audioContext.destination);
-                    state.microphoneEnabled = true;
-                }
-                return {audio:state.audioEnabled, microphone:state.microphoneEnabled};
-            },
+            enableAudio: (microphone=false) => pydevices_enable_audio(microphone),
             permissions: () => ({audio:pydevices_state.audioEnabled, microphone:pydevices_state.microphoneEnabled}),
             stats: () => ({
                 events:Array.from(pydevices_state.displays.values()).reduce((n,d)=>n+d.events.length,0),
@@ -415,8 +395,65 @@ mergeInto(LibraryManager.library, {
     pydevices_timer_poll__deps: ['$pydevices_state'],
     pydevices_timer_poll: () => pydevices_state.firedTimers.length ? pydevices_state.firedTimers.shift() : -1,
 
-    pydevices_audio_state__deps: ['$pydevices_state'],
-    pydevices_audio_state: (input) => input ? +pydevices_state.microphoneEnabled : +pydevices_state.audioEnabled,
+    $pydevices_enable_audio__deps: ['$pydevices_state'],
+    $pydevices_enable_audio: async (microphone=false) => {
+        const state = pydevices_state;
+        const AudioContext = globalThis.AudioContext || globalThis.webkitAudioContext;
+        if (!AudioContext) throw new Error('Web Audio is unavailable');
+        state.audioContext ||= new AudioContext();
+        await state.audioContext.resume();
+        state.audioEnabled = state.audioContext.state === 'running';
+        if (microphone) {
+            state.mediaStream = await navigator.mediaDevices.getUserMedia({audio:true});
+            state.mediaNode = state.audioContext.createMediaStreamSource(state.mediaStream);
+            state.processor = state.audioContext.createScriptProcessor(1024, 2, 2);
+            state.processor.onaudioprocess = (event) => {
+                const channels = [];
+                for (let c = 0; c < event.inputBuffer.numberOfChannels; c++) channels.push(new Float32Array(event.inputBuffer.getChannelData(c)));
+                state.inputFrames.push({channels, rate:event.inputBuffer.sampleRate, offset:0});
+                if (state.inputFrames.length > 64) state.inputFrames.shift();
+            };
+            state.mediaNode.connect(state.processor);
+            state.processor.connect(state.audioContext.destination);
+            state.microphoneEnabled = true;
+        }
+        return {audio:state.audioEnabled, microphone:state.microphoneEnabled};
+    },
+
+    /*
+     * A browser keeps audio suspended until the page gets a click, tap or key
+     * press. Python asks "is audio on?" when it opens an output; when the
+     * answer is no, the next gesture on the page turns it on, so a program
+     * needs no Enable Audio button and no retry of its own. The listeners
+     * come off once audio runs, and in shutdown().
+     */
+    $pydevices_disarm_audio_unlock__deps: ['$pydevices_state'],
+    $pydevices_disarm_audio_unlock: () => {
+        const state = pydevices_state;
+        if (!state.audioUnlock) return;
+        for (const name of state.audioUnlock.names) document.removeEventListener(name, state.audioUnlock.handler, true);
+        state.audioUnlock = null;
+    },
+    $pydevices_arm_audio_unlock__deps: ['$pydevices_state', '$pydevices_disarm_audio_unlock', '$pydevices_enable_audio'],
+    $pydevices_arm_audio_unlock: () => {
+        const state = pydevices_state;
+        if (state.audioUnlock || typeof document === 'undefined') return;
+        const names = ['pointerdown', 'pointerup', 'keydown'];
+        const handler = () => {
+            if (state.audioEnabled) { pydevices_disarm_audio_unlock(); return; }
+            pydevices_enable_audio(false).then(
+                () => { if (state.audioEnabled) pydevices_disarm_audio_unlock(); },
+                () => {});
+        };
+        state.audioUnlock = {names, handler};
+        for (const name of names) document.addEventListener(name, handler, true);
+    },
+    pydevices_audio_state__deps: ['$pydevices_state', '$pydevices_arm_audio_unlock'],
+    pydevices_audio_state: (input) => {
+        if (input) return +pydevices_state.microphoneEnabled;
+        if (!pydevices_state.audioEnabled) pydevices_arm_audio_unlock();
+        return +pydevices_state.audioEnabled;
+    },
 
     $pydevices_decode_pcm: (bytes, frames, channels, bits, signed, bigEndian) => {
         const result = Array.from({length:channels}, () => new Float32Array(frames));
