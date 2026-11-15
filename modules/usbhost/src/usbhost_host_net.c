@@ -216,9 +216,10 @@ static void usbhost_net_free_xfers(void) {
     }
 }
 
-// Start moving frames on the data interface `itf` (claimed here) and bring
-// up a network interface with `mac` as its address, DHCP asked for.
-int usbhost_net_start(uint32_t dev_id, uint8_t itf, uint8_t ep_in, uint8_t ep_out, uint16_t mps,
+// Start moving frames on the data interface `itf` (claimed here, at its
+// alternate setting `alt`: a CDC-ECM adapter's endpoints are in alternate 1)
+// and bring up a network interface with `mac` as its address, DHCP asked for.
+int usbhost_net_start(uint32_t dev_id, uint8_t itf, uint8_t alt, uint8_t ep_in, uint8_t ep_out, uint16_t mps,
     const uint8_t mac[6], bool rndis) {
     if (usbhost_net.open) {
         return -MP_EBUSY;
@@ -227,7 +228,7 @@ int usbhost_net_start(uint32_t dev_id, uint8_t itf, uint8_t ep_in, uint8_t ep_ou
     if (usbhost_host_dev_lookup(dev_id, &dev) != 0) {
         return -MP_ENODEV;
     }
-    int r = usbhost_xfer_claim(dev_id, itf, 0);
+    int r = usbhost_xfer_claim(dev_id, itf, alt);
     if (r < 0) {
         return r;
     }
