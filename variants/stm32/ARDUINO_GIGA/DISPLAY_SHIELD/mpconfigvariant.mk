@@ -1,7 +1,6 @@
 # Arduino GIGA R1 WiFi with the GIGA Display Shield: upstream's ARDUINO_GIGA,
-# plus what LVGL and the shield's MIPI DSI panel need, in the board's 1280 KB
-# firmware slot. build_mp.py includes this after the board's own
-# mpconfigboard.mk.
+# plus what LVGL and the shield's MIPI DSI panel need, in the board's firmware
+# slot. build_mp.py includes this after the board's own mpconfigboard.mk.
 
 # The Wi-Fi chip's firmware (about 420 KB) moves out of internal flash into the
 # megabyte of QSPI flash the board reserves for it at 0x90F00000, where the
@@ -27,3 +26,11 @@ CFLAGS += -DLV_FONT_MONTSERRAT_40=0
 # The DSI host and LTDC drivers that displayif's mipidsi uses. The
 # stm32h7xx_hal_conf.h beside this file enables them.
 HAL_SRC_C += $(addprefix $(STM32LIB_HAL_BASE)/Src/stm32$(MCU_SERIES)xx_, hal_dsi.c hal_ltdc.c)
+
+# Link-time optimisation: the compiler sees the whole image at once and drops
+# or merges what no caller reaches, which makes room for pygraphics.
+LTO = 1
+# With nothing frozen, upstream's frozen_content.c declares the empty frozen
+# .mpy table with another pointer type than py/frozenmod.c, and LTO compares
+# the two. Both are an array of NULL pointers, so that stays a warning.
+CFLAGS += -Wno-error=lto-type-mismatch
