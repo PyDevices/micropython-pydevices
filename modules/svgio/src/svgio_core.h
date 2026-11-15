@@ -50,9 +50,15 @@ float svgio_prepared_scale(const svgio_prepared_t *prepared);
 // strip_rows rows at a time through strip (width * strip_rows * 4 bytes),
 // handing each strip to rows(). The strips sit where a render of every row
 // puts them, so a picture drawn in bands is the picture drawn whole.
-// prepared is the image prepared at that scale. NULL, or why not.
+// prepared is the image prepared at that scale. swaps is nswaps pairs of
+// colours, each 0xBBGGRR as NanoSVG holds them: wherever a fill, a stroke or
+// a gradient's stop is the first of a pair, the second is drawn, with the
+// opacity the first had. NULL, or why not.
 const char *svgio_render(svgio_image_t *image, svgio_prepared_t *prepared, float scale, int width, int height,
-    int y0, int y1, uint8_t *strip, int strip_rows, svgio_rows_fn rows, void *ctx);
+    int y0, int y1, const uint32_t *swaps, int nswaps, uint8_t *strip, int strip_rows, svgio_rows_fn rows, void *ctx);
+
+// The most pairs of colours a render swaps.
+#define SVGIO_MAX_SWAPS 128
 
 // n RGBA pixels to native-order RGB565. With alpha, pixels gets the colour
 // and alpha its coverage (pixels may be NULL for the mask alone). Without

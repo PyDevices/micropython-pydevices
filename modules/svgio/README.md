@@ -61,7 +61,7 @@ the SVG's own, from its `width` and `height` or its `viewBox`. Give one of
 
 The SVG stays parsed, so you can `decode()` it as often as you like.
 
-### `decode(target, alpha=None, *, x=0, y=0, stride=None, rows=None)`
+### `decode(target, alpha=None, *, x=0, y=0, stride=None, rows=None, colors=None)`
 
 Draws the image with its top-left at `(x, y)` and rows `stride` pixels apart
 (default: the image's width). Pixels outside the image are left alone.
@@ -90,6 +90,21 @@ multiples of that draws no row twice.
 
 Bad arguments and data that isn't an SVG raise `ValueError`, saying what's
 wrong. A parse or a strip that doesn't fit in the heap raises `MemoryError`.
+
+`colors={0xRRGGBB: 0xRRGGBB, ...}` draws the SVG with colours swapped:
+wherever a fill, a stroke or a gradient's stop is one of the keys, its value
+is drawn, with the opacity the first had. The parsed SVG keeps its own
+colours, so one `open()` serves a sprite in every livery, and the result is
+byte for byte what the SVG written in the new colours draws:
+
+```python
+d.open(sprite, width=200)
+d.decode(red_team, alpha)
+d.decode(blue_team, alpha, colors={0xD02020: 0x2040D0, 0x801010: 0x102080})
+```
+
+Up to 128 colours. A colour is matched as it was parsed, whichever way the
+SVG wrote it.
 
 ### `close()`
 

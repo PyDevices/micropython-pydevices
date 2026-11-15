@@ -83,6 +83,7 @@ class SvgDecoder:
         y: int = 0,
         stride: int | None = None,
         rows: tuple[int, int] | None = None,
+        colors: dict[int, int] | None = None,
     ) -> None:
         """Draw the SVG.
 
@@ -108,12 +109,18 @@ class SvgDecoder:
                 including, `rows[1]`, where they sit in the whole picture.
                 Bands drawn one after another give the same bytes as one
                 `decode()` of every row. The default is every row.
+            colors: Colours to swap, each `0xRRGGBB` of the SVG to the
+                `0xRRGGBB` to draw in its place, in fills, strokes and
+                gradients' stops; each keeps its opacity. The parsed SVG is
+                left as it was. At most 128.
 
         Raises:
             RuntimeError: No `open()` yet.
             ValueError: Neither buffer, a buffer too small for the rows drawn
-                at that place (the message gives the sizes), or `rows` outside
-                the image.
+                at that place (the message gives the sizes), `rows` outside
+                the image, or `colors` with more than 128 entries or a value
+                that isn't `0xRRGGBB`.
+            TypeError: `colors` isn't a dict.
             MemoryError: No room for a strip.
         """
     def close(self) -> None:

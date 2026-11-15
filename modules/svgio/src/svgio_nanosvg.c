@@ -755,10 +755,21 @@ float svgio_prepared_scale(const svgio_prepared_t *p) {
     return p->scale;
 }
 
+// color with its red, green and blue swapped for another's, if it is the
+// first of one of the nswaps pairs; its opacity stays.
+static unsigned int svgio_recolor(unsigned int color, const uint32_t *swaps, int nswaps) {
+    for (int i = 0; i < nswaps; i++) {
+        if ((color & 0x00FFFFFFu) == swaps[2 * i]) {
+            return (color & 0xFF000000u) | swaps[2 * i + 1];
+        }
+    }
+    return color;
+}
+
 // One strip, rows -ty up, of every pass that reaches it: NanoSVG's
 // nsvgRasterize, with the flattening done once in svgio_prepare.
 static const char *svgio_strip(NSVGrasterizer *r, svgio_prepared_t *p,
-    float scale, float ty, uint8_t *dst, int w, int h) {
+    float scale, float ty, const uint32_t *swaps, int nswaps, uint8_t *dst, int w, int h) {
     r->bitmap = dst;
     r->width = w;
     r->height = h;
@@ -796,7 +807,37 @@ static const char *svgio_strip(NSVGrasterizer *r, svgio_prepared_t *p,
             e->y1 = (ty + e->y1) * NSVG__SUBSAMPLES;
         }
         NSVGcachedPaint cache;
-        nsvg__initPaint(&cache, ps->stroke ? &ps->shape->stroke : &ps->shape->fill, ps->shape->opacity);
+        NSVGpaint *paint = ps->stroke ? &ps->shape->stroke : &ps->shape->fill;
+        // With colours to swap, the paint is a copy with them swapped: the
+        // parsed SVG keeps its own, for the next decode().
+        NSVGpaint swapped;
+        union {
+            NSVGgradient gradient;
+            char room[sizeof(NSVGgradient) + 15 * sizeof(NSVGgradientStop)];
+        } near;
+        NSVGgradient *far = NULL;
+        if (nswaps != 0 && paint->type == NSVG_PAINT_COLOR) {
+            swapped = *paint;
+            swapped.color = svgio_recolor(paint->color, swaps, nswaps);
+            paint = &swapped;
+        } else if (nswaps != 0 && (paint->type == NSVG_PAINT_LINEAR_GRADIENT || paint->type == NSVG_PAINT_RADIAL_GRADIENT)) {
+            const NSVGgradient *g = paint->gradient;
+            const size_t size = sizeof(NSVGgradient) + (g->nstops > 1 ? g->nstops - 1 : 0) * sizeof(NSVGgradientStop);
+            NSVGgradient *copy = size <= sizeof(near) ? &near.gradient : (far = malloc(size));
+            if (copy == NULL) {
+                return "not enough memory to render";
+            }
+            memcpy(copy, g, size);
+            NSVGgradientStop *stops = copy->stops;
+            for (int i = 0; i < g->nstops; i++) {
+                stops[i].color = svgio_recolor(g->stops[i].color, swaps, nswaps);
+            }
+            swapped = *paint;
+            swapped.gradient = copy;
+            paint = &swapped;
+        }
+        nsvg__initPaint(&cache, paint, ps->shape->opacity);
+        free(far);
         nsvg__rasterizeSortedEdges(r, 0.0f, ty, scale, &cache, ps->stroke ? NSVG_FILLRULE_NONZERO : ps->shape->fillRule);
         SVGIO_TIME_END(SVGIO_PHASE_RASTER);
     }
@@ -807,7 +848,7 @@ static const char *svgio_strip(NSVGrasterizer *r, svgio_prepared_t *p,
 }
 
 const char *svgio_render(svgio_image_t *image, svgio_prepared_t *prepared, float scale, int width, int height,
-    int y0, int y1, uint8_t *strip, int strip_rows, svgio_rows_fn rows, void *ctx) {
+    int y0, int y1, const uint32_t *swaps, int nswaps, uint8_t *strip, int strip_rows, svgio_rows_fn rows, void *ctx) {
     NSVGrasterizer *r = nsvgCreateRasterizer();
     if (r == NULL) {
         return "not enough memory to render";
@@ -826,8 +867,10 @@ const char *svgio_render(svgio_image_t *image, svgio_prepared_t *prepared, float
         const int keep = (y1 - y < n ? y1 - y : n) - skip;
         // A strip is the picture moved up by y and cut to n rows.
         if (prepared != NULL && SVGIO_OPT(4)) {
-            why = svgio_strip(r, prepared, scale, (float)-y, strip, width, n);
+            why = svgio_strip(r, prepared, scale, (float)-y, swaps, nswaps, strip, width, n);
         } else {
+            // Only a profiling build with prepared outlines switched off
+            // comes here, and it draws the SVG's own colours.
             SVGIO_TIME_START();
             nsvgRasterize(r, (NSVGimage *)image, 0.0f, (float)-y, scale, strip, width, n, width * 4);
             SVGIO_TIME_END(SVGIO_PHASE_RASTER);

@@ -23,6 +23,9 @@ It checks what one runtime can check alone:
 - a Buffer holds a picture outside the collector's heap, where the port has
   memory there, and so does a decoder's working memory; close() and the
   collector give both back;
+- decode(colors=) draws the SVG with colours swapped, byte for byte what the
+  SVG written in those colours draws: fills, strokes and gradients' stops,
+  each keeping its opacity;
 - a drawing in the compact form, one of every record, expands to the SVG
   text it stands for, character for character, and draws the same pixels;
 - bad arguments and data that isn't SVG raise, naming the problem.
@@ -308,7 +311,7 @@ g.decode(buf, rows=(0, 10))
 planes = None
 buf.close()
 assert len(buf) == 0 and not buf
-expect_raises(TypeError, lambda: g.decode(buf), "")
+expect_raises((TypeError, ValueError), lambda: g.decode(buf), "")
 expect_raises(ValueError, lambda: svgio.Buffer(0), "Buffer")
 # close(): a decoder lets go of the SVG and of its working memory.
 shut = svgio.SvgDecoder(memory=ROOM)
@@ -372,6 +375,52 @@ if MICROPYTHON:
         again.close()
         tiny.close()
         view = None
+
+# Colours swapped at decode: the same bytes as the SVG written in the new
+# colours, from the one parse. Fills, strokes, both kinds of gradient (one
+# with more stops than fit beside the paint), opacities, and a colour left alone.
+PAINTED = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><defs>'
+    '<linearGradient id="a" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="%(sky)s"/>'
+    '<stop offset="1" stop-color="%(leaf)s" stop-opacity="0.5"/></linearGradient>'
+    '<radialGradient id="b" cx="0.5" cy="0.5" r="0.5">%(many)s</radialGradient></defs>'
+    '<rect width="120" height="80" fill="url(#a)"/>'
+    '<circle cx="40" cy="40" r="30" fill="url(#b)" stroke="%(leaf)s" stroke-width="5" stroke-opacity="0.7"/>'
+    '<path d="M70 10L110 30L80 70Z" fill="%(skin)s" fill-opacity="0.6" stroke="%(ink)s" stroke-width="3"/>'
+    '<rect x="5" y="60" width="30" height="12" fill="%(ink)s" opacity="0.8"/>'
+    '<rect x="90" y="5" width="20" height="10" fill="rgb(18, 52, 86)"/></svg>'
+)
+
+
+def painted(sky, leaf, skin, ink):
+    many = "".join('<stop offset="%s" stop-color="%s"/>' % (k / 19, (sky, leaf, skin)[k % 3]) for k in range(20))
+    return (PAINTED % {"sky": sky, "leaf": leaf, "skin": skin, "ink": ink, "many": many}).encode()
+
+
+def drawn(decoder, **how):
+    pw, ph = decoder.width, decoder.height
+    p, a = bytearray(pw * ph * 2), bytearray(pw * ph)
+    decoder.decode(p, a, **how)
+    return p, a
+
+
+was, now = svgio.SvgDecoder(), svgio.SvgDecoder()
+was.open(painted("#3080ff", "#00c040", "#ffd0a0", "#102030"), width=240)
+now.open(painted("#ff8030", "#c0a000", "#a0d0ff", "#302010"), width=240)
+SWAP = {0x3080FF: 0xFF8030, 0x00C040: 0xC0A000, 0xFFD0A0: 0xA0D0FF, 0x102030: 0x302010, 0x777777: 0x000000}
+own, other = drawn(was), drawn(now)
+assert own != other, "the two paintings should differ"
+assert drawn(was, colors=SWAP) == other, "colours swapped at decode differ from the SVG in those colours"
+assert drawn(was) == own, "a decode with colours changed the parsed SVG"
+assert drawn(was, colors={}) == own
+in_bands = bytearray(240 * 160 * 2), bytearray(240 * 160)
+for y0 in range(0, 160, 37):
+    was.decode(in_bands[0], in_bands[1], rows=(y0, min(y0 + 37, 160)), colors=SWAP)
+assert in_bands == other, "colours swapped in bands differ"
+expect_raises(TypeError, lambda: drawn(was, colors=[(1, 2)]), "colors")
+expect_raises(ValueError, lambda: drawn(was, colors={0x1000000: 0}), "colors")
+if MICROPYTHON:
+    expect_raises(ValueError, lambda: drawn(was, colors=dict((k, k) for k in range(129))), "128")
 
 # The compact form: one of every record, with the text each stands for.
 import struct  # noqa: E402
