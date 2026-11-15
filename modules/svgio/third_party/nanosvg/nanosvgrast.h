@@ -348,6 +348,18 @@ static void nsvg__flattenCubicBez(NSVGrasterizer* r,
 
 	if (level > 10) return;
 
+	// svgio: a curve whose points all sit on the last point (a closing
+	// segment of no length) adds nothing, but the flatness test below can't
+	// pass when its ends meet, so it split ten levels deep, 2047 calls each.
+	if (SVGIO_OPT(16) && level == 0 && r->npoints > 0) {
+		NSVGpoint* pt = &r->points[r->npoints-1];
+		if (nsvg__ptEquals(pt->x,pt->y, x1,y1, r->distTol) && nsvg__ptEquals(pt->x,pt->y, x2,y2, r->distTol) &&
+			nsvg__ptEquals(pt->x,pt->y, x3,y3, r->distTol) && nsvg__ptEquals(pt->x,pt->y, x4,y4, r->distTol)) {
+			pt->flags = (unsigned char)(pt->flags | type);
+			return;
+		}
+	}
+
 	x12 = (x1+x2)*0.5f;
 	y12 = (y1+y2)*0.5f;
 	x23 = (x2+x3)*0.5f;

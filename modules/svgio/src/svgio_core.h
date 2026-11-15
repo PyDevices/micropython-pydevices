@@ -51,7 +51,8 @@ void svgio_rgba_to_565(const uint8_t *rgba, size_t n, uint16_t *pixels, uint8_t 
 
 // A profiling build: SVGIO_BENCH=1 times each phase and lets svgio._opts()
 // switch each speedup off (bit 1: the scanline's fast paths, 2: rows with no
-// edges skipped, 4: prepared outlines, 8: no divide at full alpha).
+// edges skipped, 4: prepared outlines, 8: no divide at full alpha, 16: closing
+// segments of no length not split).
 #ifndef SVGIO_BENCH
 #define SVGIO_BENCH 0
 #endif

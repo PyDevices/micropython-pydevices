@@ -19,12 +19,16 @@ Changes:
    300-byte block held for the whole parse, so 128 levels cost about 41 KB
    for any file; svgio_nanosvg.c asks for 32.
 
-3. nanosvgrast.h: four speedups that leave every pixel as it was.
+3. nanosvgrast.h: five speedups that leave every pixel as it was.
    nsvg__scanlineSolid skips pixels nothing covers, and writes an opaque
    colour that covers a pixel fully without blending it.
    nsvg__rasterizeSortedEdges clears the scanline only where a row wrote,
    and skips the rows above, between and below a shape's edges.
-   nsvg__unpremultiplyAlpha leaves opaque pixels alone. Each is marked
+   nsvg__unpremultiplyAlpha leaves opaque pixels alone.
+   nsvg__flattenCubicBez adds nothing for a curve that sits on the last
+   point, where upstream split it ten levels deep because its ends meet:
+   the closing segment of a rect, rounded rect or circle cost 2047 calls,
+   most of the time a 24 px icon took to draw. Each is marked
    "svgio:" and guarded by SVGIO_OPT(bit), which is always on unless a
    profiling build (SVGIO_BENCH in svgio_core.h) switches it at run time.
 
