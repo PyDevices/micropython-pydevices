@@ -65,7 +65,7 @@ Our variants, in [`variants/`](https://github.com/PyDevices/micropython-pydevice
 | windows | `pydevices` | The same as unix `pydevices`, with the Windows display and audio backends (`displaydev.windisplay`, `audiodev.win_audio`). |
 | windows | `vst3-engine` | The same as unix `vst3-engine`. |
 | webassembly | `pydevices` | The browser runtime, with the `wasmbridge` module and a Fetch-backed `requests`. |
-| esp32 | `ESP32_GENERIC` `AUDIO_KIT` | The ESP32 Audio Kit: upstream's PSRAM variant with flash and PSRAM at 80 MHz, which keeps Bluetooth call audio whole while a program is busy, and the CPU at 240 MHz, which lets a 48 kHz synth run with its reverb. |
+| esp32 | `ESP32_GENERIC` `AUDIO_KIT` | The ESP32 Audio Kit: upstream's PSRAM variant with flash and PSRAM at 80 MHz, which keeps Bluetooth call audio whole while a program is busy, and the CPU at 240 MHz, which lets a 48 kHz synth run with its reverb. A 128 KB ROMFS partition [runs your own compiled packages from flash](../guides/run-packages-from-romfs.md). |
 | esp32 | `ESP32_GENERIC_S3` `NO_PSRAM` | An S3 with no PSRAM: upstream's generic build without its PSRAM settings, TLS in internal RAM, and the caches and Wi-Fi buffers at sizes internal RAM can spare. |
 | esp32 | `ESP32_GENERIC_S3` `LCD_4_3`, `LCD_7`, `T_EMBED` | The S3 boards in the table above. |
 | esp32 | `ESP32_GENERIC_P4` `WIFI6_DEV_KIT`, `WIFI6_DEV_KIT_H2` | The P4 DEV-KIT, with the USB device on the two different connectors in the table above. The Pico-sized ESP32-P4-WIFI6 has the same C6 wiring, and `WIFI6_DEV_KIT_H2` puts its USB device on header pins 19 and 20. |
