@@ -174,6 +174,32 @@ class ModulesMoved(unittest.TestCase):
         self.assertEqual(build_mp.modules_moved({"mine": plain}, {"mine": dict(plain)}), [])
 
 
+class CpFrozenManifest(unittest.TestCase):
+    """A Python-only module freezes into a CircuitPython build; one that names
+    c_module() goes through USER_C_MODULES instead."""
+
+    def check(self, text):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "pkg"
+            d.mkdir()
+            (d / "manifest.py").write_text(text)
+            return build_mp.cp_frozen_manifest_dir(d)
+
+    def test_python_only(self):
+        self.assertTrue(self.check('require("x")\n'))
+
+    def test_c_module(self):
+        self.assertFalse(self.check("c_module(\"x\")\n"))
+
+    def test_exec_module_is_not_c_module(self):
+        # audioinstruments' and audioeffects' manifests load selection.py this way.
+        self.assertTrue(self.check("_spec.loader.exec_module(selection)\n"))
+
+    def test_shipped_audio_manifests(self):
+        for name in ("audioinstruments", "audioeffects"):
+            self.assertTrue(build_mp.cp_frozen_manifest_dir(build_mp.MODULES_DIR / name), name)
+
+
 class BuildDirFor(unittest.TestCase):
     want = {"port": "unix", "board": None, "variant": "pydevices", "flash": None, "modules": "pydevices",
             "module_set": ["pydevices"]}
