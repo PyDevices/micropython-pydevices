@@ -386,7 +386,9 @@ assert mem_p[: cw * ch * 2] == text_p and mem_a[: cw * ch] == text_a
 expect_raises(ValueError, lambda: svgio.expand(COMPACT[:-40]), "compact")
 expect_raises(ValueError, lambda: c.open(COMPACT[:200]), "compact")
 expect_raises(ValueError, lambda: svgio.expand(b"<svg/>"), "compact")
-expect_raises(ValueError, lambda: svgio.expand(b"\x01SVG" + bytes((12 - struct.calcsize(F),)) + COMPACT[5:]), "float")
+if MICROPYTHON:
+    # the desktop svgio reads floats of either size; a board reads its own
+    expect_raises(ValueError, lambda: svgio.expand(b"\x01SVG" + bytes((12 - struct.calcsize(F),)) + COMPACT[5:]), "float")
 expect_raises(ValueError, lambda: svgio.expand(COMPACT[:5] + b"\x63"), "compact")
 print("api: ok")
 
