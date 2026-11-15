@@ -9,7 +9,8 @@
 // - memory comes from the MicroPython heap, so a parse that runs out returns
 //   NULL (NanoSVG then frees what it had) instead of failing in a C library
 //   allocator the port may not have, and the garbage collector sees every
-//   block NanoSVG holds;
+//   block NanoSVG holds; or from a decoder's own block of that heap, an
+//   arena, when it was made with one;
 // - sscanf, strtoll, strtol and qsort are small local versions, because
 //   bare-metal ports don't all link a C library that has them;
 // - the two double-precision calls, pow and sqrt, go through single-precision
@@ -34,25 +35,154 @@
 // --- memory ------------------------------------------------------------------
 
 static size_t svgio_held, svgio_peak;
+static svgio_arena_t *svgio_arena;      // whose memory is in use, or NULL
 
-static void svgio_count(void *p, int sign) {
-    if (p != NULL) {
-        size_t n = gc_nbytes(p);
-        svgio_held = sign > 0 ? svgio_held + n : svgio_held - n;
-        if (svgio_held > svgio_peak) {
-            svgio_peak = svgio_held;
+static void svgio_count(size_t n, int sign) {
+    svgio_held = sign > 0 ? svgio_held + n : svgio_held - n;
+    if (svgio_held > svgio_peak) {
+        svgio_peak = svgio_held;
+    }
+    svgio_arena_t *a = svgio_arena;
+    if (a != NULL && a->used + a->spill > a->peak) {
+        a->peak = a->used + a->spill;
+    }
+}
+
+// An arena is blocks end to end, each an 8-byte header and its bytes: the
+// block's size with bit 0 set while it's in use, then the size of the block
+// before it, so a freed block joins free neighbours on both sides. A search
+// for room starts where the last one ended, which finds the free tail at once
+// while a parse fills the arena from the bottom.
+#define SVGIO_BLK 8u
+#define SVGIO_BLK_MIN 16u
+#define SVGIO_BLK_USED 1u
+
+static inline uint32_t *svgio_blk(svgio_arena_t *a, uint32_t off) {
+    return (uint32_t *)(void *)(a->base + off);
+}
+
+void svgio_arena_reset(svgio_arena_t *a) {
+    a->rover = 0;
+    a->used = a->spill = a->peak = 0;
+    if (a->size != 0) {
+        uint32_t *h = svgio_blk(a, 0);
+        h[0] = a->size;
+        h[1] = 0;
+    }
+}
+
+void svgio_mem_use(svgio_arena_t *arena) {
+    svgio_arena = arena;
+}
+
+static bool svgio_in_arena(svgio_arena_t *a, void *p) {
+    return a != NULL && a->size != 0 && (uint8_t *)p >= a->base && (uint8_t *)p < a->base + a->size;
+}
+
+// The free block at off, sz bytes, becomes a used one of need bytes; what is
+// left over, if it can hold a block, stays free after it.
+static void svgio_blk_take(svgio_arena_t *a, uint32_t off, uint32_t sz, uint32_t need) {
+    uint32_t *h = svgio_blk(a, off);
+    if (sz - need >= SVGIO_BLK_MIN) {
+        uint32_t *rest = svgio_blk(a, off + need);
+        rest[0] = sz - need;
+        rest[1] = need;
+        if (off + sz < a->size) {
+            svgio_blk(a, off + sz)[1] = sz - need;
         }
+        sz = need;
+    }
+    h[0] = sz | SVGIO_BLK_USED;
+    a->rover = off + sz < a->size ? off + sz : 0;
+}
+
+static void *svgio_arena_alloc(svgio_arena_t *a, size_t n) {
+    if (a->size == 0 || n > a->size) {
+        return NULL;
+    }
+    const uint32_t need = (((uint32_t)n + 7u) & ~7u) + SVGIO_BLK;
+    uint32_t off = a->rover;
+    do {
+        uint32_t *h = svgio_blk(a, off);
+        uint32_t sz = h[0] & ~7u;
+        if (!(h[0] & SVGIO_BLK_USED) && sz >= need) {
+            svgio_blk_take(a, off, sz, need);
+            sz = h[0] & ~7u;
+            a->used += sz;
+            svgio_count(sz, 1);
+            return (uint8_t *)h + SVGIO_BLK;
+        }
+        off += sz;
+        if (off >= a->size) {
+            off = 0;
+        }
+    } while (off != a->rover);
+    return NULL;
+}
+
+static void svgio_arena_free(svgio_arena_t *a, void *p) {
+    uint32_t off = (uint32_t)((uint8_t *)p - a->base) - SVGIO_BLK;
+    uint32_t *h = svgio_blk(a, off);
+    uint32_t sz = h[0] & ~7u;
+    a->used -= sz;
+    svgio_count(sz, -1);
+    if (off + sz < a->size) {
+        uint32_t *next = svgio_blk(a, off + sz);
+        if (!(next[0] & SVGIO_BLK_USED)) {
+            sz += next[0];
+        }
+    }
+    if (h[1] != 0) {
+        uint32_t *prev = svgio_blk(a, off - h[1]);
+        if (!(prev[0] & SVGIO_BLK_USED)) {
+            off -= h[1];
+            sz += prev[0];
+            h = prev;
+        }
+    }
+    h[0] = sz;
+    if (off + sz < a->size) {
+        svgio_blk(a, off + sz)[1] = sz;
+    }
+    if (a->rover > off && a->rover < off + sz) {
+        a->rover = off;     // it pointed into what is now the middle of a block
     }
 }
 
 static void *svgio_malloc(size_t n) {
-    void *p = n ? gc_alloc(n, 0) : NULL;
-    svgio_count(p, 1);
+    if (n == 0) {
+        return NULL;
+    }
+    svgio_arena_t *a = svgio_arena;
+    if (a != NULL) {
+        void *p = svgio_arena_alloc(a, n);
+        if (p != NULL) {
+            return p;
+        }
+    }
+    void *p = gc_alloc(n, 0);
+    if (p != NULL) {
+        if (a != NULL) {
+            a->spill += gc_nbytes(p);
+        }
+        svgio_count(gc_nbytes(p), 1);
+    }
     return p;
 }
 
 static void svgio_free(void *p) {
-    svgio_count(p, -1);
+    if (p == NULL) {
+        return;
+    }
+    svgio_arena_t *a = svgio_arena;
+    if (svgio_in_arena(a, p)) {
+        svgio_arena_free(a, p);
+        return;
+    }
+    if (a != NULL) {
+        a->spill -= gc_nbytes(p);
+    }
+    svgio_count(gc_nbytes(p), -1);
     gc_free(p);
 }
 
@@ -64,11 +194,50 @@ static void *svgio_realloc(void *p, size_t n) {
         svgio_free(p);
         return NULL;
     }
+    svgio_arena_t *a = svgio_arena;
+    if (svgio_in_arena(a, p)) {
+        const uint32_t off = (uint32_t)((uint8_t *)p - a->base) - SVGIO_BLK;
+        uint32_t *h = svgio_blk(a, off);
+        const uint32_t sz = h[0] & ~7u;
+        if (n <= sz - SVGIO_BLK) {
+            return p;
+        }
+        if (n <= a->size && off + sz < a->size) {
+            // Grown in place over a free block that follows, as an array at
+            // the arena's free tail always can be.
+            const uint32_t need = (((uint32_t)n + 7u) & ~7u) + SVGIO_BLK;
+            uint32_t *next = svgio_blk(a, off + sz);
+            if (!(next[0] & SVGIO_BLK_USED) && sz + next[0] >= need) {
+                const uint32_t rover = a->rover;
+                h[0] = sz + next[0];
+                if (off + h[0] < a->size) {
+                    svgio_blk(a, off + h[0])[1] = h[0];
+                }
+                svgio_blk_take(a, off, h[0], need);
+                const uint32_t now = h[0] & ~7u;
+                if (!(rover > off && rover < off + now)) {
+                    a->rover = rover;
+                }
+                a->used += now - sz;
+                svgio_count(now - sz, 1);
+                return p;
+            }
+        }
+        void *q = svgio_malloc(n);
+        if (q != NULL) {
+            memcpy(q, p, sz - SVGIO_BLK);
+            svgio_arena_free(a, p);
+        }
+        return q;
+    }
     size_t was = gc_nbytes(p);
     void *q = gc_realloc(p, n, true);
     if (q != NULL) {
-        svgio_held -= was;
-        svgio_count(q, 1);
+        if (a != NULL) {
+            a->spill = a->spill - was + gc_nbytes(q);
+        }
+        svgio_count(was, -1);
+        svgio_count(gc_nbytes(q), 1);
     }
     return q;
 }
@@ -78,9 +247,7 @@ void *svgio_mem_alloc(size_t n) {
 }
 
 void svgio_mem_free(void *p) {
-    if (p != NULL) {
-        svgio_free(p);
-    }
+    svgio_free(p);
 }
 
 void svgio_mem_reset(void) {
@@ -532,7 +699,7 @@ static const char *svgio_strip(NSVGrasterizer *r, svgio_prepared_t *p,
 }
 
 const char *svgio_render(svgio_image_t *image, svgio_prepared_t *prepared, float scale, int width, int height,
-    uint8_t *strip, int strip_rows, svgio_rows_fn rows, void *ctx) {
+    int y0, int y1, uint8_t *strip, int strip_rows, svgio_rows_fn rows, void *ctx) {
     NSVGrasterizer *r = nsvgCreateRasterizer();
     if (r == NULL) {
         return "not enough memory to render";
@@ -540,8 +707,15 @@ const char *svgio_render(svgio_image_t *image, svgio_prepared_t *prepared, float
     r->scanline = malloc(width);
     r->cscanline = width;
     const char *why = r->scanline == NULL ? "not enough memory to render" : NULL;
-    for (int y = 0; y < height && why == NULL; y += strip_rows) {
+    // The strips are the ones a render of every row draws, whichever rows are
+    // wanted, and each is drawn whole: where a strip starts decides how its
+    // edges round, and an empty pixel takes its colour from its neighbours in
+    // the strip. Only then is a band the same bytes as that part of the whole
+    // picture. Rows of a strip outside the band are drawn and left out.
+    for (int y = y0 - y0 % strip_rows; y < y1 && why == NULL; y += strip_rows) {
         int n = height - y < strip_rows ? height - y : strip_rows;
+        const int skip = y0 > y ? y0 - y : 0;
+        const int keep = (y1 - y < n ? y1 - y : n) - skip;
         // A strip is the picture moved up by y and cut to n rows.
         if (prepared != NULL && SVGIO_OPT(4)) {
             why = svgio_strip(r, prepared, scale, (float)-y, strip, width, n);
@@ -555,7 +729,7 @@ const char *svgio_render(svgio_image_t *image, svgio_prepared_t *prepared, float
         }
         if (why == NULL) {
             SVGIO_TIME_START();
-            rows(ctx, strip, y, n, width);
+            rows(ctx, strip + (size_t)skip * width * 4, y + skip, keep, width);
             SVGIO_TIME_END(SVGIO_PHASE_CONVERT);
         }
     }

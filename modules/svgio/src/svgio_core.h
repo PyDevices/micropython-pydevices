@@ -38,11 +38,13 @@ svgio_prepared_t *svgio_prepare(svgio_image_t *image, float scale);
 void svgio_prepared_free(svgio_prepared_t *prepared);
 float svgio_prepared_scale(const svgio_prepared_t *prepared);
 
-// Render image at scale into width x height pixels, strip_rows rows at a time
-// through strip (width * strip_rows * 4 bytes), handing each strip to rows().
+// Render rows y0 up to y1 of image at scale, width x height pixels in all,
+// strip_rows rows at a time through strip (width * strip_rows * 4 bytes),
+// handing each strip to rows(). The strips sit where a render of every row
+// puts them, so a picture drawn in bands is the picture drawn whole.
 // prepared is the image prepared at that scale. NULL, or why not.
 const char *svgio_render(svgio_image_t *image, svgio_prepared_t *prepared, float scale, int width, int height,
-    uint8_t *strip, int strip_rows, svgio_rows_fn rows, void *ctx);
+    int y0, int y1, uint8_t *strip, int strip_rows, svgio_rows_fn rows, void *ctx);
 
 // n RGBA pixels to native-order RGB565. With alpha, pixels gets the colour
 // and alpha its coverage (pixels may be NULL for the mask alone). Without
@@ -65,7 +67,29 @@ extern unsigned svgio_opts;
 extern uint32_t svgio_phase_us[SVGIO_PHASES];
 #endif
 
-// Memory on the MicroPython heap, as NanoSVG's is: NULL when it runs out.
+// A decoder's working memory. With size set, base is one block of the
+// MicroPython heap that the parser and the rasteriser take their memory from,
+// a small allocator of its own inside it, so an open() or a decode() asks the
+// heap for nothing. What doesn't fit spills to the heap. With size 0 it only
+// counts what its decoder holds.
+typedef struct {
+    uint8_t *base;          // the block's head, which keeps it alive; NULL without one
+    uint32_t size;          // bytes of it, a multiple of 8
+    uint32_t rover;         // where the next search for room starts
+    size_t used;            // bytes of base in use, block headers included
+    size_t spill;           // bytes on the heap instead
+    size_t peak;            // the most used + spill since svgio_arena_reset()
+} svgio_arena_t;
+
+// Everything in the arena is forgotten. Free what spilled first.
+void svgio_arena_reset(svgio_arena_t *arena);
+
+// Whose memory the calls below, the parser and the rasteriser use until the
+// next svgio_mem_use(): an arena, or NULL for the heap alone. A block goes
+// back with the arena it came from in use.
+void svgio_mem_use(svgio_arena_t *arena);
+
+// Memory from the arena in use, or the MicroPython heap: NULL when it runs out.
 void *svgio_mem_alloc(size_t n);
 void svgio_mem_free(void *p);
 

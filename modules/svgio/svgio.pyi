@@ -27,8 +27,21 @@ class SvgDecoder:
     into another buffer or at another place, without reading it again.
     """
 
-    def __init__(self) -> None:
-        """Make a decoder."""
+    def __init__(self, *, memory: int | None = None) -> None:
+        """Make a decoder.
+
+        With `memory`, the decoder takes that many bytes from the heap once
+        and does every `open()` and `decode()` inside them, so drawing asks
+        the heap for nothing. A picture that needs more still draws: the rest
+        comes from the heap.
+
+        Args:
+            memory: Bytes of working memory, at least 4096, or None.
+
+        Raises:
+            ValueError: `memory` under 4096.
+            MemoryError: The heap has no block that large.
+        """
     def open(
         self,
         source: str | bytes | bytearray | memoryview,
@@ -66,6 +79,7 @@ class SvgDecoder:
         x: int = 0,
         y: int = 0,
         stride: int | None = None,
+        rows: tuple[int, int] | None = None,
     ) -> None:
         """Draw the SVG.
 
@@ -87,11 +101,16 @@ class SvgDecoder:
             y: Row of the image's top edge in the buffers.
             stride: Pixels from the start of one row to the next. The default
                 is the image's width.
+            rows: Draw only the image's rows from `rows[0]` up to, not
+                including, `rows[1]`, where they sit in the whole picture.
+                Bands drawn one after another give the same bytes as one
+                `decode()` of every row. The default is every row.
 
         Raises:
             RuntimeError: No `open()` yet.
-            ValueError: Neither buffer, or a buffer too small for the image at
-                that place (the message gives the sizes).
+            ValueError: Neither buffer, a buffer too small for the rows drawn
+                at that place (the message gives the sizes), or `rows` outside
+                the image.
             MemoryError: No room for a strip.
         """
     @property
@@ -100,6 +119,16 @@ class SvgDecoder:
     @property
     def height(self) -> int:
         """The height `decode()` draws, after `open()`."""
+    @property
+    def memory(self) -> int:
+        """The bytes of working memory the decoder was made with, or 0."""
+    @property
+    def memory_peak(self) -> int:
+        """The most bytes the decoder held at once since the last `open()`.
+
+        Larger than `memory` when a picture didn't fit and the rest came from
+        the heap.
+        """
 
 def register_lvgl_decoder() -> bool:
     """Add this module's decoder to the running LVGL.
