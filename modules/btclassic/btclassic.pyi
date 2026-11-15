@@ -223,7 +223,9 @@ class Bluetooth:
         `config("mac")` reads, `config(name="kitchen")` sets. Settings:
 
         - name (str): what other devices list the board as. Defaults to the
-          board's hostname, `network.hostname()`.
+          board's hostname, `network.hostname()`, which `wifi_manager` sets
+          to the board's name. Without Wi-Fi, `config(name=boarddev.name())`
+          lists the board under that name.
         - discoverable (bool): other devices can find the board when they
           search. On by default. A profile that takes one device at a time
           keeps the board out of searches while that device is connected,

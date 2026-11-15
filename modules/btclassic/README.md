@@ -35,6 +35,10 @@ Windows PC:
 Bench Tone A - Test Signals
 ```
 
+The board is listed under its hostname. Joining Wi-Fi with `wifi_manager`
+sets that to the board's name, `boarddev.name()`; a program that leaves Wi-Fi
+off, like this one, sets it with `bt.config(name=boarddev.name())`.
+
 Phones send 44.1 kHz almost always. A program that should follow any rate
 opens its output at `music.sample_rate` once the `FORMAT` bit comes, as
 [`examples/btclassic_simpletest.py`](examples/btclassic_simpletest.py) does.

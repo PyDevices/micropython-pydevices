@@ -16,8 +16,9 @@ Run it:
 
     mpftp run btclassic_with_ble.py
 
-A phone's BLE scanner app lists the board under its hostname; a serial
-terminal on your computer or phone connects to the Classic port.
+A phone's BLE scanner app lists the board under its name,
+``boarddev.name()``; a serial terminal on your computer or phone connects to
+the Classic port.
 
 Tested on: Adafruit QT Py ESP32 Pico, MicroPython 1.30.0-preview with
 btclassic, with a Windows 11 PC on its serial port and BLE devices nearby.
@@ -26,6 +27,7 @@ btclassic, with a Windows 11 PC on its serial port and BLE devices nearby.
 import time
 
 import bluetooth
+import boarddev
 import btclassic
 import network
 
@@ -35,10 +37,11 @@ SCAN_MS = 10_000  # each BLE scan, in milliseconds
 
 # Wi-Fi and Bluetooth share the radio. Turn Wi-Fi off for a steadier link.
 network.WLAN(network.STA_IF).active(False)
-name = network.hostname().encode()
+name = boarddev.name()
 
-# Start the Classic serial port.
+# Start the Classic serial port, under the board's name.
 bt = btclassic.Bluetooth()
+bt.config(name=name)
 port = btclassic.Serial(bt)
 
 # Start BLE beside it. Scan results arrive through the IRQ handler.
@@ -56,9 +59,9 @@ def on_ble(event, data):
 ble.irq(on_ble)
 
 # Advertise the name: a flags field, then the complete local name.
-adv = bytes((2, 0x01, 0x06, len(name) + 1, 0x09)) + name
+adv = bytes((2, 0x01, 0x06, len(name) + 1, 0x09)) + name.encode()
 ble.gap_advertise(ADVERTISE_US, adv)
-print("Classic serial port and BLE advertising as", name.decode())
+print("Classic serial port and BLE advertising as", name)
 
 while True:
     # Scan for BLE devices, echoing serial lines meanwhile.
