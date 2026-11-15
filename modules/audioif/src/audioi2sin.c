@@ -39,6 +39,14 @@
 // buffer of wire frames handed in as `source=` (two slots a frame, at
 // `bit_depth`), or silence paced off the clock without one. That is what
 // makes the conversions and the lifecycle testable with no board.
+//
+// IT IS AN AUDIOSAMPLE TOO, as on CircuitPython 11, so a live microphone
+// plays through `I2SOut.play(mic)` or a mixer voice. The pump pulls it on its
+// own thread, so nothing below `get_buffer` touches the interpreter: on a
+// board a pull takes what the ring holds and pads the rest with silence,
+// never blocking, which is what CircuitPython's espressif port does; on a
+// desktop it reads `source=` the way `record()` does, and the pump's clock
+// is the pace.
 
 #include <stdint.h>
 #include <string.h>
@@ -51,6 +59,9 @@
 
 #include "cp_compat/objproperty.h"
 
+#include "audiocore/__init__.h"
+#include "shared/audiodsp_pump_lock.h"
+
 #include "audiopump_i2s.h"
 
 // How long `record()` waits for the microphone to deliver anything at all
@@ -62,8 +73,19 @@
 // The ring, in time: a quarter of a second, between 4 kB and 64 kB.
 #define AUDIOI2SIN_RING_MS (250)
 
+// One block the pump pulls when the microphone is played, in frames.
+#define AUDIOI2SIN_STREAM_FRAMES (256)
+
+// Which slot of the wire a recording keeps: `_audioif.rx_open`'s `take`.
+#define AUDIOI2SIN_TAKE_LEFT  (0)
+#define AUDIOI2SIN_TAKE_RIGHT (1)
+#define AUDIOI2SIN_TAKE_MIX   (2)
+#define AUDIOI2SIN_TAKE_BOTH  (3)
+
 typedef struct _audioi2sin_i2sin_obj_t {
-    mp_obj_base_t base;
+    // First, so the audio pipeline can pull it: sample_rate, the stream's
+    // bits_per_sample and channel_count live here.
+    audiosample_base_t base;
     bool deinited;
     bool recording;         // holds the capture ring (board builds)
     bool mono;
@@ -72,11 +94,20 @@ typedef struct _audioi2sin_i2sin_obj_t {
     uint8_t bit_depth;      // on the wire: 8, 16, 24 or 32
     uint8_t out_depth;      // in the caller's buffer
     uint8_t slot_bytes;     // one sample in the ring: 1, 2 or 4 bytes
+    uint8_t take;           // AUDIOI2SIN_TAKE_*: the slot, both, or the mix
+    uint8_t which;          // the stream block handed out next
     uint32_t sample_rate;
     uint32_t dropped_seen;  // the ring's dropped count at the last look
     // --- desktop -------------------------------------------------------
+    // --- played as an audiosample -------------------------------------
+    uint8_t *stream[2];     // ping-pong, so a node may hold the last block
+    // --- desktop -------------------------------------------------------
     mp_obj_t source;        // a buffer of wire frames, or MP_OBJ_NULL
     size_t source_at;       // where the next frame is read, in bytes
+    // `source`'s bytes, taken on the interpreter, so the pump thread can
+    // read them without asking the runtime.
+    const uint8_t *source_buf;
+    size_t source_len;
 } audioi2sin_i2sin_obj_t;
 
 extern const mp_obj_type_t audioi2sin_i2sin_type;
@@ -112,6 +143,37 @@ static inline int32_t audioi2sin_read(const uint8_t *p, uint8_t slot_bytes,
     int32_t v;
     memcpy(&v, p, sizeof(v));
     return in_depth == 24 ? (v >> 8) : v;
+}
+
+// One slot of a two-slot wire frame as `take` keeps it, ready for
+// audioi2sin_read. The mix is the capture ring's own arithmetic (_audioif.c),
+// so a desktop `source=` comes out the same as a board's ring: four-byte
+// slots are halved before they are added, narrower ones added then halved.
+static inline void audioi2sin_take(const uint8_t *frame, uint8_t slot_bytes,
+    uint8_t take, uint8_t *out) {
+    const uint8_t *l = frame;
+    const uint8_t *r = frame + slot_bytes;
+    if (take == AUDIOI2SIN_TAKE_RIGHT) {
+        memcpy(out, r, slot_bytes);
+    } else if (take != AUDIOI2SIN_TAKE_MIX) {
+        memcpy(out, l, slot_bytes);
+    } else if (slot_bytes == 1) {
+        const int8_t m = (int8_t)(((int32_t)*(const int8_t *)l
+            + (int32_t)*(const int8_t *)r) >> 1);
+        memcpy(out, &m, 1);
+    } else if (slot_bytes == 2) {
+        int16_t a, b;
+        memcpy(&a, l, 2);
+        memcpy(&b, r, 2);
+        const int16_t m = (int16_t)(((int32_t)a + (int32_t)b) >> 1);
+        memcpy(out, &m, 2);
+    } else {
+        int32_t a, b;
+        memcpy(&a, l, 4);
+        memcpy(&b, r, 4);
+        const int32_t m = (a >> 1) + (b >> 1);
+        memcpy(out, &m, 4);
+    }
 }
 
 // CircuitPython's `shared_audioi2sin_write_converted`
@@ -163,7 +225,7 @@ static mp_obj_t audioi2sin_i2sin_make_new(const mp_obj_type_t *type,
     enum { ARG_bit_clock, ARG_word_select, ARG_data, ARG_main_clock,
            ARG_sample_rate, ARG_bit_depth, ARG_output_bit_depth, ARG_mono,
            ARG_left_justified, ARG_samples_signed, ARG_external_clock,
-           ARG_port, ARG_main_clock_fs, ARG_source };
+           ARG_port, ARG_main_clock_fs, ARG_source, ARG_take };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_bit_clock,        MP_ARG_REQUIRED | MP_ARG_OBJ,
           { .u_obj = MP_OBJ_NULL } },
@@ -200,6 +262,13 @@ static mp_obj_t audioi2sin_i2sin_make_new(const mp_obj_type_t *type,
         // Desktop only: the wire frames `record()` reads.
         { MP_QSTR_source,           MP_ARG_KW_ONLY | MP_ARG_OBJ,
           { .u_obj = mp_const_none } },
+        // Which slot of the wire to keep, as `_audioif.rx_open` takes it: 0
+        // the left, 1 the right, 2 their average, 3 both. A codec with two
+        // microphones on one wire (the ES7210's MIC1 left, MIC2 right) needs
+        // the choice. None is CircuitPython's: the left slot when mono, both
+        // when not.
+        { MP_QSTR_take,             MP_ARG_KW_ONLY | MP_ARG_OBJ,
+          { .u_obj = mp_const_none } },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed),
@@ -224,6 +293,20 @@ static mp_obj_t audioi2sin_i2sin_make_new(const mp_obj_type_t *type,
     const mp_int_t rate = args[ARG_sample_rate].u_int;
     if (rate < 1000 || rate > 192000) {
         mp_raise_ValueError(MP_ERROR_TEXT("sample_rate out of range"));
+    }
+
+    const bool mono = args[ARG_mono].u_bool;
+    mp_int_t take = mono ? AUDIOI2SIN_TAKE_LEFT : AUDIOI2SIN_TAKE_BOTH;
+    if (args[ARG_take].u_obj != mp_const_none) {
+        take = mp_obj_get_int(args[ARG_take].u_obj);
+        if (take < AUDIOI2SIN_TAKE_LEFT || take > AUDIOI2SIN_TAKE_BOTH) {
+            mp_raise_ValueError(MP_ERROR_TEXT("take must be 0, 1, 2 or 3"));
+        }
+        if (mono == (take == AUDIOI2SIN_TAKE_BOTH)) {
+            mp_raise_ValueError(mono
+                ? MP_ERROR_TEXT("take=3 keeps both slots; pass mono=False")
+                : MP_ERROR_TEXT("take=0, 1 or 2 keeps one slot; pass mono=True"));
+        }
     }
 
     const int bclk = audiobusio_pin_gpio(args[ARG_bit_clock].u_obj,
@@ -253,7 +336,8 @@ static mp_obj_t audioi2sin_i2sin_make_new(const mp_obj_type_t *type,
         audioi2sin_i2sin_obj_t, &audioi2sin_i2sin_type);
     memset((char *)self + sizeof(mp_obj_base_t), 0,
         sizeof(*self) - sizeof(mp_obj_base_t));
-    self->mono = args[ARG_mono].u_bool;
+    self->mono = mono;
+    self->take = (uint8_t)take;
     self->samples_signed = args[ARG_samples_signed].u_bool;
     self->bit_depth = (uint8_t)bit_depth;
     self->out_depth = (uint8_t)out_depth;
@@ -262,6 +346,28 @@ static mp_obj_t audioi2sin_i2sin_make_new(const mp_obj_type_t *type,
     self->slot_bytes = (uint8_t)(wire_bits / 8);
     self->sample_rate = (uint32_t)rate;
     self->source = source == mp_const_none ? MP_OBJ_NULL : source;
+    if (self->source != MP_OBJ_NULL) {
+        mp_buffer_info_t src;
+        mp_get_buffer_raise(self->source, &src, MP_BUFFER_READ);
+        self->source_buf = (const uint8_t *)src.buf;
+        self->source_len = src.len;
+    }
+
+    // As an audiosample: the depth `record()` writes when that is 8 or 16
+    // bits, the widths the pipeline carries, and 16 otherwise, so a 24-bit
+    // microphone plays too. CircuitPython refuses that one; it costs nothing
+    // to take it.
+    const uint8_t stream_depth = out_depth <= 16 ? (uint8_t)out_depth : 16;
+    const uint32_t channels = mono ? 1 : 2;
+    self->base.sample_rate = (uint32_t)rate;
+    self->base.bits_per_sample = stream_depth;
+    self->base.channel_count = (uint8_t)channels;
+    self->base.samples_signed = self->samples_signed;
+    self->base.single_buffer = false;
+    self->base.max_buffer_length = AUDIOI2SIN_STREAM_FRAMES * channels
+        * (stream_depth / 8);
+    self->stream[0] = m_new0(uint8_t, self->base.max_buffer_length);
+    self->stream[1] = m_new0(uint8_t, self->base.max_buffer_length);
 
     if (board) {
         const audiopump_i2s_cfg_t cfg = {
@@ -287,9 +393,10 @@ static mp_obj_t audioi2sin_i2sin_make_new(const mp_obj_type_t *type,
         uint32_t ring = (uint32_t)rate * self->slot_bytes * channels
             * AUDIOI2SIN_RING_MS / 1000;
         ring = ring < 4096 ? 4096 : (ring > 65536 ? 65536 : ring);
-        // Mono is the left slot, as in CircuitPython: an INMP441 with L/R
-        // tied low, and the first microphone of a two-microphone ADC.
-        (void)audiopump_i2s_rx_begin(&cfg, ring, self->mono ? 0 : 3);
+        // Mono is the left slot unless `take` says otherwise, as in
+        // CircuitPython: an INMP441 with L/R tied low, and the first
+        // microphone of a two-microphone ADC.
+        (void)audiopump_i2s_rx_begin(&cfg, ring, self->take);
         self->recording = true;
     }
     return MP_OBJ_FROM_PTR(self);
@@ -302,12 +409,20 @@ static mp_obj_t audioi2sin_i2sin_deinit(mp_obj_t self_in) {
     if (self->deinited) {
         return mp_const_none;
     }
+    // Under the pump's lock, so no pull is inside get_buffer when the
+    // pipeline's guard starts saying this sample is gone; the ring and the
+    // source are let go after it, outside.
+    audiodsp_pump_lock_acquire();
+    audiosample_mark_deinit(&self->base);
+    self->deinited = true;
+    audiodsp_pump_lock_release();
     if (self->recording) {
         audiopump_i2s_rx_end();
         self->recording = false;
     }
     self->source = MP_OBJ_NULL;
-    self->deinited = true;
+    self->source_buf = NULL;
+    self->source_len = 0;
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(audioi2sin_i2sin_deinit_obj,
@@ -384,8 +499,46 @@ static uint32_t audioi2sin_record_board(audioi2sin_i2sin_obj_t *self,
     return produced;
 }
 
-// The desktop: wire frames off `source=`, two slots each, wrapping at the
-// end, or silence paced off the clock.
+// The desktop: `length` samples at `depth` from the wire frames in `p`, two
+// slots each, wrapping at the end, with `take` applied. Returns 0 for a
+// source with no whole frame. Never touches the runtime: the pump calls it.
+static uint32_t audioi2sin_desktop_fill(audioi2sin_i2sin_obj_t *self,
+    const uint8_t *p, size_t len, void *buffer, uint32_t length,
+    uint8_t depth) {
+    const size_t frame = 2u * self->slot_bytes;
+    const size_t frames = len / frame;
+    if (frames == 0) {
+        return 0;
+    }
+    uint8_t slot[4];
+    uint32_t produced = 0;
+    while (produced < length) {
+        if (self->source_at + frame > frames * frame) {
+            self->source_at = 0;
+        }
+        const uint8_t *f = p + self->source_at;
+        self->source_at += frame;
+        if (self->take == AUDIOI2SIN_TAKE_BOTH) {
+            audioi2sin_store(buffer, produced++,
+                audioi2sin_read(f, self->slot_bytes, self->bit_depth),
+                self->bit_depth, depth, self->samples_signed);
+            if (produced < length) {
+                audioi2sin_store(buffer, produced++,
+                    audioi2sin_read(f + self->slot_bytes, self->slot_bytes,
+                        self->bit_depth),
+                    self->bit_depth, depth, self->samples_signed);
+            }
+        } else {
+            audioi2sin_take(f, self->slot_bytes, self->take, slot);
+            audioi2sin_store(buffer, produced++,
+                audioi2sin_read(slot, self->slot_bytes, self->bit_depth),
+                self->bit_depth, depth, self->samples_signed);
+        }
+    }
+    return produced;
+}
+
+// The desktop's `record()`: off `source=`, or silence paced off the clock.
 static uint32_t audioi2sin_record_desktop(audioi2sin_i2sin_obj_t *self,
     void *buffer, uint32_t length) {
     const uint32_t ch = self->mono ? 1 : 2;
@@ -400,30 +553,8 @@ static uint32_t audioi2sin_record_desktop(audioi2sin_i2sin_obj_t *self,
     }
     mp_buffer_info_t src;
     mp_get_buffer_raise(self->source, &src, MP_BUFFER_READ);
-    const size_t frame = 2u * self->slot_bytes;
-    const size_t frames = src.len / frame;
-    if (frames == 0) {
-        return 0;
-    }
-    const uint8_t *p = (const uint8_t *)src.buf;
-    uint32_t produced = 0;
-    while (produced < length) {
-        if (self->source_at + frame > frames * frame) {
-            self->source_at = 0;
-        }
-        const uint8_t *f = p + self->source_at;
-        self->source_at += frame;
-        audioi2sin_store(buffer, produced++,
-            audioi2sin_read(f, self->slot_bytes, self->bit_depth),
-            self->bit_depth, self->out_depth, self->samples_signed);
-        if (ch == 2 && produced < length) {
-            audioi2sin_store(buffer, produced++,
-                audioi2sin_read(f + self->slot_bytes, self->slot_bytes,
-                    self->bit_depth),
-                self->bit_depth, self->out_depth, self->samples_signed);
-        }
-    }
-    return produced;
+    return audioi2sin_desktop_fill(self, (const uint8_t *)src.buf, src.len,
+        buffer, length, self->out_depth);
 }
 
 static mp_obj_t audioi2sin_i2sin_record(mp_obj_t self_in, mp_obj_t dest_in,
@@ -479,6 +610,77 @@ static mp_obj_t audioi2sin_i2sin_record(mp_obj_t self_in, mp_obj_t dest_in,
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(audioi2sin_i2sin_record_obj,
     audioi2sin_i2sin_record);
+
+// --- played as an audiosample ----------------------------------------------
+//
+// Both run where the pipeline calls them, the pump's thread included, so
+// neither raises nor allocates. A live microphone never ends: get_buffer
+// always says there is more.
+
+static void audioi2sin_i2sin_reset_buffer(audioi2sin_i2sin_obj_t *self,
+    bool single_channel_output, uint8_t channel) {
+    (void)single_channel_output;
+    (void)channel;
+    self->which = 0;
+    if (self->recording) {
+        // What waited in the ring was the room before the play; start at now.
+        audiopump_i2s_rx_discard();
+    }
+}
+
+static audioio_get_buffer_result_t audioi2sin_i2sin_get_buffer(
+    audioi2sin_i2sin_obj_t *self, bool single_channel_output, uint8_t channel,
+    uint8_t **buffer, uint32_t *buffer_length) {
+    uint8_t *out = self->stream[self->which];
+    self->which ^= 1;
+    const uint8_t depth = self->base.bits_per_sample;
+    const uint32_t ch = self->base.channel_count;
+    const uint32_t total = AUDIOI2SIN_STREAM_FRAMES * ch;
+    uint32_t produced = 0;
+    if (self->recording) {
+        // Whatever the ring holds now, up to a block; the rest is silence.
+        // The ring already holds what `take` keeps, one slot or two.
+        const uint32_t frame = (uint32_t)self->slot_bytes * ch;
+        uint8_t scratch[512];
+        const uint32_t max_frames = sizeof(scratch) / frame;
+        while (produced < total) {
+            uint32_t want = (total - produced) / ch;
+            if (want > max_frames) {
+                want = max_frames;
+            }
+            const uint32_t got = audiopump_i2s_rx_pull(scratch, want * frame);
+            const uint32_t samples = got / self->slot_bytes;
+            for (uint32_t i = 0; i < samples; i++) {
+                audioi2sin_store(out, produced++,
+                    audioi2sin_read(scratch + i * self->slot_bytes,
+                        self->slot_bytes, self->bit_depth),
+                    self->bit_depth, depth, self->samples_signed);
+            }
+            if (got < want * frame) {
+                break;
+            }
+        }
+    } else if (self->source_buf != NULL) {
+        produced = audioi2sin_desktop_fill(self, self->source_buf,
+            self->source_len, out, total, depth);
+    }
+    for (; produced < total; produced++) {
+        audioi2sin_store(out, produced, 0, self->bit_depth, depth,
+            self->samples_signed);
+    }
+    if (single_channel_output) {
+        out += (channel % ch) * (depth / 8);
+    }
+    *buffer = out;
+    *buffer_length = self->base.max_buffer_length;
+    return GET_BUFFER_MORE_DATA;
+}
+
+static const audiosample_p_t audioi2sin_i2sin_proto = {
+    MP_PROTO_IMPLEMENT(MP_QSTR_protocol_audiosample)
+    .reset_buffer = (audiosample_reset_buffer_fun)audioi2sin_i2sin_reset_buffer,
+    .get_buffer = (audiosample_get_buffer_fun)audioi2sin_i2sin_get_buffer,
+};
 
 // --- the properties ---------------------------------------------------------
 
@@ -549,7 +751,8 @@ MP_DEFINE_CONST_OBJ_TYPE(
     MP_TYPE_FLAG_NONE,
     make_new, audioi2sin_i2sin_make_new,
     attr, cp_compat_attr,
-    locals_dict, &audioi2sin_i2sin_locals
+    locals_dict, &audioi2sin_i2sin_locals,
+    protocol, &audioi2sin_i2sin_proto
     );
 
 static const mp_rom_map_elem_t audioi2sin_globals_table[] = {

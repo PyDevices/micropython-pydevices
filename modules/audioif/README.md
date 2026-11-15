@@ -215,9 +215,33 @@ sets MCLK in bit clocks per frame (256 by default), and `source=`, on a
 desktop build, is a buffer of two-slot wire frames that `record()` reads in a
 loop. With no `source=` a desktop records silence, paced at the sample rate.
 
-`_audioif.Input` below is a different thing: an audiosample the pump pulls on
-its own thread, so a live microphone can feed an effect graph. `I2SIn` is not
-an audiosample yet, so `I2SOut.play(mic)` does not work here.
+**One microphone of two.** A codec with two microphones on one wire, like the
+ES7210 with MIC1 on the left slot and MIC2 on the right, needs a choice the
+hardware doesn't make. `take=` makes it, as `_audioif.rx_open` does: 0 keeps
+the left slot, 1 the right, 2 their average, and 3 both, which needs
+`mono=False`. Without it you get CircuitPython's choice, the left slot when
+mono and both when not.
+
+**Play the microphone.** `I2SIn` is an audiosample too, as on CircuitPython
+11, so a live microphone plays through an output or a mixer voice:
+
+```python
+import audiobusio, audioi2sin, board
+
+mic = audioi2sin.I2SIn(board.D9, board.D10, board.D11, sample_rate=16000)
+out = audiobusio.I2SOut(board.D12, board.D13, board.D14)
+out.play(mic)                          # the room, on the speaker
+```
+
+The pump pulls it in blocks of 256 frames, taking what the ring holds and
+padding the rest with silence, so it never waits for the microphone. It plays
+at `output_bit_depth` when that is 8 or 16 bits and at 16 bits otherwise, so a
+24-bit microphone plays too, where CircuitPython refuses it. On a desktop it
+plays `source=` in a loop. Call `record()` or play it, not both at once: they
+read the same samples.
+
+`_audioif.Input` below is a different thing: an audiosample whose read waits
+for the I2S driver, so the microphone itself paces an effect graph.
 
 **The mono path is not written.** A board with one transducer fed by a
 two-slot wire gets the same signal in both slots and has no answer here.

@@ -1,4 +1,4 @@
-# audioif on the unix port beside audiodsp: the driver binds with a thread, each probe's planted fault fails first, then the probes (I2SIn's among them) and CircuitPython's own I2SOut example pass. (These checks moved here with audioif from its own repository, 2026-10-19.)
+# audioif on the unix port beside audiodsp: the driver binds with a thread, each probe's planted fault fails first, then the probes (I2SIn's among them, recording and played) and CircuitPython's own I2SOut example pass. (These checks moved here with audioif from its own repository, 2026-10-19.)
 name: audioif
 
 on:
@@ -73,7 +73,9 @@ jobs:
                          "sink_probe.py $TMP --fault flip" \
                          "sink_probe.py $TMP --fault truncate" \
                          "i2sin_probe.py --fault rate" \
-                         "i2sin_probe.py --fault slot"; do
+                         "i2sin_probe.py --fault slot" \
+                         "i2sin_play_probe.py $TMP --fault take" \
+                         "i2sin_play_probe.py $TMP --fault short"; do
             if run $planted > /dev/null; then
               echo "the planted fault passed: $planted" >&2
               exit 1
@@ -82,6 +84,7 @@ jobs:
           run sink_probe.py "$TMP"
           run busio_probe.py "$TMP"
           run i2sin_probe.py
+          run i2sin_play_probe.py "$TMP"
 
       - name: CircuitPython's documented example, unmodified
         run: |

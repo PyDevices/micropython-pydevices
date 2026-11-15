@@ -17,6 +17,10 @@ class I2SIn:
     `record` reads from a quarter-second ring the DMA fills, so a pause between
     calls (a garbage collection, a file write) loses nothing and successive
     calls are continuous.
+
+    It is an audiosample too, so `audiobusio.I2SOut.play(mic)` or a mixer
+    voice plays the live microphone. It plays at `output_bit_depth` when that
+    is 8 or 16 bits, and at 16 bits otherwise.
     """
 
     sample_rate: int
@@ -49,6 +53,7 @@ class I2SIn:
         port: int = -1,
         main_clock_fs: int = 256,
         source: bytes | bytearray | memoryview | None = None,
+        take: int | None = None,
     ) -> None:
         """Open the microphone.
 
@@ -62,7 +67,7 @@ class I2SIn:
                 top of its 32-bit slot.
             output_bit_depth: The width of the samples written; None uses
                 `bit_depth`.
-            mono: Record the left slot only.
+            mono: Record one slot, the left unless `take` says otherwise.
             left_justified: Use left-justified rather than Philips framing.
             samples_signed: Write signed samples.
             external_clock: Raises `NotImplementedError` when True.
@@ -71,6 +76,10 @@ class I2SIn:
             source: On a build with no I2S: a buffer of two-slot wire frames
                 that `record` reads in a loop. Without it a desktop records
                 silence, paced at the sample rate.
+            take: Which slot to keep: 0 the left, 1 the right, 2 their
+                average, 3 both. 3 needs `mono=False` and the others
+                `mono=True`. None keeps the left slot when mono and both when
+                not.
 
         Raises:
             ValueError: A setting isn't one that's supported.
