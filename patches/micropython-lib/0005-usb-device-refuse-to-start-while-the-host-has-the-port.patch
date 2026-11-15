@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:00:00 -0600
+Subject: [PATCH] usb-device: refuse to start while the USB host has an
+ ESP32-S2 or S3's one port.
+
+On an ESP32-S2 or S3 the USB host and the device share one USB port. A
+device started while the host ran never enumerated, and the port stayed
+silent until a reset, even after the host stopped. init() and active(True)
+now raise an OSError before anything changes when usbhost's host is
+running on such a chip, saying to stop it with usb.core.stop() first. The
+device that is up stays up.
+---
+ micropython/usb/usb-device/manifest.py        |  2 +-
+ micropython/usb/usb-device/usb/device/core.py | 25 +++++++++++++++++++
+ 2 files changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/micropython/usb/usb-device/manifest.py b/micropython/usb/usb-device/manifest.py
+index 2607bd5..e3d428b 100644
+--- a/micropython/usb/usb-device/manifest.py
++++ b/micropython/usb/usb-device/manifest.py
+@@ -1,2 +1,2 @@
+-metadata(version="0.2.2")
++metadata(version="0.2.3")
+ package("usb")
+diff --git a/micropython/usb/usb-device/usb/device/core.py b/micropython/usb/usb-device/usb/device/core.py
+index 6891029..2547bea 100644
+--- a/micropython/usb/usb-device/usb/device/core.py
++++ b/micropython/usb/usb-device/usb/device/core.py
+@@ -7,6 +7,7 @@
+ from micropython import const
+ import machine
+ import struct
++import sys
+ 
+ try:
+     from _thread import get_ident
+@@ -117,6 +118,27 @@ def _check_in_eps(usbd, builtin_driver, itfs):
+     raise ValueError("{} IN endpoints on this chip: {}".format(limit, parts))
+ 
+ 
++def _check_port_free():
++    # On an ESP32-S2 or S3 the USB host (usbhost's _usbhost) and this device
++    # share the one USB port. A device started while the host has the port
++    # never enumerates, and the port stays silent until a reset even after the
++    # host stops. Refuse before anything changes, so the program decides what
++    # to give up.
++    try:
++        import _usbhost
++    except ImportError:
++        return
++    name = getattr(sys.implementation, "_machine", "")
++    if "ESP32S2" not in name and "ESP32S3" not in name:
++        return
++    stats = _usbhost.host_stats()
++    if stats and stats[0]:
++        raise OSError(
++            "the USB host is running on this board's one USB port; "
++            "stop it with usb.core.stop() before starting a USB device"
++        )
++
++
+ class _Device:
+     # Class that implements the Python parts of the MicroPython USBDevice.
+     #
+@@ -133,6 +155,7 @@ class _Device:
+     def init(self, *itfs, **kwargs):
+         # Helper function to configure the USB device and activate it in a single call
+         _check_in_eps(self._usbd, kwargs.get("builtin_driver", False), itfs)
++        _check_port_free()
+         self.active(False)
+         self.config(*itfs, **kwargs)
+         self.active(True)
+@@ -295,6 +318,8 @@ class _Device:
+         # actually been connected to and configured by a USB host. Use the
+         # Interface.is_open() function to check if the host has configured an
+         # interface of the device.
++        if optional_value and optional_value[0]:
++            _check_port_free()
+         return self._usbd.active(*optional_value)
+ 
+     def _open_itf_cb(self, desc):
+-- 
+2.43.0
+

@@ -19,6 +19,8 @@ on:
       - 'DEPENDENCIES.lock'
       - 'patches/micropython/**'
       - 'patches/tinyusb/**'
+      - 'patches/micropython-lib/**'
+      - 'tests/test_usb_device_port.py'
       - 'tests/test_provenance.py'
       - 'scripts/update_provenance.py'
       - 'provenance.json'
@@ -37,6 +39,8 @@ on:
       - 'DEPENDENCIES.lock'
       - 'patches/micropython/**'
       - 'patches/tinyusb/**'
+      - 'patches/micropython-lib/**'
+      - 'tests/test_usb_device_port.py'
       - 'tests/test_provenance.py'
       - 'scripts/update_provenance.py'
       - 'provenance.json'
@@ -56,6 +60,36 @@ jobs:
         run: PYTHONPATH=tests python3 -m unittest test_build_mp test_pins test_freeze_list test_effects_selection -v
       - name: provenance.json is current
         run: PYTHONPATH=tests python3 -m unittest test_provenance -v
+
+  usb-device:
+    # usb.device as our firmware freezes it: micropython-lib's, with
+    # patches/micropython-lib/ applied by the test to a copy, at the commit
+    # the pinned MicroPython's submodule names.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read the pinned upstream from DEPENDENCIES.lock
+        id: pin
+        run: echo "ref=$(python3 scripts/pins.py micropython)" >> "$GITHUB_OUTPUT"
+      - name: Check out the pinned upstream
+        uses: actions/checkout@v7
+        with:
+          repository: micropython/micropython
+          ref: ${{ steps.pin.outputs.ref }}
+          path: micropython
+          fetch-depth: 1
+      - name: Check out its micropython-lib
+        run: |
+          set -euo pipefail
+          sha=$(git -C micropython ls-tree HEAD lib/micropython-lib | awk '{print $3}')
+          git init -q micropython/lib/micropython-lib
+          git -C micropython/lib/micropython-lib fetch -q --depth 1 https://github.com/micropython/micropython-lib.git "$sha"
+          git -C micropython/lib/micropython-lib checkout -q FETCH_HEAD
+      - name: usb.device refuses to start while the host has a shared port
+        env:
+          PYDEVICES_REQUIRE_MICROPYTHON: '1'
+        run: PYTHONPATH=tests python3 -m unittest test_usb_device_port -v
 
   vpath:
     # make must find each user C module's sources in its own directory, not in
