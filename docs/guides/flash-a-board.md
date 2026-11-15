@@ -77,11 +77,13 @@ while the computer has it.
 
 `machine.bootloader()` still reaches the DFU bootloader.
 
-`firmware1.bin` holds the radio's firmware for Wi-Fi and for Bluetooth, and
-only changes when the Wi-Fi driver does, so after the first time you can leave
-it out. A build without the variant keeps the Wi-Fi firmware inside its one
-image, `firmware.bin`, which the last command writes in place of
-`firmware0.bin`, and freezes its Python modules as upstream does.
+`firmware1.bin` holds the radio's firmware for Wi-Fi and for Bluetooth.
+`firmware0.bin` finds it by address, so flash the two from the same build
+together: with a `firmware1.bin` from another build, the board starts with
+"could not find valid firmware" and no Wi-Fi or Bluetooth. A build without
+the variant keeps the Wi-Fi firmware inside its one image, `firmware.bin`,
+which the last command writes in place of `firmware0.bin`, and freezes its
+Python modules as upstream does.
 
 The OmniPython libraries don't fit in this firmware beside LVGL, so they go in
 the ROMFS partition too, where MicroPython runs them in place and finds them

@@ -299,9 +299,10 @@ static uint32_t audioif_render_us_max;
 // The render, on its own stack. The heap is locked, so a pull that tried to
 // allocate gets a MemoryError rather than a heap the interpreter was in the
 // middle of changing, and the error is caught here and counted. Nothing in the
-// engine's pull raises; this is the net under it.
+// engine's pull raises; this is the net under it. Only the handler's assembly
+// calls it, which link-time optimisation can't see, so it's marked used.
 void audioif_render_irq(void);
-void audioif_render_irq(void) {
+__attribute__((used)) void audioif_render_irq(void) {
     if (!audioif_open || !audioif_render_armed || !audiopump_c_service_mode()) {
         return;
     }
@@ -326,7 +327,7 @@ void audioif_render_irq(void) {
 // of it the deepest render used.
 #define AUDIOIF_STACK_WORDS (AUDIOIF_RENDER_STACK / 4)
 #define AUDIOIF_STACK_PAINT (0x5a5aa5a5u)
-uint32_t audioif_render_stack[AUDIOIF_STACK_WORDS] __attribute__((aligned(8)));
+uint32_t audioif_render_stack[AUDIOIF_STACK_WORDS] __attribute__((aligned(8), used));
 static bool audioif_stack_painted;
 
 static void audioif_stack_paint(void) {
