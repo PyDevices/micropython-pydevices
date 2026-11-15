@@ -1,0 +1,342 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 12:00:00 -0600
+Subject: [PATCH] dcd_dwc2: on the ESP32-P4 the device interrupt runs from
+ IRAM through a flash erase.
+
+A flash write or erase turns the ESP32-P4's cache off, and with it flash
+and PSRAM, for as long as a sector erase takes (about 35 ms). Interrupts
+whose handlers aren't in IRAM wait until it's back. On a flash that can't
+suspend an erase, a USB sound card loses about 40 ms of audio, in packets
+the host never gets, each time a file is written.
+
+The DWC2 device interrupt is now allocated with ESP_INTR_FLAG_IRAM, and
+dcd_dwc2.c, dwc2_common.c, tusb_fifo.c and usbd.c go to IRAM (linker.lf),
+so an isochronous stream whose buffers are in internal RAM keeps moving.
+While the cache is off the interrupt keeps away from memory behind it:
+usbd.c holds the events it would queue (they'd wake tasks and run hooks
+that live in flash) and sends them when the cache is back; dcd_dwc2.c
+holds OUT packets bound for PSRAM in a small internal buffer and NAKs the
+endpoint when it's full, and leaves IN FIFOs for PSRAM buffers empty.
+A SOF interrupt flushes what's held.
+
+The host interrupt is unchanged. Other targets are unchanged.
+---
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index d9066bc..290f255 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -47,10 +47,15 @@ set(requirements_private
+     esp_netif   # required by rndis_reports.c: #include "netif/ethernet.h"
+     )
+ 
++set(ldfragments)
++
+ if(${target} STREQUAL "esp32p4")
+     list(APPEND requirements_private
+                 esp_mm # required by dcd_dwc2.c: #include "esp_cache.h"
++                spi_flash # dcd_dwc2.c and usbd.c: spi_flash_cache_enabled()
+         )
++    # The device interrupt and what it calls, in IRAM (TUP_DCD_ISR_IN_IRAM)
++    list(APPEND ldfragments "linker.lf")
+ endif()
+ 
+ idf_component_register(SRCS ${srcs}
+@@ -58,6 +63,7 @@ idf_component_register(SRCS ${srcs}
+                        PRIV_INCLUDE_DIRS ${includes_private}
+                        PRIV_REQUIRES  ${requirements_private}
+                        REQUIRES freertos
++                       LDFRAGMENTS ${ldfragments}
+                        )
+ 
+ target_compile_options(${COMPONENT_LIB} PUBLIC ${compile_options})
+diff --git a/linker.lf b/linker.lf
+new file mode 100644
+index 0000000..7ee6386
+--- /dev/null
++++ b/linker.lf
+@@ -0,0 +1,11 @@
++# ESP32-P4: the device interrupt runs from IRAM (TUP_DCD_ISR_IN_IRAM in
++# tusb_mcu.h), so a USB isochronous stream goes on while a flash write or
++# erase has the cache off. These are the interrupt's code and what it calls,
++# with their constant tables (noflash puts .rodata in DRAM too).
++[mapping:tinyusb_dcd_iram]
++archive: libespressif__tinyusb.a
++entries:
++    dcd_dwc2 (noflash)
++    dwc2_common (noflash)
++    tusb_fifo (noflash)
++    usbd (noflash)
+diff --git a/src/common/tusb_mcu.h b/src/common/tusb_mcu.h
+index 35de470..559e5e8 100644
+--- a/src/common/tusb_mcu.h
++++ b/src/common/tusb_mcu.h
+@@ -486,6 +486,12 @@
+   #define CFG_TUH_MEM_DCACHE_ENABLE_DEFAULT     CFG_TUH_DWC2_DMA_ENABLE
+   #define CFG_TUSB_MEM_DCACHE_LINE_SIZE_DEFAULT 64
+ 
++  // The device interrupt runs from IRAM (linker.lf), so it keeps running while
++  // a flash write or erase has the cache off. While the cache is off it keeps
++  // its hands off memory behind the cache (PSRAM, flash): events wait in
++  // usbd.c, and packets for a buffer out there wait in dcd_dwc2.c.
++  #define TUP_DCD_ISR_IN_IRAM                   1
++
+ #elif TU_CHECK_MCU(OPT_MCU_ESP32S31)
+   #define TUP_USBIP_DWC2
+   #define TUP_USBIP_DWC2_ESP32
+diff --git a/src/device/usbd.c b/src/device/usbd.c
+index c4c418c..27a37fb 100644
+--- a/src/device/usbd.c
++++ b/src/device/usbd.c
+@@ -427,11 +427,63 @@ static osal_queue_t _usbd_q;
+   #define _usbd_mutex   NULL
+ #endif
+ 
++#if TUP_DCD_ISR_IN_IRAM
++#include "esp_private/cache_utils.h"
++
++// While a flash write or erase has the cache off, the interrupt may still run
++// (from IRAM), but the queue send and the application's event hook are code
++// behind the cache. An event raised then waits here, and the DCD sends it on
++// from its next interrupt with the cache back. Isochronous streams handled by
++// a driver's xfer_isr raise no event, so they go on without waiting. The DCD
++// takes an interrupt for every SOF while events wait, so they wait no longer
++// than a frame after the cache comes back.
++#define USBD_HELD_EVENTS 32
++static dcd_event_t _usbd_held[USBD_HELD_EVENTS];
++static volatile uint8_t _usbd_held_count;
++
++TU_ATTR_ALWAYS_INLINE static inline bool queue_event_now(dcd_event_t const * event, bool in_isr) {
++  TU_ASSERT(osal_queue_send(_usbd_q, event, in_isr));
++  tud_event_hook_cb(event->rhport, event->event_id, in_isr);
++  return true;
++}
++
++TU_ATTR_ALWAYS_INLINE static inline bool queue_event(dcd_event_t const * event, bool in_isr) {
++  if (in_isr && (_usbd_held_count != 0 || !spi_flash_cache_enabled())) {
++    // An SOF event comes every (micro)frame for an application that asked
++    // for them: the latest one stands for those it replaces.
++    if (event->event_id == DCD_EVENT_SOF) {
++      for (uint8_t i = 0; i < _usbd_held_count; i++) {
++        if (_usbd_held[i].event_id == DCD_EVENT_SOF) {
++          _usbd_held[i] = *event;
++          return true;
++        }
++      }
++    }
++    // Otherwise a cache-off stretch of a few tens of ms raises a handful.
++    TU_ASSERT(_usbd_held_count < USBD_HELD_EVENTS);
++    _usbd_held[_usbd_held_count++] = *event;
++    return true;
++  }
++  return queue_event_now(event, in_isr);
++}
++
++void usbd_send_held_events(void) {
++  for (uint8_t i = 0; i < _usbd_held_count; i++) {
++    queue_event_now(&_usbd_held[i], true);
++  }
++  _usbd_held_count = 0;
++}
++
++bool usbd_events_held(void) {
++  return _usbd_held_count != 0;
++}
++#else
+ TU_ATTR_ALWAYS_INLINE static inline bool queue_event(dcd_event_t const * event, bool in_isr) {
+   TU_ASSERT(osal_queue_send(_usbd_q, event, in_isr));
+   tud_event_hook_cb(event->rhport, event->event_id, in_isr);
+   return true;
+ }
++#endif
+ 
+ //--------------------------------------------------------------------+
+ // Prototypes
+diff --git a/src/device/usbd_pvt.h b/src/device/usbd_pvt.h
+index be778f9..133c922 100644
+--- a/src/device/usbd_pvt.h
++++ b/src/device/usbd_pvt.h
+@@ -69,6 +69,13 @@ usbd_class_driver_t const* usbd_app_driver_get_cb(uint8_t* driver_count);
+ typedef bool (*usbd_control_xfer_cb_t)(uint8_t rhport, uint8_t stage, tusb_control_request_t const * request);
+ 
+ void usbd_int_set(bool enabled);
++
++#if TUP_DCD_ISR_IN_IRAM
++// Events the interrupt raised while the cache was off, sent on now that it is
++// back (called by the DCD from its interrupt). True while any are waiting.
++void usbd_send_held_events(void);
++bool usbd_events_held(void);
++#endif
+ void usbd_spin_lock(bool in_isr);
+ void usbd_spin_unlock(bool in_isr);
+ 
+diff --git a/src/portable/synopsys/dwc2/dcd_dwc2.c b/src/portable/synopsys/dwc2/dcd_dwc2.c
+index 740b795..8d21b06 100644
+--- a/src/portable/synopsys/dwc2/dcd_dwc2.c
++++ b/src/portable/synopsys/dwc2/dcd_dwc2.c
+@@ -87,6 +87,62 @@ CFG_TUD_MEM_SECTION static struct {
+ 
+ static tud_configure_dwc2_t _tud_cfg = CFG_TUD_CONFIGURE_DWC2_DEFAULT;
+ 
++#if TUP_DCD_ISR_IN_IRAM && CFG_TUD_DWC2_SLAVE_ENABLE
++#include "esp_memory_utils.h"
++#include "esp_private/cache_utils.h"
++
++// While a flash write or erase has the cache off, this interrupt still runs
++// (from IRAM), and an isochronous stream goes on: its packets go between
++// internal RAM buffers. Any other endpoint's buffer may be behind the cache
++// (PSRAM, or flash for a constant IN buffer), where the interrupt can't reach.
++// An OUT packet for one is read off the shared RX FIFO into this internal
++// buffer, and the endpoint NAKs until the cache is back; an IN endpoint stops
++// filling its TX FIFO. The next interrupt with the cache on puts the held
++// packets where they belong and lets both go on (held_release()).
++typedef struct {
++  uint8_t* dest;
++  uint16_t offset;  // into _held_rx_data
++  uint16_t len;
++} held_rx_t;
++
++#define DCD_HELD_RX_BYTES   4096u  // the RX FIFO holds less than this
++#define DCD_HELD_RX_PACKETS 16u
++static uint32_t _held_rx_data[DCD_HELD_RX_BYTES / 4];
++static held_rx_t _held_rx[DCD_HELD_RX_PACKETS];
++static uint8_t _held_rx_count;
++static uint16_t _held_rx_used;
++static uint32_t _held_out_nak;   // OUT endpoints NAKing while their packets are held
++static uint32_t _held_in_txfe;   // IN endpoints whose TX FIFO empty interrupt is held
++
++TU_ATTR_ALWAYS_INLINE static inline bool held_reachable(const void* p) {
++  return esp_ptr_internal(p);
++}
++
++TU_ATTR_ALWAYS_INLINE static inline bool held_any(void) {
++  return (_held_rx_count | _held_out_nak | _held_in_txfe) != 0;
++}
++
++static void held_release(dwc2_regs_t* dwc2) {
++  const uint8_t* data = (const uint8_t*) _held_rx_data;
++  for (uint8_t i = 0; i < _held_rx_count; i++) {
++    memcpy(_held_rx[i].dest, data + _held_rx[i].offset, _held_rx[i].len);
++  }
++  _held_rx_count = 0;
++  _held_rx_used = 0;
++  for (uint8_t epnum = 0; _held_out_nak != 0; epnum++) {
++    if (_held_out_nak & TU_BIT(epnum)) {
++      _held_out_nak &= ~TU_BIT(epnum);
++      dwc2_dep_t* epout = &dwc2->epout[epnum];
++      if (epout->doepctl & DOEPCTL_EPENA) {
++        epout->doepctl |= DOEPCTL_CNAK;
++      }
++    }
++  }
++  dwc2->diepempmsk |= _held_in_txfe;
++  _held_in_txfe = 0;
++}
++#endif
++
+ TU_ATTR_ALWAYS_INLINE static inline uint8_t dwc2_ep_count(const dwc2_regs_t* dwc2) {
+   #if TU_CHECK_MCU(OPT_MCU_GD32VF103)
+   (void) dwc2;
+@@ -951,7 +1007,33 @@ static void handle_rxflvl_irq(uint8_t rhport) {
+         // Read packet off RxFIFO
+         if (xfer->ff != NULL) {
+           tu_hwfifo_read_to_fifo(rx_fifo, xfer->ff, byte_count, NULL);
+-        } else {
++        }
++        #if TUP_DCD_ISR_IN_IRAM
++        else if ((_held_out_nak & TU_BIT(epnum)) ||
++                 (!held_reachable(xfer->buffer) && !spi_flash_cache_enabled())) {
++          // Hold it (see held_release()), and NAK the endpoint's next packets.
++          const uint16_t room = (uint16_t)(DCD_HELD_RX_BYTES - _held_rx_used);
++          if (_held_rx_count < DCD_HELD_RX_PACKETS && byte_count <= room) {
++            held_rx_t* h = &_held_rx[_held_rx_count++];
++            h->dest = xfer->buffer;
++            h->offset = _held_rx_used;
++            h->len = byte_count;
++            tu_hwfifo_read(rx_fifo, (uint8_t*) _held_rx_data + _held_rx_used, byte_count, NULL);
++            _held_rx_used = (uint16_t)(_held_rx_used + ((byte_count + 3u) & ~3u));
++          } else {
++            // Can't happen while the endpoint NAKs: the RX FIFO is smaller. Drain it anyway.
++            for (uint16_t i = 0; i < byte_count; i += 4) {
++              (void) *rx_fifo;
++            }
++          }
++          if (!(_held_out_nak & TU_BIT(epnum))) {
++            _held_out_nak |= TU_BIT(epnum);
++            epout->doepctl |= DOEPCTL_SNAK;
++          }
++          xfer->buffer += byte_count;
++        }
++        #endif
++        else {
+           tu_hwfifo_read(rx_fifo, xfer->buffer, byte_count, NULL);
+           xfer->buffer += byte_count;
+         }
+@@ -1014,6 +1096,14 @@ static void handle_epin_slave(uint8_t rhport, uint8_t epnum, dwc2_diepint_t diep
+   // - 64 bytes or
+   // - Half/Empty of TX FIFO size (configured by GAHBCFG.TXFELVL)
+   if (diepint_bm.txfifo_empty && tu_bit_test(dwc2->diepempmsk, epnum)) {
++    #if TUP_DCD_ISR_IN_IRAM
++    if (xfer->ff == NULL && !held_reachable(xfer->buffer) && !spi_flash_cache_enabled()) {
++      // Fill it once the cache is back (see held_release()).
++      dwc2->diepempmsk &= ~(1u << epnum);
++      _held_in_txfe |= TU_BIT(epnum);
++      return;
++    }
++    #endif
+     epin_write_tx_fifo(dwc2, epnum);
+ 
+     // Turn off TXFE if all bytes are written.
+@@ -1199,6 +1289,13 @@ static void handle_incomplete_iso_in(uint8_t rhport) {
+  */
+ void dcd_int_handler(uint8_t rhport) {
+   dwc2_regs_t* dwc2 = DWC2_REG(rhport);
++  #if TUP_DCD_ISR_IN_IRAM && CFG_TUD_DWC2_SLAVE_ENABLE
++  // What waited while the cache was off goes on first, in order.
++  if ((held_any() || usbd_events_held()) && spi_flash_cache_enabled()) {
++    held_release(dwc2);
++    usbd_send_held_events();
++  }
++  #endif
+   const uint32_t gintmask = dwc2->gintmsk;
+   const uint32_t gintsts = dwc2->gintsts & gintmask;
+ 
+@@ -1293,6 +1390,15 @@ void dcd_int_handler(uint8_t rhport) {
+     dwc2->gintsts = GINTSTS_IISOIXFR;
+     handle_incomplete_iso_in(rhport);
+   }
++
++  #if TUP_DCD_ISR_IN_IRAM && CFG_TUD_DWC2_SLAVE_ENABLE
++  // While anything waits, interrupt on every SOF too, so it goes on within a
++  // (micro)frame of the cache coming back even if the bus is otherwise quiet.
++  // The SOF handler above turns this off again unless SOF was asked for.
++  if (held_any() || usbd_events_held()) {
++    dwc2->gintmsk |= GINTMSK_SOFM;
++  }
++  #endif
+ }
+ 
+ #if CFG_TUD_TEST_MODE
+diff --git a/src/portable/synopsys/dwc2/dwc2_esp32.h b/src/portable/synopsys/dwc2/dwc2_esp32.h
+index 436f8dc..561c35b 100644
+--- a/src/portable/synopsys/dwc2/dwc2_esp32.h
++++ b/src/portable/synopsys/dwc2/dwc2_esp32.h
+@@ -117,7 +117,15 @@ TU_ATTR_ALWAYS_INLINE static inline void dwc2_clock_init(uint8_t rhport, tusb_ro
+ 
+ TU_ATTR_ALWAYS_INLINE static inline void dwc2_int_set(uint8_t rhport, tusb_role_t role, bool enabled) {
+   if (enabled) {
+-    esp_intr_alloc(_dwc2_controller[rhport].irqnum, ESP_INTR_FLAG_LOWMED,
++    int flags = ESP_INTR_FLAG_LOWMED;
++    #if TUP_DCD_ISR_IN_IRAM
++    // The device interrupt is in IRAM (linker.lf) and runs while the cache is
++    // off; the host one is not.
++    if (role == TUSB_ROLE_DEVICE) {
++      flags |= ESP_INTR_FLAG_IRAM;
++    }
++    #endif
++    esp_intr_alloc(_dwc2_controller[rhport].irqnum, flags,
+                    dwc2_int_handler_wrap, (void*)(uintptr_t)tu_u16(role, rhport), &usb_ih[rhport]);
+   } else {
+     esp_intr_free(usb_ih[rhport]);
+-- 
+2.43.0

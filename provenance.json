@@ -199,6 +199,9 @@
   },
   "0066-micropython-py-scheduler-a-ctrl-c-in-a-callback-reaches-the-running-code.patch": {
    "sha256": "e2616de1a842051c529040b2561249879e839f18bcc2f89c3c9f07dacb0e9a14"
+  },
+  "0067-micropython-shared-tinyusb-a-p4-stream-keeps-playing-while-flash-is-written.patch": {
+   "sha256": "92670f81447c81492d850a9ecbeddc5301e627aea4a98a00081990d06376e4d9"
   }
  },
  "tinyusb_patches": {
@@ -207,6 +210,9 @@
   },
   "0002-ncm_device-transfer-blocks-from-the-application.patch": {
    "sha256": "9654e5fd53cd70f597a8b02181bfb5cd42a6ec847a7878430dc7bdb4acddc544"
+  },
+  "0003-dcd_dwc2-esp32p4-device-interrupt-runs-from-iram-through-a-flash-erase.patch": {
+   "sha256": "e8dec7da4b6b71e1cb4b9edeb9a42d4101660a4498aeaa850f79cb26b2545ac8"
   }
  }
 }
