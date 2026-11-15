@@ -4,7 +4,7 @@
 """Play your phone through the board's speaker.
 
 The board shows up in your phone's or computer's Bluetooth list under its
-hostname. Pair with it and play something: the board plays it through its
+name, ``boarddev.name()``. Pair with it and play something: the board plays it through its
 speaker and prints each new title, with the left and right levels once a
 second.
 
@@ -22,6 +22,7 @@ Tested on: Adafruit QT Py ESP32 Pico with the Audio BFF, MicroPython
 import time
 
 import board_peripherals
+import boarddev
 import btclassic
 import network
 from audiodev import AudioFormat
@@ -33,10 +34,11 @@ FRAMES = 512  # frames per write; 512 is about 12 ms at 44.1 kHz
 # arrives slower than it plays, in bursts. Turn Wi-Fi off while listening.
 network.WLAN(network.STA_IF).active(False)
 
-# Start Bluetooth and the audio sink. The board appears under its hostname.
+# Start Bluetooth and the audio sink, under the board's name.
 bt = btclassic.Bluetooth()
+bt.config(name=boarddev.name())
 receiver = btclassic.AudioSink(bt)
-print("Pair with %s and play something." % network.hostname())
+print("Pair with %s and play something." % bt.config("name"))
 buf = bytearray(FRAMES * 4)
 speaker = None
 rate = 0

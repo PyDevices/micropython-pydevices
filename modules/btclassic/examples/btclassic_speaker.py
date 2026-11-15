@@ -15,7 +15,7 @@ Run it:
 
     mpftp run btclassic_speaker.py
 
-Pair your phone with the board's hostname and play something. The board
+Pair your phone with the board's name and play something. The board
 prints the title and artist of each track, and the levels once a second.
 
 Tested on: ESP32 Audio Kit (ESP32-A1S), MicroPython 1.30.0-preview,
@@ -25,21 +25,21 @@ playing from a Galaxy S21.
 import time
 
 import board_peripherals
+import boarddev
 import btclassic
 import network
 from audiodev import AudioFormat
 
 # Change these to match your setup.
 BUFFER_MS = 1000  # what the board holds; a phone sends a burst as it starts
-NAME = None  # the name the phone lists, or None for the hostname
+NAME = None  # the name the phone lists, or None for the board's name
 
 # Wi-Fi and Bluetooth share the ESP32's radio. Turn Wi-Fi off for audio.
 network.WLAN(network.STA_IF).active(False)
 
 # Start Bluetooth and the audio sink. A phone the board knows is called back.
 bt = btclassic.Bluetooth()
-if NAME:
-    bt.config(name=NAME)
+bt.config(name=NAME or boarddev.name())
 music = btclassic.AudioSink(bt, buffer_ms=BUFFER_MS)
 print("Pair with %s and play something." % bt.config("name"))
 
