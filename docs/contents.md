@@ -19,6 +19,7 @@ guides/build-for-a-board
 guides/choose-modules
 guides/flash-a-board
 guides/fit-firmware-on-a-small-flash
+guides/run-packages-from-romfs
 guides/build-with-a-few-instruments
 guides/build-in-a-codespace
 guides/build-on-windows

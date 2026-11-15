@@ -960,7 +960,7 @@ class Esp32KeepFs(unittest.TestCase):
             self.assertEqual(parts["factory"], (0x10000, shipped[c["id"]]), c["id"])
 
     def test_a_table_kept_at_its_own_size_is_unchanged(self):
-        for variant, fs, mb in (("ESP32_GENERIC_P4/P4X_EYE", 0x6F0000, 16), ("ESP32_GENERIC/AUDIO_KIT", 0x20000, 4)):
+        for variant, fs, mb in (("ESP32_GENERIC_P4/P4X_EYE", 0x6F0000, 16), ("ESP32_GENERIC/AUDIO_KIT", 0x18000, 4)):
             src = build_mp.VARIANTS_DIR / "esp32" / variant / "partitions.csv"
             before = {r[0]: (int(r[3], 0), int(r[4], 0)) for r in build_mp.esp32_table_rows(src)}
             self.assertEqual(self.keep(fs, mb, src=src), before, variant)

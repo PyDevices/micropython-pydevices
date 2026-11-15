@@ -15,6 +15,7 @@ for boards, desktops and the browser. One command, [`build_mp.py`](https://githu
 - [Choose modules](guides/choose-modules.md)
 - [Flash a board](guides/flash-a-board.md)
 - [Fit firmware on a small flash](guides/fit-firmware-on-a-small-flash.md)
+- [Run your own packages from ROMFS](guides/run-packages-from-romfs.md)
 - [Build with a few instruments and effects](guides/build-with-a-few-instruments.md)
 - [Build in a codespace](guides/build-in-a-codespace.md)
 - [Build on Windows](guides/build-on-windows.md)
