@@ -62,23 +62,67 @@ static mp_obj_t svgio_decoder_make_new(const mp_obj_type_t *type, size_t n_args,
         }
         memory &= ~(mp_int_t)7;
     }
-    svgio_decoder_obj_t *self = mp_obj_malloc(svgio_decoder_obj_t, type);
+    // With a finaliser, so a block from outside the heap goes back when the
+    // decoder is collected without close().
+    svgio_decoder_obj_t *self = mp_obj_malloc_with_finaliser(svgio_decoder_obj_t, type);
     self->image = NULL;
     self->prepared = NULL;
     self->scale = 0;
     self->width = self->height = 0;
     self->mem.base = NULL;
+    self->mem.outside = false;
+    self->mem.spilled = NULL;
     self->mem.size = 0;
     svgio_arena_reset(&self->mem);
     if (memory != 0) {
-        // One block, asked for once. The decoder points at its head, which is
-        // what keeps it, and everything the parser builds inside it, alive.
-        self->mem.base = m_new(uint8_t, memory);
+        // One block, asked for once: from outside the heap where there is
+        // such memory, so the collector never reads it. Otherwise a block of
+        // the heap, which the decoder keeps alive by pointing at its head.
+        uint8_t *base = svgio_outside_alloc(memory);
+        self->mem.outside = base != NULL;
+        self->mem.base = base != NULL ? base : m_new(uint8_t, memory);
         self->mem.size = (uint32_t)memory;
         svgio_arena_reset(&self->mem);
     }
     return MP_OBJ_FROM_PTR(self);
 }
+
+// close(): the decoder lets go of the SVG and of its working memory now; it
+// works on as a decoder without any. Also what collecting a decoder does,
+// where only memory from outside the heap is given back: the collector takes
+// the rest itself, and may already have.
+static mp_obj_t svgio_decoder_close(mp_obj_t self_in) {
+    svgio_decoder_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (!self->mem.outside) {
+        svgio_mem_use(&self->mem);
+        svgio_prepared_free(self->prepared);
+        svgio_image_free(self->image);
+        svgio_mem_use(NULL);
+    }
+    // Outside the heap, the SVG is in the block and in what spilled from it,
+    // and both go back whole.
+    self->prepared = NULL;
+    self->image = NULL;
+    self->width = self->height = 0;
+    self->mem.size = 0;
+    svgio_arena_reset(&self->mem);
+    if (self->mem.outside) {
+        svgio_outside_free(self->mem.base);
+    }
+    self->mem.base = NULL;
+    self->mem.outside = false;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(svgio_decoder_close_obj, svgio_decoder_close);
+
+static mp_obj_t svgio_decoder_del(mp_obj_t self_in) {
+    svgio_decoder_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (self->mem.outside) {
+        svgio_decoder_close(self_in);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(svgio_decoder_del_obj, svgio_decoder_del);
 
 // The whole file as bytes, from a path or a stream.
 static mp_obj_t svgio_read_all(mp_obj_t src) {
@@ -346,6 +390,8 @@ static void svgio_decoder_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
 static const mp_rom_map_elem_t svgio_decoder_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_open), MP_ROM_PTR(&svgio_decoder_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_decode), MP_ROM_PTR(&svgio_decoder_decode_obj) },
+    { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&svgio_decoder_close_obj) },
+    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&svgio_decoder_del_obj) },
 };
 static MP_DEFINE_CONST_DICT(svgio_decoder_locals, svgio_decoder_locals_table);
 
@@ -356,6 +402,92 @@ MP_DEFINE_CONST_OBJ_TYPE(
     make_new, svgio_decoder_make_new,
     attr, svgio_decoder_attr,
     locals_dict, &svgio_decoder_locals
+    );
+
+// --- Buffer --------------------------------------------------------------------
+//
+// Buffer(size): bytes for pictures, from outside the MicroPython heap where
+// the port has memory there. The collector reads every block of the heap it
+// keeps, so a few megabytes of sprites in bytearrays make each collection
+// take a few hundred milliseconds on a board; a Buffer costs it nothing. It
+// has the buffer protocol, so decode() draws into it or into a memoryview of
+// a part of it, and it isn't cleared.
+
+typedef struct {
+    mp_obj_base_t base;
+    uint8_t *buf;
+    size_t len;
+    bool outside;       // buf came from svgio_outside_alloc()
+} svgio_buffer_obj_t;
+
+static mp_obj_t svgio_buffer_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+    mp_arg_check_num(n_args, n_kw, 1, 1, false);
+    const mp_int_t n = mp_obj_get_int(args[0]);
+    if (n < 1) {
+        mp_raise_ValueError(MP_ERROR_TEXT("svgio: a Buffer has at least one byte"));
+    }
+    svgio_buffer_obj_t *self = mp_obj_malloc_with_finaliser(svgio_buffer_obj_t, type);
+    self->len = 0;
+    self->buf = svgio_outside_alloc(n);
+    self->outside = self->buf != NULL;
+    if (self->buf == NULL) {
+        self->buf = m_new(uint8_t, n);      // a port with no memory but the heap
+    }
+    self->len = n;
+    return MP_OBJ_FROM_PTR(self);
+}
+
+// close(): the bytes go back now. A memoryview of them must not be used again.
+static mp_obj_t svgio_buffer_close(mp_obj_t self_in) {
+    svgio_buffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (self->outside) {
+        svgio_outside_free(self->buf);
+    }
+    self->buf = NULL;
+    self->len = 0;
+    self->outside = false;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(svgio_buffer_close_obj, svgio_buffer_close);
+
+static mp_int_t svgio_buffer_get_buffer(mp_obj_t self_in, mp_buffer_info_t *info, mp_uint_t flags) {
+    (void)flags;
+    svgio_buffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (self->buf == NULL) {
+        return 1;       // closed
+    }
+    info->buf = self->buf;
+    info->len = self->len;
+    info->typecode = 'B';
+    return 0;
+}
+
+static mp_obj_t svgio_buffer_unary_op(mp_unary_op_t op, mp_obj_t self_in) {
+    svgio_buffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    switch (op) {
+        case MP_UNARY_OP_BOOL:
+            return mp_obj_new_bool(self->len != 0);
+        case MP_UNARY_OP_LEN:
+            return mp_obj_new_int_from_uint(self->len);
+        default:
+            return MP_OBJ_NULL;
+    }
+}
+
+static const mp_rom_map_elem_t svgio_buffer_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&svgio_buffer_close_obj) },
+    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&svgio_buffer_close_obj) },
+};
+static MP_DEFINE_CONST_DICT(svgio_buffer_locals, svgio_buffer_locals_table);
+
+MP_DEFINE_CONST_OBJ_TYPE(
+    svgio_buffer_type,
+    MP_QSTR_Buffer,
+    MP_TYPE_FLAG_NONE,
+    make_new, svgio_buffer_make_new,
+    unary_op, svgio_buffer_unary_op,
+    buffer, svgio_buffer_get_buffer,
+    locals_dict, &svgio_buffer_locals
     );
 
 // The LVGL decoder's last SVG (lvgl_decoder.c). Registered on every build, as
@@ -428,6 +560,13 @@ static mp_obj_t svgio_mem_peak_fn(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(svgio_mem_peak_obj, svgio_mem_peak_fn);
 
+// _outside() -> int: how many blocks of memory from outside the heap svgio
+// holds now, in decoders and Buffers. For its tests.
+static mp_obj_t svgio_outside_fn(void) {
+    return mp_obj_new_int_from_uint(svgio_outside_held());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(svgio_outside_obj, svgio_outside_fn);
+
 #if SVGIO_BENCH
 // _opts(mask): which speedups run (svgio_core.h lists the bits), in a
 // profiling build.
@@ -482,6 +621,7 @@ static const mp_rom_map_elem_t svgio_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_svgio) },
     { MP_ROM_QSTR(MP_QSTR___revision__), MP_ROM_PTR(&svgio_revision_obj) },
     { MP_ROM_QSTR(MP_QSTR_SvgDecoder), MP_ROM_PTR(&svgio_decoder_type) },
+    { MP_ROM_QSTR(MP_QSTR_Buffer), MP_ROM_PTR(&svgio_buffer_type) },
     #if SVGIO_LVGL_DECODER
     { MP_ROM_QSTR(MP_QSTR___init__), MP_ROM_PTR(&svgio___init___obj) },
     #endif
@@ -489,6 +629,7 @@ static const mp_rom_map_elem_t svgio_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_lvgl_decoders), MP_ROM_PTR(&svgio_lvgl_decoders_obj) },
     { MP_ROM_QSTR(MP_QSTR_expand), MP_ROM_PTR(&svgio_expand_obj) },
     { MP_ROM_QSTR(MP_QSTR__mem_peak), MP_ROM_PTR(&svgio_mem_peak_obj) },
+    { MP_ROM_QSTR(MP_QSTR__outside), MP_ROM_PTR(&svgio_outside_obj) },
     #if SVGIO_BENCH
     { MP_ROM_QSTR(MP_QSTR__opts), MP_ROM_PTR(&svgio_opts_obj) },
     { MP_ROM_QSTR(MP_QSTR__profile), MP_ROM_PTR(&svgio_profile_obj) },

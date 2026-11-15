@@ -30,10 +30,11 @@ class SvgDecoder:
     def __init__(self, *, memory: int | None = None) -> None:
         """Make a decoder.
 
-        With `memory`, the decoder takes that many bytes from the heap once
-        and does every `open()` and `decode()` inside them, so drawing asks
-        the heap for nothing. A picture that needs more still draws: the rest
-        comes from the heap.
+        With `memory`, the decoder takes that many bytes once and does every
+        `open()` and `decode()` inside them, so drawing asks the heap for
+        nothing. They come from outside MicroPython's heap where the port has
+        memory there, so the collector never reads them. A picture that needs
+        more still draws.
 
         Args:
             memory: Bytes of working memory, at least 4096, or None.
@@ -115,6 +116,11 @@ class SvgDecoder:
                 the image.
             MemoryError: No room for a strip.
         """
+    def close(self) -> None:
+        """Let go of the SVG and of the working memory now.
+
+        Collecting the decoder does the same.
+        """
     @property
     def width(self) -> int:
         """The width `decode()` draws, after `open()`."""
@@ -131,6 +137,28 @@ class SvgDecoder:
         Larger than `memory` when a picture didn't fit and the rest came from
         the heap.
         """
+
+class Buffer:
+    """Bytes to draw pictures into, outside MicroPython's heap where the port has memory there.
+
+    The collector reads every block of the heap it keeps, so megabytes of
+    pictures in `bytearray`s make each collection slow. It doesn't read a
+    `Buffer`. Pass one to `SvgDecoder.decode()`, or a `memoryview` of part of
+    one; it isn't cleared. Keep the `Buffer` itself for as long as a
+    `memoryview` of it is in use: the view alone doesn't keep it.
+    """
+
+    def __init__(self, size: int) -> None:
+        """Take `size` bytes.
+
+        Raises:
+            ValueError: `size` under 1.
+            MemoryError: No block that large.
+        """
+    def __len__(self) -> int: ...
+    def __buffer__(self, flags: int, /) -> memoryview: ...
+    def close(self) -> None:
+        """Give the bytes back now. A `memoryview` of them must not be used again."""
 
 def expand(drawing: bytes | bytearray | memoryview) -> bytes:
     """Give the SVG text a drawing in the compact form stands for.

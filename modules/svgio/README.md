@@ -91,6 +91,19 @@ multiples of that draws no row twice.
 Bad arguments and data that isn't an SVG raise `ValueError`, saying what's
 wrong. A parse or a strip that doesn't fit in the heap raises `MemoryError`.
 
+### `close()`
+
+Lets go of the SVG and of the decoder's working memory now. Collecting a
+decoder does the same.
+
+### `svgio.Buffer(size)`
+
+`size` bytes to draw pictures into, with the buffer protocol: pass one to
+`decode()`, or a `memoryview` of part of one. Where the port has memory
+outside MicroPython's heap it comes from there, which is what it's for:
+[Pictures outside the heap](#pictures-outside-the-heap). It isn't cleared.
+`len()` gives its size, and `close()` gives the bytes back now.
+
 ### `svgio.expand(drawing) -> bytes`
 
 The SVG text a drawing in [the compact form](#the-compact-form) stands for:
@@ -133,6 +146,28 @@ parsed, the parsed shapes, the kept outlines and one strip. A picture that
 needs more than the decoder has still draws: what doesn't fit comes from the
 heap, and `memory_peak` comes out larger than `memory`. Each `open()` starts
 the block afresh, so one decoder serves any number of pictures, one at a time.
+
+### Pictures outside the heap
+
+MicroPython's collector reads every block of the heap it keeps, looking for
+what the block points at. A few megabytes of sprites in `bytearray`s
+therefore make every collection slow, hundreds of milliseconds on a board,
+whenever it comes.
+
+A `Buffer` is bytes the collector doesn't read, and a decoder's working
+memory is too:
+
+```python
+sprites = svgio.Buffer(4 * 1024 * 1024)
+view = memoryview(sprites)
+d.decode(view[: w * h * 2], view[w * h * 2 : w * h * 3])
+```
+
+Both come from outside the heap on an ESP32 with PSRAM, on a desktop and in a
+browser. Ports that give MicroPython all of their memory have nowhere else,
+and there both are blocks of the heap as before. Keep the `Buffer` itself for
+as long as you use a `memoryview` of it: the view alone doesn't keep it, and
+its bytes go back when it is collected or closed.
 
 ## The compact form
 

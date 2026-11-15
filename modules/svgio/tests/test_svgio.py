@@ -20,6 +20,9 @@ It checks what one runtime can check alone:
   byte for byte the picture drawn whole;
 - SvgDecoder(memory=) draws the same pixels from its own working memory,
   asking the heap for nothing, and spills to the heap when it's too small;
+- a Buffer holds a picture outside the collector's heap, where the port has
+  memory there, and so does a decoder's working memory; close() and the
+  collector give both back;
 - a drawing in the compact form, one of every record, expands to the SVG
   text it stands for, character for character, and draws the same pixels;
 - bad arguments and data that isn't SVG raise, naming the problem.
@@ -294,6 +297,57 @@ if MICROPYTHON:
     # A decoder without memory counts what it held, too.
     assert g.memory_peak > 0
 expect_raises(ValueError, lambda: svgio.SvgDecoder(memory=100), "memory")
+
+# Buffer: bytes for a picture. decode() draws into one, or into a part of one.
+buf = svgio.Buffer(gw * gh * 3)
+assert len(buf) == gw * gh * 3 and buf
+planes = memoryview(buf)
+g.decode(planes[: gw * gh * 2], planes[gw * gh * 2 :])
+assert planes[: gw * gh * 2] == whole_p and planes[gw * gh * 2 :] == whole_a, "a Buffer holds other pixels"
+g.decode(buf, rows=(0, 10))
+planes = None
+buf.close()
+assert len(buf) == 0 and not buf
+expect_raises(TypeError, lambda: g.decode(buf), "")
+expect_raises(ValueError, lambda: svgio.Buffer(0), "Buffer")
+# close(): a decoder lets go of the SVG and of its working memory.
+shut = svgio.SvgDecoder(memory=ROOM)
+shut.open(svg_path("gauge"), width=400)
+shut.close()
+assert shut.memory == 0
+expect_raises(RuntimeError, lambda: shut.decode(whole_p), "open()")
+shut.close()
+assert shut.open(svg_path("gauge"), width=400) == (gw, gh)
+if MICROPYTHON:
+    # Where the port has memory outside the heap, a megabyte of Buffer or of
+    # working memory takes none of the heap, so no collection reads it; and
+    # every block goes back, by close() or when its owner is collected.
+    gc.collect()
+    held, before = svgio._outside(), gc.mem_alloc()
+    big, roomy = svgio.Buffer(1 << 20), svgio.SvgDecoder(memory=1 << 20)
+    outside = gc.mem_alloc() - before < (1 << 19)
+    print("memory outside the heap: %s" % ("yes" if outside else "no, the heap serves"))
+    if sys.platform in ("linux", "darwin", "win32"):
+        assert outside, "a desktop has memory outside the heap"
+    if outside:
+        assert svgio._outside() == held + 2
+        cramped = svgio.SvgDecoder(memory=8192)  # what spills is outside too
+        cramped.open(text, width=400)
+        cramped.decode(small_p, small_a)
+        assert small_p == whole_p and small_a == whole_a
+        assert svgio._outside() > held + 3, "a decoder with memory outside the heap spilled into the heap"
+        cramped.close()
+        big.close()
+        assert svgio._outside() == held + 1, "close() kept %d blocks" % (svgio._outside() - held - 1)
+        roomy.open(text, width=400)
+        for _ in range(20):
+            d2, b2 = svgio.SvgDecoder(memory=8192), svgio.Buffer(4096)
+            d2.open(text, width=400)
+            d2.decode(small_p, small_a)
+        d2 = b2 = roomy = cramped = big = None
+        gc.collect()
+        gc.collect()
+        assert svgio._outside() == held, "the collector left %d blocks outside the heap" % (svgio._outside() - held)
 
 # The compact form: one of every record, with the text each stands for.
 import struct  # noqa: E402
