@@ -6,7 +6,7 @@
 Draws a red square sliding across a picture, encodes each frame with the
 ESP32-P4's hardware H.264 encoder, and serves the stream from an RTSP
 server on the board. Success is the square moving in a player. The program
-joins Wi-Fi from ``/lib/secrets.py`` (pydevices' ``wifi.py``), prints the
+joins Wi-Fi from ``/lib/secrets.py`` (pydevices' ``wifi_manager``), prints the
 URL, and runs for ``SECONDS``.
 
 Needs: an ESP32-P4 board with firmware built with vision, which carries the
@@ -26,10 +26,10 @@ import h264
 import image
 import network
 import rtsp
-import wifi
+import wifi_manager
 
 # Join Wi-Fi and print the address to open in a player.
-wifi.connect_from_secrets()
+wifi_manager.connect()
 print("rtsp://%s:8554/" % network.WLAN(network.STA_IF).ifconfig()[0])
 
 # Change these to match your setup.
