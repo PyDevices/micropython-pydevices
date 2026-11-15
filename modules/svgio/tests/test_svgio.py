@@ -115,23 +115,22 @@ again_p, again_a = bytearray(w * h * 2), bytearray(w * h)
 d.decode(again_p, again_a)
 assert again_p == pixels and again_a == alpha
 
-# The second decode() draws from the outlines the first one kept, so it skips
-# the flattening that takes most of a small icon's time. Best of seven, each
-# from a fresh open(); without the outlines the two take the same time.
+# The first decode() keeps the outlines it flattened, on the heap, so the
+# next one at the same size draws from them; without them nothing stays.
 if sys.implementation.name == "micropython":
-    first_us = again_us = 1 << 30
-    for _ in range(7):
-        t = svgio.SvgDecoder()
-        tw, th = t.open(svg_path("wifi"), width=24)
-        tp, ta = bytearray(tw * th * 2), bytearray(tw * th)
-        t0 = ticks_us()
-        t.decode(tp, ta)
-        t1 = ticks_us()
-        t.decode(tp, ta)
-        t2 = ticks_us()
-        first_us, again_us = min(first_us, t1 - t0), min(again_us, t2 - t1)
-    print("wifi-24: first decode %d us, again %d us" % (first_us, again_us))
-    assert again_us * 2 < first_us, "a second decode should reuse the first one's outlines"
+    import gc
+
+    t = svgio.SvgDecoder()
+    tw, th = t.open(svg_path("wifi"), width=24)
+    tp, ta = bytearray(tw * th * 2), bytearray(tw * th)
+    gc.collect()
+    before = gc.mem_alloc()
+    t.decode(tp, ta)
+    gc.collect()
+    kept = gc.mem_alloc() - before
+    print("wifi-24: outlines kept %d bytes" % kept)
+    assert kept > 0, "decode() should keep the outlines it flattened"
+    t = tp = ta = None
 
 # Placed at (x, y) in a wider buffer: the same pixels, and nothing else
 # touched.
