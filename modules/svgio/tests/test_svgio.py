@@ -20,6 +20,8 @@ It checks what one runtime can check alone:
   byte for byte the picture drawn whole;
 - SvgDecoder(memory=) draws the same pixels from its own working memory,
   asking the heap for nothing, and spills to the heap when it's too small;
+- a drawing in the compact form, one of every record, expands to the SVG
+  text it stands for, character for character, and draws the same pixels;
 - bad arguments and data that isn't SVG raise, naming the problem.
 
 With --out, every render in cases.py is written there, raw, for
@@ -292,6 +294,103 @@ if MICROPYTHON:
     # A decoder without memory counts what it held, too.
     assert g.memory_peak > 0
 expect_raises(ValueError, lambda: svgio.SvgDecoder(memory=100), "memory")
+
+# The compact form: one of every record, with the text each stands for.
+import struct  # noqa: E402
+
+F = "d" if 1.0 + 1e-10 != 1.0 else "f"  # this runtime's float
+NONE, NO_STROKE, GRADIENT = 0xFFFFFFFF, 0xFFFFFFFE, 0x1000000
+
+
+def style(fill, stroke=NO_STROKE, width=1, opacity=1, extra=b""):
+    return struct.pack("<II2" + F + "H", fill, stroke, width, opacity, len(extra)) + extra
+
+
+def text_d(d):
+    return struct.pack("<BH", ord("T"), len(d)) + d
+
+
+data = (
+    struct.pack("<B2" + F, ord("M"), 10, 70.5)
+    + struct.pack("<B2" + F, ord("L"), 30, 70.5)
+    + struct.pack("<B4" + F, ord("Q"), 40, 60, 30, 50)
+    + struct.pack("<B6" + F, ord("C"), 25, 45, 15, 45, 10, 50)
+    + b"Z"
+    + text_d(b"M60 60")
+    + struct.pack("<B2" + F, ord("L"), 70, 62.25)
+    + text_d(b"L")
+    + struct.pack("<B2" + F, ord("P"), 64, 72)
+    + text_d(b"a4 4 0 0 1 -4 -12z")
+)
+COMPACT = b"".join(
+    (
+        b"\x01SVG" + bytes((struct.calcsize(F),)),
+        struct.pack("<B4" + F, 10, 0, 0, 100, 80),
+        struct.pack("<B4" + F + "BB", 11, 0, 0, 1, 1, 0, 2) + struct.pack("<" + F + "I" + F, 0, 0xFF8800, 1) + struct.pack("<" + F + "I" + F, 1, 0x2040FF, 0.5),
+        struct.pack("<B3" + F + "B2" + F + "BB", 12, 50, 40, 30, 1, 45, 35, 1, 1) + struct.pack("<" + F + "I" + F, 0.25, 0xFFFFFF, 1),
+        b"\x0d",
+        struct.pack("<B" + F + "H", 6, 1, 0) + struct.pack("<B3" + F, 1, 90, 70, 123456.5) + style(0x123456) + b"\x07",
+        struct.pack("<B5" + F, 3, 0, 0, 100, 80, 0) + style(GRADIENT),
+        struct.pack("<B5" + F, 3, 4, 4, 30.5, 20, 6) + style(0x102030, 0xC4DC4C, 2.5, 0.75, b'stroke-dasharray="4 2"'),
+        struct.pack("<B3" + F, 1, 80, 20, 12.125) + style(GRADIENT + 1, 0x000000, 1.5),
+        struct.pack("<B" + F + "H", 6, 0.5, 14) + b"translate(2 1)",
+        struct.pack("<B5" + F, 2, 50, 40, 20, 9.5, 30) + style(NONE, 0xFF0000, 3),
+        struct.pack("<B5" + F, 2, 50, 40, 8, 4, 0) + style(0x00FF00, 0x0000FF, 2, extra=b'stroke-linecap="butt"'),
+        b"\x07",
+        struct.pack("<B4" + F + "B", 8, 12, 5, 15, 0.5, 1),
+        struct.pack("<B4" + F + "B", 8, 3, 3, 0, 1, 0),
+        struct.pack("<BI", 4, len(data)) + data + style(0x336699, 0xFFFFFF, 0.75),
+        b"\x07\x07",
+        b"\x0e",
+    )
+)
+EXPANDED = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80" viewBox="0 0 100 80"><defs>'
+    b'<linearGradient id="g0" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff8800"/>'
+    b'<stop offset="1" stop-color="#2040ff" stop-opacity="0.5"/></linearGradient>'
+    b'<radialGradient id="g1" cx="50" cy="40" r="30" fx="45" fy="35" gradientUnits="userSpaceOnUse">'
+    b'<stop offset="0.25" stop-color="#ffffff"/></radialGradient></defs>'
+    b'<g><circle cx="90" cy="70" r="1.2346e+05" fill="#123456"/></g>'
+    b'<rect x="0" y="0" width="100" height="80" fill="url(#g0)"/>'
+    b'<rect x="4" y="4" width="30.5" height="20" fill="#102030" stroke="#c4dc4c" stroke-width="2.5"'
+    b' stroke-linecap="round" stroke-linejoin="round" opacity="0.75" rx="6" stroke-dasharray="4 2"/>'
+    b'<circle cx="80" cy="20" r="12.125" fill="url(#g1)" stroke="#000000" stroke-width="1.5"'
+    b' stroke-linecap="round" stroke-linejoin="round"/>'
+    b'<g transform="translate(2 1)" opacity="0.5">'
+    b'<ellipse cx="50" cy="40" rx="20" ry="9.5" fill="none" stroke="#ff0000" stroke-width="3"'
+    b' stroke-linecap="round" stroke-linejoin="round" transform="rotate(30 50 40)"/>'
+    b'<ellipse cx="50" cy="40" rx="8" ry="4" fill="#00ff00" stroke="#0000ff" stroke-width="2"'
+    b' stroke-linejoin="round" stroke-linecap="butt"/></g>'
+    b'<g transform="translate(12 5) rotate(15) scale(-0.5 0.5)"><g transform="translate(3 3)">'
+    b'<path d="M10 70.5L30 70.5Q40 60 30 50C25 45 15 45 10 50ZM60 60L70 62.25L64 72a4 4 0 0 1 -4 -12z"'
+    b' fill="#336699" stroke="#ffffff" stroke-width="0.75" stroke-linecap="round" stroke-linejoin="round"/>'
+    b"</g></g></svg>"
+)
+expanded = bytes(svgio.expand(COMPACT))
+if expanded != EXPANDED:
+    k = 0
+    while k < min(len(expanded), len(EXPANDED)) and expanded[k] == EXPANDED[k]:
+        k += 1
+    raise AssertionError("expand() differs at %d: %r, not %r" % (k, expanded[k - 30 : k + 30], EXPANDED[k - 30 : k + 30]))
+c = svgio.SvgDecoder()
+cw, ch = c.open(COMPACT, width=200)
+compact_p, compact_a = bytearray(cw * ch * 2), bytearray(cw * ch)
+c.decode(compact_p, compact_a)
+assert c.open(EXPANDED, width=200) == (cw, ch) == (200, 160)
+text_p, text_a = bytearray(cw * ch * 2), bytearray(cw * ch)
+c.decode(text_p, text_a)
+assert compact_p == text_p and compact_a == text_a, "a compact drawing draws other pixels than its text"
+assert max(compact_a) == 255 and len(set(compact_p)) > 16, "the compact drawing drew nothing much"
+assert m.open(COMPACT, width=200) == (cw, ch)
+m.decode(mem_p, mem_a)
+assert mem_p[: cw * ch * 2] == text_p and mem_a[: cw * ch] == text_a
+expect_raises(ValueError, lambda: svgio.expand(COMPACT[:-40]), "compact")
+expect_raises(ValueError, lambda: c.open(COMPACT[:200]), "compact")
+expect_raises(ValueError, lambda: svgio.expand(b"<svg/>"), "compact")
+if MICROPYTHON:
+    # the desktop svgio reads floats of either size; a board reads its own
+    expect_raises(ValueError, lambda: svgio.expand(b"\x01SVG" + bytes((12 - struct.calcsize(F),)) + COMPACT[5:]), "float")
+expect_raises(ValueError, lambda: svgio.expand(COMPACT[:5] + b"\x63"), "compact")
 print("api: ok")
 
 # Every case, timed; written out for the reference check. Each is drawn

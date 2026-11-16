@@ -147,14 +147,28 @@ static mp_obj_t svgio_decoder_open(size_t n_args, const mp_obj_t *pos, mp_map_t 
     // The parser writes into its text, and wants it NUL-terminated.
     svgio_mem_reset();
     svgio_mem_use(&self->mem);
-    char *text = svgio_mem_alloc(b.len + 1);
+    char *text;
+    const char *why = NULL;
+    if (svgio_is_compact(b.buf, b.len)) {
+        // A drawing in the compact form: the text it stands for, then the same parse.
+        size_t n;
+        text = svgio_expand(b.buf, b.len, &n, &why);
+    } else {
+        text = svgio_mem_alloc(b.len + 1);
+        if (text != NULL) {
+            memcpy(text, b.buf, b.len);
+            text[b.len] = '\0';
+        }
+    }
     float sw = 0, sh = 0;
     svgio_image_t *image = NULL;
     if (text != NULL) {
-        memcpy(text, b.buf, b.len);
-        text[b.len] = '\0';
         image = svgio_parse(text, &sw, &sh);
         svgio_mem_free(text);
+    }
+    if (why != NULL && strncmp(why, "not enough", 10) != 0) {
+        svgio_mem_use(NULL);
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("svgio: %s"), why);
     }
     if (image != NULL && !(sw > 0 && sh > 0)) {
         svgio_image_free(image);
@@ -436,6 +450,28 @@ static mp_obj_t svgio_profile_fn(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(svgio_profile_obj, svgio_profile_fn);
 #endif
 
+// expand(drawing) -> bytes: the SVG text a drawing in the compact form stands
+// for, which is what open() parses when it is given one.
+static mp_obj_t svgio_expand_fn(mp_obj_t drawing) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(drawing, &b, MP_BUFFER_READ);
+    size_t n = 0;
+    const char *why = "not a drawing in svgio's compact form";
+    svgio_mem_use(NULL);
+    char *text = svgio_is_compact(b.buf, b.len) ? svgio_expand(b.buf, b.len, &n, &why) : NULL;
+    if (text == NULL) {
+        if (strncmp(why, "not enough", 10) == 0) {
+            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("svgio: not enough memory for the SVG text"));
+        }
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("svgio: %s"), why);
+    }
+    // text is on the heap: if making the bytes raises, the collector takes it
+    mp_obj_t out = mp_obj_new_bytes((const byte *)text, n);
+    svgio_mem_free(text);
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(svgio_expand_obj, svgio_expand_fn);
+
 // svgio.__revision__: which svgio this firmware was built from (git describe).
 #ifndef SVGIO_REVISION
 #define SVGIO_REVISION "unknown"
@@ -451,6 +487,7 @@ static const mp_rom_map_elem_t svgio_module_globals_table[] = {
     #endif
     { MP_ROM_QSTR(MP_QSTR_register_lvgl_decoder), MP_ROM_PTR(&svgio_register_lvgl_decoder_obj) },
     { MP_ROM_QSTR(MP_QSTR_lvgl_decoders), MP_ROM_PTR(&svgio_lvgl_decoders_obj) },
+    { MP_ROM_QSTR(MP_QSTR_expand), MP_ROM_PTR(&svgio_expand_obj) },
     { MP_ROM_QSTR(MP_QSTR__mem_peak), MP_ROM_PTR(&svgio_mem_peak_obj) },
     #if SVGIO_BENCH
     { MP_ROM_QSTR(MP_QSTR__opts), MP_ROM_PTR(&svgio_opts_obj) },

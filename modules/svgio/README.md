@@ -53,7 +53,8 @@ and the most it held at once since the last `open()`.
 
 ### `open(source, *, width=None, height=None, scale=None) -> (width, height)`
 
-`source` is bytes-like, a path or a binary stream. Without a size, you get
+`source` is bytes-like, a path or a binary stream: SVG text, or a drawing in
+[the compact form](#the-compact-form). Without a size, you get
 the SVG's own, from its `width` and `height` or its `viewBox`. Give one of
 `width`, `height` or `scale` and the other side follows the aspect ratio.
 `width` and `height` are properties too, after a successful `open()`.
@@ -89,6 +90,11 @@ multiples of that draws no row twice.
 
 Bad arguments and data that isn't an SVG raise `ValueError`, saying what's
 wrong. A parse or a strip that doesn't fit in the heap raises `MemoryError`.
+
+### `svgio.expand(drawing) -> bytes`
+
+The SVG text a drawing in [the compact form](#the-compact-form) stands for:
+what `open()` parses when you give it one.
 
 ## Memory and speed
 
@@ -127,6 +133,74 @@ parsed, the parsed shapes, the kept outlines and one strip. A picture that
 needs more than the decoder has still draws: what doesn't fit comes from the
 heap, and `memory_peak` comes out larger than `memory`. Each `open()` starts
 the block afresh, so one decoder serves any number of pictures, one at a time.
+
+## The compact form
+
+A program that draws from code, a gauge whose needle moves or a character in
+a pose, has its shapes as numbers. To hand them to `open()` as SVG it writes
+every coordinate out as text, which the parser reads straight back, and on a
+board the writing takes far longer than the drawing: a scene of 700 shapes
+took 0.8 s to write in Python on an ESP32-P4 and 0.5 s to draw.
+
+The compact form is SVG with its numbers left as numbers. A shape is a record
+that `struct.pack` makes in one call, and `open()` takes the records where it
+takes text:
+
+```python
+import struct, svgio
+
+F = "f"                                   # "d" where floats are doubles
+no_stroke = (0xFFFFFFFE, 1.0, 1.0, 0)     # stroke, its width, opacity, no extra attributes
+drawing = b"".join((
+    b"\x01SVG\x04",                                               # 4: the size of a float
+    struct.pack("<B4" + F, 10, 0, 0, 100, 100),                    # the view: x, y, width, height
+    b"\x0d",                                                       # no gradients
+    struct.pack("<B3" + F + "II2" + F + "H", 1, 50, 50, 40, 0xFF8800, *no_stroke),   # a circle
+    b"\x0e",
+))
+d = svgio.SvgDecoder()
+w, h = d.open(drawing, width=48)
+```
+
+svgio writes the text each record stands for, with every number as `"%.5g"`
+prints it on that runtime, and parses that. So a drawing is the same pixels
+as the SVG text `expand()` returns for it, and anything SVG text can say that
+the records can't goes in as text, in a path's data or a shape's extra
+attributes.
+
+A drawing is five bytes, `0x01`, `SVG` and the size of a float (4 or 8, the
+runtime's own: `open()` refuses the other), then records to its end. Numbers
+are little-endian; `F` is a float. A paint is a `u32`: `0xFFFFFFFF` for none,
+under `0x1000000` a colour `0xRRGGBB`, otherwise gradient number
+`paint - 0x1000000`, counted in the order the gradients come.
+
+| Record | Fields | Stands for |
+|---|---|---|
+| 10 | `x y w h` : F | `<svg>` with that `viewBox`, `w` by `h`. Comes first. |
+| 11 | `x1 y1 x2 y2` : F, `user` : u8, `n` : u8, `n` stops | `<linearGradient>` |
+| 12 | `cx cy r` : F, `focus` : u8, `fx fy` : F, `user` : u8, `n` : u8, `n` stops | `<radialGradient>`; `fx fy` are written when `focus` is 1 |
+| 13 | | Ends the gradients. The shapes follow. |
+| 1 | `cx cy r` : F, style | `<circle>` |
+| 2 | `cx cy rx ry rot` : F, style | `<ellipse>`, turned `rot` degrees about its centre |
+| 3 | `x y w h r` : F, style | `<rect>`, with corners of radius `r` unless it is 0 |
+| 4 | `n` : u32, `n` bytes of path data, style | `<path>` |
+| 6 | `opacity` : F, `n` : u16, `n` bytes of text | `<g>` with that text as its `transform` |
+| 8 | `x y rot scale` : F, `flip` : u8 | `<g>` moved to `x y`, turned and scaled; `flip` mirrors it left to right |
+| 7 | | `</g>` |
+| 14 | | `</svg>` |
+
+A stop is `offset` : F, `colour` : u32, `opacity` : F. With `user` 1 a
+gradient's coordinates are in the drawing's units, otherwise fractions of the
+shape's box.
+
+A style is `fill` : paint, `stroke` : paint, `width` : F, `opacity` : F,
+`n` : u16, then `n` bytes of extra attributes as text. A `stroke` of
+`0xFFFFFFFE` is no stroke; with one, caps and joins are round unless the
+extra attributes name `stroke-linecap` or `stroke-linejoin`. `opacity` is written when it's under 1.
+
+Path data is segments: `M x y`, `L x y`, `Q` with four numbers, `C` with six,
+`Z`, `P x y` (the two numbers with no letter, to carry on a run), and
+`T` `n` : u16 with `n` bytes of path data as text, for arcs and anything else.
 
 ## LVGL image decoder
 

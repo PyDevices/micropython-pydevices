@@ -17,6 +17,7 @@ SRC_USERMOD_C += $(SVGIO_DIR)/mod_svgio.c
 
 # The engine has no qstrs, so it stays out of the QSTR scan.
 SRC_USERMOD_LIB_C += $(SVGIO_DIR)/svgio_nanosvg.c
+SRC_USERMOD_LIB_C += $(SVGIO_DIR)/svgio_compact.c
 
 # LVGL is in this build if USER_C_MODULES names omnipython-lvgl's
 # ports/micropython, whose repository root, two levels up, holds the generated
