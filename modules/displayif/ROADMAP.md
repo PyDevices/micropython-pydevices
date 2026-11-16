@@ -18,8 +18,8 @@ letting a drawing layer work with the panel's own memory rather than around it.
 
 - Hardware runs still to do: RK043 (mimxrt eLCDIF), RT1170 DSI, and a long
   Pico DVI soak on a full panel.
-- mimxrt `i80bus`: a board config in pydevices, and an optional DMA path for
+- mimxrt `i80bus`: a board config in omnipython, and an optional DMA path for
   bulk transfers.
 
 Bugs, and things you need that don't work yet, go to
-[issues](https://github.com/PyDevices/micropython-pydevices/issues).
+[issues](https://github.com/PyDevices/omnipython-builds/issues).

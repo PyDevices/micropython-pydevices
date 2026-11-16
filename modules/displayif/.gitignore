@@ -1,4 +1,4 @@
-# Shared minimum (PyDevices package / cmod repos)
+# Shared minimum (OmniPython package / cmod repos)
 .venv/
 __pycache__/
 *.py[cod]

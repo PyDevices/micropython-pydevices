@@ -93,7 +93,7 @@ def fake_cell(root, c, version="v1.30.0-preview"):
     meta.update(kind=c["kind"], flash_offset=None if c["offset"] is None else rf.hex8(c["offset"]) if c["kind"] == "stm32" else hex(c["offset"]),
                 flash_bytes=int(c["flash"][:-2]) * rf.MB, files=files, build_seconds=61,
                 interpreter_version=version if c["interpreter"] == "micropython" else "11.0.0-alpha.1-dirty",
-                module_revisions={"pydevices": {"commit": COMMIT, "dirty": False}})
+                module_revisions={"omnipython": {"commit": COMMIT, "dirty": False}})
     if c["kind"] == "rp2" and c.get("fs"):
         meta["rp2_storage_bytes"] = rf.size_bytes(c["fs"])
     (d / "cell.json").write_text(json.dumps(meta))
@@ -204,7 +204,7 @@ class BuildTheGiga(unittest.TestCase):
         for name, data in (("firmware0.bin", b"0" * 64), ("firmware1.bin", b"1" * 64), ("romfs.img", b"r" * 64),
                            ("firmware.elf", b"\x7fELF v1.30.0-preview"), ("firmware.map", b"m")):
             (self.src / name).write_bytes(data)
-        (self.src / "pydevices-build.json").write_text(json.dumps(
+        (self.src / "omnipython-build.json").write_text(json.dumps(
             {"complete": True, "micropython_version": "v1.30.0-preview", "romfs_modules": ROMFS_MODULES}))
 
     def tearDown(self):
@@ -441,7 +441,7 @@ class Assemble(unittest.TestCase):
     def test_a_dirty_module_is_caught(self):
         d = self.indir / "mp-s3-lcd7"
         meta = json.loads((d / "cell.json").read_text())
-        meta["module_revisions"]["pydevices"]["dirty"] = True
+        meta["module_revisions"]["omnipython"]["dirty"] = True
         (d / "cell.json").write_text(json.dumps(meta))
         self.fails_with("dirty")
 

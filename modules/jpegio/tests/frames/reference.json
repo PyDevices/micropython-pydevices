@@ -9,7 +9,7 @@
   "Compare with a tolerance: TJpgDec's IDCT, chroma replication and DC-only 1/8 differ."
  ],
  "pillow": "12.3.0",
- "rgb565": "((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3), little-endian uint16 (native order on all PyDevices targets)",
+ "rgb565": "((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3), little-endian uint16 (native order on all OmniPython targets)",
  "scale_dims": "width = source_width >> scale, height = source_height >> scale (partial-MCU remainder dropped, as TJpgDec does)",
  "frames": {
   "baseline_jfif_320x240.jpg": {

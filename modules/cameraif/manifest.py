@@ -12,6 +12,6 @@ import os
 c_module(".")  # this directory holds the micropython.cmake / micropython.mk for the C half
 
 # Only the P4 has a MIPI camera for cameraif to open.
-if os.environ.get("PYDEVICES_TARGET", "").startswith("esp32/ESP32_GENERIC_P4"):
+if os.environ.get("OMNIPYTHON_TARGET", "").startswith("esp32/ESP32_GENERIC_P4"):
     freeze("sensors")
     freeze("frozen", "cameraif_sensors.py")

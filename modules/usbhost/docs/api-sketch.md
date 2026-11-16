@@ -1,6 +1,6 @@
 # usbhost API Sketch — v0
 
-**Status:** Gate 1 deliverable for review, kept as history. The API that shipped is `usb.core` and the class packages in [pydevices](https://github.com/PyDevices/pydevices); this sketch's `usbhost.*` surface was retired.
+**Status:** Gate 1 deliverable for review, kept as history. The API that shipped is `usb.core` and the class packages in [omnipython](https://github.com/PyDevices/omnipython); this sketch's `usbhost.*` surface was retired.
 
 The sketch is written against all backends at once — the ESP native module, the desktop backends, and the hypothetical RP2350 TinyUSB backend of the vision's Appendix A — because the surface must not leak any one stack's assumptions. CircuitPython's `usb_host`/`usb_hid`/`usb_midi` family was studied for shape; names differ where PyDevices conventions differ.
 
@@ -13,7 +13,7 @@ The sketch is written against all backends at once — the ESP native module, th
 
 ## Package shape
 
-`usbhost` is a provider package in `pydevices/lib`, beside `audiodev` and `displaydev`, selecting a backend the same way: the native `_usbhost` C module where present, an OS-service backend on desktop. Both halves are always importable; emptiness is expressed through capabilities, not absence:
+`usbhost` is a provider package in `omnipython/lib`, beside `audiodev` and `displaydev`, selecting a backend the same way: the native `_usbhost` C module where present, an OS-service backend on desktop. Both halves are always importable; emptiness is expressed through capabilities, not absence:
 
 ```python
 import usbhost
@@ -25,7 +25,7 @@ usbhost.host.capabilities()    # frozenset() — desktop device role, wasm, unsu
 
 ## Events
 
-Attach and detach are ordinary PyDevices events, delivered through the same polled queue the event system already uses:
+Attach and detach are ordinary OmniPython events, delivered through the same polled queue the event system already uses:
 
 ```python
 # event.type in (usbhost.ATTACH, usbhost.DETACH); event.device is a DeviceInfo

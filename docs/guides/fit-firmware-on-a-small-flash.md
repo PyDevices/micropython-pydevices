@@ -37,7 +37,7 @@ print(esp32.Partition.find(esp32.Partition.TYPE_DATA, label="vfs")[0].info()[3])
 and build with that size:
 
 ```bash
-./build_mp.py --port rp2 --board RPI_PICO --modules displayif,lvgl,pydevices --keep-fs 576K
+./build_mp.py --port rp2 --board RPI_PICO --modules displayif,lvgl,omnipython --keep-fs 576K
 ./build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant LCD_7 --flash 8MB --modules all --keep-fs 2688K
 ```
 

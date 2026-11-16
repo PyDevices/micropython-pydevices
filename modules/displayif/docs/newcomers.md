@@ -1,11 +1,11 @@
 # Newcomer's guide to displayif
 
-`displayif` supplies native display-interface modules for PyDevices
+`displayif` supplies native display-interface modules for OmniPython
 `displaydev` board configurations. It is source-integrated firmware code, not
 a package: a board uses it only when its MicroPython firmware was built with
 the required `USER_C_MODULES` backend.
 
-Start from a board configuration in [pydevices](https://github.com/PyDevices/pydevices),
+Start from a board configuration in [omnipython](https://github.com/PyDevices/omnipython),
 then identify the matching interface in [the port matrix](port-matrix.md).
 For example, an ESP32-P4 DSI board needs `mipidsi`, an RGB framebuffer may
 need `dotclockframebuffer`, and a desktop MicroPython application uses
@@ -14,7 +14,7 @@ need `dotclockframebuffer`, and a desktop MicroPython application uses
 ## The mental model
 
 ```text
-pydevices board_config
+omnipython board_config
        |
        v
 displaydev backend (BusDisplay, FBDisplay, or SDLDisplay)

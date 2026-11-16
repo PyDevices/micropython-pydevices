@@ -4,7 +4,7 @@ What the host does today, where its limits are, and why it is built the way
 it is. The [README](../README.md) says what usbhost is and how to build it.
 
 Which device classes the packages drive, and which boards run them, are in
-[USB host support](https://github.com/PyDevices/pydevices/blob/main/docs/reference/usb-host-support.md).
+[USB host support](https://github.com/PyDevices/omnipython/blob/main/docs/reference/usb-host-support.md).
 
 ## Limits, and what has been proven
 
@@ -106,7 +106,7 @@ the P4 driving the bus; they don't reset the hub, and neither does
 host back at full speed (or the other way round, which is untested) can end
 up answering nothing at either speed, and only removing the board's power
 brings it back
-([#121](https://github.com/PyDevices/micropython-pydevices/issues/121)).
+([#121](https://github.com/PyDevices/omnipython-builds/issues/121)).
 
 So `usb.core.start()` refuses that change on this board. It raises
 `USBError` before it touches the host, so the host that is running keeps
@@ -149,7 +149,7 @@ no transfer failed. Echoes took 2.4 ms at the median and 16 ms at the 99th
 percentile, at worst 40 ms.
 
 A board that polls its touch panel over I2C while its device sends resets
-within a minute ([#408](https://github.com/PyDevices/micropython-pydevices/issues/408)).
+within a minute ([#408](https://github.com/PyDevices/omnipython-builds/issues/408)).
 The ten minutes above ran with the touch reads turned off.
 
 ## Why the events are drained rather than delivered

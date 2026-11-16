@@ -78,7 +78,7 @@ def main():
     if dev is None:
         print("no USB audio input found")
         print("attach a USB microphone")
-        print("note: a PyDevices board cannot present as a mic yet (usbif#7)")
+        print("note: an OmniPython board cannot present as a mic yet (usbif#7)")
         usb.core.stop()
         return
 

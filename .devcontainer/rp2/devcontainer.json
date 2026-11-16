@@ -8,7 +8,7 @@
     }
   },
   "mounts": [
-    "source=pydevices-deps-${devcontainerId},target=${containerWorkspaceFolder}/deps,type=volume"
+    "source=omnipython-deps-${devcontainerId},target=${containerWorkspaceFolder}/deps,type=volume"
   ],
   "onCreateCommand": "sh .devcontainer/on-create.sh",
   "postCreateCommand": "echo 'To build: ./build_mp.py --port rp2 --board RPI_PICO2 --modules all'"

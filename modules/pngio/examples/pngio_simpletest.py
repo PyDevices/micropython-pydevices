@@ -9,7 +9,7 @@ file with ``pngio.PngDecoder`` and checks that every pixel came back
 exactly, since PNG, unlike JPEG, loses nothing.
 
 Needs: a MicroPython firmware built with pngio (``--modules pngio`` or
-``all``). On CPython, pydevices-desktop's ``pngio`` gives the same API
+``all``). On CPython, omnipython-desktop's ``pngio`` gives the same API
 over Pillow.
 
 Run it:
@@ -18,7 +18,7 @@ Run it:
     mpremote cp :stripes.png .
 
 Tested on: the MicroPython unix port, built with ``--modules all``, and
-CPython with pydevices-desktop on Linux and Windows.
+CPython with omnipython-desktop on Linux and Windows.
 """
 
 import pngio

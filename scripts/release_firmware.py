@@ -129,36 +129,36 @@ CELLS = [
     # takes 48 bytes), which is what runs in a few hundred KB.
     dict(id="mp-s3-8mb", label="ESP32-S3 with no PSRAM, 8 MB flash (QT Py ESP32-S3 with no PSRAM)",
          interpreter="micropython", port="esp32", board="ESP32_GENERIC_S3", variant="NO_PSRAM", flash="8MB",
-         modules="pydevices,displayif,pygraphics,pngio,palettes,iconkit,svgio,mdns,jpegio,ulab",
+         modules="omnipython,displayif,pygraphics,pngio,palettes,iconkit,svgio,mdns,jpegio,ulab",
          chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
     dict(id="mp-s3-tembed", label="LilyGO T-Embed S3", interpreter="micropython", port="esp32",
          board="ESP32_GENERIC_S3", variant="T_EMBED", flash="16MB", modules="all",
          chip="esp32s3", offset=0, kind="esp32", deps="idf", autosize=True),
     dict(id="cp-p4-devkit", label="ESP32-P4-WIFI6-DEV-KIT", interpreter="circuitpython", port="espressif",
          board="waveshare_esp32p4_wifi6_dev_kit", variant=None, flash="16MB",
-         modules="audiodsp,audioinstruments,audioeffects,pygraphics,pngio,tsmux,ppa,jpegio,cameraif,castif,h264enc,usbhost,pydevices,pdwidgets,palettes,lvgl",
+         modules="audiodsp,audioinstruments,audioeffects,pygraphics,pngio,tsmux,ppa,jpegio,cameraif,castif,h264enc,usbhost,omnipython,pdwidgets,palettes,lvgl",
          chip="esp32p4", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-s3-lcd7", label="ESP32-S3-Touch-LCD-7", interpreter="circuitpython", port="espressif",
          board="waveshare_esp32s3_touch_lcd_7", variant=None, flash="8MB",
-         modules="audiodsp,audioinstruments,audioeffects,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl",
+         modules="audiodsp,audioinstruments,audioeffects,pygraphics,pngio,tsmux,omnipython,pdwidgets,palettes,lvgl",
          chip="esp32s3", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-s3-lcd43", label="ESP32-S3-Touch-LCD-4.3", interpreter="circuitpython", port="espressif",
          board="waveshare_esp32s3_touch_lcd_43", variant=None, flash="8MB",
-         modules="audiodsp,audioinstruments,audioeffects,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl",
+         modules="audiodsp,audioinstruments,audioeffects,pygraphics,pngio,tsmux,omnipython,pdwidgets,palettes,lvgl",
          chip="esp32s3", offset=0, kind="espressif", deps="cp-esp"),
     # The Adafruit Qualia ESP32-S3 for RGB666 displays: 16 MB flash, 8 MB octal PSRAM, with one 6 MB
     # app slot so LVGL fits (CircuitPython's own board has 2 MB ones).
     dict(id="cp-s3-qualia", label="Adafruit Qualia ESP32-S3 RGB666", interpreter="circuitpython", port="espressif",
          board="adafruit_qualia_s3_rgb666_single_app", variant=None, flash="16MB",
-         modules="audiodsp,audioinstruments,audioeffects,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl",
+         modules="audiodsp,audioinstruments,audioeffects,pygraphics,pngio,tsmux,omnipython,pdwidgets,palettes,lvgl",
          chip="esp32s3", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-twatch", label="LilyGO T-Watch S3", interpreter="circuitpython", port="espressif",
          board="lilygo_twatch_s3_single_app", variant=None, flash="16MB",
-         modules="audiodsp,audioinstruments,audioeffects,pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl",
+         modules="audiodsp,audioinstruments,audioeffects,pygraphics,pngio,tsmux,omnipython,pdwidgets,palettes,lvgl",
          chip="esp32s3", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-feather-rp2040", label="Adafruit Feather RP2040 + display wing", interpreter="circuitpython",
          port="raspberrypi", board="feather_rp2040_lvgl", variant=None, flash="8MB",
-         modules="pygraphics,pngio,tsmux,pydevices,pdwidgets,palettes,lvgl", chip="rp2040", offset=None, kind="rp2", deps="none"),
+         modules="pygraphics,pngio,tsmux,omnipython,pdwidgets,palettes,lvgl", chip="rp2040", offset=None, kind="rp2", deps="none"),
     dict(id="mp-giga-shield", label="Arduino GIGA R1 WiFi + GIGA Display Shield", interpreter="micropython",
          port="stm32", board="ARDUINO_GIGA", variant="DISPLAY_SHIELD", flash="2MB",
          modules="displayif,lvgl,audiodsp,audioif,ulab,usbhost,pygraphics", chip="stm32h747", offset=0x08040000, base=0x08000000,
@@ -363,9 +363,9 @@ def build(cell_id, out):
                 "files off first)")
         raise Failed(f"build_mp.py failed for {c['id']} (exit {rc}) after {seconds} s{kept}")
     src = build_dir(c)
-    record = json.loads((src / "pydevices-build.json").read_text())
+    record = json.loads((src / "omnipython-build.json").read_text())
     if not record.get("complete"):
-        raise Failed(f"{src / 'pydevices-build.json'} says the build is not complete")
+        raise Failed(f"{src / 'omnipython-build.json'} says the build is not complete")
 
     if (src / "romfs").is_dir():
         # The modules in romfs.img as files, for anyone who deploys a ROMFS of their own.
@@ -381,7 +381,7 @@ def build(cell_id, out):
         dest = out / f"{role}{EXTENSION[role]}"
         shutil.copyfile(f, dest)
         files[role] = {"file": dest.name, "size": dest.stat().st_size, "sha256": sha256(dest)}
-    shutil.copyfile(src / "pydevices-build.json", out / "build-record.json")
+    shutil.copyfile(src / "omnipython-build.json", out / "build-record.json")
     if c["interpreter"] == "micropython":
         check_version_tag(record.get("micropython_version"), out / f"elf{EXTENSION['elf']}", c["id"])
         print(f"  sys.version tag: {record['micropython_version']}", flush=True)
@@ -723,7 +723,7 @@ def summary(doc):
 
 # ---- the draft Release -----------------------------------------------------
 
-REPO_SLUG = "PyDevices/micropython-pydevices"
+REPO_SLUG = "PyDevices/omnipython-builds"
 STAGED_TAG = re.compile(r"staged-[A-Za-z0-9][A-Za-z0-9._-]*")
 FINAL_TAG = re.compile(r"v\d+\.\d+\.\d+-\d{8}")
 

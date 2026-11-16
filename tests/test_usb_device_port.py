@@ -8,7 +8,7 @@ while the USB host runs on an ESP32-S2 or S3, whose one port they share.
 The test takes usb/device/core.py from the micropython-lib checkout under
 micropython/ (or $MICROPYTHON), applies patches/micropython-lib/ to a copy,
 and runs it on CPython over a fake machine.USBDevice and _usbhost. It skips
-without a checkout, unless PYDEVICES_REQUIRE_MICROPYTHON is set, as CI does.
+without a checkout, unless OMNIPYTHON_REQUIRE_MICROPYTHON is set, as CI does.
 
     PYTHONPATH=tests python3 -m unittest test_usb_device_port -v
 """
@@ -67,7 +67,7 @@ class SharedPort(unittest.TestCase):
     def setUp(self):
         if not (LIB / CORE).is_file():
             why = "needs a micropython-lib checkout under micropython/ or $MICROPYTHON"
-            if os.environ.get("PYDEVICES_REQUIRE_MICROPYTHON"):
+            if os.environ.get("OMNIPYTHON_REQUIRE_MICROPYTHON"):
                 self.fail(why)
             self.skipTest(why)
         tmp = tempfile.TemporaryDirectory()

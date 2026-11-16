@@ -15,7 +15,7 @@ d.decode(fb, 10, 10, stride=480)                    # RGB565 into fb at (10, 10)
 
 The same code runs on every runtime. On MicroPython it's this C module, on
 every port (`--modules all` has it). On CPython, `pngio.py` in
-pydevices-desktop gives the same API over Pillow, so `pip install pillow` is
+omnipython-desktop gives the same API over Pillow, so `pip install pillow` is
 all a desktop needs.
 
 [`examples/pngio_simpletest.py`](examples/pngio_simpletest.py) saves a picture as a PNG, loads it back, and checks every pixel.

@@ -8,9 +8,9 @@
 The website and workbench keep this file beside the runtime they serve, so a
 reader can tell what a published runtime was built from: the binary's size and
 SHA-256, the patch series MicroPython carried and the commit of every source
-that went in. The commits come from the build's own pydevices-build.json.
+that went in. The commits come from the build's own omnipython-build.json.
 
-    python3 scripts/wasm_provenance.py builds/webassembly/pydevices
+    python3 scripts/wasm_provenance.py builds/webassembly/omnipython
 """
 
 import argparse
@@ -31,13 +31,13 @@ def git(*args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("build", help="the build directory, holding micropython.wasm and pydevices-build.json")
+    parser.add_argument("build", help="the build directory, holding micropython.wasm and omnipython-build.json")
     parser.add_argument("--built-by", default="", help="who built it, such as a CI run's URL")
     args = parser.parse_args()
 
     build = Path(args.build)
     wasm = build / "micropython.wasm"
-    record = json.loads((build / "pydevices-build.json").read_text(encoding="utf-8"))
+    record = json.loads((build / "omnipython-build.json").read_text(encoding="utf-8"))
     if record.get("port") != "webassembly":
         sys.exit(f"{build} is a {record.get('port')} build, not webassembly")
 
@@ -55,7 +55,7 @@ def main():
         }
     head = git("rev-parse", "HEAD")
     if head:
-        sources["micropython-pydevices"] = {
+        sources["omnipython-builds"] = {
             "head": head,
             "describe": git("describe", "--always", "--dirty", "--abbrev=7") or head[:7],
             "dirty": bool(git("status", "--porcelain")),

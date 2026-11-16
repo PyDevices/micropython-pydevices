@@ -15,7 +15,7 @@ prints.
 
 Needs: a network. On a board, CircuitPython, or a MicroPython firmware
 built with mdns, already connected to Wi-Fi. On a computer, the MicroPython
-unix or Windows port built with mdns, or CPython with pydevices-desktop and
+unix or Windows port built with mdns, or CPython with omnipython-desktop and
 python-zeroconf.
 
 Run it:
@@ -30,7 +30,7 @@ Tested on: ESP32-S3 boards on MicroPython 1.30 preview and CircuitPython
 import mdns
 
 # Change these to match your setup.
-INSTANCE_NAME = "PyDevices page"
+INSTANCE_NAME = "OmniPython page"
 PORT = 8080
 VISITS = 3
 

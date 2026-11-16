@@ -43,7 +43,7 @@ jobs:
           install: make mingw-w64-x86_64-gcc autoconf automake libtool
 
       - name: Build the windows port with every module, as the installer does
-        run: python build_mp.py --port windows --variant pydevices --modules all
+        run: python build_mp.py --port windows --variant omnipython --modules all
 
       - name: The modules import, LVGL among them
         shell: bash

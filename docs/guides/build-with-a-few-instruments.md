@@ -5,7 +5,7 @@ beside LVGL and the audio modules. Name the instruments you play in
 `AUDIOINSTRUMENTS`, and the build freezes only those and what they import:
 
 ```bash
-AUDIOINSTRUMENTS=electric_piano,mono_synth,rhythm808 ./build_mp.py --port esp32 --board ESP32_GENERIC --variant SPIRAM --flash 4MB --modules pydevices,displayif,lvgl,audioif,audiodsp,ulab,audioinstruments
+AUDIOINSTRUMENTS=electric_piano,mono_synth,rhythm808 ./build_mp.py --port esp32 --board ESP32_GENERIC --variant SPIRAM --flash 4MB --modules omnipython,displayif,lvgl,audioif,audiodsp,ulab,audioinstruments
 ```
 
 On the board, `audioinstruments.ALL` lists just those three, so an app that
@@ -41,7 +41,7 @@ mpftp put -r build-instruments/audioinstruments /lib/audioinstruments
 ```
 
 The script reads the package a build put under `deps/omnipython-lib`, which
-any build that names `pydevices` or another of
+any build that names `omnipython` or another of
 [omnipython-lib's modules](choose-modules.md#python-packages-from-omnipython-lib)
 makes. The instruments are bytecode only, so the `.mpy` files run on any board
 with firmware from the same build tree.
@@ -60,7 +60,7 @@ the package's `__init__` and the base they share, and any effect they build
 on:
 
 ```bash
-AUDIOEFFECTS=chorus,reverb ./build_mp.py --port esp32 --board ESP32_GENERIC --variant AUDIO_KIT --flash 4MB --modules pydevices,displayif,lvgl,btclassic,audioif,audiodsp,audioeffects
+AUDIOEFFECTS=chorus,reverb ./build_mp.py --port esp32 --board ESP32_GENERIC --variant AUDIO_KIT --flash 4MB --modules omnipython,displayif,lvgl,btclassic,audioif,audiodsp,audioeffects
 ```
 
 On the board, `audioeffects.ALL` lists `Chorus` and `Reverb`, and

@@ -68,7 +68,7 @@ v1.29.0). Point the script at your own MicroPython tree:
 /path/to/cameraif/apply_patches.sh --apply /path/to/micropython
 ```
 
-micropython-pydevices' `build_mp.py` applies them on its own, with the rest of
+omnipython-builds' `build_mp.py` applies them on its own, with the rest of
 its patch series.
 
 Then, on MicroPython 1.29 or later, add one line to the manifest your P4 build
@@ -117,7 +117,7 @@ their driver in, and then says it can't stream them.
 CircuitPython's espressif port builds with make, through
 [micropython.mk](micropython.mk). It needs the port to build the camera's
 ESP-IDF components and the sensor drivers, which it doesn't on its own, so
-build with [micropython-pydevices](https://github.com/PyDevices/micropython-pydevices):
+build with [omnipython-builds](https://github.com/PyDevices/omnipython-builds):
 its CircuitPython patches add that, and its `build_mp.py` fetches the sensor
 drivers at a pinned version.
 
@@ -439,7 +439,7 @@ climbing and `frames` is not, frames are arriving and being rejected, and
 cam.deinit()
 ```
 
-Idempotent, like the rest of PyDevices: calling it twice is not an error, and
+Idempotent, like the rest of OmniPython: calling it twice is not an error, and
 neither is calling it on a camera that never opened. Afterwards every method
 raises rather than touching freed hardware. `__del__` does the same on a
 best-effort basis, and a soft reset (Ctrl-D) tears the camera down before the
@@ -723,8 +723,8 @@ MIT.
 A sensor that `esp_cam_sensor` doesn't ship needs no C. Describe it as a dict
 and pass it as `sensor=`; `cameraif` opens it at its address, checks its chip
 ID, and drives it from the description, just as it would one of Espressif's
-drivers. The IMX219 is described this way, in pydevices'
-[`drivers/camera/imx219.py`](https://github.com/PyDevices/pydevices/blob/main/drivers/camera/imx219.py):
+drivers. The IMX219 is described this way, in omnipython's
+[`drivers/camera/imx219.py`](https://github.com/PyDevices/omnipython/blob/main/drivers/camera/imx219.py):
 
 ```python
 import cameraif

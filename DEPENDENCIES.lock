@@ -32,14 +32,14 @@ ulab              https://github.com/v923z/micropython-ulab.git       15e9997470
 omnipython-lvgl   https://github.com/PyDevices/omnipython-lvgl.git    3e4381e7addded2ac48358a1bbd6c74224711cf0
 
 # omnipython-lib is not a module either: it is the repository of our
-# Python-only packages (pydevices, palettes, pdwidgets, audioinstruments,
+# Python-only packages (omnipython, palettes, pdwidgets, audioinstruments,
 # audioeffects, board configs and drivers). A build asks its tools/libbuild.py
 # for the library tree and require()s packages from it; the modules/ entries of
-# those names are manifests that do exactly that. It is the pydevices
-# repository until the rename. The packages the library builds from other
+# those names are manifests that do exactly that. It is the omnipython
+# repository. The packages the library builds from other
 # repositories (audiocomponents' two) are pinned by tag in its lib-lock.json,
 # not here.
-omnipython-lib    https://github.com/PyDevices/pydevices.git          cd464e2fc1ff68467cf5a71d69f17612ff9addd1
+omnipython-lib    https://github.com/PyDevices/omnipython.git          2dcb9ac41fa48870a95d686057600a77335e7e12
 
 # esp-vision (espressif/esp-vision, Apache-2.0): the source of the tflite
 # module and, later, its image stack. modules/.esp-vision/fetch.sh puts it at

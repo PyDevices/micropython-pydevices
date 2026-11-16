@@ -12,8 +12,8 @@ Needs: a board with USB device support and the ``usb-hid`` and
 ``adafruit_hid`` packages. Install them with ``mip`` if your firmware
 doesn't freeze them:
 
-    mip.install("github:PyDevices/pydevices/usb-hid")
-    mip.install("github:PyDevices/pydevices/bledev_hid")
+    mip.install("github:PyDevices/omnipython/usb-hid")
+    mip.install("github:PyDevices/omnipython/bledev_hid")
 
 Run it:
 

@@ -13,7 +13,7 @@ printing. The board's own Wi-Fi is turned off first, so the page can only
 have come through the phone. Set ``WIFI_OFF = False`` to keep Wi-Fi up and
 send sockets through the phone anyway with ``net.set_default()``.
 
-The interface is ``usb.host.net.Tether``, from pydevices' ``usb-host-net``
+The interface is ``usb.host.net.Tether``, from omnipython's ``usb-host-net``
 package. RNDIS is what Samsung and many other Android phones speak; CDC-ECM,
 CDC-NCM and iPhone tethering are not implemented.
 

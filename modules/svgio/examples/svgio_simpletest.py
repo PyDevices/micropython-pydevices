@@ -9,7 +9,7 @@ without a screen. The same ``decode()`` call fills an RGB565 buffer for a
 display.
 
 Needs: a MicroPython firmware built with svgio (``--modules svgio`` or
-``all``). On CPython, pydevices-desktop's ``svgio`` gives the same API
+``all``). On CPython, omnipython-desktop's ``svgio`` gives the same API
 over resvg.
 
 Run it:

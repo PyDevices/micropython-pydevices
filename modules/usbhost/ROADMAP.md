@@ -1,7 +1,7 @@
 # Roadmap
 
 What's planned for the USB host under `usb.core`. Plans for the class
-packages themselves are in pydevices' roadmap.
+packages themselves are in omnipython's roadmap.
 
 - TinyUSB's host on more boards, so rp2 and others get `usb.core` too. The
   Arduino GIGA already runs on it; what's left is the other ports, and
@@ -15,4 +15,4 @@ packages themselves are in pydevices' roadmap.
   ([how it works](docs/host.md#host-and-device-at-once-on-the-esp32-p4)).
 
 Bugs, and things you need that don't work yet, go to
-[issues](https://github.com/PyDevices/micropython-pydevices/issues).
+[issues](https://github.com/PyDevices/omnipython-builds/issues).

@@ -9,7 +9,7 @@ each one. `host_enum.py` shows how to read their names and watch them come
 and go.
 
 Needs: a board with USB host support (firmware built with usbhost), the
-`usb-core` package (`mip.install("github:PyDevices/pydevices/usb-core")`),
+`usb-core` package (`mip.install("github:PyDevices/omnipython/usb-core")`),
 and a device in the host port. An ESP32-S3 needs a powered hub or OTG
 adapter, because some boards don't switch VBUS.
 

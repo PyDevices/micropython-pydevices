@@ -1,4 +1,4 @@
-// castif's MPEG-TS muxer as it was at micropython-pydevices ccccb28
+// castif's MPEG-TS muxer as it was at omnipython-builds ccccb28
 // (modules/castif/src/mod_castif.c), extracted verbatim by
 // tests/extract_castif_ref.py. compare_castif.c builds it beside tsmux_core.c
 // and checks both write the same packets. Do not edit: regenerate.

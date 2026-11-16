@@ -17,7 +17,7 @@ SRC_USERMOD_LIB_C += $(PPA_DIR)/ppa_hw.c
 # CircuitPython builds its espressif port with make, so on an ESP32-P4 the PPA
 # is built in here, as micropython.cmake does on MicroPython. CircuitPython's
 # espressif port builds and links the components a module names
-# (micropython-pydevices' CircuitPython patches).
+# (omnipython-builds' CircuitPython patches).
 ifneq ($(wildcard $(TOP)/py/circuitpy_mpconfig.h),)
 ifeq ($(IDF_TARGET),esp32p4)
 CFLAGS_USERMOD += -DPPA_HW=1 \

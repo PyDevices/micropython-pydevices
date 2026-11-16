@@ -4,7 +4,7 @@ You can build without installing anything, in a GitHub codespace or in a dev
 container on your own machine. Each port has its own container, holding only
 that port's packages: unix, webassembly, rp2, windows and esp32.
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/PyDevices/micropython-pydevices)
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/PyDevices/omnipython-builds)
 
 ## Open one
 
@@ -37,7 +37,7 @@ Explorer, open `builds/` down to your build, right-click `firmware.bin` (or
 ## Try a webassembly build in workbench
 
 The webassembly container opens your build in workbench, the browser IDE.
-Build, then run [`scripts/serve_workbench.sh`](https://github.com/PyDevices/micropython-pydevices/blob/main/scripts/serve_workbench.sh): it downloads the newest workbench
+Build, then run [`scripts/serve_workbench.sh`](https://github.com/PyDevices/omnipython-builds/blob/main/scripts/serve_workbench.sh): it downloads the newest workbench
 release, puts your `micropython.wasm` in it and serves it on port 8000, which
 the container forwards and your browser opens. Click the simulator button (the
 display icon) and the REPL that starts is your build.

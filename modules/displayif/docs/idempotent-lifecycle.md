@@ -1,9 +1,9 @@
 # Idempotent init / deinit — displayif contract
 
 **Audience:** Agents and humans changing host-owning displayif backends.  
-**Module:** [`modules/displayif`](..) in micropython-pydevices (the standalone repository is archived).
+**Module:** [`modules/displayif`](..) in omnipython-builds (the standalone repository is archived).
 **Companions:** [AGENTS.md](../AGENTS.md), [port-matrix.md](port-matrix.md), [soft-reset-and-bring-up.md](soft-reset-and-bring-up.md), [README.md](../README.md).
-**Related PyDevices package:** `displaydev` expects idempotent `deinit()` — native modules must match.
+**Related OmniPython package:** `displaydev` expects idempotent `deinit()` — native modules must match.
 
 **Status (2026-07):** Implemented for all real backends listed below. Soft-reset + reconstruct is the acceptance test. This doc is the **contract and inventory**, not a todo brief.
 
@@ -77,7 +77,7 @@ Stubs under `src/ports/common/notimpl/` and ctor-raise stubs stay stubs (no hard
 | `picodvi` | `picodvi` | [`src/ports/rp2/mod_picodvi.c`](../src/ports/rp2/mod_picodvi.c) (+ `picodvi_rp2040.*`, `picodvi_rp2350.*`) | FBDisplay |
 | `rgbmatrix` | `rgbmatrix` | [`src/ports/common/rgbmatrix/mod_rgbmatrix.c`](../src/ports/common/rgbmatrix/mod_rgbmatrix.c) (+ per-port `rgbmatrix_pm.c`) | FBDisplay |
 
-**Out of scope:** MCU CircuitPython bindings (stock CP display stack); changing pydevices board configs to avoid re-init. Desktop `usdl2` is the CP exception (unix).
+**Out of scope:** MCU CircuitPython bindings (stock CP display stack); changing omnipython board configs to avoid re-init. Desktop `usdl2` is the CP exception (unix).
 
 ---
 

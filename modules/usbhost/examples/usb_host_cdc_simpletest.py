@@ -5,7 +5,7 @@
 
 Opens the first CDC-ACM device on the host port, writes a short line, and
 prints whatever comes back. A USB-serial adapter, another microcontroller's
-CDC console, or a PyDevices board presenting CDC all work, because CDC is a
+CDC console, or an OmniPython board presenting CDC all work, because CDC is a
 standard class with no bespoke protocol. The device side is ordinary CDC:
 MicroPython's built-in console, or ``dev.functions("cdc")``. ``BAUDRATE`` is
 sent to the device as its line coding, which a USB-serial adapter needs to

@@ -96,7 +96,7 @@ list(APPEND MICROPY_DEF_BOARD MICROPY_VFS_ROM=1)
 ```
 
 and give its partition table a `romfs` row of subtype `0x8f`, as the Audio Kit's
-[`partitions.csv`](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/esp32/ESP32_GENERIC/AUDIO_KIT/partitions.csv)
+[`partitions.csv`](https://github.com/PyDevices/omnipython-builds/blob/main/variants/esp32/ESP32_GENERIC/AUDIO_KIT/partitions.csv)
 does. Take the room from the app partition, not the filesystem, and the board
 keeps its files when you flash the new table. [Add a board
 variant](add-a-board-variant.md) covers the rest.

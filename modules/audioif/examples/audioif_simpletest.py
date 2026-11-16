@@ -12,8 +12,8 @@ On a desktop build there is no amplifier; set SINK to a file name and the
 audio is written there instead, as signed 16-bit stereo samples.
 
 A board whose DAC is a codec (an ES8311, say) needs two more things: the
-codec switched on before this runs (board_config.audio_power() on a
-PyDevices board), and MAIN_CLOCK set to the pin that clocks it.
+codec switched on before this runs (board_config.audio_power() on an
+OmniPython board), and MAIN_CLOCK set to the pin that clocks it.
 
 Run it:
     mpremote run audioif_simpletest.py

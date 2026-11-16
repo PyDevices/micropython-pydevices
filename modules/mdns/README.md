@@ -29,7 +29,7 @@ It builds on four ports, each on what that system already has:
 `--modules all` includes it. The browser build can't send multicast, so it
 has no `mdns`. CircuitPython's boards keep CircuitPython's own; its unix port has none, so
 `--interpreter circuitpython --port unix` adds this one. On CPython,
-`mdns.py` in pydevices-desktop gives the same API over python-zeroconf.
+`mdns.py` in omnipython-desktop gives the same API over python-zeroconf.
 
 [`examples/mdns_simpletest.py`](examples/mdns_simpletest.py) advertises a web service and lists the ones it finds, itself included.
 

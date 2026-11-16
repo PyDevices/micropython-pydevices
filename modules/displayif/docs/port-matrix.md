@@ -1,10 +1,10 @@
 # displayif — port matrix
 
-Native display **interface** modules for PyDevices `displaydev`. Portable code in `src/ports/common/`; SoC-specific code under `src/ports/<mp-port>/` (names from `micropython/ports/`).
+Native display **interface** modules for OmniPython `displaydev`. Portable code in `src/ports/common/`; SoC-specific code under `src/ports/<mp-port>/` (names from `micropython/ports/`).
 
 **Start here for agents:** [AGENTS.md](../AGENTS.md) → [idempotent-lifecycle.md](idempotent-lifecycle.md) → [soft-reset-and-bring-up.md](soft-reset-and-bring-up.md) (soft-reset wraps, symptom table, bring-up methods).
 
-Several `pydevices` MicroPython `board_config.py` files raise `NotImplementedError` until the matching displayif module exists — **that is what this repo builds**.
+Several `omnipython` MicroPython `board_config.py` files raise `NotImplementedError` until the matching displayif module exists — **that is what this repo builds**.
 
 **Workspace:** clone as a sibling of `micropython/`.
 
@@ -13,7 +13,7 @@ Parallel RGB on MicroPython is **`import dotclockframebuffer` → `dotclockframe
 matching CircuitPython’s module name. Other interfaces keep their own module
 names (`mipidsi`, `i80bus`, `picodvi`, …).
 
-**CircuitPython:** displayif does **not** ship CP bindings. CircuitPython already provides `dotclockframebuffer`, `mipidsi`, `paralleldisplaybus`, `picodvi`, etc. — use those for CP board configs under `pydevices/board_configs/cp/`.
+**CircuitPython:** displayif does **not** ship CP bindings. CircuitPython already provides `dotclockframebuffer`, `mipidsi`, `paralleldisplaybus`, `picodvi`, etc. — use those for CP board configs under `omnipython/board_configs/cp/`.
 
 ---
 
@@ -62,7 +62,7 @@ no-ops on this port (both are wired on esp32's esp_lcd RGB path).
 `mipidsi` (**MIMXRT1176**): drives the SoC MIPI DSI host (NXP `mipi_dsi_split`) with an
 **LCDIFV2** video bridge to the DPI path. Primary hardware target: **MIMXRT1170-EVK** + Waveshare
 5" DSI on J84 — panel **50H-800480-IPS** with a **TC358762** DSI-to-RGB bridge. Panel init is
-supplied via the pydevices board config `init_sequence` bytes. `Display` optional kwargs match
+supplied via the omnipython board config `init_sequence` bytes. `Display` optional kwargs match
 esp32 displayif: `virtual_channel=0` (must be `0` — NXP path does not multiplex VC yet) and
 `color_depth=16`. Panel **reset** and **backlight** GPIO are owned by board_config, not `Display`.
 Lifecycle: wires `displayif_mimxrt1176_dsi_*_deinit/stop` into the shared soft-reset registry.
@@ -78,7 +78,7 @@ are ordinary GPIO outputs. Only one `I80Bus` instance per board (single FLEXIO2 
 **MIMXRT1060-EVK**, the LCDIF RGB pins on `GPIO_B0_04`–`GPIO_B0_11` overlap the typical FlexIO2
 data mapping — do not use the RK043 RGB shield pins simultaneously with i80bus. `frequency` is
 wired here (as on esp32/rp2 — ignored on samd). Bulk transfers (≥64 bytes) use
-`FLEXIO_MCULCD_TransferBlocking` with `dataOnly=true`. Example pydevices config:
+`FLEXIO_MCULCD_TransferBlocking` with `dataOnly=true`. Example omnipython config:
 `busdisplay/i80/teensy41_flexio_ili9341`.
 
 Non-1062 mimxrt boards get a stub `dotclockframebuffer`; non-1176 boards get a stub `mipidsi`.
@@ -131,7 +131,7 @@ or override with `picotool_DIR` / `PICOTOOL_FETCH_FROM_GIT_PATH`.
 ### samd
 
 `i80bus` (**SAMD51**, GPIO bit-bang): uses PORT `OUTSET`/`OUTCLR` register writes via the shared
-[`src/ports/common/i80bus/gpio_bitbang.c`](../src/ports/common/i80bus/gpio_bitbang.c) backend (same algorithm as pydevices's viper `I80Bus`).
+[`src/ports/common/i80bus/gpio_bitbang.c`](../src/ports/common/i80bus/gpio_bitbang.c) backend (same algorithm as omnipython's viper `I80Bus`).
 Supports 8 data pins via `data0` (eight consecutive) or `data_pins` (sequential or LUT layout).
 No dedicated 8080 peripheral — throughput is lower than esp32-S3, rp2 PIO, or mimxrt FlexIO.
 `frequency` is accepted for CP signature parity but unused (timing is not cycle-counted yet);
@@ -173,11 +173,11 @@ until its reset button is pressed.
 
 The board needs the HAL's DSI and LTDC drivers: the `ARDUINO_GIGA` `DISPLAY_SHIELD` variant in
 the [boards table](../../../docs/reference/boards.md) adds them, through its
-`stm32h7xx_hal_conf.h` and `HAL_SRC_C`. Example pydevices config: `fbdisplay/arduino-giga-display-shield`.
+`stm32h7xx_hal_conf.h` and `HAL_SRC_C`. Example omnipython config: `fbdisplay/arduino-giga-display-shield`.
 
 ---
 
-## pydevices board configs (MicroPython)
+## omnipython board configs (MicroPython)
 
 These configs import displayif modules when firmware is built with the matching cmod:
 
@@ -195,7 +195,7 @@ These configs import displayif modules when firmware is built with the matching 
 | `fbdisplay/t-rgb_480` | `dotclockframebuffer` |
 | parallel RGB `fbdisplay/*` (MP) | `dotclockframebuffer` |
 
-CP siblings live under [`board_configs/cp/fbdisplay/`](https://github.com/PyDevices/pydevices/tree/main/board_configs/cp/fbdisplay) and use CircuitPython native modules — not displayif.
+CP siblings live under [`board_configs/cp/fbdisplay/`](https://github.com/PyDevices/omnipython/tree/main/board_configs/cp/fbdisplay) and use CircuitPython native modules — not displayif.
 
 ---
 

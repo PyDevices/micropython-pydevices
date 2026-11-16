@@ -1,4 +1,4 @@
-# Direct browser runtime for PyDevices. The variant is external to the pinned
+# Direct browser runtime for OmniPython. The variant is external to the pinned
 # upstream checkout and is selected with VARIANT_DIR by build_mp.py, which
 # lets this variant's manifest.py be the build's FROZEN_MANIFEST.
 JSFLAGS += -s ASYNCIFY

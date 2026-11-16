@@ -18,7 +18,7 @@
 # The engine runs on ESP-IDF's USB host library. From ESP-IDF 6, which
 # CircuitPython's espressif port builds with, that's Espressif's `usb`
 # component from its registry rather than part of ESP-IDF. CircuitPython builds
-# with the component manager off, so micropython-pydevices' build_mp.py fetches
+# with the component manager off, so omnipython-builds' build_mp.py fetches
 # it at the version DEPENDENCIES.lock pins and passes it; one of its CircuitPython
 # patches has the port build and link a component a module names. The host's
 # settings (hubs, the 4 KB control-transfer buffer in ./sdkconfig) go in the
@@ -43,7 +43,7 @@ endif
 ifeq ($(USBHOST_ENGINE),1)
 USBHOST_USB := $(filter %/usb,$(USER_ESP_IDF_COMPONENT_DIRS:/=))
 ifeq ($(USBHOST_USB),)
-$(error usbhost: USER_ESP_IDF_COMPONENT_DIRS names no usb. ESP-IDF 6 doesn't ship the USB host library; build with micropython-pydevices' build_mp.py, or pass the directory of Espressif's usb component)
+$(error usbhost: USER_ESP_IDF_COMPONENT_DIRS names no usb. ESP-IDF 6 doesn't ship the USB host library; build with omnipython-builds' build_mp.py, or pass the directory of Espressif's usb component)
 endif
 
 SRC_USERMOD_C += \

@@ -18,7 +18,7 @@ firmware needs machine.USBDevice's streaming endpoints, audiodsp and audioif,
 and the board needs micropython-lib's ``usb-device`` and usbhost's
 ``usb-device-audio`` package:
 
-    build_mp.py --modules pydevices,usbhost,audiodsp,audioif
+    build_mp.py --modules omnipython,usbhost,audiodsp,audioif
 
 Run it:
 

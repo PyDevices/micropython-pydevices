@@ -86,11 +86,11 @@ class TheFile(unittest.TestCase):
 
 
 class FrozenLibrary(unittest.TestCase):
-    """What the pinned library freezes, read from pydevices on GitHub.
+    """What the pinned library freezes, read from omnipython on GitHub.
 
     A frozen package hides one of the same name in /lib, so a module the
     library's frozen packages lack can't be added to a board with mip. Offline
-    the checks skip; PYDEVICES_REQUIRE_NETWORK=1 makes that a failure.
+    the checks skip; OMNIPYTHON_REQUIRE_NETWORK=1 makes that a failure.
     """
 
     def has(self, path):
@@ -105,7 +105,7 @@ class FrozenLibrary(unittest.TestCase):
                 return False
             raise
         except urllib.error.URLError as e:
-            if os.environ.get("PYDEVICES_REQUIRE_NETWORK") == "1":
+            if os.environ.get("OMNIPYTHON_REQUIRE_NETWORK") == "1":
                 raise
             self.skipTest("no network to read %s: %s" % (url, e.reason))
 

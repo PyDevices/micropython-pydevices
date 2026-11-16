@@ -8,7 +8,7 @@
     }
   },
   "mounts": [
-    "source=pydevices-deps-${devcontainerId},target=${containerWorkspaceFolder}/deps,type=volume"
+    "source=omnipython-deps-${devcontainerId},target=${containerWorkspaceFolder}/deps,type=volume"
   ],
   "onCreateCommand": "sh .devcontainer/on-create.sh",
   "forwardPorts": [
@@ -20,5 +20,5 @@
       "onAutoForward": "openBrowser"
     }
   },
-  "postCreateCommand": "echo 'To build: ./build_mp.py --port webassembly --variant pydevices --modules all, then scripts/serve_workbench.sh'"
+  "postCreateCommand": "echo 'To build: ./build_mp.py --port webassembly --variant omnipython --modules all, then scripts/serve_workbench.sh'"
 }

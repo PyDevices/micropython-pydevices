@@ -1,4 +1,4 @@
-# The PyDevices windows build: upstream's dev variant (ROM text compression)
+# The OmniPython windows build: upstream's dev variant (ROM text compression)
 # plus what displayif's usdl2 backend needs to link -- SDL2's MinGW
 # development tree, which the work directory carries as SDL2/ beside the
 # MicroPython clone. Cross-compiled with CROSS_COMPILE=x86_64-w64-mingw32-.

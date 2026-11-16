@@ -12,4 +12,4 @@
   the OV2710's have. Four drivers with real logic still have no description.
 
 Bugs, and things you need that don't work yet, go to
-[issues](https://github.com/PyDevices/micropython-pydevices/issues).
+[issues](https://github.com/PyDevices/omnipython-builds/issues).

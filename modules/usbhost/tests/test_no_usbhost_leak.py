@@ -10,7 +10,7 @@ every example in this repository was written (PyDevices/usbif#10).
 
 So the rule is drawn here rather than left to reviewers: nothing an application reads -- the examples,
 the root README's snippets, the examples README -- may name it at all. Which package files may import it is
-checked beside the packages, in pydevices. The
+checked beside the packages, in omnipython. The
 test walks the files instead of trusting a convention, because the twenty
 examples that once broke this rule each looked perfectly reasonable alone.
 Tools and hardware checks under `tools/` and `tests/` may name it: they

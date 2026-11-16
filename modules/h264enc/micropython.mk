@@ -9,7 +9,7 @@
 #       USER_ESP_IDF_COMPONENT_DIRS=/path/to/esp_h264
 #
 # esp_h264 is Espressif's encoder component, from its component registry.
-# CircuitPython builds with the component manager off, so micropython-pydevices'
+# CircuitPython builds with the component manager off, so omnipython-builds'
 # build_mp.py fetches it at the version DEPENDENCIES.lock pins (the one
 # components/h264enc_esp_h264 asks MicroPython's build for) and passes it; one
 # of its CircuitPython patches has the port build the component and link it.
@@ -25,7 +25,7 @@ ifeq ($(IDF_TARGET),esp32p4)
 H264ENC_MOD_DIR := $(USERMOD_DIR)
 H264ENC_ESP_H264 := $(filter %/esp_h264,$(USER_ESP_IDF_COMPONENT_DIRS:/=))
 ifeq ($(H264ENC_ESP_H264),)
-$(error h264enc: USER_ESP_IDF_COMPONENT_DIRS names no esp_h264. ESP-IDF doesn't ship the H.264 encoder; build with micropython-pydevices' build_mp.py, or pass the esp_h264 component's directory)
+$(error h264enc: USER_ESP_IDF_COMPONENT_DIRS names no esp_h264. ESP-IDF doesn't ship the H.264 encoder; build with omnipython-builds' build_mp.py, or pass the esp_h264 component's directory)
 endif
 
 SRC_USERMOD_C += $(H264ENC_MOD_DIR)/src/mod_h264enc.c

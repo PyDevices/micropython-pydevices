@@ -14,7 +14,7 @@ it goes by, or leave it empty to list them all.
 
 Needs: a network. On a board, CircuitPython, or a MicroPython firmware
 built with mdns, already connected to Wi-Fi. On a computer, the MicroPython
-unix or Windows port built with mdns, or CPython with pydevices-desktop and
+unix or Windows port built with mdns, or CPython with omnipython-desktop and
 python-zeroconf.
 
 Run it:
@@ -29,7 +29,7 @@ Tested on: ESP32-S3 boards on MicroPython 1.30 preview and CircuitPython
 import mdns
 
 # Change these to match your setup.
-INSTANCE_NAME = "PyDevices page"  # "" lists every web page and stops
+INSTANCE_NAME = "OmniPython page"  # "" lists every web page and stops
 SEARCH_SECONDS = 3
 
 # On a board, use the Wi-Fi interface: network.WLAN on MicroPython,

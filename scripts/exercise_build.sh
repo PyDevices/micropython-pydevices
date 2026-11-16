@@ -1,11 +1,11 @@
 #!/bin/sh
 # Exercise build_mp.py from a bare clone, with no boards attached.
 #
-#   curl -fsSL https://raw.githubusercontent.com/PyDevices/micropython-pydevices/main/scripts/exercise_build.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/PyDevices/omnipython-builds/main/scripts/exercise_build.sh | sh
 #   curl -fsSL .../exercise_build.sh | sh -s -- some-branch
 #   curl -fsSL .../exercise_build.sh | TARGETS="unix wasm" sh
 #
-# Clones micropython-pydevices into a fresh directory outside any PyDevices
+# Clones omnipython-builds into a fresh directory outside any PyDevices
 # workspace, so build_mp.py has to fetch MicroPython, every module and each
 # toolchain itself. It checks the failure paths, builds every desktop port and
 # two esp32 boards with --modules all, two Picos with the module sets a
@@ -30,7 +30,7 @@
 
 set -u
 
-URL=https://github.com/PyDevices/micropython-pydevices.git
+URL=https://github.com/PyDevices/omnipython-builds.git
 LAST=
 REPORT=/dev/null
 LOGS=
@@ -44,7 +44,7 @@ report_build() {  # build dir
     rb_dir=$1
     python3 - "$rb_dir" <<'EOF' | tee -a "$REPORT"
 import json, sys
-d = json.load(open(sys.argv[1] + "/pydevices-build.json"))
+d = json.load(open(sys.argv[1] + "/omnipython-build.json"))
 print("record    complete=%s micropython=%s modules=%s" % (d.get("complete"), d.get("micropython"), d.get("modules")))
 for name, m in sorted(d.get("module_revisions", {}).items()):
     print("  module  %-18s %s dirty=%s" % (name, m.get("commit"), m.get("dirty")))
@@ -155,9 +155,9 @@ main() {
     say "arm       $(arm-none-eabi-gcc --version 2>/dev/null | head -1 || echo missing)"
 
     section "clone"
-    git clone -q --branch "$REF" "$URL" "$WORK/micropython-pydevices" < /dev/null || { say "clone failed"; return 1; }
-    MPP=$WORK/micropython-pydevices
-    say "micropython-pydevices $(git -C "$MPP" rev-parse HEAD) ($REF)"
+    git clone -q --branch "$REF" "$URL" "$WORK/omnipython-builds" < /dev/null || { say "clone failed"; return 1; }
+    MPP=$WORK/omnipython-builds
+    say "omnipython-builds $(git -C "$MPP" rev-parse HEAD) ($REF)"
     if [ -n "${DEPS_FROM:-}" ]; then
         mkdir -p "$MPP/deps"
         for m_dep in esp-idf emsdk SDL2; do
@@ -184,7 +184,7 @@ main() {
         else
             say "FAIL  a different module set: no wipe, or no rebuild"
         fi
-        build unix-all --port unix --variant pydevices --modules all
+        build unix-all --port unix --variant omnipython --modules all
         if [ -n "$LAST" ]; then
             section "run unix-all"
             (cd "$WORK" && env -u MICROPYPATH "$LAST/micropython" -c "
@@ -195,7 +195,7 @@ print('RUN', sys.implementation._machine, np.sum(np.array([1, 2, 3])), board_con
         fi
     fi
     if want wasm; then
-        build wasm-all --port webassembly --variant pydevices --modules all
+        build wasm-all --port webassembly --variant omnipython --modules all
         if [ -n "$LAST" ] && command -v node > /dev/null; then
             section "run wasm-all under node"
             printf 'import sys, ulab, pygraphics, displaydev\nprint("RUN", sys.platform, ulab.__version__)\n' > "$WORK/hello.py"
@@ -204,7 +204,7 @@ print('RUN', sys.implementation._machine, np.sum(np.array([1, 2, 3])), board_con
     fi
     if want windows; then
         if command -v x86_64-w64-mingw32-gcc > /dev/null; then
-            build windows-all --port windows --variant pydevices --modules all
+            build windows-all --port windows --variant omnipython --modules all
         else
             section "build windows-all: SKIPPED, x86_64-w64-mingw32-gcc is missing (apt-get install gcc-mingw-w64-x86-64)"
         fi

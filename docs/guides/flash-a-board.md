@@ -89,14 +89,14 @@ The OmniPython libraries don't fit in this firmware beside LVGL, so they go in
 the ROMFS partition too, where MicroPython runs them in place and finds them
 before `/flash/lib`. A deploy replaces the whole partition, so put the
 firmware's modules in the folder you deploy, then the libraries. From a clone
-of [pydevices](https://github.com/PyDevices/pydevices), with
+of [omnipython](https://github.com/PyDevices/omnipython), with
 [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html):
 
 ```bash
-git clone --depth 1 https://github.com/PyDevices/pydevices.git
+git clone --depth 1 https://github.com/PyDevices/omnipython.git
 mkdir romfs
 cp -r builds/stm32/ARDUINO_GIGA/DISPLAY_SHIELD/romfs/* romfs/
-cp -r pydevices/lib/* romfs/
+cp -r omnipython/lib/* romfs/
 mpremote romfs deploy romfs
 ```
 
@@ -106,7 +106,7 @@ first `cp`. mpremote compiles each `.py` to `.mpy` on the way when the
 release writes `.mpy` files this firmware reads). Without it, mpremote copies
 the `.py` files and the board compiles them as they're imported. The board's
 own drivers go in the same folder:
-[the GIGA Display Shield's board page](https://github.com/PyDevices/pydevices/blob/main/docs/boards/display-boards.md#arduino-giga-r1-wifi--giga-display-shield)
+[the GIGA Display Shield's board page](https://github.com/PyDevices/omnipython/blob/main/docs/boards/display-boards.md#arduino-giga-r1-wifi--giga-display-shield)
 has that recipe.
 
 The H747 has a second core, a Cortex-M4, and upstream's layout leaves it the
@@ -153,5 +153,5 @@ For a `.uf2`, mpftp copies it to the board's drive instead.
 
 ## After flashing
 
-pydevices' [Bringing up a board](https://github.com/PyDevices/pydevices/blob/main/docs/guides/bring-up-a-board.md)
+omnipython's [Bringing up a board](https://github.com/PyDevices/omnipython/blob/main/docs/guides/bring-up-a-board.md)
 takes a flashed board to one drawing on its own panel.

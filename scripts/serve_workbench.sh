@@ -2,7 +2,7 @@
 # Open your webassembly build in workbench, the browser IDE whose simulator
 # runs MicroPython.
 #
-#   ./build_mp.py --port webassembly --variant pydevices --modules all
+#   ./build_mp.py --port webassembly --variant omnipython --modules all
 #   scripts/serve_workbench.sh [build dir]
 #
 # It downloads the newest workbench release (once per release, into
@@ -11,7 +11,7 @@
 # Ctrl+C. In the webassembly dev container that port is forwarded and your
 # browser opens it; elsewhere, open http://localhost:8000/.
 #
-# The build dir defaults to builds/webassembly/pydevices. The page and your
+# The build dir defaults to builds/webassembly/omnipython. The page and your
 # build share one origin, so nothing else needs setting up.
 #
 # Environment:
@@ -24,14 +24,14 @@ say() { echo "$*"; }
 fail() { echo "serve_workbench.sh: $*" >&2; exit 1; }
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-build=${1:-$repo/builds/webassembly/pydevices}
+build=${1:-$repo/builds/webassembly/omnipython}
 port=${WORKBENCH_PORT:-8000}
 bind=${WORKBENCH_BIND:-127.0.0.1}
 cache=$repo/deps/workbench
 site=$repo/builds/workbench
 
 [ -f "$build/micropython.mjs" ] && [ -f "$build/micropython.wasm" ] ||
-    fail "no webassembly build in $build; build one with ./build_mp.py --port webassembly --variant pydevices --modules all"
+    fail "no webassembly build in $build; build one with ./build_mp.py --port webassembly --variant omnipython --modules all"
 
 # The newest release's tag, or the newest one already downloaded when GitHub
 # can't be reached.
@@ -64,7 +64,7 @@ python3 -m zipfile -e "$zip" "$site"
 # own runtime, so it goes; your build's record goes beside the runtime instead.
 cp "$build/micropython.mjs" "$build/micropython.wasm" "$site/assets/pydevices/"
 rm -f "$site/assets/pydevices/micropython.wasm.provenance"
-[ ! -f "$build/pydevices-build.json" ] || cp "$build/pydevices-build.json" "$site/assets/pydevices/"
+[ ! -f "$build/omnipython-build.json" ] || cp "$build/omnipython-build.json" "$site/assets/pydevices/"
 
 if [ -n "${CODESPACE_NAME:-}" ] && [ -n "${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}" ]; then
     url="https://$CODESPACE_NAME-$port.$GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN/"

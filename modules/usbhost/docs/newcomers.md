@@ -1,6 +1,6 @@
 # Newcomer's guide to usbhost
 
-`usbhost` is the C module under a MicroPython board's USB packages, which live in [pydevices](https://github.com/PyDevices/pydevices). Together they give a board USB both ways round. As a device, a board appears to a computer as a sound card, webcam, drive, keyboard or MIDI instrument. As a host, it drives keyboards, drives, MIDI controllers, serial devices, speakers, microphones and cameras.
+`usbhost` is the C module under a MicroPython board's USB packages, which live in [omnipython](https://github.com/PyDevices/omnipython). Together they give a board USB both ways round. As a device, a board appears to a computer as a sound card, webcam, drive, keyboard or MIDI instrument. As a host, it drives keyboards, drives, MIDI controllers, serial devices, speakers, microphones and cameras.
 
 ## The board as a device
 
@@ -16,7 +16,7 @@ usb.device.get().init(spk, builtin_driver=True)  # beside the board's console
 
 `init()` re-enumerates the board, because a USB device can't change what it is in place. Put several interfaces in one `init()` to present them together. A controller has a fixed number of endpoints (the ESP32-S3 drives IN endpoints 1 to 4), and `machine.USBDevice` refuses a set that doesn't fit with a `ValueError` naming the endpoint.
 
-Audio and video move their packets in C, from the USB interrupt, through `USBDevice.Ring` and `USBDevice.stream()`. A firmware needs the PyDevices MicroPython overlay for those.
+Audio and video move their packets in C, from the USB interrupt, through `USBDevice.Ring` and `USBDevice.stream()`. A firmware needs the OmniPython MicroPython overlay for those.
 
 ## The board as a host
 
@@ -34,7 +34,7 @@ Start the host with the classes you'll stream (`usb.core.start(classes=("uvc",))
 
 ## Repository map
 
-The class packages (`usb-core`, `usb-host-*`, `usb-device-*`, `usb-hid`) are in pydevices, each in its own directory beside `midiports`. The ESP32 patch that lets the host borrow the OTG controller is the overlay's `patches/micropython/0039`.
+The class packages (`usb-core`, `usb-host-*`, `usb-device-*`, `usb-hid`) are in omnipython, each in its own directory beside `midiports`. The ESP32 patch that lets the host borrow the OTG controller is the overlay's `patches/micropython/0039`.
 
 | Path | Purpose |
 |---|---|

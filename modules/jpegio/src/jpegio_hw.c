@@ -239,7 +239,7 @@ mp_obj_t jpegio_hw_encode(const void *pixels, int width, int height, size_t stri
 // (micropython.cmake, -Wl,--wrap) and, while a decode of ours is running,
 // loads JFIF's full-range matrix in its place. The engine then writes RGB565
 // itself, in a few milliseconds, where converting its YUV in software took
-// ten times as long and was most of a 640x480 decode (micropython-pydevices#422).
+// ten times as long and was most of a 640x480 decode (omnipython-builds#422).
 static volatile bool jpegio_hw_full_range;
 
 #if JPEGIO_HW_WRAP
