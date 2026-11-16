@@ -8,7 +8,7 @@
     }
   },
   "mounts": [
-    "source=pydevices-deps-${devcontainerId},target=${containerWorkspaceFolder}/deps,type=volume"
+    "source=omnipython-deps-${devcontainerId},target=${containerWorkspaceFolder}/deps,type=volume"
   ],
   "containerEnv": {
     "IDF_TOOLS_PATH": "${containerWorkspaceFolder}/deps/espressif-tools"

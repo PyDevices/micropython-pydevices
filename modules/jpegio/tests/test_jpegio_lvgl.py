@@ -258,7 +258,7 @@ def main():
     auto = decoders().count(DECODER)
     assert auto <= 1, decoders()
     # The desktop interpreters all have the hook: unix at its extra-features
-    # ROM level, windows through the PyDevices variant (displayif#41).
+    # ROM level, windows through the OmniPython variant (displayif#41).
     if sys.platform in DESKTOP_WITH_BUILTIN_INIT:
         assert auto == 1, (
             "%s: `import jpegio` after lv.init() registered nothing -- this build lacks "

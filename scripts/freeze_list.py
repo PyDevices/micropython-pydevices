@@ -6,7 +6,7 @@
 """List what a manifest freezes, by name and hash, and compare two lists.
 
     scripts/freeze_list.py list --port-dir micropython/ports/unix \\
-        --env PYDEVICES_MODULES=all variants/unix/pydevices/manifest.py > after.json
+        --env OMNIPYTHON_MODULES=all variants/unix/omnipython/manifest.py > after.json
     scripts/freeze_list.py compare before.json after.json
 
 `list` evaluates a manifest the way MicroPython's tools/makemanifest.py does
@@ -179,7 +179,7 @@ def main():
     ls.add_argument("--port-dir", required=True, help="$(PORT_DIR): the port's directory")
     ls.add_argument("--board-dir", help="$(BOARD_DIR)")
     ls.add_argument("--mpy-lib-dir", help="$(MPY_LIB_DIR) (default: <mpy-dir>/lib/micropython-lib)")
-    ls.add_argument("--env", action="append", metavar="NAME=VALUE", help="environment the manifest reads (PYDEVICES_MODULES, ...)")
+    ls.add_argument("--env", action="append", metavar="NAME=VALUE", help="environment the manifest reads (OMNIPYTHON_MODULES, ...)")
     ls.add_argument("--output", "-o", help="write here instead of standard output")
     ls.add_argument("--strip-paths", action="store_true", help="leave each file's path out of the list")
     ls.set_defaults(func=cmd_list)

@@ -75,4 +75,4 @@ if(DISPLAYIF_PORT_STM32)
     include(${DISPLAYIF_MOD_DIR}/src/ports/stm32/micropython.cmake)
 endif()
 
-# The JPEG decoder, jpegio, moved to micropython-pydevices' modules/jpegio.
+# The JPEG decoder, jpegio, moved to omnipython-builds' modules/jpegio.

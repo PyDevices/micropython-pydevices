@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-# The packages from micropython-lib that PyDevices' APIs lean on, frozen in so
+# The packages from micropython-lib that OmniPython's APIs lean on, frozen in so
 # an OmniPython firmware never asks anyone to mip.install them first (on stock
 # MicroPython you install them from micropython-lib's index, then ours):
 #
@@ -39,7 +39,7 @@ import os
 include("../library.py")
 for _pkg in ("usb-device-audio", "usb-device-video", "usb-device-msc", "usb-device-net"):
     require(_pkg, library="omnipython-lib")
-_names = [n.strip() for n in os.environ.get("PYDEVICES_MODULES", "").split(",")]
+_names = [n.strip() for n in os.environ.get("OMNIPYTHON_MODULES", "").split(",")]
 _usbhost = os.path.realpath("../usbhost")
 if any(n in ("all", "usbhost") or os.path.realpath(n) == _usbhost for n in _names if n):
     for _pkg in (

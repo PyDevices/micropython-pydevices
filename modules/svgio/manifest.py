@@ -3,6 +3,6 @@
 # SPDX-License-Identifier: MIT
 
 # svgio: SVG files rendered to RGB565 and an alpha mask, on NanoSVG. C only;
-# every port. On CPython, pydevices-desktop's svgio.py gives the same API over
+# every port. On CPython, omnipython-desktop's svgio.py gives the same API over
 # resvg.
 c_module(".")

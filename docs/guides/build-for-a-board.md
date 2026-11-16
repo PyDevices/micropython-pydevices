@@ -15,7 +15,7 @@ out `--port` and the script asks for port, board, variant, flash size and
 modules.
 
 Output lands in `builds/<port>/[<board>/]<variant>/`, beside
-`pydevices-build.json`, a record of every module's commit. With no
+`omnipython-build.json`, a record of every module's commit. With no
 `--variant`, that last directory is `default` on esp32 and rp2, and `standard`
 on the desktop ports. [Flash a board](flash-a-board.md) says where
 `firmware.bin` goes.

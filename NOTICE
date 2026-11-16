@@ -1,4 +1,4 @@
-micropython-pydevices
+omnipython-builds
 Copyright (c) 2026 PyDevices, MIT License (see LICENSE).
 
 Firmware built from this repository can contain code from other projects.

@@ -8,20 +8,20 @@ tracked here or linked from a sibling checkout or cloned at the commit in
 
 | Module | What it is |
 |---|---|
-| [`audioif`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/audioif) | The audio hardware under the audio pump, with CircuitPython's `audiobusio.I2SOut` and `audioi2sin.I2SIn` on top. |
-| [`btclassic`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/btclassic) | Bluetooth Classic: the radio, an audio sink that plays a phone or computer with its track, cover art and controls (A2DP and AVRCP), and a hands-free unit for the phone's calls, both ways (HFP). Classic ESP32. Opt-in: a firmware with it has no `bluetooth` (BLE) module. |
-| [`cameraif`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/cameraif) | A MIPI-CSI camera as a MicroPython object, on the ESP32-P4. |
-| [`castif`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/castif) | Casts an ESP32-P4's screen and sound to a TV over Wi-Fi Display, or serves them as live HLS. |
-| [`displayif`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/displayif) | The display buses and panels under `displaydev` (SPI, I2C, i80, QSPI, dot-clock RGB, MIPI-DSI, PicoDVI, RGB matrix, SDL2). The dot-clock, MIPI-DSI, PicoDVI and RGB matrix modules keep CircuitPython's names. |
-| [`h264enc`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/h264enc) | RGB565 frames to H.264 on the ESP32-P4's hardware encoder. |
-| [`jpegio`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/jpegio) | JPEG decode and encode, with CircuitPython's `jpegio` API. |
-| [`mdns`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/mdns) | Find and advertise services on the local network, with CircuitPython's `mdns` API (esp32, rp2, unix, windows). |
-| [`picotts`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/picotts) | Text to speech on the SVOX Pico engine, with the API of Adafruit's `adafruit_picotts`. Opt-in, and it needs PSRAM. |
-| [`pngio`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/pngio) | PNG encode and decode, RGB565 in and out. |
-| [`ppa`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/ppa) | Scale, rotate, convert and fill pixel buffers, on the ESP32-P4's Pixel Processing Accelerator or in portable C elsewhere. |
-| [`svgio`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/svgio) | SVG decode at any size, RGB565 with alpha, and an LVGL image decoder. |
-| [`tsmux`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/tsmux) | MPEG-TS and HLS segments from H.264. |
-| [`usbhost`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/usbhost) | The USB host port and isochronous streams that `usb.core` and the `usb.host.*` packages are built on (ESP32-S2, S3 and P4, and the Arduino GIGA R1's USB-A port without isochronous streams). |
+| [`audioif`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/audioif) | The audio hardware under the audio pump, with CircuitPython's `audiobusio.I2SOut` and `audioi2sin.I2SIn` on top. |
+| [`btclassic`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/btclassic) | Bluetooth Classic: the radio, an audio sink that plays a phone or computer with its track, cover art and controls (A2DP and AVRCP), and a hands-free unit for the phone's calls, both ways (HFP). Classic ESP32. Opt-in: a firmware with it has no `bluetooth` (BLE) module. |
+| [`cameraif`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/cameraif) | A MIPI-CSI camera as a MicroPython object, on the ESP32-P4. |
+| [`castif`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/castif) | Casts an ESP32-P4's screen and sound to a TV over Wi-Fi Display, or serves them as live HLS. |
+| [`displayif`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/displayif) | The display buses and panels under `displaydev` (SPI, I2C, i80, QSPI, dot-clock RGB, MIPI-DSI, PicoDVI, RGB matrix, SDL2). The dot-clock, MIPI-DSI, PicoDVI and RGB matrix modules keep CircuitPython's names. |
+| [`h264enc`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/h264enc) | RGB565 frames to H.264 on the ESP32-P4's hardware encoder. |
+| [`jpegio`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/jpegio) | JPEG decode and encode, with CircuitPython's `jpegio` API. |
+| [`mdns`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/mdns) | Find and advertise services on the local network, with CircuitPython's `mdns` API (esp32, rp2, unix, windows). |
+| [`picotts`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/picotts) | Text to speech on the SVOX Pico engine, with the API of Adafruit's `adafruit_picotts`. Opt-in, and it needs PSRAM. |
+| [`pngio`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/pngio) | PNG encode and decode, RGB565 in and out. |
+| [`ppa`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/ppa) | Scale, rotate, convert and fill pixel buffers, on the ESP32-P4's Pixel Processing Accelerator or in portable C elsewhere. |
+| [`svgio`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/svgio) | SVG decode at any size, RGB565 with alpha, and an LVGL image decoder. |
+| [`tsmux`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/tsmux) | MPEG-TS and HLS segments from H.264. |
+| [`usbhost`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/usbhost) | The USB host port and isochronous streams that `usb.core` and the `usb.host.*` packages are built on (ESP32-S2, S3 and P4, and the Arduino GIGA R1's USB-A port without isochronous streams). |
 
 ## Modules from other repositories
 
@@ -29,26 +29,26 @@ tracked here or linked from a sibling checkout or cloned at the commit in
 |---|---|
 | `audiodsp`, `pygraphics`, `ulab` | Cloned at the commit in `DEPENDENCIES.lock` when `modules/<name>` is missing, or linked from a sibling checkout. |
 | `lvgl` | [omnipython-lvgl](https://github.com/PyDevices/omnipython-lvgl), fetched at the commit in `DEPENDENCIES.lock` into `modules/.omnipython-lvgl`, or linked from a sibling checkout. A build compiles its `ports/micropython` or `ports/circuitpython`, whichever the interpreter is, and `all` includes it. |
-| `pydevices`, `palettes`, `pdwidgets`, `iconkit`, `audioinstruments`, `audioeffects` | Manifests here that require the Python packages from omnipython-lib. `audiocomponents` is the old name for the last two together and still builds both. |
+| `omnipython`, `palettes`, `pdwidgets`, `iconkit`, `audioinstruments`, `audioeffects` | Manifests here that require the Python packages from omnipython-lib. `audiocomponents` is the old name for the last two together and still builds both. |
 | `micropython-lib` | MicroPython's own upstream packages, frozen from the checkout the MicroPython tree carries. |
 | `tflite`, `vision` | [esp-vision's modules](../guides/use-esp-vision-modules.md), opt-in: `all` leaves them out. |
 
-[`modules/all`](https://github.com/PyDevices/micropython-pydevices/tree/main/modules/all) is not a module but the rule behind `all`: every module beside it
+[`modules/all`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/all) is not a module but the rule behind `all`: every module beside it
 except those with an `OPT_IN` file: `btclassic`, `picotts`, `tflite` and `vision`.
 
 ## Which modules build on CircuitPython
 
 What `--modules` can name on CircuitPython, and why a module is missing where
 it is. "Unix" is CircuitPython's unix port, built and imported in
-[`circuitpython.yml`](https://github.com/PyDevices/micropython-pydevices/blob/main/.github/workflows/circuitpython.yml);
+[`circuitpython.yml`](https://github.com/PyDevices/omnipython-builds/blob/main/.github/workflows/circuitpython.yml);
 "boards" are the five CircuitPython cells of
-[`release-firmware.yml`](https://github.com/PyDevices/micropython-pydevices/blob/main/.github/workflows/release-firmware.yml).
+[`release-firmware.yml`](https://github.com/PyDevices/omnipython-builds/blob/main/.github/workflows/release-firmware.yml).
 
 | Module | Unix | Boards | Notes |
 |---|---|---|---|
 | pygraphics | yes | all five | |
 | audiodsp | yes | the four ESP32 cells | The modules CircuitPython lacks, `audiograph` and `audiopump.Ring` (Python-made audio that `audiobusio.I2SOut` plays) among them; its audiocore, synthio and the rest stay CircuitPython's. With all of it, a LilyGO T-Embed S3 build fits that board's 2 MB app slot only with `CIRCUITPY_ULAB=0` on the make line. |
-| displayif | yes (`usdl2`) | no, on purpose | Boards have CircuitPython's own `displayio` and display buses. pydevices' `SDLDisplay` runs on top of `usdl2`. |
+| displayif | yes (`usdl2`) | no, on purpose | Boards have CircuitPython's own `displayio` and display buses. `omnipython`'s `SDLDisplay` runs on top of `usdl2`. |
 | pngio | yes | all five | Decodes with CircuitPython's older uzlib. |
 | svgio | yes | no | Not named in the board cells yet. |
 | tsmux | yes | all five | |
@@ -56,16 +56,16 @@ it is. "Unix" is CircuitPython's unix port, built and imported in
 | jpegio | yes | ESP32-P4 | Adds only the encoder's C API: CircuitPython has its own `jpegio` decoder. |
 | cameraif | yes (`available()` is False) | ESP32-P4 | |
 | mdns | yes | no, on purpose | CircuitPython's boards have an `mdns` of their own; its unix port has none. |
-| usbhost | yes, as `_usbhost`, with no host engine | ESP32-P4 | The host engine runs on ESP-IDF's USB host library, which from ESP-IDF 6 is Espressif's `usb` component: [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py) fetches it at the version `DEPENDENCIES.lock` pins. The P4's boards leave its high-speed controller to us. Tethering is left out until the port has a network. The S3's one controller is CircuitPython's drive and REPL, so it gets the module without the engine. On the RP2040 and i.MX, CircuitPython's own `usb.core` is the host. |
+| usbhost | yes, as `_usbhost`, with no host engine | ESP32-P4 | The host engine runs on ESP-IDF's USB host library, which from ESP-IDF 6 is Espressif's `usb` component: [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py) fetches it at the version `DEPENDENCIES.lock` pins. The P4's boards leave its high-speed controller to us. Tethering is left out until the port has a network. The S3's one controller is CircuitPython's drive and REPL, so it gets the module without the engine. On the RP2040 and i.MX, CircuitPython's own `usb.core` is the host. |
 | audioif | no | no | Links against audiodsp's audio pump and `cp_compat`, which audiodsp's CircuitPython glue doesn't build. It isn't needed there: audioif gives MicroPython the `audiobusio` and `audioi2sin` that CircuitPython boards already have. |
 | ulab | CircuitPython's own | CircuitPython's own | |
 | castif | no: it is the ESP32-P4's | ESP32-P4, with no network | Talks to lwIP directly, the lwIP under CircuitPython's own `socketpool`. CircuitPython's P4 port has no network until it drives the boards' ESP32-C6, so castif is built without one and `start()` says so. Name tsmux, h264enc and ppa with it. |
-| h264enc | no: it is the ESP32-P4's encoder | ESP32-P4 | Espressif's `esp_h264`, which CircuitPython's port, built with the component manager off, can't fetch itself, is pinned in `DEPENDENCIES.lock` and fetched by [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py). Name ppa with it. |
+| h264enc | no: it is the ESP32-P4's encoder | ESP32-P4 | Espressif's `esp_h264`, which CircuitPython's port, built with the component manager off, can't fetch itself, is pinned in `DEPENDENCIES.lock` and fetched by [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py). Name ppa with it. |
 | picotts | no | no, on purpose | CircuitPython has Adafruit's `adafruit_picotts`, the same engine and API as a native `.mpy`. |
 | btclassic | no | no | MicroPython only for now. |
 | tflite, vision | no | no, on purpose | esp-vision's modules, for MicroPython only. |
 | lvgl | yes | all five | One name for both interpreters: a CircuitPython build compiles omnipython-lvgl's `ports/circuitpython`. A board build needs `CIRCUITPY_GIFIO=0`, since LVGL links its own AnimatedGIF decoder; our boards set it. |
 | micropython-lib | no | no | MicroPython's own upstream packages. |
-| pydevices, palettes, pdwidgets | frozen | frozen | Python only. On unix, pydevices also freezes its desktop files (the boards drop them), and pdwidgets and palettes with it: together their names pass CircuitPython's 64 KB frozen-string pool, so [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py) builds the unix port with four-byte qstr offsets (patches 0001 and 0010). Boards keep two-byte offsets. |
+| omnipython, palettes, pdwidgets | frozen | frozen | Python only. On unix, omnipython also freezes its desktop files (the boards drop them), and pdwidgets and palettes with it: together their names pass CircuitPython's 64 KB frozen-string pool, so [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py) builds the unix port with four-byte qstr offsets (patches 0001 and 0010). Boards keep two-byte offsets. |
 
-What is planned for the rest is in the [roadmap](https://github.com/PyDevices/micropython-pydevices/blob/main/ROADMAP.md).
+What is planned for the rest is in the [roadmap](https://github.com/PyDevices/omnipython-builds/blob/main/ROADMAP.md).

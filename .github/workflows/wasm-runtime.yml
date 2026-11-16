@@ -1,5 +1,5 @@
 # The website (PyDevices.github.io) and workbench serve a WebAssembly build of
-# this repository: the webassembly port, pydevices variant, every module. Its
+# this repository: the webassembly port, omnipython variant, every module. Its
 # sources move here, in DEPENDENCIES.lock, the patch series and the module
 # manifests, and nothing on either site notices. So when main changes what
 # goes into that build, this rebuilds it from the pins, checks it starts and
@@ -56,11 +56,11 @@ jobs:
           push: never
           runCmd: |
             set -e
-            ./build_mp.py --port webassembly --variant pydevices --modules all
+            ./build_mp.py --port webassembly --variant omnipython --modules all
 
       - name: It starts and imports what it freezes
         run: |
-          b=builds/webassembly/pydevices
+          b=builds/webassembly/omnipython
           cat > /tmp/check.py <<'EOF'
           import sys
           print(sys.implementation)
@@ -73,16 +73,16 @@ jobs:
 
       - name: Stamp its provenance
         run: |
-          python3 scripts/wasm_provenance.py builds/webassembly/pydevices \
+          python3 scripts/wasm_provenance.py builds/webassembly/omnipython \
             --built-by "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
       - uses: actions/upload-artifact@v7
         with:
           name: wasm-runtime
           path: |
-            builds/webassembly/pydevices/micropython.mjs
-            builds/webassembly/pydevices/micropython.wasm
-            builds/webassembly/pydevices/micropython.wasm.provenance
+            builds/webassembly/omnipython/micropython.mjs
+            builds/webassembly/omnipython/micropython.wasm
+            builds/webassembly/omnipython/micropython.wasm.provenance
           if-no-files-found: error
 
   propose:
@@ -145,16 +145,16 @@ jobs:
           git config user.email "pydevices-release-automation[bot]@users.noreply.github.com"
           git checkout -b "$branch"
           git add "$DIR/micropython.mjs" "$DIR/micropython.wasm" "$DIR/micropython.wasm.provenance"
-          git commit -q -m "WebAssembly runtime: rebuild at micropython-pydevices ${short}"
+          git commit -q -m "WebAssembly runtime: rebuild at omnipython-builds ${short}"
           git push -q --force origin "$branch"
-          body="The WebAssembly runtime rebuilt from [micropython-pydevices@${short}](https://github.com/PyDevices/micropython-pydevices/commit/${SOURCE_SHA}): the webassembly port, pydevices variant, every module, at that commit's pins. It starts under node and imports what it freezes ([build](${RUN_URL})). \`${DIR}/micropython.wasm.provenance\` lists every source's commit.
+          body="The WebAssembly runtime rebuilt from [omnipython-builds@${short}](https://github.com/PyDevices/omnipython-builds/commit/${SOURCE_SHA}): the webassembly port, pydevices variant, every module, at that commit's pins. It starts under node and imports what it freezes ([build](${RUN_URL})). \`${DIR}/micropython.wasm.provenance\` lists every source's commit.
 
           Open a page with a live demo on the preview before merging."
           # One open runtime pull request at a time: this one replaces any older.
           for old in $(gh pr list --repo "$REPO" --state open --json number,headRefName \
                          --jq ".[] | select(.headRefName | startswith(\"wasm-runtime/\")) | select(.headRefName != \"$branch\") | .number"); do
-            gh pr close "$old" --repo "$REPO" --delete-branch --comment "Replaced by the runtime rebuilt at micropython-pydevices ${short}."
+            gh pr close "$old" --repo "$REPO" --delete-branch --comment "Replaced by the runtime rebuilt at omnipython-builds ${short}."
           done
           if [ -z "$(gh pr list --repo "$REPO" --head "$branch" --state open --json number --jq '.[].number')" ]; then
-            gh pr create --repo "$REPO" --head "$branch" --title "WebAssembly runtime: rebuild at micropython-pydevices ${short}" --body "$body"
+            gh pr create --repo "$REPO" --head "$branch" --title "WebAssembly runtime: rebuild at omnipython-builds ${short}" --body "$body"
           fi

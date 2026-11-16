@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Brad Barnett
 #
 # SPDX-License-Identifier: MIT
-"""Read a USB keyboard on the host port as PyDevices key events.
+"""Read a USB keyboard on the host port as OmniPython key events.
 
 A keyboard plugged into the board produces the same ``events.Key`` records as
 an SDL keyboard on the desktop, so application code is the same on both.

@@ -1346,7 +1346,7 @@ MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(SDL_GetDesktopDisplayMode_fun_obj, 1, 2, SDL
 
 #if !CIRCUITPY || DISPLAYIF_USER_C_MODULE
 
-//| """Desktop SDL2 subset for PyDevices displaydev (linked against libSDL2)."""
+//| """Desktop SDL2 subset for OmniPython displaydev (linked against libSDL2)."""
 
 static const mp_rom_map_elem_t usdl2_module_globals_table[] = {
 #include "usdl2_module_globals.inc"

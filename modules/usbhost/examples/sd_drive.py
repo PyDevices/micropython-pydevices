@@ -18,7 +18,7 @@ Needs: a board with USB device support, an SD card slot, and the
 ``usb-device-msc`` package. Install it with ``mip`` if your firmware doesn't
 freeze it:
 
-    mip.install("github:PyDevices/pydevices/usb-device-msc")
+    mip.install("github:PyDevices/omnipython/usb-device-msc")
 
 Run it:
 
@@ -43,7 +43,7 @@ def open_card():
     Native SDIO first: on boards that have it (the ESP32-P4 panels, for
     one) it is a hardware peripheral, needs no pin map, and is by far the
     quickest path. Falling back to the board config covers the boards whose
-    card is on SPI, where the wiring is a per-board fact that `pydevices`
+    card is on SPI, where the wiring is a per-board fact that `omnipython`
     already records rather than something this example should guess.
     """
     try:

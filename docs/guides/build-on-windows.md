@@ -1,7 +1,7 @@
 # Build on Windows
 
 A Linux or WSL machine cross-builds the same `micropython.exe` with the same
-command, `./build_mp.py --port windows --variant pydevices --modules all`,
+command, `./build_mp.py --port windows --variant omnipython --modules all`,
 once the MinGW packages in [Install](../get-started/install.md#install-what-each-port-needs)
 are installed; the SDL2 it links against is fetched. This page is for building
 on Windows itself.
@@ -20,13 +20,13 @@ If the first `pacman` line says it updated MSYS2's core and must close, run it
 once more. Then, in any PowerShell:
 
 ```powershell
-git clone https://github.com/PyDevices/micropython-pydevices.git
-cd micropython-pydevices
-python build_mp.py --port windows --variant pydevices --modules all
-.\builds\windows\pydevices\micropython.exe
+git clone https://github.com/PyDevices/omnipython-builds.git
+cd omnipython-builds
+python build_mp.py --port windows --variant omnipython --modules all
+.\builds\windows\omnipython\micropython.exe
 ```
 
-That's all you type. [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py) finds MSYS2 in `C:\msys64` (set
+That's all you type. [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py) finds MSYS2 in `C:\msys64` (set
 `MSYS2_ROOT` if it's elsewhere), puts its tools first on the build's `PATH`,
 and uses its `bash`. Left to `PATH`, `bash` from PowerShell is WSL's, which
 would run the build inside Linux. Without MSYS2 it stops and prints the install
@@ -42,7 +42,7 @@ shell, MSYS2 or not.
   `python` opens the Microsoft Store, turn off the `python.exe` and
   `python3.exe` App Execution Aliases (Settings, Apps, Advanced app settings,
   App execution aliases), or type `py` instead.
-- Use `--variant pydevices` for the Windows display and audio backends
+- Use `--variant omnipython` for the Windows display and audio backends
   (`displaydev.windisplay`, `audiodev.win_audio`). They need `uwin32`, which
   only that variant freezes, so on `dev` or the default they fail to import.
 - Only the windows port builds natively. Build esp32, rp2, webassembly and

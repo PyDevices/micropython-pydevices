@@ -1,6 +1,6 @@
 # Newcomer's guide to audioif
 
-`audioif` is the hardware half of PyDevices audio. It supplies the platform driver beneath audiodsp's portable `audiopump`: threads, locks, clocks, and I2S output. Its normal public API is CircuitPython-shaped `audiobusio.I2SOut`; `_audioif` is the lower-level native module.
+`audioif` is the hardware half of OmniPython audio. It supplies the platform driver beneath audiodsp's portable `audiopump`: threads, locks, clocks, and I2S output. Its normal public API is CircuitPython-shaped `audiobusio.I2SOut`; `_audioif` is the lower-level native module.
 
 It is firmware source, not a pip package. Build it alongside `audiodsp` when a target needs an actual audio driver.
 
@@ -14,7 +14,7 @@ out = audiobusio.I2SOut(board.GPIO12, board.GPIO13, board.GPIO14)
 out.play(sample, loop=True)
 ```
 
-Only one output may own a peripheral, a new `play()` replaces the current sample, and `playing` becomes false when a finite sample ends. `retarget()` is a PyDevices extension for replacing a graph tail without closing the active channel.
+Only one output may own a peripheral, a new `play()` replaces the current sample, and `playing` becomes false when a finite sample ends. `retarget()` is an OmniPython extension for replacing a graph tail without closing the active channel.
 
 ```python
 import audiopump
@@ -46,11 +46,11 @@ The portable engine belongs in [audiodsp](https://github.com/PyDevices/audiodsp)
 
 ## Building and target boundaries
 
-Clone `audioif` beside `audiodsp`. Both must be included as user modules; each build file finds audiodsp headers through a sibling path by default. `micropython-pydevices` supplies ready-made audio manifests and board variants, while the root README gives upstream build commands.
+Clone `audioif` beside `audiodsp`. Both must be included as user modules; each build file finds audiodsp headers through a sibling path by default. `omnipython-builds` supplies ready-made audio manifests and board variants, while the root README gives upstream build commands.
 
 ESP32 has the production I2S driver and can expose microphone capture through `_audioif.Input`. Unix and Windows use native threads with a file sink for deterministic testing; Windows can also play to a WASAPI speaker and read a WASAPI microphone through `_audioif.Input`, both on the pump thread (README, "Live audio on Windows"). WebAssembly deliberately binds no driver because it has neither threads nor a hardware sink.
 
-`I2SOut` accepts PyDevices-specific `port=`, `sample_rate=`, and `main_clock_fs=` options for board wiring. Its desktop-only `sink=` option writes to a file for testing, or on Windows names a speaker with `sink="wasapi..."`. Do not use `retarget()` to change sample rate or signed-16 format: the running DMA and pump buffers are sized for the original stream.
+`I2SOut` accepts OmniPython-specific `port=`, `sample_rate=`, and `main_clock_fs=` options for board wiring. Its desktop-only `sink=` option writes to a file for testing, or on Windows names a speaker with `sink="wasapi..."`. Do not use `retarget()` to change sample rate or signed-16 format: the running DMA and pump buffers are sized for the original stream.
 
 ## Contributor boundary
 

@@ -1,5 +1,5 @@
 # usbhost's USB host settings, appended to every esp32 build that selects usbhost
-# (micropython-pydevices' build_mp.py finds this file by name).
+# (omnipython-builds' build_mp.py finds this file by name).
 #
 # External hub support is off by default upstream, which makes a hub
 # enumerate as a device the host stack cannot use with everything behind it

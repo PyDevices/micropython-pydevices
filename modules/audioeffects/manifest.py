@@ -28,7 +28,7 @@ else:
     selection = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(selection)
 
-    _library = os.environ["PYDEVICES_LIBRARY"]
+    _library = os.environ["OMNIPYTHON_LIBRARY"]
     _out = os.path.join(os.path.dirname(_library), "audioeffects-selected")
     _files = selection.write(os.path.join(_library, "audioeffects", "audioeffects"), _picked, _out)
     # On stderr: the build reads stdout for C module paths.

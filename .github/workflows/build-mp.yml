@@ -88,7 +88,7 @@ jobs:
           git -C micropython/lib/micropython-lib checkout -q FETCH_HEAD
       - name: usb.device refuses to start while the host has a shared port
         env:
-          PYDEVICES_REQUIRE_MICROPYTHON: '1'
+          OMNIPYTHON_REQUIRE_MICROPYTHON: '1'
         run: PYTHONPATH=tests python3 -m unittest test_usb_device_port -v
 
   vpath:
@@ -114,5 +114,5 @@ jobs:
         run: python3 patches/apply_patches.py micropython
       - name: Each module's sources come from its own directory
         env:
-          PYDEVICES_REQUIRE_MICROPYTHON: '1'
+          OMNIPYTHON_REQUIRE_MICROPYTHON: '1'
         run: PYTHONPATH=tests python3 -m unittest test_build_mp.VpathSearchesEachModuleFirst -v

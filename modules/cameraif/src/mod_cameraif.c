@@ -15,7 +15,7 @@
 //
 // Board facts -- pins, LDO channel, control signals -- are arguments rather
 // than constants, because this module has no business knowing which board it
-// is on. `pydevices` already records that per board in `board_config` /
+// is on. `omnipython` already records that per board in `board_config` /
 // `board_peripherals`, and its camera() passes them here.
 //
 // Lifecycle follows displayif's idempotent-lifecycle contract: the
@@ -82,12 +82,12 @@ extern void displayif_register_soft_reset(void (*fn)(void)) __attribute__((weak)
 extern void displayif_unregister_soft_reset(void (*fn)(void)) __attribute__((weak));
 
 // jpegio does the JPEG encoding (on the P4's hardware engine), from its C API
-// (jpegio.h in micropython-pydevices' modules/jpegio). Weak for the same
+// (jpegio.h in omnipython-builds' modules/jpegio). Weak for the same
 // reason: a firmware without jpegio still links, and capture_jpeg() says what
 // is missing. Its arguments: pixels, len, width, height, stride, format (0 =
 // RGB565), swap, quality, subsample (4:2:0), hardware (-1 = when there is
 // one), exact, used_hw.
-// The PPA's scaling and colour conversion are ppa's (micropython-pydevices'
+// The PPA's scaling and colour conversion are ppa's (omnipython-builds'
 // modules/ppa/src/ppa_mod.h), the same way: weak, so a firmware without ppa
 // still links and capture_scaled() / capture_yuy2() say what is missing.
 // Keep this struct in step with ppa_mod_srm_t there.
@@ -576,7 +576,7 @@ static esp_err_t cameraif_xclk_start(cameraif_obj_t *c, int pin, uint32_t hz) {
 #if defined(CIRCUITPY)
 // CircuitPython's espressif port calls this at the end of every program,
 // before it deletes the board buses (reset_port_early in its
-// supervisor/port.c; micropython-pydevices' CircuitPython patches add the
+// supervisor/port.c; omnipython-builds' CircuitPython patches add the
 // call). The camera's SCCB device would otherwise keep board.I2C from being
 // deleted, and the CSI controller, the ISP and the PHY's LDO would outlive
 // the program that opened them. The same job as displayif's soft-reset hook

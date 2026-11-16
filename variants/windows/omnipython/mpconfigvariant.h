@@ -1,4 +1,4 @@
-// The PyDevices windows build: upstream's dev variant, included from the port
+// The OmniPython windows build: upstream's dev variant, included from the port
 // tree, plus an 8 MB GC heap by default (upstream's is 2 MB on 64-bit);
 // -X heapsize= still overrides it. Needs patch 0012.
 #include "variants/dev/mpconfigvariant.h"

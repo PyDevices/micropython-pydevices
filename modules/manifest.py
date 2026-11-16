@@ -9,21 +9,21 @@
 # in here.
 #
 # The module list is a comma-separated string: options.modules if the
-# including manifest passes one, else $PYDEVICES_MODULES, which build_mp.py
+# including manifest passes one, else $OMNIPYTHON_MODULES, which build_mp.py
 # sets from --modules. A bare name is modules/<name>; anything with a path
 # separator is a directory of its own (build_mp.py makes it absolute). "all"
 # is modules/all like any other name. A name that is no directory here is a
 # package of omnipython-lib (build_mp.py assembles the library and sets
-# $PYDEVICES_LIBRARY): palettes and the other Python-only packages have a
+# $OMNIPYTHON_LIBRARY): palettes and the other Python-only packages have a
 # manifest here that requires theirs, and the rest, appkit, a board config or
 # a driver, are required directly.
 #
 # Called by hand:
-#   PYDEVICES_MODULES=audiodsp,displayif make -C ports/unix \
+#   OMNIPYTHON_MODULES=audiodsp,displayif make -C ports/unix \
 #       FROZEN_MANIFEST=<this repo>/modules/manifest.py
 #
 # A board with a manifest.py of its own upstream (the GIGA's) is built with
-# PYDEVICES_BOARD_MANIFEST naming it, and that is the base instead of the
+# OMNIPYTHON_BOARD_MANIFEST naming it, and that is the base instead of the
 # port's.
 #
 # options.board_manifest=False starts from the port's manifest even when the
@@ -40,9 +40,9 @@ options.defaults(base=True, modules=None, board_manifest=True)
 # lib-overrides/ holds the few micropython-lib packages we freeze our own copy
 # of (mip, for a connection kept open per host). Searched ahead of
 # micropython-lib, so the port's require() of one of them gets ours.
-add_library("pydevices-overrides", "../lib-overrides", prepend=True)
+add_library("omnipython-overrides", "../lib-overrides", prepend=True)
 
-_board_manifest = os.environ.get("PYDEVICES_BOARD_MANIFEST")
+_board_manifest = os.environ.get("OMNIPYTHON_BOARD_MANIFEST")
 if options.base and options.board_manifest and _board_manifest:
     # Upstream's own manifest for the board, which build_mp.py names when
     # the board has one. It starts from the port's and adds what the board
@@ -85,7 +85,7 @@ elif options.base:
 _here = os.getcwd()  # include() runs a manifest from its own directory
 _names = options.modules
 if _names is None:
-    _names = os.environ.get("PYDEVICES_MODULES", "")
+    _names = os.environ.get("OMNIPYTHON_MODULES", "")
 
 for _name in (n.strip() for n in _names.split(",")):
     if not _name:

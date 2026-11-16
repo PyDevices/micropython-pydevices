@@ -22,7 +22,7 @@ fb.blit_alpha(mask, 10, 10, w, h, 0xFFFF)           # filled with one colour
 The same code runs on every runtime. On MicroPython it's this C module, on
 every port, and `--modules all` includes it (about 42 KB of flash on an
 ESP32-S3). On CPython, `svgio.py` in
-pydevices-desktop gives the same API over resvg, so `pip install resvg-py
+omnipython-desktop gives the same API over resvg, so `pip install resvg-py
 pillow` is all a desktop needs.
 
 [`examples/svgio_simpletest.py`](examples/svgio_simpletest.py) draws an icon at two sizes and prints it as text.

@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Build PyDevices MicroPython firmware with one command.
+"""Build OmniPython MicroPython firmware with one command.
 
     ./build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI \\
         --flash 16MB --modules audiodsp,displayif,/home/you/earful
@@ -233,7 +233,7 @@ def micropython_version(mp, upstream):
 
     The version names the upstream commit, not the local overlay commit on top
     of it, which no one else has and git cannot find. The overlay is part of
-    what this repository is, and pydevices-build.json records which patches a
+    what this repository is, and omnipython-build.json records which patches a
     build carries, so it does not make the build "dirty"; only edits beyond it
     do (a submodule carrying our recorded patches doesn't count either)."""
     described = git_out(mp, "describe", "--tags", "--match", "v[1-9].*", "--abbrev=10", upstream)
@@ -373,7 +373,7 @@ def lvgl_checkout(ws):
     return dest.resolve()
 
 
-# omnipython-lib is the repository of our Python-only packages: pydevices,
+# omnipython-lib is the repository of our Python-only packages: omnipython,
 # palettes, pdwidgets, appkit, audioinstruments, audioeffects, and every board
 # config and driver. It is pinned in DEPENDENCIES.lock beside the modules but is not
 # one: a build asks its tools/libbuild.py for the library tree, one directory
@@ -406,8 +406,8 @@ def library_checkout(ws):
             return dest
         say(f"{dest} is not at {pins.LOCK}'s {commit[:12]}; fetching it again")
         shutil.rmtree(dest)
-    # Called pydevices until the rename; either name is the same repository.
-    for sibling in ((ws / LIBRARY, ws / "pydevices") if ws else ()):
+    # A checkout folder may carry the library's name or the repository's.
+    for sibling in ((ws / LIBRARY, ws / "omnipython", ws / "pydevices") if ws else ()):
         if (sibling / "tools" / "libbuild.py").is_file():
             link(dest, sibling)
             return dest
@@ -676,7 +676,7 @@ def resolve_modules(spec, library=None, interpreter="micropython", lvgl=None):
             names.append("all")
             # modules/all/manifest.py's rule: every module but the opt-in ones.
             dirs += [MODULES_DIR / n for n in module_choices() if n != "all" and not (MODULES_DIR / n / "OPT_IN").is_file()]
-            # and LVGL, which modules/all/manifest.py finds through $PYDEVICES_LVGL.
+            # and LVGL, which modules/all/manifest.py finds through $OMNIPYTHON_LVGL.
             if lvgl is not None:
                 dirs.append(lvgl_dir())
         elif item == LVGL_MODULE and not (MODULES_DIR / item).is_dir():
@@ -1975,7 +1975,7 @@ def build_dir_for(build, want, clean, revisions):
     """The build dir for a target, emptied first if it was built with
     something other than `want` (another module set, flash size, ...) or
     with its modules at other commits than `revisions`, record()'s rows."""
-    rec_path = build / "pydevices-build.json"
+    rec_path = build / "omnipython-build.json"
     if clean and build.exists():
         shutil.rmtree(build)
         say(f"--clean: removed {build}")
@@ -2003,7 +2003,7 @@ def build_dir_for(build, want, clean, revisions):
     return rec_path
 
 
-# The unix port freezes pdwidgets and palettes beside pydevices and the C
+# The unix port freezes pdwidgets and palettes beside omnipython and the C
 # modules, and their names together pass the 64 KB a ROM qstr pool's two-byte
 # offsets can address. Four-byte offsets (patches/circuitpython/0001 and 0010)
 # lift that for about two bytes of flash per qstr: fine on a desktop, so only
@@ -2120,15 +2120,15 @@ def build_circuitpython(args, make_extra, ws):
 
     env = {k: v for k, v in os.environ.items()
            if k not in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "VARIANT_DIR", "PYTHONPATH",
-                        "BINDINGS_DIR", "PYDEVICES_LVGL")}
+                        "BINDINGS_DIR", "OMNIPYTHON_LVGL")}
     if library.tree:
-        env["PYDEVICES_LIBRARY"] = library.tree.as_posix()
-    env["PYDEVICES_INTERPRETER"] = "circuitpython"
+        env["OMNIPYTHON_LIBRARY"] = library.tree.as_posix()
+    env["OMNIPYTHON_INTERPRETER"] = "circuitpython"
     if version:
         # py/version.py takes this instead of asking git, whose answer carries -dirty for our patches.
         env["CP_VERSION"] = version
-    # The unix port is a desktop: pydevices freezes its host-only files there.
-    env["PYDEVICES_PLATFORM"] = "desktop" if port == "unix" else "board"
+    # The unix port is a desktop: omnipython freezes its host-only files there.
+    env["OMNIPYTHON_PLATFORM"] = "desktop" if port == "unix" else "board"
     env["PATH"] = os.pathsep.join([str(CP_VENV / "bin"), env.get("PATH", "")])
     env["VIRTUAL_ENV"] = str(CP_VENV)
     # Only the submodules this target needs, the way CircuitPython's CI does:
@@ -2209,8 +2209,8 @@ def failure_hint(port, log_text):
 
 EXAMPLES = """examples:
   ./build_mp.py                       asks for port, board, variant and modules
-  ./build_mp.py --port unix --variant pydevices --modules all
-  ./build_mp.py --port windows --variant pydevices --modules all
+  ./build_mp.py --port unix --variant omnipython --modules all
+  ./build_mp.py --port windows --variant omnipython --modules all
   ./build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT \\
       --flash 8MB --modules all
   ./build_mp.py --port rp2 --board RPI_PICO2 --modules displayif,pygraphics
@@ -2330,7 +2330,7 @@ def main():
     # standard image beside it.
     build = OUT_DIR / port / (board or "") / ((variant or DEFAULT_VARIANT.get(port, "default")) + ("-coredump" if args.coredump else ""))
     build = Path(os.path.normpath(build))
-    rec_path = build / "pydevices-build.json"
+    rec_path = build / "omnipython-build.json"
     # The set --modules resolved to, not just its spelling: "all" grows when a
     # module is added, and a build dir from before would otherwise be reused,
     # its frozen content generated against a qstr pool the new module has
@@ -2345,16 +2345,16 @@ def main():
 
     env = dict(os.environ)
     for leak in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "BOARD_DIR", "VARIANT_DIR",
-                 "BINDINGS_DIR", "PYDEVICES_LVGL", "PYDEVICES_BOARD_MANIFEST"):
+                 "BINDINGS_DIR", "OMNIPYTHON_LVGL", "OMNIPYTHON_BOARD_MANIFEST"):
         env.pop(leak, None)
-    env["PYDEVICES_MODULES"] = spec
+    env["OMNIPYTHON_MODULES"] = spec
     own = board_manifest(port, board)
     if own is not None:
-        env["PYDEVICES_BOARD_MANIFEST"] = own.as_posix()
+        env["OMNIPYTHON_BOARD_MANIFEST"] = own.as_posix()
     if port == "stm32" and board in STM32_M4_SLOT:
         # The padding module that moves the code at the M4's boot address
         # when it must; empty until then. Regenerated before each make.
-        env["PYDEVICES_MODULES"] = ",".join(x for x in (spec, (build / "m4pad-src" / "m4pad").as_posix()) if x)
+        env["OMNIPYTHON_MODULES"] = ",".join(x for x in (spec, (build / "m4pad-src" / "m4pad").as_posix()) if x)
     romfs_list = build / "romfs-python.json"
     if port == "stm32":
         # A variant whose manifest moves its Python to the ROMFS partition (the
@@ -2362,19 +2362,19 @@ def main():
         romfs_list.unlink(missing_ok=True)
         (build / "romfs.img").unlink(missing_ok=True)
         shutil.rmtree(build / "romfs", ignore_errors=True)
-        env["PYDEVICES_PYTHON_TO_ROMFS"] = romfs_list.as_posix()
-    # The frozen pydevices leaves its host-only files off a board's image.
-    env["PYDEVICES_PLATFORM"] = "desktop" if port in ("unix", "windows", "webassembly") else "board"
+        env["OMNIPYTHON_PYTHON_TO_ROMFS"] = romfs_list.as_posix()
+    # The frozen omnipython leaves its host-only files off a board's image.
+    env["OMNIPYTHON_PLATFORM"] = "desktop" if port in ("unix", "windows", "webassembly") else "board"
     # Which target this is, for a module whose manifest freezes something for one board family only.
-    env["PYDEVICES_TARGET"] = f"{port}/{board}" if board else port
+    env["OMNIPYTHON_TARGET"] = f"{port}/{board}" if board else port
     if version:
         # makeversionhdr.py takes these instead of asking git, which a shallow clone can't answer.
         env["MICROPY_GIT_TAG"], env["MICROPY_GIT_HASH"] = version
     if library.tree:
-        env["PYDEVICES_LIBRARY"] = library.tree.as_posix()
+        env["OMNIPYTHON_LIBRARY"] = library.tree.as_posix()
     if lvgl_root:
         # modules/all/manifest.py takes LVGL's port from here.
-        env["PYDEVICES_LVGL"] = lvgl_port(lvgl_root, "micropython").as_posix()
+        env["OMNIPYTHON_LVGL"] = lvgl_port(lvgl_root, "micropython").as_posix()
     if os.name == "nt":
         # Upstream's tools open sources without encoding=; Windows' default is cp1252.
         env.setdefault("PYTHONUTF8", "1")
@@ -2382,7 +2382,7 @@ def main():
     # then runs the mpy-cross sub-make that would inherit BUILD= (micropython#19667).
     # Windows has no python3: give make this Python, in a form MSYS sh keeps.
     winpy = [f"PYTHON={Path(sys.executable).as_posix()}"] if os.name == "nt" else []
-    run(["make", "-C", str(mp / "mpy-cross"), "-j", JOBS, *winpy], env={k: v for k, v in env.items() if k != "PYDEVICES_MODULES"},
+    run(["make", "-C", str(mp / "mpy-cross"), "-j", JOBS, *winpy], env={k: v for k, v in env.items() if k != "OMNIPYTHON_MODULES"},
         stdout=subprocess.DEVNULL)
     exe = ".exe" if os.name == "nt" else ""
     env["MICROPY_MPYCROSS"] = (mp / "mpy-cross" / "build" / f"mpy-cross{exe}").as_posix()
@@ -2566,7 +2566,7 @@ def main():
             grown = (build / M4_SLOT_MK).exists()
             if grown and args.no_autosize:
                 for entry in build.iterdir():
-                    if entry.name != "pydevices-build.json":
+                    if entry.name != "omnipython-build.json":
                         shutil.rmtree(entry) if entry.is_dir() and not entry.is_symlink() else entry.unlink()
                 say(f"--no-autosize: {build} had taken the M4 core's flash; wiped, building in 1,280 KB.")
                 grown = False
@@ -2597,7 +2597,7 @@ def main():
                 say("  program beside it. Build with --no-autosize to stop here instead.\n")
                 # OpenAMP's settings change what every object was compiled with.
                 for entry in build.iterdir():
-                    if entry.name != "pydevices-build.json":
+                    if entry.name != "omnipython-build.json":
                         shutil.rmtree(entry) if entry.is_dir() and not entry.is_symlink() else entry.unlink()
                 grown = True
             stm32_grown = grown and rc == 0

@@ -6,7 +6,7 @@
 #
 # usbhost's native half, the `_usbhost` module built from ``src/``: the USB host
 # port and the transfers and streams the USB packages build on. The packages
-# themselves (usb-core, usb-host-*, usb-device-*, usb-hid) live in pydevices
+# themselves (usb-core, usb-host-*, usb-device-*, usb-hid) live in omnipython
 # and are not frozen here; install the ones a board needs with mip, so they
 # upgrade without a reflash.
 

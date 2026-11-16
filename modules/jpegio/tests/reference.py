@@ -21,7 +21,7 @@ For every baseline (SOF0) frame in frames/ that Pillow can decode:
      used: neither matches TJpgDec's arithmetic.
   3. pack to RGB565 exactly as tjpgd.c does under JD_FORMAT 1,
      ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3), stored as little-endian
-     uint16 (native order on every PyDevices target), row-major, no stride;
+     uint16 (native order on every OmniPython target), row-major, no stride;
   4. record width, height, sha256 of the packed buffer, and per-channel means
      of the 8-bit image (mean_rgb) and of the channels recoverable from the
      RGB565 buffer, i.e. r&0xF8, g&0xFC, b&0xF8 (mean_rgb565).
@@ -127,7 +127,7 @@ def main():
             "Compare with a tolerance: TJpgDec's IDCT, chroma replication and DC-only 1/8 differ.",
         ],
         "pillow": Image.__version__,
-        "rgb565": "((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3), little-endian uint16 (native order on all PyDevices targets)",
+        "rgb565": "((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3), little-endian uint16 (native order on all OmniPython targets)",
         "scale_dims": "width = source_width >> scale, height = source_height >> scale (partial-MCU remainder dropped, as TJpgDec does)",
         "frames": {},
         "not_referenced": {},

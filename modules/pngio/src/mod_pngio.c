@@ -5,7 +5,7 @@
 //
 // The engine is pngio_core.c. Decoding inflates through MicroPython's own
 // uzlib (the `deflate` module's), one scanline at a time. On CPython,
-// pydevices-desktop's pngio.py gives the same API over Pillow.
+// omnipython-desktop's pngio.py gives the same API over Pillow.
 //
 // SPDX-License-Identifier: MIT
 

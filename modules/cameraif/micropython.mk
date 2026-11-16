@@ -10,7 +10,7 @@
 #
 # That needs CircuitPython's espressif port to build ESP-IDF components a
 # module asks for (USER_ESP_IDF_COMPONENTS), which it doesn't on its own;
-# micropython-pydevices carries the patch, and its build_mp.py fetches the
+# omnipython-builds carries the patch, and its build_mp.py fetches the
 # three components at their pinned versions and passes them. The board's
 # sdkconfig has to enable a sensor driver and its auto-detection, for example
 # CONFIG_CAMERA_OV5647=y and CONFIG_CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y;
@@ -34,7 +34,7 @@ ifeq ($(IDF_TARGET),esp32p4)
 CAMERAIF_CAM_SENSOR := $(filter %/esp_cam_sensor,$(USER_ESP_IDF_COMPONENT_DIRS:/=))
 CAMERAIF_SCCB := $(filter %/esp_sccb_intf,$(USER_ESP_IDF_COMPONENT_DIRS:/=))
 ifeq ($(CAMERAIF_CAM_SENSOR),)
-$(error cameraif: USER_ESP_IDF_COMPONENT_DIRS names no esp_cam_sensor. ESP-IDF has no camera sensor drivers; build with micropython-pydevices' build_mp.py, or pass the esp_cam_sensor, esp_sccb_intf and cmake_utilities component directories)
+$(error cameraif: USER_ESP_IDF_COMPONENT_DIRS names no esp_cam_sensor. ESP-IDF has no camera sensor drivers; build with omnipython-builds' build_mp.py, or pass the esp_cam_sensor, esp_sccb_intf and cmake_utilities component directories)
 endif
 ifeq ($(CAMERAIF_SCCB),)
 $(error cameraif: USER_ESP_IDF_COMPONENT_DIRS names no esp_sccb_intf, which esp_cam_sensor needs)

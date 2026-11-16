@@ -1,6 +1,6 @@
 # usbhost
 
-The C half of USB on a PyDevices MicroPython firmware: `_usbhost`, the USB
+The C half of USB on an OmniPython MicroPython firmware: `_usbhost`, the USB
 host port and the transfers and isochronous streams that `usb.core` and the
 `usb.host.*` packages are built on. You don't import it yourself. You use the
 packages, and they use it.
@@ -26,9 +26,9 @@ requests; drives and streams haven't been tried there. Phone tethering is
 left out there, because the port has no network yet. Every other CircuitPython build gets `_usbhost`
 without the host.
 
-## The packages are in pydevices
+## The packages are in omnipython
 
-Everything you call lives in [pydevices](https://github.com/PyDevices/pydevices),
+Everything you call lives in [omnipython](https://github.com/PyDevices/omnipython),
 beside `midiports`, and installs with `mip`:
 
 - `usb-core`: `usb.core`, `usb.util` and `usb_host`, in PyUSB's and
@@ -43,7 +43,7 @@ beside `midiports`, and installs with `mip`:
   overlay's streaming endpoints (`USBDevice.Ring`, `USBDevice.stream()`).
 
 ```python
-mip.install("github:PyDevices/pydevices/usb-host-msc")   # brings usb-core with it
+mip.install("github:PyDevices/omnipython/usb-host-msc")   # brings usb-core with it
 ```
 
 ```python
@@ -98,7 +98,7 @@ python -m unittest discover -s tests -p "test_*.py"
 ```
 
 The proof matrix and the stream and host checks for real boards are in
-[tools/](tools/). The packages' own tests are in pydevices.
+[tools/](tools/). The packages' own tests are in omnipython.
 
 ## Licence
 

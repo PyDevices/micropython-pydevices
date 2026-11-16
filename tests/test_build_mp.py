@@ -76,7 +76,7 @@ class OffPin(unittest.TestCase):
 
     def test_module_without_a_lock_row(self):
         build_mp.lock = lambda: {}
-        self.assertIsNone(build_mp.off_pin("pydevices", self.repo, self.commits[0]))
+        self.assertIsNone(build_mp.off_pin("omnipython", self.repo, self.commits[0]))
 
 
 class Esp32Speed(unittest.TestCase):
@@ -144,30 +144,30 @@ class Esp32Speed(unittest.TestCase):
 
 class ModulesMoved(unittest.TestCase):
     def test_nothing_moved(self):
-        now = {"pydevices": row(), "displayif": row(B)}
+        now = {"omnipython": row(), "displayif": row(B)}
         self.assertEqual(build_mp.modules_moved(dict(now), now), [])
 
     def test_commit_moved_names_module_and_both_commits(self):
-        moved = build_mp.modules_moved({"pydevices": row(A)}, {"pydevices": row(B)})
-        self.assertEqual(moved, [f"pydevices was at {A[:12]}, now {B[:12]}"])
+        moved = build_mp.modules_moved({"omnipython": row(A)}, {"omnipython": row(B)})
+        self.assertEqual(moved, [f"omnipython was at {A[:12]}, now {B[:12]}"])
 
     def test_uncommitted_edits_build_incrementally(self):
         # Only a commit counts: an edit to a module rebuilds incrementally.
         for had, now in ((row(), row(dirty=True, changes="123abc")),
                          (row(dirty=True, changes="123abc"), row(dirty=True, changes="456def")),
                          (row(dirty=True, changes="123abc"), row())):
-            self.assertEqual(build_mp.modules_moved({"pydevices": had}, {"pydevices": now}), [])
+            self.assertEqual(build_mp.modules_moved({"omnipython": had}, {"omnipython": now}), [])
 
     def test_commit_moved_with_edits_names_only_the_commits(self):
-        moved = build_mp.modules_moved({"pydevices": row(A, dirty=True, changes="123abc")},
-                                       {"pydevices": row(B, dirty=True, changes="123abc")})
-        self.assertEqual(moved, [f"pydevices was at {A[:12]}, now {B[:12]}"])
+        moved = build_mp.modules_moved({"omnipython": row(A, dirty=True, changes="123abc")},
+                                       {"omnipython": row(B, dirty=True, changes="123abc")})
+        self.assertEqual(moved, [f"omnipython was at {A[:12]}, now {B[:12]}"])
 
     def test_record_without_revisions(self):
-        self.assertEqual(len(build_mp.modules_moved(None, {"pydevices": row()})), 1)
+        self.assertEqual(len(build_mp.modules_moved(None, {"omnipython": row()})), 1)
 
     def test_module_missing_from_record(self):
-        self.assertEqual(build_mp.modules_moved({}, {"pydevices": row()}), ["pydevices: not in the build record"])
+        self.assertEqual(build_mp.modules_moved({}, {"omnipython": row()}), ["omnipython: not in the build record"])
 
     def test_not_a_git_checkout(self):
         plain = {"path": "/x", "revision": "(not a git checkout)", "commit": None, "dirty": None, "changes": None}
@@ -201,12 +201,12 @@ class CpFrozenManifest(unittest.TestCase):
 
 
 class BuildDirFor(unittest.TestCase):
-    want = {"port": "unix", "board": None, "variant": "pydevices", "flash": None, "modules": "pydevices",
-            "module_set": ["pydevices"]}
+    want = {"port": "unix", "board": None, "variant": "omnipython", "flash": None, "modules": "omnipython",
+            "module_set": ["omnipython"]}
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.build = Path(self.tmp.name) / "unix" / "pydevices"
+        self.build = Path(self.tmp.name) / "unix" / "omnipython"
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -216,7 +216,7 @@ class BuildDirFor(unittest.TestCase):
         self.build.mkdir(parents=True, exist_ok=True)
         (self.build / "frozen_content.c").write_text("stale")
         rec = dict(self.want, complete=True, module_revisions=revisions)
-        (self.build / "pydevices-build.json").write_text(json.dumps(rec))
+        (self.build / "omnipython-build.json").write_text(json.dumps(rec))
 
     def run_it(self, revisions):
         out = io.StringIO()
@@ -225,22 +225,22 @@ class BuildDirFor(unittest.TestCase):
         return out.getvalue()
 
     def test_unchanged_keeps_the_folder(self):
-        self.built({"pydevices": row(A)})
-        self.assertEqual(self.run_it({"pydevices": row(A)}), "")
+        self.built({"omnipython": row(A)})
+        self.assertEqual(self.run_it({"omnipython": row(A)}), "")
         self.assertTrue((self.build / "frozen_content.c").exists())
 
     def test_moved_commit_wipes_and_says_why(self):
-        self.built({"pydevices": row(A)})
-        said = self.run_it({"pydevices": row(B)})
+        self.built({"omnipython": row(A)})
+        said = self.run_it({"omnipython": row(B)})
         self.assertFalse((self.build / "frozen_content.c").exists())
         self.assertIn("wiped", said)
-        self.assertIn(f"pydevices was at {A[:12]}, now {B[:12]}", said)
+        self.assertIn(f"omnipython was at {A[:12]}, now {B[:12]}", said)
 
     def test_record_written_before_the_build_carries_revisions(self):
-        self.run_it({"pydevices": row(A)})
-        rec = json.loads((self.build / "pydevices-build.json").read_text())
+        self.run_it({"omnipython": row(A)})
+        rec = json.loads((self.build / "omnipython-build.json").read_text())
         self.assertFalse(rec["complete"])
-        self.assertEqual(rec["module_revisions"], {"pydevices": row(A)})
+        self.assertEqual(rec["module_revisions"], {"omnipython": row(A)})
 
 
 class Record(unittest.TestCase):
@@ -542,8 +542,8 @@ class LibraryPackages(unittest.TestCase):
     def test_the_workspace_checkout_of_the_library_wins_over_the_pin(self):
         with tempfile.TemporaryDirectory() as tmp:
             ws = Path(tmp) / "ws"
-            (ws / "pydevices" / "tools").mkdir(parents=True)
-            (ws / "pydevices" / "tools" / "libbuild.py").write_text("")
+            (ws / "omnipython" / "tools").mkdir(parents=True)
+            (ws / "omnipython" / "tools" / "libbuild.py").write_text("")
             repo = Path(tmp) / "repo"
             (repo / "modules").mkdir(parents=True)
             (repo / "DEPENDENCIES.lock").write_text("omnipython-lib https://example.invalid/lib.git " + "a" * 40 + "\n")
@@ -554,7 +554,7 @@ class LibraryPackages(unittest.TestCase):
                     dest = build_mp.library_checkout(ws)
             finally:
                 build_mp.REPO, build_mp.MODULES_DIR = saved
-            self.assertEqual(dest.resolve(), (ws / "pydevices").resolve())
+            self.assertEqual(dest.resolve(), (ws / "omnipython").resolve())
 
     def test_the_build_record_names_the_library_commit(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -681,7 +681,7 @@ class FrozenManifest(unittest.TestCase):
             plain = variants / "esp32" / "BOARD" / "WITHOUT"
             plain.mkdir(parents=True)
             (plain / "mpconfigvariant.cmake").write_text("")
-            port = variants / "unix" / "pydevices"
+            port = variants / "unix" / "omnipython"
             port.mkdir(parents=True)
             (port / "manifest.py").write_text("")
             saved = build_mp.VARIANTS_DIR, build_mp.MODULES_DIR
@@ -692,7 +692,7 @@ class FrozenManifest(unittest.TestCase):
                 self.assertEqual(fm("esp32", "BOARD", "WITHOUT"), modules / "manifest.py")
                 self.assertEqual(fm("esp32", "BOARD", None), modules / "manifest.py")
                 self.assertEqual(fm("esp32", "OTHER", "WITH"), modules / "manifest.py")
-                self.assertEqual(fm("unix", None, "pydevices"), port / "manifest.py")
+                self.assertEqual(fm("unix", None, "omnipython"), port / "manifest.py")
                 self.assertEqual(fm("unix", None, None), modules / "manifest.py")
             finally:
                 build_mp.VARIANTS_DIR, build_mp.MODULES_DIR = saved
@@ -1380,7 +1380,7 @@ class VpathSearchesEachModuleFirst(unittest.TestCase):
     each module's own directory first.
 
     Needs micropython/ prepared with the overlay (any build does it); skipped
-    without one, unless PYDEVICES_REQUIRE_MICROPYTHON is set, as CI does."""
+    without one, unless OMNIPYTHON_REQUIRE_MICROPYTHON is set, as CI does."""
 
     def mp(self):
         mp = Path(build_mp.__file__).resolve().parent / "micropython"
@@ -1392,7 +1392,7 @@ class VpathSearchesEachModuleFirst(unittest.TestCase):
         elif "The PyDevices overlay applied" not in build_mp.git_out(mp, "log", "-1", "--format=%s"):
             why = "micropython/ is not prepared with the overlay (run a build, or patches/apply_patches.py)"
         if why:
-            if os.environ.get("PYDEVICES_REQUIRE_MICROPYTHON"):
+            if os.environ.get("OMNIPYTHON_REQUIRE_MICROPYTHON"):
                 self.fail(why)
             self.skipTest(why)
         return mp

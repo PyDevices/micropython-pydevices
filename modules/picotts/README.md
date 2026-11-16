@@ -41,7 +41,7 @@ sentences and prints how long each took.
 
   ```python
   import mip
-  mip.install("github:PyDevices/micropython-pydevices/modules/picotts/voices/en-US.json")
+  mip.install("github:PyDevices/omnipython-builds/modules/picotts/voices/en-US.json")
   ```
 
   Or download the two files from the URLs in

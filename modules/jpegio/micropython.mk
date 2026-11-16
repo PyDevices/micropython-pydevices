@@ -27,7 +27,7 @@ CFLAGS_USERMOD += -DJPEGIO_HW=1 \
 	-isystem $(TOP)/ports/espressif/esp-idf/components/esp_hal_jpeg/include \
 	-isystem $(TOP)/ports/espressif/esp-idf/components/esp_hal_jpeg/esp32p4/include
 # Built and linked by CircuitPython's espressif port when a module names them
-# (micropython-pydevices' CircuitPython patches).
+# (omnipython-builds' CircuitPython patches).
 USER_ESP_IDF_COMPONENTS += esp_driver_jpeg esp_hal_jpeg
 endif
 else

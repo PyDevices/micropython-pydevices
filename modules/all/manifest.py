@@ -12,7 +12,7 @@
 # its C half (ulab keeps its glue in code/).
 #
 # LVGL is not in modules/: it is omnipython-lvgl's ports/micropython, which
-# build_mp.py names in $PYDEVICES_LVGL, and "all" takes it from there.
+# build_mp.py names in $OMNIPYTHON_LVGL, and "all" takes it from there.
 import os
 
 _root = os.path.dirname(os.getcwd())  # include() runs a manifest from its own directory
@@ -39,6 +39,6 @@ for _name in sorted(os.listdir(_root)):
             )
         )
 
-_lvgl = os.environ.get("PYDEVICES_LVGL")
+_lvgl = os.environ.get("OMNIPYTHON_LVGL")
 if _lvgl:
     include(_lvgl)

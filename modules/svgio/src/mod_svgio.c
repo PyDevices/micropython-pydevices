@@ -9,7 +9,7 @@
 //   d.decode(pixels, alpha, rows=(0, 120))        # a band of the picture
 //   d.decode(pixels, alpha, colors={0xFF0000: 0x00A0FF})    # in other colours
 //
-// The engine is NanoSVG (svgio_nanosvg.c). On CPython, pydevices-desktop's
+// The engine is NanoSVG (svgio_nanosvg.c). On CPython, omnipython-desktop's
 // svgio.py gives the same API over resvg.
 //
 // SPDX-License-Identifier: MIT

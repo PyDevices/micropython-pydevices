@@ -10,20 +10,20 @@ service this program advertises is in the list too.
 
 Needs: a network. On a board, a firmware built with mdns, already
 connected to Wi-Fi. On a computer, the MicroPython unix or Windows port
-built with mdns, or CPython with pydevices-desktop and python-zeroconf.
+built with mdns, or CPython with omnipython-desktop and python-zeroconf.
 
 Run it:
 
     mpremote run mdns_simpletest.py
 
 Tested on: the MicroPython unix port, built with ``--modules all``, and
-CPython with pydevices-desktop on Linux and Windows.
+CPython with omnipython-desktop on Linux and Windows.
 """
 
 import mdns
 
 # Change these to match your setup.
-INSTANCE_NAME = "PyDevices example"
+INSTANCE_NAME = "OmniPython example"
 PORT = 8080
 SEARCH_SECONDS = 3
 

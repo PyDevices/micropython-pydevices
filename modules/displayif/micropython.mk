@@ -133,7 +133,7 @@ ifneq ($(DISPLAYIF_PORT_UNIX)$(DISPLAYIF_PORT_WINDOWS),00)
 include $(DISPLAYIF_MOD_DIR)/src/ports/desktop/usdl2/micropython.mk
 endif
 
-# The JPEG decoder, jpegio, moved to micropython-pydevices' modules/jpegio.
+# The JPEG decoder, jpegio, moved to omnipython-builds' modules/jpegio.
 
 # displayif_revision_obj, read as <module>.__revision__ on every module here.
 # src/include is on the path here, not only in ports/common/micropython.mk,

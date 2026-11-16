@@ -7,7 +7,7 @@ cache sizes and tick.
 
 ## An esp32 board
 
-On esp32, [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py) appends our ESP-IDF settings after the board's, so ours
+On esp32, [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py) appends our ESP-IDF settings after the board's, so ours
 win. They come from files it finds by name, each used only if it exists, in
 this order:
 
@@ -37,7 +37,7 @@ It may also hold:
   full-speed PHYs, so the USB device comes out on the kit's USB-C marked "USB".
 
 The partition table is found the same way, the most specific `partitions.csv`
-winning ([`variants/esp32/partitions.esp32s3.csv`](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/esp32/partitions.esp32s3.csv)
+winning ([`variants/esp32/partitions.esp32s3.csv`](https://github.com/PyDevices/omnipython-builds/blob/main/variants/esp32/partitions.esp32s3.csv)
 adds a coredump partition on the S3, which a standard build leaves unused).
 Without one, the board's own is used. Either way, autosize grows the app
 partition when the image doesn't fit, unless the build keeps a board's
@@ -47,17 +47,17 @@ Run the CPU, flash and PSRAM at the fastest clocks the board's chips are
 rated for. The CPU's rating is the chip's: 240 MHz for an ESP32, S2, S3 or C5,
 160 for a C3 or C6, 400 for a P4 of revision 3 or later and 360 before that.
 Every S3 build already runs at 240
-([`variants/esp32/sdkconfig.esp32s3`](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/esp32/sdkconfig.esp32s3)),
+([`variants/esp32/sdkconfig.esp32s3`](https://github.com/PyDevices/omnipython-builds/blob/main/variants/esp32/sdkconfig.esp32s3)),
 and a P4 build runs at its revision's rating by default. A classic ESP32
 board sets 240 in the variant's `sdkconfig`, as
-[`AUDIO_KIT`'s](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/esp32/ESP32_GENERIC/AUDIO_KIT/sdkconfig)
+[`AUDIO_KIT`'s](https://github.com/PyDevices/omnipython-builds/blob/main/variants/esp32/ESP32_GENERIC/AUDIO_KIT/sdkconfig)
 does: upstream's default is 160 MHz, and at 160 a 48 kHz synth with a reverb
 runs out of time and clicks. The ESP32-S0WD and ESP32-D2WD are the exceptions,
 rated for 160.
 
 Flash and PSRAM are usually rated for 80 MHz, which the variant's `sdkconfig`
 sets in two lines
-([`QTPY_PICO`'s](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/esp32/ESP32_GENERIC/QTPY_PICO/sdkconfig)).
+([`QTPY_PICO`'s](https://github.com/PyDevices/omnipython-builds/blob/main/variants/esp32/ESP32_GENERIC/QTPY_PICO/sdkconfig)).
 Upstream's generic boards run them at 40 MHz, and at that clock a classic
 ESP32 can fall behind in Bluetooth audio. Read the flash's JEDEC ID with
 `esptool.py flash-id` and check its datasheet first. The flash clock lives in
@@ -74,7 +74,7 @@ An rp2 board of ours is a variant of one of upstream's, in
 board's own folder, so `build_mp.py` makes a folder of its own for every rp2
 build, `builds/rp2/<BOARD>/<VARIANT>/<BOARD>/`, links upstream's board into it
 unchanged, adds
-[`variants/rp2/board.cmake`](https://github.com/PyDevices/micropython-pydevices/blob/main/variants/rp2/board.cmake)
+[`variants/rp2/board.cmake`](https://github.com/PyDevices/omnipython-builds/blob/main/variants/rp2/board.cmake)
 after the board's own settings, and adds what the variant holds:
 
 - `mpconfigvariant.cmake` (required): cmake settings, included after the
@@ -125,6 +125,6 @@ to make room itself; see
 
 ## Desktop variants
 
-The unix and windows ports take our `pydevices` and `vst3-engine` variants, and
-webassembly takes `pydevices`. [The variants table](../reference/boards.md#variants)
+The unix and windows ports take our `omnipython` and `vst3-engine` variants, and
+webassembly takes `omnipython`. [The variants table](../reference/boards.md#variants)
 lists them.

@@ -16,7 +16,7 @@ import os
 
 include("../../../../modules/manifest.py")
 
-_names = [n.strip() for n in os.environ.get("PYDEVICES_MODULES", "").split(",")]
+_names = [n.strip() for n in os.environ.get("OMNIPYTHON_MODULES", "").split(",")]
 _usbhost = os.path.realpath("../../../../modules/usbhost")
 if any(n in ("all", "usbhost") or os.path.realpath(n) == _usbhost for n in _names if n):
     include("../../../../modules/library.py")

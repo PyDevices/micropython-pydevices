@@ -1,7 +1,7 @@
 # Soft-reset and board bring-up
 
 Why an interface that works on first boot can fail after a soft reset, and how to
-make it survive one. Drawn from hardware bring-ups with PyDevices `displaydev`
+make it survive one. Drawn from hardware bring-ups with OmniPython `displaydev`
 plus LVGL, exercised through `mpftp`'s soft reset.
 
 These patterns apply when porting **any** displayif interface on **any** MCU port
@@ -11,7 +11,7 @@ These patterns apply when porting **any** displayif interface on **any** MCU por
 
 ### Boards these patterns were verified on
 
-| Interface | Board (`pydevices/board_configs/fbdisplay/…`) | Panel | Notes |
+| Interface | Board (`omnipython/board_configs/fbdisplay/…`) | Panel | Notes |
 |-----------|----------------------------------|-------|-------|
 | `mipidsi` | `esp32-p4-wifi6-touch-lcd-4b` | MIPI DSI | Soft-reset / timer lifecycle reference |
 | `DotClockFramebuffer` | `qualia_tl040hds20` (+ CP `cp_qualia_tl040hds20`) | 720×720 RGB-666→565 | First MP DotClock bring-up; bounce + double-FB |
@@ -92,8 +92,8 @@ Use this loop on a new board / interface instead of guessing from one symptom.
 ### 2. Prefer fast package install over serial spam
 
 - Push only thin host-side files with mpftp (`secrets.py`, and `wifi.py` when
-  the firmware doesn't freeze pydevices).
-- Use **`mip.install` over Wi‑Fi** for pydevices board packages / libs — much
+  the firmware doesn't freeze omnipython).
+- Use **`mip.install` over Wi‑Fi** for omnipython board packages / libs — much
   faster than recursive mpftp/mpremote for large trees.
 - Soft-reset between major FS changes so imports see a clean heap.
 
@@ -232,7 +232,7 @@ When adding or porting a backend that owns host resources:
       implement the strong hook for that port
 7. [ ] Large framebuffers: PSRAM / sdkconfig sized (see PORT_MATRIX); prefer native
       blit paths into SPIRAM
-8. [ ] pydevices board_config: touch axes, backlight, `FBDisplay` refresh wiring
+8. [ ] omnipython board_config: touch axes, backlight, `FBDisplay` refresh wiring
 9. [ ] If custom `attr` is set: export `refresh` / `blit` / `fill_rect` /
       `deinit` / `__del__` there (locals_dict alone is skipped)
 10. [ ] Dot-clock RGB: continuous scanout + panel FB (not malloc + on-demand);
@@ -243,14 +243,14 @@ Stubs under `src/ports/common/notimpl/` stay stubs — no soft-reset registratio
 
 ---
 
-## PyDevices / LVGL interaction (outside this repo)
+## OmniPython / LVGL interaction (outside this repo)
 
 These are not displayif bugs but show up during the same bring-up:
 
 - **`appdev.App` + `multimer`:** one shared periodic timer; LVGL claims
   presentation via `app.pause_refresh()` / `display_driver`.
 - **Interactive REPL / mpftp:** `app.run()` / select paths must not assume a
-  non-interactive process (see `appdev` / `multimer` in pydevices).
+  non-interactive process (see `appdev` / `multimer` in omnipython).
 - **Do not leave flash logging** in `display_driver`, examples, or board_config
   on the touch/refresh path.
 

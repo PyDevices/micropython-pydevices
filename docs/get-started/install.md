@@ -11,7 +11,7 @@ On Linux, WSL, or Git Bash on Windows:
 curl -fsSL https://pydevices.github.io/install.sh | sh
 ```
 
-It clones the repository into `micropython-pydevices` in the current directory
+It clones the repository into `omnipython-builds` in the current directory
 and checks your tools. It prints only what your machine is missing, one
 `apt-get install` line per port, so you can leave out ports you won't build.
 It can install a port's packages for you, with `sh -s -- --deps rp2` (or
@@ -20,8 +20,8 @@ It can install a port's packages for you, with `sh -s -- --deps rp2` (or
 Or clone it yourself:
 
 ```bash
-git clone https://github.com/PyDevices/micropython-pydevices.git
-cd micropython-pydevices
+git clone https://github.com/PyDevices/omnipython-builds.git
+cd omnipython-builds
 ```
 
 Native Windows builds, from PowerShell, are in
@@ -30,7 +30,7 @@ installed at all, use [a codespace](../guides/build-in-a-codespace.md).
 
 ## Install what each port needs
 
-[`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py) fetches the big pieces itself: MicroPython, the modules, ESP-IDF,
+[`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py) fetches the big pieces itself: MicroPython, the modules, ESP-IDF,
 emsdk, the pico-sdk and picotool, and SDL2 for MinGW. What it can't fetch are
 your distribution's packages. On Debian or Ubuntu (WSL included):
 

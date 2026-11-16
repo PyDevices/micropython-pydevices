@@ -1,12 +1,12 @@
 # audioif
 
-The audio hardware layer for PyDevices firmware: the platform drivers under the
+The audio hardware layer for OmniPython firmware: the platform drivers under the
 audio pump. It is one C module, `_audioif`, with CircuitPython's
 `audiobusio.I2SOut` and `audioi2sin.I2SIn` on top of it — the part that knows what a thread is, what a
 mutex is, where the clock comes from and where the audio goes. It sits beside
 [`displayif`](../displayif) and
 [`usbhost`](../usbhost), and under `audiodev` in
-[pydevices](https://github.com/PyDevices/pydevices).
+[omnipython](https://github.com/PyDevices/omnipython).
 
 New here? Read the [newcomer's guide](docs/newcomers.md) for the portable
 pump-to-driver boundary, normal I2S API, and firmware integration map.
@@ -490,12 +490,12 @@ the directory that contains both, which builds every module in it.
 `AUDIODSP_DIR` (Make) and `AUDIOPUMP_AUDIODSP_DIR` (CMake) override where the
 headers are looked for.
 
-[micropython-pydevices](https://github.com/PyDevices/micropython-pydevices)'
+[omnipython-builds](https://github.com/PyDevices/omnipython-builds)'
 `build_mp.py` builds the pairing on any port, with upstream's own boards:
 
 ```bash
-micropython-pydevices/build_mp.py --port unix --variant pydevices --modules audiodsp,audioif
-micropython-pydevices/build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI \
+omnipython-builds/build_mp.py --port unix --variant omnipython --modules audiodsp,audioif
+omnipython-builds/build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI \
     --flash 16MB --modules audiodsp,audioif
 ```
 

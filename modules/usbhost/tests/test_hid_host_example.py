@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Brad Barnett
 #
 # SPDX-License-Identifier: MIT
-"""examples/hid_host.py turns usb.host.hid's key events into PyDevices ones.
+"""examples/hid_host.py turns usb.host.hid's key events into OmniPython ones.
 
 ``usb.host.hid`` returns ``(KEY_DOWN, keycode, modifiers)`` and the like, with
 adafruit_hid's Keycode values. The example maps each to an ``events.Key``,

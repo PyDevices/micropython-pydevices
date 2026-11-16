@@ -8,7 +8,7 @@ What's still ahead is in the repository's [ROADMAP.md](../ROADMAP.md); this page
 keeps the record of how the build-out went.
 
 1. Scaffold — done
-2. pydevices board configs on `dotclockframebuffer.DotClockFramebuffer` + `FBDisplay` — done
+2. omnipython board configs on `dotclockframebuffer.DotClockFramebuffer` + `FBDisplay` — done
 3. `spibus` + smoke tests — done
 4. esp32 `dotclockframebuffer`, `i80bus`, `mipidsi` — done
 5. mimxrt eLCDIF `dotclockframebuffer`, RT1176 `mipidsi`, FlexIO `i80bus` — done
@@ -22,5 +22,5 @@ keeps the record of how the build-out went.
    - **Pending:** RK043 (mimxrt eLCDIF), RT1170 DSI, Pico DVI full panel soak
 10. Lifecycle / soft-reset registry for all host-owning backends — **done**
     ([idempotent-lifecycle.md](idempotent-lifecycle.md))
-11. mimxrt i80bus: board-specific pydevices config, optional DMA bulk path — pending
-12. `displaydev`: remove legacy `RGBDisplay` package — done in pydevices
+11. mimxrt i80bus: board-specific omnipython config, optional DMA bulk path — pending
+12. `displaydev`: remove legacy `RGBDisplay` package — done in omnipython

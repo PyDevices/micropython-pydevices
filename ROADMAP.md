@@ -2,7 +2,7 @@
 
 Work here mostly follows bug reports and requests, so if something is broken
 or missing for you, open an
-[issue](https://github.com/PyDevices/micropython-pydevices/issues).
+[issue](https://github.com/PyDevices/omnipython-builds/issues).
 
 ## Firmware
 
@@ -30,7 +30,7 @@ ours to port.
   works on the WIFI6 DEV-KIT and a webcam enumerates; reading a drive and a
   webcam's stream haven't been tried on CircuitPython there yet.
 - **The USB host drivers on CircuitPython's own `usb.core`**, on the RP2040
-  and i.MX: planned in [pydevices](https://github.com/PyDevices/pydevices/blob/main/ROADMAP.md#usb).
+  and i.MX: planned in [omnipython](https://github.com/PyDevices/omnipython/blob/main/ROADMAP.md#usb).
 
 ## tflite models
 

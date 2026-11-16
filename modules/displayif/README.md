@@ -1,19 +1,19 @@
 # displayif
 
-**Status:** source-integrated component — built into firmware from source as a user C module, not installed as a package. By design it has no versioned releases and is **not** in PyDevices' publishing set (unlike `pydevices` / `pydevices-desktop`). Maturity: **Alpha**. Issues: [micropython-pydevices issues](https://github.com/PyDevices/micropython-pydevices/issues).
+**Status:** source-integrated component — built into firmware from source as a user C module, not installed as a package. By design it has no versioned releases and is **not** in PyDevices' publishing set (unlike `omnipython` / `omnipython-desktop`). Maturity: **Alpha**. Issues: [omnipython-builds issues](https://github.com/PyDevices/omnipython-builds/issues).
 
-Native display **interface** modules for PyDevices `displaydev`. Portable code in [`src/ports/common/`](src/ports/common/); SoC-specific code under `src/ports/<mp-port>/`.
+Native display **interface** modules for OmniPython `displaydev`. Portable code in [`src/ports/common/`](src/ports/common/); SoC-specific code under `src/ports/<mp-port>/`.
 
 New here? Read the [newcomer's guide](docs/newcomers.md) for the board-to-
 backend map, firmware integration boundary, and lifecycle rules.
 
-MicroPython board configs in `pydevices` that raise `NotImplementedError` on import need firmware built with the matching displayif module. Native C modules register directly — **no Python re-export layer** in this repo.
+MicroPython board configs in `omnipython` that raise `NotImplementedError` on import need firmware built with the matching displayif module. Native C modules register directly — **no Python re-export layer** in this repo.
 
-**CircuitPython** already has MCU display interfaces (`dotclockframebuffer`, `mipidsi`, `picodvi`, …) — use [`pydevices/board_configs/cp/`](https://github.com/PyDevices/pydevices/tree/main/board_configs/cp) with stock CP firmware for those. **Exception:** desktop `usdl2` (unix) builds into CircuitPython's unix port as a user C module, from this repo's [`micropython.mk`](micropython.mk).
+**CircuitPython** already has MCU display interfaces (`dotclockframebuffer`, `mipidsi`, `picodvi`, …) — use [`omnipython/board_configs/cp/`](https://github.com/PyDevices/omnipython/tree/main/board_configs/cp) with stock CP firmware for those. **Exception:** desktop `usdl2` (unix) builds into CircuitPython's unix port as a user C module, from this repo's [`micropython.mk`](micropython.mk).
 
 **Status:** Accelerated interfaces on esp32, mimxrt, samd, and rp2. See [docs/port-matrix.md](docs/port-matrix.md).
 
-Use this repo when a `pydevices` board config needs a native display interface that is not available in the stock MicroPython port. In practice, you usually start with the target board’s port and the relevant display backend (for example `mipidsi`, `dotclockframebuffer`, or `picodvi`), then build the firmware with this module in it (see [Build](#-build)). If you are debugging a bring-up problem, begin with [docs/soft-reset-and-bring-up.md](docs/soft-reset-and-bring-up.md) and the port notes in [docs/port-matrix.md](docs/port-matrix.md).
+Use this repo when a `omnipython` board config needs a native display interface that is not available in the stock MicroPython port. In practice, you usually start with the target board’s port and the relevant display backend (for example `mipidsi`, `dotclockframebuffer`, or `picodvi`), then build the firmware with this module in it (see [Build](#-build)). If you are debugging a bring-up problem, begin with [docs/soft-reset-and-bring-up.md](docs/soft-reset-and-bring-up.md) and the port notes in [docs/port-matrix.md](docs/port-matrix.md).
 
 **Agents:** start at [AGENTS.md](AGENTS.md). Soft-reset / idempotent lifecycle
 (**implemented**): [docs/idempotent-lifecycle.md](docs/idempotent-lifecycle.md). Bring-up /
@@ -64,12 +64,12 @@ Tested against the MicroPython this repository pins ([DEPENDENCIES.lock](../../D
 11.0.0-alpha.2 oracle, and SDL2 >= 2.0 (desktop `usdl2`) — see [this module's DEPENDENCIES.lock](DEPENDENCIES.lock) for the
 other pins and how to verify them locally.
 
-On MicroPython 1.29 or later, clone micropython-pydevices anywhere (displayif is
+On MicroPython 1.29 or later, clone omnipython-builds anywhere (displayif is
 its `modules/displayif` folder) and add one line to the manifest your build
 already uses:
 
 ```python
-include("/path/to/micropython-pydevices/modules/displayif/manifest.py")
+include("/path/to/omnipython-builds/modules/displayif/manifest.py")
 ```
 
 On unix that manifest is `ports/unix/variants/standard/manifest.py`; on esp32
@@ -115,13 +115,13 @@ ports. Unix needs `libsdl2-dev`. Windows (MinGW) needs an unpacked
 [SDL2 MinGW development ZIP](https://github.com/libsdl-org/SDL/releases) and
 `SDL2_DEV` pointing at its root (see [`tools/sdl2_dev_env.sh`](tools/sdl2_dev_env.sh)).
 
-For several PyDevices modules at once,
-[micropython-pydevices](https://github.com/PyDevices/micropython-pydevices)
+For several OmniPython modules at once,
+[omnipython-builds](https://github.com/PyDevices/omnipython-builds)
 keeps ready-made manifests, variants and boards.
 
 CircuitPython unix: build CircuitPython's unix port with this repository as a
 user C module, `make -C ports/unix USER_C_MODULES=/path/to/displayif` from a
-CircuitPython 11 checkout, or micropython-pydevices'
+CircuitPython 11 checkout, or omnipython-builds'
 `./build_mp.py --interpreter circuitpython --port unix --modules displayif`.
 Only `usdl2` builds there; any other CircuitPython port refuses this module,
 because boards there use CircuitPython's own `displayio`.
@@ -161,14 +161,14 @@ Then run the lifecycle API test under the same interpreter:
 [the protomatter/ README](third_party/protomatter/README.md)
 for the identified upstream revision and license text.
 
-The JPEG decoder, `jpegio`, moved to micropython-pydevices'
+The JPEG decoder, `jpegio`, moved to omnipython-builds'
 [modules/jpegio](../jpegio) on 2026-10-06, with its vendored TJpgDec and its notice.
 
 ## Related
 
 - [docs/port-matrix.md](docs/port-matrix.md) — port matrix, hardware validation, RP2350 DSI notes
 - [docs/ports/esp32.md](docs/ports/esp32.md) — Qualia DotClock + P4 mipidsi behavioral notes
-- [PyDevices/pydevices](https://github.com/PyDevices/pydevices) — canonical drivers and board configs
+- [PyDevices/omnipython](https://github.com/PyDevices/omnipython) — canonical drivers and board configs
 - [PyDevices/gallery](https://github.com/PyDevices/gallery) — examples and gallery
 
 What's planned next is in [ROADMAP.md](ROADMAP.md).

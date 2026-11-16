@@ -17,7 +17,7 @@ CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=9
 # A flash write or erase keeps the cache off for as long as the chip takes
 # (about 35 ms for a 4 KB sector on this board's XMC flash), and the USB
 # interrupt can't run meanwhile: a sound card lost about 40 ms of audio per
-# sector, 80 ms for an 8 KB file (micropython-pydevices#451). With auto
+# sector, 80 ms for an 8 KB file (omnipython-builds#451). With auto
 # suspend the controller pauses the erase when the CPU reads flash, and the
 # sound card loses nothing (1 to 2 packets of 600 across a write, about the
 # count it loses with no writes at all).

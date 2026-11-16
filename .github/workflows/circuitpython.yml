@@ -144,13 +144,13 @@ jobs:
 
       # castif and h264enc build to nothing here (they are the ESP32-P4's); they
       # are named so their micropython.mk is checked on a port without them.
-      # pydevices comes with displayif for its SDLDisplay. With pdwidgets and
+      # omnipython comes with displayif for its SDLDisplay. With pdwidgets and
       # palettes the frozen strings pass CircuitPython's 64 KB pool, so the
       # unix build uses four-byte qstr offsets (build_mp.py sets them).
       - name: Build CircuitPython's unix port with our C modules
         run: |
           python3 build_mp.py --interpreter circuitpython --port unix \
-            --modules pygraphics,audiodsp,displayif,pydevices,pdwidgets,palettes,pngio,svgio,tsmux,ppa,jpegio,cameraif,mdns,usbhost,castif,h264enc
+            --modules pygraphics,audiodsp,displayif,omnipython,pdwidgets,palettes,pngio,svgio,tsmux,ppa,jpegio,cameraif,mdns,usbhost,castif,h264enc
 
       - name: Every module imports
         run: |
@@ -164,7 +164,7 @@ jobs:
           # jpegio is CircuitPython's own decoder there: ours adds only the encoder's C API.
           assert hasattr(jpegio, "JpegDecoder")
           assert cameraif.available() is False
-          # pydevices freezes CircuitPython's asyncio and the ticks under it.
+          # omnipython freezes CircuitPython's asyncio and the ticks under it.
           import asyncio, adafruit_ticks, bledev
           # pdwidgets and palettes are frozen with it: more names than a 64 KB pool holds.
           import pdwidgets, palettes
@@ -222,7 +222,7 @@ jobs:
           usdl2.SDL_Quit()"
           timeout 60 $MP modules/displayif/tests/test_lifecycle_api.py
 
-      - name: pydevices' SDLDisplay draws on it
+      - name: omnipython's SDLDisplay draws on it
         env:
           SDL_VIDEODRIVER: dummy
         run: |

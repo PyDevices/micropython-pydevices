@@ -19,7 +19,7 @@ replacing whatever the last set left:
                         (a release download carries no CORS headers, so the
                         flasher cannot read it from the Release)
     manifests/<id>.json an ESP Web Tools manifest for each ESP32 build
-    interpreters.json   the desktop interpreters of the newest pydevices final,
+    interpreters.json   the desktop interpreters of the newest omnipython final,
                         when one is given or found (see below)
 
 Every file is checked against the sha256 in firmware.json on the way in. The

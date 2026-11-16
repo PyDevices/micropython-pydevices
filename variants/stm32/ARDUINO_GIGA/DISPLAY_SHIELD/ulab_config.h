@@ -16,8 +16,8 @@
 // array functions below. A program that needs them wants a GIGA build
 // without Bluetooth, or a board with more flash.
 
-#ifndef PYDEVICES_GIGA_ULAB_CONFIG_H
-#define PYDEVICES_GIGA_ULAB_CONFIG_H
+#ifndef OMNIPYTHON_GIGA_ULAB_CONFIG_H
+#define OMNIPYTHON_GIGA_ULAB_CONFIG_H
 
 // One-dimensional arrays, which is what an audio block is.
 #define ULAB_MAX_DIMS                               1

@@ -17,7 +17,7 @@ while True:
 
 A whole board screen served as HLS, with the encoder and the HTTP server in
 a task of their own, is `HlsDisplay` in the
-[castdisplay](https://github.com/PyDevices/pydevices/tree/main/packages/castdisplay)
+[castdisplay](https://github.com/PyDevices/omnipython/tree/main/packages/castdisplay)
 package.
 
 [`examples/tsmux_simpletest.py`](examples/tsmux_simpletest.py) cuts encoded video into HLS segments and a playlist that ffplay or VLC streams.

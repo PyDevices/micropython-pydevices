@@ -6,7 +6,7 @@
 /modules/*
 !/modules/manifest.py
 !/modules/library.py
-!/modules/pydevices/
+!/modules/omnipython/
 !/modules/palettes/
 !/modules/pdwidgets/
 !/modules/iconkit/

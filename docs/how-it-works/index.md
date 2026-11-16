@@ -1,7 +1,7 @@
 # How it works
 
 This repository builds MicroPython-compatible and CircuitPython-compatible
-firmware with the PyDevices C modules compiled in. It holds our patches to one
+firmware with the OmniPython C modules compiled in. It holds our patches to one
 pinned MicroPython release, our variants and the build command. It is not a
 fork, and it publishes no Python package.
 
@@ -39,7 +39,7 @@ is the user's side of this.
 - Upstream is **pinned**. Moving the `micropython` line of `DEPENDENCIES.lock` re-validates every patch.
 - Patches are justified in their headers. Never hand-edit a patched tree: change
   the patch and prepare again.
-- [`build_mp.py`](https://github.com/PyDevices/micropython-pydevices/blob/main/build_mp.py) names no version and no setting. Pins move in the lock files,
+- [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py) names no version and no setting. Pins move in the lock files,
   and esp32 settings live in sdkconfig fragments it finds by convention.
 - Publishing binaries is a separate decision from this source repository.
 

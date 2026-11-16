@@ -29,7 +29,7 @@ for name in NAMES:
         if src[j] == "}" and depth == 0:
             out.append(src[start:j + 1])
             break
-header = """// castif's MPEG-TS muxer as it was at micropython-pydevices %s
+header = """// castif's MPEG-TS muxer as it was at omnipython-builds %s
 // (modules/castif/src/mod_castif.c), extracted verbatim by
 // tests/extract_castif_ref.py. compare_castif.c builds it beside tsmux_core.c
 // and checks both write the same packets. Do not edit: regenerate.

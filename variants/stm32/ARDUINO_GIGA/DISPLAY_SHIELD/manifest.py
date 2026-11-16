@@ -37,7 +37,7 @@ require("usb-device-msc", library="omnipython-lib")
 # to LVGL and the C modules. This writes the list for build_mp.py, which
 # compiles it for the board into romfs.img beside the firmware. ROMFS is
 # mounted at boot and /rom is on sys.path, so the modules import as before.
-_python_to_romfs = os.environ.get("PYDEVICES_PYTHON_TO_ROMFS")
+_python_to_romfs = os.environ.get("OMNIPYTHON_PYTHON_TO_ROMFS")
 _manifest = include.__self__
 # The pass that only collects C modules lists no files: leave the list alone.
 if _python_to_romfs and _manifest.files():

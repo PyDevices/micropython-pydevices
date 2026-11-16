@@ -2,18 +2,18 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Sphinx configuration for the micropython-pydevices documentation.
+"""Sphinx configuration for the omnipython-builds documentation.
 
-Everything shared by the PyDevices documentation projects (theme, top bar,
-Markdown setup) comes from pydevices-docs. This repository has no Python
+Everything shared by the OmniPython documentation projects (theme, top bar,
+Markdown setup) comes from omnipython-docs. This repository has no Python
 package to document, so the reference pages are written by hand.
 """
 
-from pydevices_docs import configure
+from omnipython_docs import configure
 
 globals().update(configure(
-    "micropython-pydevices", __file__,
-    repo="PyDevices/micropython-pydevices", edit_path="docs",
+    "omnipython-builds", __file__,
+    repo="PyDevices/omnipython-builds", edit_path="docs",
     version_file=None,
 ))
 

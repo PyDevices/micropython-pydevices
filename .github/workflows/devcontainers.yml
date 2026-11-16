@@ -43,12 +43,12 @@ jobs:
         include:
           - port: unix
             run: |
-              ./build_mp.py --port unix --variant pydevices --modules all
-              builds/unix/pydevices/micropython -c "import sys; print(sys.implementation); import displaydev; print('displaydev imports')"
+              ./build_mp.py --port unix --variant omnipython --modules all
+              builds/unix/omnipython/micropython -c "import sys; print(sys.implementation); import displaydev; print('displaydev imports')"
           - port: webassembly
             run: |
-              ./build_mp.py --port webassembly --variant pydevices --modules all
-              b=builds/webassembly/pydevices
+              ./build_mp.py --port webassembly --variant omnipython --modules all
+              b=builds/webassembly/omnipython
               printf 'import sys\nprint(sys.implementation)\nimport displaydev\nprint("displaydev imports")\n' > /tmp/check.py
               node $b/micropython.mjs /tmp/check.py
               # workbench, with this build in it, on the port the config forwards
@@ -67,8 +67,8 @@ jobs:
               ls -l builds/rp2/RPI_PICO2/default/firmware.uf2
           - port: windows
             run: |
-              ./build_mp.py --port windows --variant pydevices --modules all
-              ls -l builds/windows/pydevices/micropython.exe
+              ./build_mp.py --port windows --variant omnipython --modules all
+              ls -l builds/windows/omnipython/micropython.exe
           - port: esp32
             run: |
               ./build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB --modules all

@@ -1,17 +1,17 @@
-# micropython-pydevices
+# omnipython-builds
 
-micropython-pydevices builds firmware: MicroPython-compatible and
-CircuitPython-compatible interpreters with the PyDevices C modules compiled in,
+omnipython-builds builds firmware: MicroPython-compatible and
+CircuitPython-compatible interpreters with the OmniPython C modules compiled in,
 for boards, desktops and the browser, with one command.
 
 ```bash
 curl -fsSL https://pydevices.github.io/install.sh | sh
 ```
 
-That clones this repository into `micropython-pydevices` in the current
+That clones this repository into `omnipython-builds` in the current
 directory (Linux, WSL, or Git Bash on Windows) and tells you which packages your
 machine still needs. Or clone it yourself: `git clone
-https://github.com/PyDevices/micropython-pydevices.git`. The build fetches
+https://github.com/PyDevices/omnipython-builds.git`. The build fetches
 everything else.
 
 Build MicroPython for your desktop with the pygraphics module inside:

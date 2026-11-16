@@ -19,7 +19,7 @@ phone, such as MIDIPadidi, then plays into the board like any controller. A
 phone is a high-speed device, so it needs no ``FULL_SPEED`` behind a hub.
 
 Needs: a board with USB host support (firmware built with usbhost) and the
-``midiports`` package from pydevices, installed with ``mip``. Behind a hub
+``midiports`` package from omnipython, installed with ``mip``. Behind a hub
 on an ESP32-P4, set ``FULL_SPEED = True`` below: a keyboard is a full-speed
 device, and the P4's high-speed port can't reach one through a hub without a
 transaction translator, which the ESP-IDF host lacks. At full speed the hub
