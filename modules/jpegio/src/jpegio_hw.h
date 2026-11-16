@@ -24,6 +24,10 @@
 mp_obj_t jpegio_hw_encode(const void *pixels, int width, int height, size_t stride,
     int format, bool swap, int quality, bool subsample, bool exact);
 
+// True after a jpegio_hw_encode() that gave up because exact=True's widened
+// copy of the image (3 bytes a pixel, in one piece) could not be had.
+extern bool jpegio_hw_no_room;
+
 // Decodes a whole JPEG to RGB565 at (x, y) of a target `stride` pixels wide.
 // Returns NULL, or a short reason the engine could not.
 const char *jpegio_hw_decode(const uint8_t *data, size_t len, int width, int height,

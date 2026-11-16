@@ -110,6 +110,10 @@ mp_obj_t jpegio_encode(const void *pixels, size_t len, int width, int height, si
             }
             return out;
         }
+        if (hardware > 0 && jpegio_hw_no_room) {
+            mp_raise_msg(&mp_type_OSError,
+                MP_ERROR_TEXT("no room for exact=True's copy of this image (3 bytes a pixel in one piece); exact=False reads it in place"));
+        }
         if (hardware > 0) {
             mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("the JPEG engine could not encode this image"));
         }
