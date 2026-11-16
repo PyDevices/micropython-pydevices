@@ -202,6 +202,9 @@
   },
   "0067-micropython-shared-tinyusb-a-p4-stream-keeps-playing-while-flash-is-written.patch": {
    "sha256": "92670f81447c81492d850a9ecbeddc5301e627aea4a98a00081990d06376e4d9"
+  },
+  "0068-micropython-py-scheduler-callbacks-run-on-the-main-thread-only.patch": {
+   "sha256": "c2ec86c82e42466e902a07090361acb211322bb104523212254b25e86512b1b7"
   }
  },
  "tinyusb_patches": {

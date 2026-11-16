@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 21:00:00 -0600
+Subject: [PATCH] py/scheduler: Run scheduled callbacks on the main thread
+ only, with a GIL too.
+
+Without a GIL the scheduler already runs only on the main thread. With one
+(the esp32 port) it runs on whichever thread calls mp_handle_pending()
+next, and a thread that waits in a socket call does that every time its
+wait comes round. So a soft timer's callback, LVGL's timer pass, the
+WebREPL poll and anything given to micropython.schedule() run there,
+nested inside that thread's code and on its stack, which is often small.
+
+On an ESP32-P4 with a thread making HTTPS requests for 25 s, a 5 ms
+multimer timer ran on that thread for 713 to 1592 of 3720 to 4896 ticks,
+an LVGL timer for 285 to 637 of 1588 to 2175, and a callback scheduled
+when the thread's job ended ran on the thread itself every time. A thread
+that only sleeps took 2060 of 4974 ticks. An app that drew from its timer
+there stopped the board with no traceback.
+
+Run the scheduler on the main thread only, as without a GIL, and let a
+thread that isn't the main one hand the GIL on at its next bounce while
+callbacks are pending, since it can't run them itself. Without that a
+thread in a pure Python loop would keep the GIL, and the callbacks
+waiting, until it blocked.
+
+With the patch, in five runs of the same test and one with a sleeping
+thread, not one callback ran off the main thread. The main thread ran
+more ticks than before: 3587 against 2983 with about 20 requests, 3013
+against 2128 with about 30. The cost is that a tick now waits for the
+main thread to get the GIL back: time between ticks over 20 ms grew from
+about 170 ms per request to about 360 ms, most of it in the TLS
+handshake. Those ticks used to run on the requesting thread instead.
+---
+diff --git a/py/scheduler.c b/py/scheduler.c
+--- a/py/scheduler.c
++++ b/py/scheduler.c
+@@ -283,9 +283,11 @@
+     // Handle any pending callbacks.
+     #if MICROPY_ENABLE_SCHEDULER
+     bool run_scheduler = (MP_STATE_VM(sched_state) == MP_SCHED_PENDING);
+-    #if MICROPY_PY_THREAD && !MICROPY_PY_THREAD_GIL
+-    // Avoid races by running the scheduler on the main thread, only.
+-    // (Not needed if GIL enabled, as GIL ensures thread safety here.)
++    #if MICROPY_PY_THREAD
++    // Run the scheduler on the main thread, only. Without a GIL that avoids
++    // races. With one it keeps a callback off another thread's stack: a
++    // thread waiting in a socket call would otherwise run timer callbacks,
++    // the REPL and anything else scheduled, nested inside its own code.
+     run_scheduler = run_scheduler && mp_thread_is_main_thread();
+     #endif
+     if (run_scheduler) {
+@@ -300,7 +302,7 @@
+ // nothing would wake the wait until some unrelated interrupt.
+ static inline bool mp_event_callback_ready(void) {
+     #if MICROPY_ENABLE_SCHEDULER
+-    #if MICROPY_PY_THREAD && !MICROPY_PY_THREAD_GIL
++    #if MICROPY_PY_THREAD
+     if (!mp_thread_is_main_thread()) {
+         return false;
+     }
+diff --git a/py/vm.c b/py/vm.c
+--- a/py/vm.c
++++ b/py/vm.c
+@@ -1381,8 +1381,11 @@
+                     gil_divisor = MICROPY_PY_THREAD_GIL_VM_DIVISOR;
+                     #endif
+                     #if MICROPY_ENABLE_SCHEDULER
+-                    // can only switch threads if the scheduler is unlocked
+-                    if (MP_STATE_VM(sched_state) == MP_SCHED_IDLE)
++                    // can only switch threads if the scheduler is unlocked;
++                    // another thread also lets go while callbacks are pending,
++                    // since only the main thread runs them
++                    if (MP_STATE_VM(sched_state) == MP_SCHED_IDLE
++                        || (MP_STATE_VM(sched_state) == MP_SCHED_PENDING && !mp_thread_is_main_thread()))
+                     #endif
+                     {
+                     MP_THREAD_GIL_EXIT();
+-- 
+2.43.0
