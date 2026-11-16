@@ -62,4 +62,19 @@ esp_err_t __wrap_esp_cache_msync(void *addr, size_t size, int flags) {
     return __real_esp_cache_msync(addr, size, flags);
 }
 
+#else
+
+// A chip that syncs its cache in one piece has no such mutex. The link wraps
+// the function in every esp32 build, so it still needs its other end here.
+
+#include <stddef.h>
+
+#include "esp_err.h"
+
+esp_err_t __real_esp_cache_msync(void *addr, size_t size, int flags);
+
+esp_err_t __wrap_esp_cache_msync(void *addr, size_t size, int flags) {
+    return __real_esp_cache_msync(addr, size, flags);
+}
+
 #endif
