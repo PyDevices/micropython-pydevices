@@ -54,6 +54,8 @@ print("Streaming for %d seconds at http://%s:8090/stream.m3u8" % (SECONDS, addre
 
 try:
     frames = FPS * SECONDS
+    period = 1000 // FPS
+    due = time.ticks_ms()
     for n in range(frames):
         # Draw the frame: background first, then the square.
         canvas.fill(BLUE)
@@ -64,7 +66,11 @@ try:
         # Offer the finished frame. If the encoder is still busy with
         # the last one, it skips this one and the stream carries on.
         hls.offer(frame)
-        time.sleep_ms(1000 // FPS)
+
+        # Wait for the next frame's turn. Drawing used part of the period,
+        # so sleep only what is left of it.
+        due = time.ticks_add(due, period)
+        time.sleep_ms(max(0, time.ticks_diff(due, time.ticks_ms())))
 finally:
     # Report what was sent, then stop serving and free the encoder.
     stats = hls.stats()
