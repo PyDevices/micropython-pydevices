@@ -18,7 +18,7 @@
    "sha256": "231fd1834fc60ac733b57c9d2be5f455966bc570d0f9d02ce6a079413d5a3ab4"
   },
   "0006-micropython-webassembly-support-soft-reinitialization.patch": {
-   "sha256": "840230162343cce7322a124cd8ae2f7a4c17e30666e97da002179b85e7434247"
+   "sha256": "c99cd6f86226fde8e11f2b38440e99c76cc50f692f3555ede9555887727e09fd"
   },
   "0007-micropython-webassembly-inert-jsffi-callbacks-across-reinit.patch": {
    "sha256": "89e4ec6ac0873b130047a06428995a394363933718112e648c4f7a26d06eea93"
