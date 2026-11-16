@@ -822,8 +822,12 @@ static void usbhost_host_task(void *arg) {
 
     #if USBHOST_HOST_SERVE_CORE >= 0
     // Wait here, on the controller's core, while the loop runs on the other.
-    // The notification can only come from the loop's task, on its way out.
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    // The loop's task clears its handle and then notifies, on its way out; a
+    // notification from anywhere else finds the handle still set and the
+    // wait goes on.
+    while (usbhost_host_serve_handle != NULL) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    }
     #else
     usbhost_host_serve();
     #endif
