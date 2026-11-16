@@ -19,7 +19,7 @@ Needs: a Pico W or Pico 2 W with firmware built with the btclassic module
 
 Run it:
 
-    mpftp run btclassic_library.py
+    mcuctl run btclassic_library.py
 
 Tested on: Pimoroni Pico Plus 2 W, MicroPython 1.30.0-preview with
 btclassic, with a Galaxy S21, whose one player can't be browsed until a

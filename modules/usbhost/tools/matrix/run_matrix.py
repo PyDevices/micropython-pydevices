@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 """The device-class proof matrix: every combination enumerates on Windows and
-moves data. Runs in WSL; drives the board over WebREPL with ``mpftp hold``.
+moves data. Runs in WSL; drives the board over WebREPL with ``mcuctl hold``.
 
     python3 tools/matrix/run_matrix.py --ws 192.168.1.159 --serial DCDA0C48AC0C [--only msc,hid]
     python3 tools/matrix/run_matrix.py --dev COM4 --serial E8F60AE0F070 --in-max 7   # the P4 panel
@@ -39,7 +39,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MPFTP = os.path.expanduser("~/gh/pydevices/mpftp/scripts/mpftp")
+MCUCTL = os.path.expanduser("~/gh/pydevices/mcuctl/scripts/mcuctl")
 WIN_TMP = "/mnt/c/Users/bradb/AppData/Local/Temp/usbhost-matrix"
 CLASSES = ("cdc", "hid", "midi", "msc")
 # IN endpoints each function takes; the board's own serial port takes two.
@@ -61,7 +61,7 @@ def win_py(script, *args, timeout=120):
 
 def ask(code, timeout=60):
     """Run code in the held REPL; returns what it printed after the @@ marker."""
-    rc, out = sh([MPFTP, "hold", "ask", "-d", DEV, "print('@@', repr(%s))" % code, "--marker", "@@", "--text",
+    rc, out = sh([MCUCTL, "hold", "ask", "-d", DEV, "print('@@', repr(%s))" % code, "--marker", "@@", "--text",
                   "--timeout", str(timeout)], timeout=timeout + 30)
     # With --marker and --text the holder prints just what followed the marker.
     return out.strip() if rc == 0 else "ERROR " + out[-300:]
@@ -210,16 +210,16 @@ def main():
     # running beside this one, and an unnamed command would find that one.
     global DEV
     DEV = args.dev or "ws://" + args.ws
-    sh([MPFTP, "hold", "stop", "-d", DEV], timeout=30)
-    rc, out = sh([MPFTP, "hold", "start", "-d", DEV], timeout=60)
+    sh([MCUCTL, "hold", "stop", "-d", DEV], timeout=30)
+    rc, out = sh([MCUCTL, "hold", "start", "-d", DEV], timeout=60)
     # The board's REPL outlives a run: drop any matrix_board an earlier run
     # imported, so this run uses the file on the board now.
     # Opening a UART bridge can reset the board, and a board that boots into
     # an app (main.py) isn't at the prompt: interrupt, and retry until it
     # answers.
     for _ in range(10):
-        sh([MPFTP, "hold", "interrupt", "-d", DEV], timeout=30)
-        sh([MPFTP, "hold", "ask", "-d", DEV, "import sys; sys.modules.pop('matrix_board', None); import matrix_board",
+        sh([MCUCTL, "hold", "interrupt", "-d", DEV], timeout=30)
+        sh([MCUCTL, "hold", "ask", "-d", DEV, "import sys; sys.modules.pop('matrix_board', None); import matrix_board",
             "--timeout", "20"], timeout=60)
         if ask("'matrix_board' in sys.modules") == "True":
             break
@@ -227,7 +227,7 @@ def main():
     else:
         sys.exit("the board never imported matrix_board")
     if args.plant:
-        sh([MPFTP, "hold", "ask", "-d", DEV, "matrix_board._drop = 0", "--timeout", "10"], timeout=40)
+        sh([MCUCTL, "hold", "ask", "-d", DEV, "matrix_board._drop = 0", "--timeout", "10"], timeout=40)
 
     classes = args.only.split(",") if args.only else CLASSES
     results = []
@@ -293,8 +293,8 @@ def main():
             row["pass"] = ok
             results.append(row)
             print(json.dumps(row), flush=True)
-    sh([MPFTP, "hold", "ask", "-d", DEV, "matrix_board.stop()", "--timeout", "10"], timeout=40)
-    sh([MPFTP, "hold", "stop", "-d", DEV], timeout=30)
+    sh([MCUCTL, "hold", "ask", "-d", DEV, "matrix_board.stop()", "--timeout", "10"], timeout=40)
+    sh([MCUCTL, "hold", "stop", "-d", DEV], timeout=30)
     good = all(r["pass"] for r in results)
     print("MATRIX", "PASS" if good else "FAIL", "%d of %d" % (sum(r["pass"] for r in results), len(results)))
     sys.exit(0 if good else 1)

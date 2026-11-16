@@ -17,7 +17,7 @@ Needs: a board with USB device support, the ``usb-device-midi`` and
 
 Run it:
 
-    mpftp run examples/midi_device_in.py --follow --timeout 90
+    mcuctl run examples/midi_device_in.py --follow --timeout 90
 
 Then play into the board's MIDI port.
 

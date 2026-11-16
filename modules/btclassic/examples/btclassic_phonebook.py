@@ -14,7 +14,7 @@ btclassic_pairing.py or any of the audio examples.
 
 Run it:
 
-    mpftp run btclassic_phonebook.py
+    mcuctl run btclassic_phonebook.py
 
 Tested on: ESP32 Audio Kit, MicroPython 1.30.0-preview with btclassic,
 with a Galaxy S21, after allowing the board to read its contacts.

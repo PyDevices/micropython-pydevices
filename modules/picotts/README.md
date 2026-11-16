@@ -46,7 +46,7 @@ sentences and prints how long each took.
 
   Or download the two files from the URLs in
   [`voices/en-US.json`](voices/en-US.json) and copy them to `/lib/picotts/`
-  with `mpremote cp` or `mpftp put`. `TTS(audio, voice_dir="/sd/voice")`
+  with `mpremote cp` or `mcuctl put`. `TTS(audio, voice_dir="/sd/voice")`
   reads them from another folder.
 - **An audio output at 16,000 Hz.** Speech comes out at 16 kHz mono, and
   `AudioOut` doesn't resample, so open it at that rate or the voice plays at

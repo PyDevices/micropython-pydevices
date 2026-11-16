@@ -2,7 +2,7 @@
 
 Why an interface that works on first boot can fail after a soft reset, and how to
 make it survive one. Drawn from hardware bring-ups with OmniPython `displaydev`
-plus LVGL, exercised through `mpftp`'s soft reset.
+plus LVGL, exercised through `mcuctl`'s soft reset.
 
 These patterns apply when porting **any** displayif interface on **any** MCU port
 (esp32 / rp2 / mimxrt / samd). Lifecycle contract:
@@ -85,16 +85,16 @@ Use this loop on a new board / interface instead of guessing from one symptom.
 ### 1. Establish a reversible baseline
 
 - Backup the MCU filesystem before mass deletes or firmware experiments
-  (`mpftp cp :/ …` or targeted `get`).
+  (`mcuctl cp :/ …` or targeted `get`).
 - Note board + variant + partition autosize (P4 + LVGL often overflows stock
-  app partition; mpftp autosize grows `esp32_partitions/<board>.csv`).
+  app partition; mcuctl autosize grows `esp32_partitions/<board>.csv`).
 
 ### 2. Prefer fast package install over serial spam
 
-- Push only thin host-side files with mpftp (`secrets.py`, and `wifi.py` when
+- Push only thin host-side files with mcuctl (`secrets.py`, and `wifi.py` when
   the firmware doesn't freeze omnipython).
 - Use **`mip.install` over Wi‑Fi** for omnipython board packages / libs — much
-  faster than recursive mpftp/mpremote for large trees.
+  faster than recursive mcuctl/mpremote for large trees.
 - Soft-reset between major FS changes so imports see a clean heap.
 
 ### 3. Separate failure classes early
@@ -109,7 +109,7 @@ then `import lv_test_timer`, not the whole gallery). Classify:
 | Presentation | Black panel, wrong colors, very slow full-screen updates |
 | Timebase | UI timers run at wrong wall-clock rate |
 | Input | Taps ignored, inverted axes, release never delivered |
-| Tooling noise | mpftp EOF timeout, flash write flicker from debug logs |
+| Tooling noise | mcuctl EOF timeout, flash write flicker from debug logs |
 
 Fix the class at its layer; do not paper over with board_config special cases.
 
@@ -121,18 +121,18 @@ For every host-owning change:
 construct / import → soft-reset → construct / import again
 ```
 
-Must succeed **without hard reset**. mpftp connect / Run paths soft-reset and
+Must succeed **without hard reset**. mcuctl connect / Run paths soft-reset and
 skip `main.py` — that is the workflow users hit.
 
 **Tooling note:** `timeout waiting for first EOF` right after soft-reset is
-often an mpftp session race, not a panicking board. `mpftp resume` / reconnect
+often an mcuctl session race, not a panicking board. `mcuctl resume` / reconnect
 and retry once. A real Guru Meditation usually needs a hard reset and shows
 up in the serial boot log.
 
 ### 5. Prove native vs Python with evidence
 
 - Time hot paths (blit row, refresh) before rewriting.
-- After C changes: rebuild + flash firmware (mpftp firmware build/flash when
+- After C changes: rebuild + flash firmware (mcuctl firmware build/flash when
   available), then re-run the same soft-reset smoke.
 - Confirm symbols (`nm`) when debugging wrap/hook issues.
 - Remove temporary flash-backed debug instrumentation before calling a UI
@@ -249,7 +249,7 @@ These are not displayif bugs but show up during the same bring-up:
 
 - **`appdev.App` + `multimer`:** one shared periodic timer; LVGL claims
   presentation via `app.pause_refresh()` / `display_driver`.
-- **Interactive REPL / mpftp:** `app.run()` / select paths must not assume a
+- **Interactive REPL / mcuctl:** `app.run()` / select paths must not assume a
   non-interactive process (see `appdev` / `multimer` in omnipython).
 - **Do not leave flash logging** in `display_driver`, examples, or board_config
   on the touch/refresh path.
@@ -259,20 +259,20 @@ changing displayif C or LVGL bindings, rebuild/flash firmware first.
 
 ---
 
-## Quick commands (mpftp-oriented)
+## Quick commands (mcuctl-oriented)
 
 ```bash
-mpftp connect COM4
-mpftp soft-reset
-mpftp exec 'import board_config; print("ok")'
+mcuctl connect COM4
+mcuctl soft-reset
+mcuctl exec 'import board_config; print("ok")'
 # or
-mpftp exec 'import lv_test_timer; print(lv_test_timer.get_state())'
+mcuctl exec 'import lv_test_timer; print(lv_test_timer.get_state())'
 
-mpftp firmware build --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI
-mpftp firmware flash -d COM4
+mcuctl firmware build --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI
+mcuctl firmware flash -d COM4
 ```
 
-Disconnect the UI session (or `mpftp disconnect`) before flashing if the port
+Disconnect the UI session (or `mcuctl disconnect`) before flashing if the port
 is busy.
 
 ---

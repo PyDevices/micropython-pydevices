@@ -21,7 +21,7 @@ USB flash drive on the host port.
 
 Run it:
 
-    mpftp run examples/usb_drive_mount.py
+    mcuctl run examples/usb_drive_mount.py
 
 Tested on: an ESP32-P4-WIFI6-DEV-KIT on MicroPython
 v1.30.0-preview.160.gb70ae1aca6 (built 2026-10-21),

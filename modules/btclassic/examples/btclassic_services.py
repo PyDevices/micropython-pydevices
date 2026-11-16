@@ -15,7 +15,7 @@ its Bluetooth stack knows; a Pico W lists every service.
 
 Run it:
 
-    mpftp run btclassic_services.py
+    mcuctl run btclassic_services.py
 
 Tested on: ESP32 Audio Kit, MicroPython 1.30.0-preview with btclassic,
 asking an Adafruit QT Py ESP32 Pico running btclassic_serial_echo.py.

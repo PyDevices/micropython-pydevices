@@ -13,7 +13,7 @@ ESP32s, Pico Ws or Pico 2 Ws, in any mix.
 
 Run it:
 
-    mpftp run --follow btclassic_l2cap.py
+    mcuctl run --follow btclassic_l2cap.py
 
 Tested on: an Adafruit QT Py ESP32 Pico and an ESP32 Audio Kit, each in both
 roles, and a Pimoroni Pico Plus 2 W with the QT Py, each in both roles,

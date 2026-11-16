@@ -15,7 +15,7 @@ btclassic_hid_gamepad.py works as the device.
 
 Run it:
 
-    mpftp run btclassic_hid_host.py
+    mcuctl run btclassic_hid_host.py
 
 Tested on: ESP32 Audio Kit, MicroPython 1.30.0-preview with btclassic,
 reading an Adafruit QT Py ESP32 Pico running btclassic_hid_gamepad.py.

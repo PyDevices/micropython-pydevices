@@ -5,8 +5,8 @@
 """`I2SOut.starved()` on a board: 0 while nothing starves, and it moves when
 the pump really falls behind.
 
-    mpftp put -d COM4 tests/p4_starved_probe.py /p4_starved_probe.py
-    mpftp exec -d COM4 "import p4_starved_probe as p; p.run()"
+    mcuctl put -d COM4 tests/p4_starved_probe.py /p4_starved_probe.py
+    mcuctl exec -d COM4 "import p4_starved_probe as p; p.run()"
 
 The pins are the Waveshare ESP32-P4 Touch-LCD panel's (ES8311 on I2S 0); pass
 others to `run()` for another board. Nothing is powered on the codec side, so

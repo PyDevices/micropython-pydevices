@@ -14,7 +14,7 @@ Classic, or a Pico W or Pico 2 W).
 
 Run it:
 
-    mpftp run btclassic_with_ble.py
+    mcuctl run btclassic_with_ble.py
 
 A phone's BLE scanner app lists the board under its name,
 ``boarddev.name()``; a serial terminal on your computer or phone connects to

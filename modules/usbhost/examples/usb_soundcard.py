@@ -22,7 +22,7 @@ and the board needs micropython-lib's ``usb-device`` and usbhost's
 
 Run it:
 
-    mpftp run examples/usb_soundcard.py
+    mcuctl run examples/usb_soundcard.py
 
 The board's serial port stays up beside the speaker. Ctrl-C stops the card.
 Another board can be the computer: run ``usb_speaker.py`` on it.

@@ -16,7 +16,7 @@ running btclassic_audio_gateway.py.
 
 Run it:
 
-    mpftp run btclassic_call_tone.py
+    mcuctl run btclassic_call_tone.py
 
 Pair your phone with the board's hostname and call it. The caller hears
 the tone.

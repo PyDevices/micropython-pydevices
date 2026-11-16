@@ -15,12 +15,12 @@ Needs: an ESP32-S3 or ESP32-P4 board with firmware built with vision, the
 photo, and esp-vision's ``pedestrian_detect_pico.espdl`` model from
 ``models/pedestrian_detect/``, both copied to the board:
 
-    mpftp put pedestrian.jpg /pedestrian.jpg
-    mpftp put pedestrian_detect_pico.espdl /pedestrian.espdl
+    mcuctl put pedestrian.jpg /pedestrian.jpg
+    mcuctl put pedestrian_detect_pico.espdl /pedestrian.espdl
 
 Run it:
 
-    mpftp run espdl_pedestrian_test.py
+    mcuctl run espdl_pedestrian_test.py
 """
 
 import time

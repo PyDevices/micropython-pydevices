@@ -19,7 +19,7 @@ doesn't freeze them:
 
 Run it:
 
-    mpftp run examples/usb_device_hid_simpletest.py
+    mcuctl run examples/usb_device_hid_simpletest.py
 
 Keep a text box focused on the computer while it runs.
 

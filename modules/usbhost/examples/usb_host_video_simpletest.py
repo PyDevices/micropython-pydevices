@@ -18,8 +18,8 @@ high-speed hub can't reach one otherwise. A high-speed webcam wants it False.
 
 Run it:
 
-    mpftp run --follow examples/usb_host_video_simpletest.py
-    mpftp get /frame.jpg frame.jpg
+    mcuctl run --follow examples/usb_host_video_simpletest.py
+    mcuctl get /frame.jpg frame.jpg
 
 Success is the frame's size printed and a picture in ``frame.jpg``.
 

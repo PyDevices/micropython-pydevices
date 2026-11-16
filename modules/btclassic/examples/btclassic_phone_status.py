@@ -15,7 +15,7 @@ btclassic_audio_gateway.py can play the phone.
 
 Run it:
 
-    mpftp run btclassic_phone_status.py
+    mcuctl run btclassic_phone_status.py
 
 Pair your phone with the board's hostname, then have someone call you.
 

@@ -17,13 +17,13 @@ model.tflite from huggingface.co/chayuto/yamnet-cry-distill-int8 and
 yamnet_class_map.csv from Google's research/audioset/yamnet folder in
 github.com/tensorflow/models, then copy them over:
 
-    mpftp put model.tflite /yamnet_cry.tflite
-    mpftp put yamnet_class_map.csv /yamnet_class_map.csv
-    mpftp put alarm.wav /alarm.wav
+    mcuctl put model.tflite /yamnet_cry.tflite
+    mcuctl put yamnet_class_map.csv /yamnet_class_map.csv
+    mcuctl put alarm.wav /alarm.wav
 
 Run it:
 
-    mpftp run tflite_sounds.py
+    mcuctl run tflite_sounds.py
 
 Tested on: an ESP32-P4 board on MicroPython v1.30.0-preview.160.gb70ae1aca6
 (built 2026-10-29).

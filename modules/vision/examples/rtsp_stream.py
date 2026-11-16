@@ -14,7 +14,7 @@ Needs: an ESP32-P4 board with firmware built with vision, which carries the
 with your Wi-Fi details.
 
 Run it as the board's ``main.py``, or with nothing attached to the USB port.
-A command that outlasts ``mpftp``'s wait resets the board over USB, which
+A command that outlasts ``mcuctl``'s wait resets the board over USB, which
 looks like the stream crashing. Then open the URL it prints in a player:
 
     ffplay rtsp://BOARD-IP:8554/

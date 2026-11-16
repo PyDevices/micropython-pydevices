@@ -17,7 +17,7 @@ no change.
 
 Run it:
 
-    mpftp run --follow examples/usb_host_midi_simpletest.py
+    mcuctl run --follow examples/usb_host_midi_simpletest.py
 
 Then play. The program sends a chord and prints the bytes of each message the
 instrument sends.

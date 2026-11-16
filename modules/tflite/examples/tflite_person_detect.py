@@ -15,12 +15,12 @@ tensorflow/lite/micro/models folder, and a picture. For the camera, set
 IMAGE to None: that needs firmware built with cameraif and a camera set up
 in board_peripherals.
 
-    mpftp put person_detect.tflite /person_detect.tflite
-    mpftp put photo.jpg /photo.jpg
+    mcuctl put person_detect.tflite /person_detect.tflite
+    mcuctl put photo.jpg /photo.jpg
 
 Run it:
 
-    mpftp run tflite_person_detect.py
+    mcuctl run tflite_person_detect.py
 
 Tested on: an ESP32-P4 board on MicroPython v1.30.0-preview.160.gb70ae1aca6
 (built 2026-10-29), with its camera.

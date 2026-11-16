@@ -14,7 +14,7 @@ terminal app, or another board.
 
 Run it:
 
-    mpftp run --follow btclassic_pairing.py
+    mcuctl run --follow btclassic_pairing.py
 
 Tested on: Adafruit QT Py ESP32 Pico with the Audio BFF, MicroPython
 1.30.0-preview, paired from an ESP32 Audio Kit.

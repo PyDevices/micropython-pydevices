@@ -15,7 +15,7 @@ Both are enlarged by nearest neighbour: at a whole-number factor that is a few
 instructions per pixel and needs no buffer beyond one band of rows.
 
 Needs: the same board as ``uvc_display.py``, and this file copied next to it
-(``mpftp put uvc_display_helpers.py /uvc_display_helpers.py``).
+(``mcuctl put uvc_display_helpers.py /uvc_display_helpers.py``).
 
 Run it:
 

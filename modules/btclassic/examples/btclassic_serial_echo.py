@@ -11,7 +11,7 @@ Needs: a classic ESP32 board with firmware built with the btclassic module.
 
 Run it:
 
-    mpftp run btclassic_serial_echo.py
+    mcuctl run btclassic_serial_echo.py
 
 Tested on: Adafruit QT Py ESP32 Pico with the Audio BFF, MicroPython
 1.30.0-preview, talking to a Windows 11 PC over its

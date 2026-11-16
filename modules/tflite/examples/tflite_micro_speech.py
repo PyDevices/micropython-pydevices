@@ -18,12 +18,12 @@ tensorflow/lite/micro/examples/micro_speech/models folder, and a 16-bit PCM
 WAV file at 16 kHz or higher, such as yes_1000ms.wav from that example's
 testdata folder:
 
-    mpftp put micro_speech_quantized.tflite /micro_speech.tflite
-    mpftp put yes_1000ms.wav /yes.wav
+    mcuctl put micro_speech_quantized.tflite /micro_speech.tflite
+    mcuctl put yes_1000ms.wav /yes.wav
 
 Run it:
 
-    mpftp run tflite_micro_speech.py
+    mcuctl run tflite_micro_speech.py
 
 Tested on: an ESP32-P4 board on MicroPython v1.30.0-preview.160.gb70ae1aca6
 (built 2026-10-29).

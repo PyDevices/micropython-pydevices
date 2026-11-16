@@ -16,7 +16,7 @@ the inquiry response.
 
 Run it:
 
-    mpftp run btclassic_settings.py
+    mcuctl run btclassic_settings.py
 
 Then pair your phone or computer with the board. The board prints the new
 address.

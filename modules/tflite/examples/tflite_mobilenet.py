@@ -16,13 +16,13 @@ The model is 4 MB, so an SD card is the place for it. For the camera, set
 IMAGE to None: that needs firmware built with cameraif and a camera set up
 in board_peripherals.
 
-    mpftp put mobilenet_v2_int8_channelwise.tflite /sdcard/mobilenet_v2.tflite
-    mpftp put ImageNetLabels.txt /sdcard/ImageNetLabels.txt
-    mpftp put photo.jpg /sdcard/photo.jpg
+    mcuctl put mobilenet_v2_int8_channelwise.tflite /sdcard/mobilenet_v2.tflite
+    mcuctl put ImageNetLabels.txt /sdcard/ImageNetLabels.txt
+    mcuctl put photo.jpg /sdcard/photo.jpg
 
 Run it:
 
-    mpftp run tflite_mobilenet.py
+    mcuctl run tflite_mobilenet.py
 
 Tested on: an ESP32-P4 board on MicroPython v1.30.0-preview.160.gb70ae1aca6
 (built 2026-10-29), with its camera.

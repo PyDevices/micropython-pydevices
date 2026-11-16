@@ -17,13 +17,13 @@ Needs: an ESP32-S3 or ESP32-P4 board with firmware built with tflite, ulab
 and audiodsp, a model and its JSON manifest from ESPHome's
 micro-wake-word-models, and a 16-bit PCM WAV file at 16 kHz or higher:
 
-    mpftp put hey_jarvis.tflite /hey_jarvis.tflite
-    mpftp put hey_jarvis.json /hey_jarvis.json
-    mpftp put speech.wav /speech.wav
+    mcuctl put hey_jarvis.tflite /hey_jarvis.tflite
+    mcuctl put hey_jarvis.json /hey_jarvis.json
+    mcuctl put speech.wav /speech.wav
 
 Run it:
 
-    mpftp run tflite_wakeword.py
+    mcuctl run tflite_wakeword.py
 
 Tested on: an ESP32-P4 board on MicroPython v1.30.0-preview.160.gb70ae1aca6
 (built 2026-10-29).

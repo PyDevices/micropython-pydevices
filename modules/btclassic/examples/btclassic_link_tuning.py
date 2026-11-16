@@ -15,7 +15,7 @@ and a computer, phone or another board to connect to its serial port
 
 Run it:
 
-    mpftp run btclassic_link_tuning.py
+    mcuctl run btclassic_link_tuning.py
 
 Tested on: Ai-Thinker ESP32 Audio Kit, MicroPython 1.30.0-preview with
 btclassic, with a Windows 11 PC connected to its serial port.

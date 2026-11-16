@@ -17,7 +17,7 @@ keyboard otherwise.
 
 Run it:
 
-    mpftp run --follow examples/usb_host_hid_simpletest.py
+    mcuctl run --follow examples/usb_host_hid_simpletest.py
 
 Then type on the keyboard. Success is a line for each key going down and
 coming up.

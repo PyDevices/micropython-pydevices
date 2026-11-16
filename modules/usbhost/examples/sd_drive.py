@@ -22,7 +22,7 @@ freeze it:
 
 Run it:
 
-    mpftp run examples/sd_drive.py
+    mcuctl run examples/sd_drive.py
 
 Another board can host this one: run ``usb_drive_read.py`` on it.
 

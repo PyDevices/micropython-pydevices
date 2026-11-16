@@ -13,12 +13,12 @@ display, a UI or a recording loop on the main thread gets the same.
 Needs: an ESP32-S3 or ESP32-P4 board with firmware built with vision, and
 the photo and model espdl_pedestrian_test.py uses, copied to the board:
 
-    mpftp put pedestrian.jpg /pedestrian.jpg
-    mpftp put pedestrian_detect_pico.espdl /pedestrian.espdl
+    mcuctl put pedestrian.jpg /pedestrian.jpg
+    mcuctl put pedestrian_detect_pico.espdl /pedestrian.espdl
 
 Run it:
 
-    mpftp run espdl_thread.py
+    mcuctl run espdl_thread.py
 """
 
 import _thread

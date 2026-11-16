@@ -17,7 +17,7 @@ Every displayif bus / framebuffer / panel constructor is **idempotent** with res
 2. `__del__` / finalizer (best-effort; must not crash if already deinited)
 3. **MicroPython soft reset** (required — see why below)
 
-A board may soft-reset (or mpftp connect / Run, which soft-resets) and then construct the same interface again **without hard reset** and without ESP-IDF / SDK “resource already taken” failures.
+A board may soft-reset (or mcuctl connect / Run, which soft-resets) and then construct the same interface again **without hard reset** and without ESP-IDF / SDK “resource already taken” failures.
 
 ### Motivating failure (ESP32-P4 MIPI DSI) — fixed
 
@@ -50,7 +50,7 @@ Do **not** paper over missing teardown with “only init once” board_config sp
 
 ## Why soft reset matters
 
-Tools such as **mpftp** (and Thonny-style workflows) soft-reset into a clean heap **without** running `main.py`, then the user imports `board_config` or runs a script that constructs displays again.
+Tools such as **mcuctl** (and Thonny-style workflows) soft-reset into a clean heap **without** running `main.py`, then the user imports `board_config` or runs a script that constructs displays again.
 
 | Layer | Soft reset behavior |
 |-------|---------------------|

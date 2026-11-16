@@ -13,7 +13,7 @@ and audiodsp modules, and a board config whose audio_out drives I2S.
 
 Run it:
 
-    mpftp run btclassic_speaker.py
+    mcuctl run btclassic_speaker.py
 
 Pair your phone with the board's name and play something. The board
 prints the title and artist of each track, and the levels once a second.

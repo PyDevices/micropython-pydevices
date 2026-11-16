@@ -17,7 +17,7 @@ device, and a high-speed hub can't reach one otherwise.
 
 Run it:
 
-    mpftp run --follow examples/usb_host_audio_simpletest.py
+    mcuctl run --follow examples/usb_host_audio_simpletest.py
 
 Make some noise near the microphone. Success is a peak well above zero.
 

@@ -17,7 +17,7 @@ full-speed device, and the P4's high-speed port can't reach one through a hub.
 
 Run it:
 
-    mpftp run --follow examples/usb_host_dfu_simpletest.py
+    mcuctl run --follow examples/usb_host_dfu_simpletest.py
 
 Success is the bootloader's memory regions listed and the flash's hash. The
 board stays in its bootloader afterwards: reset it to run its program again.

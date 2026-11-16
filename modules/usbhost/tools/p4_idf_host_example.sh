@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build ESP-IDF's own usb_host_lib example for the ESP32-P4 panel, as one
-# image that mpftp flashes at 0x2000 in place of MicroPython. It is the
+# image that mcuctl flashes at 0x2000 in place of MicroPython. It is the
 # discriminator usbif#3 names: when usbhost's host on the P4 sees no device,
 # this says whether IDF's host stack does either, with usbhost out of the picture.
 #
@@ -15,11 +15,11 @@
 # OUT  where the merged image goes (default: ./usb_host_lib_p4_at_0x2000.bin).
 #
 # Flash it, then read the console at 115200 on the board's UART port:
-#   mpftp firmware flash --artifact OUT.bin --family esp32p4 -d COM4
+#   mcuctl firmware flash --artifact OUT.bin --family esp32p4 -d COM4
 # An attach prints "CLASS: Opening device at address 1" and the descriptors;
 # silence after "CLASS: Registering Client" means the root port saw no
 # pull-up. Flash MicroPython back with --erase afterwards: the example's
-# partition table is not MicroPython's, and mpftp refuses to flash over it
+# partition table is not MicroPython's, and mcuctl refuses to flash over it
 # without one.
 #
 # What it needs: an ESP-IDF checkout (IDF_PATH, else ../esp-idf beside this
@@ -77,7 +77,7 @@ grep -q "peripheral_map = BIT" "$work/main/usb_host_lib_main.c" || {
 source "$idf_dir/export.sh" >/dev/null 2>&1
 (cd "$work" && idf.py set-target esp32p4 >/dev/null && idf.py build >/dev/null)
 
-# One image at 0x2000 (the P4's bootloader offset), which is what mpftp's
+# One image at 0x2000 (the P4's bootloader offset), which is what mcuctl's
 # --artifact/--family esp32p4 path writes.
 (cd "$work/build" && esptool.py --chip esp32p4 merge_bin -o "$out" --target-offset 0x2000 \
     $(grep -oE "0x[0-9a-f]+ [^ ]+" flash_args | tr '\n' ' ') >/dev/null)
