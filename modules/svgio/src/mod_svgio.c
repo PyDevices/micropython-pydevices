@@ -412,13 +412,51 @@ MP_DEFINE_CONST_OBJ_TYPE(
 // take a few hundred milliseconds on a board; a Buffer costs it nothing. It
 // has the buffer protocol, so decode() draws into it or into a memoryview of
 // a part of it, and it isn't cleared.
+//
+// A memoryview holds a pointer to the bytes, not to the Buffer, and the
+// collector follows pointers only into its own heap: it can collect a Buffer
+// whose views are still in use. So collecting a Buffer never gives its bytes
+// back to the system. They are parked, for the next Buffer that fits to
+// take, and a view left over from the old one goes on reading and writing
+// memory svgio owns. Only close() gives bytes back, as does running out:
+// when the system has none left, what is parked is returned to it.
 
 typedef struct {
     mp_obj_base_t base;
     uint8_t *buf;
     size_t len;
+    size_t room;        // the bytes buf was taken with, len or more
     bool outside;       // buf came from svgio_outside_alloc()
 } svgio_buffer_obj_t;
+
+// The parked blocks. The list is kept here, not in the blocks, which a view
+// may still write anywhere in. When it is full, one more collected Buffer's
+// bytes are simply never used again.
+#define SVGIO_PARKED_MAX 32
+static struct {
+    uint8_t *buf;
+    size_t room;
+} svgio_parked[SVGIO_PARKED_MAX];
+
+// The smallest parked block of n bytes or more, off the list, unless it is
+// more than twice what was asked for: a sprite shouldn't sit in a block that
+// could hold a screen.
+static uint8_t *svgio_unpark(size_t n, size_t *room) {
+    int best = -1;
+    for (int i = 0; i < SVGIO_PARKED_MAX; i++) {
+        if (svgio_parked[i].buf != NULL && svgio_parked[i].room >= n
+            && (best < 0 || svgio_parked[i].room < svgio_parked[best].room)) {
+            best = i;
+        }
+    }
+    if (best < 0 || svgio_parked[best].room / 2 > n) {
+        return NULL;
+    }
+    uint8_t *buf = svgio_parked[best].buf;
+    *room = svgio_parked[best].room;
+    svgio_parked[best].buf = NULL;
+    return buf;
+}
 
 static mp_obj_t svgio_buffer_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     mp_arg_check_num(n_args, n_kw, 1, 1, false);
@@ -428,16 +466,30 @@ static mp_obj_t svgio_buffer_make_new(const mp_obj_type_t *type, size_t n_args, 
     }
     svgio_buffer_obj_t *self = mp_obj_malloc_with_finaliser(svgio_buffer_obj_t, type);
     self->len = 0;
-    self->buf = svgio_outside_alloc(n);
+    self->room = n;
+    self->buf = svgio_unpark(n, &self->room);
+    if (self->buf == NULL) {
+        self->buf = svgio_outside_alloc(self->room);
+    }
+    if (self->buf == NULL) {
+        // The system has no more: it gets back what is parked, and is asked again.
+        for (int i = 0; i < SVGIO_PARKED_MAX; i++) {
+            svgio_outside_free(svgio_parked[i].buf);
+            svgio_parked[i].buf = NULL;
+        }
+        self->buf = svgio_outside_alloc(self->room);
+    }
     self->outside = self->buf != NULL;
     if (self->buf == NULL) {
-        self->buf = m_new(uint8_t, n);      // a port with no memory but the heap
+        // A port with no memory but the heap, where a view does keep its bytes.
+        self->buf = m_new(uint8_t, n);
     }
     self->len = n;
     return MP_OBJ_FROM_PTR(self);
 }
 
-// close(): the bytes go back now. A memoryview of them must not be used again.
+// close(): the bytes go back to the system now. A memoryview of them must not
+// be used again.
 static mp_obj_t svgio_buffer_close(mp_obj_t self_in) {
     svgio_buffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
     if (self->outside) {
@@ -449,6 +501,24 @@ static mp_obj_t svgio_buffer_close(mp_obj_t self_in) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(svgio_buffer_close_obj, svgio_buffer_close);
+
+// Collected without close(): a view of the bytes may be in use still, so they
+// are parked, not given back.
+static mp_obj_t svgio_buffer_del(mp_obj_t self_in) {
+    svgio_buffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    for (int i = 0; self->outside && i < SVGIO_PARKED_MAX; i++) {
+        if (svgio_parked[i].buf == NULL) {
+            svgio_parked[i].buf = self->buf;
+            svgio_parked[i].room = self->room;
+            break;
+        }
+    }
+    self->buf = NULL;
+    self->len = 0;
+    self->outside = false;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(svgio_buffer_del_obj, svgio_buffer_del);
 
 static mp_int_t svgio_buffer_get_buffer(mp_obj_t self_in, mp_buffer_info_t *info, mp_uint_t flags) {
     (void)flags;
@@ -476,7 +546,7 @@ static mp_obj_t svgio_buffer_unary_op(mp_unary_op_t op, mp_obj_t self_in) {
 
 static const mp_rom_map_elem_t svgio_buffer_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&svgio_buffer_close_obj) },
-    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&svgio_buffer_close_obj) },
+    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&svgio_buffer_del_obj) },
 };
 static MP_DEFINE_CONST_DICT(svgio_buffer_locals, svgio_buffer_locals_table);
 

@@ -348,7 +348,30 @@ if MICROPYTHON:
         d2 = b2 = roomy = cramped = big = None
         gc.collect()
         gc.collect()
-        assert svgio._outside() == held, "the collector left %d blocks outside the heap" % (svgio._outside() - held)
+        # The decoders' blocks are back. A collected Buffer's bytes are not
+        # given back but parked, since a view of them may still be in use:
+        # up to the twenty made above.
+        assert held < svgio._outside() <= held + 20, "%d blocks more are outside the heap, where 1 to 20 parked were expected" % (svgio._outside() - held)
+        # A view outlives its Buffer: write and read through it once the
+        # Buffer is collected, and find the bytes still svgio's.
+        lost = svgio.Buffer(1 << 16)
+        view = memoryview(lost)
+        count = svgio._outside()
+        lost = None
+        gc.collect()
+        gc.collect()
+        assert svgio._outside() == count, "collecting a Buffer gave back bytes a view still shows"
+        for at in range(0, 1 << 16, 251):
+            view[at] = at & 255
+        assert all(view[at] == at & 255 for at in range(0, 1 << 16, 251))
+        again = svgio.Buffer(1 << 16)  # takes the parked bytes: the view shows them
+        assert svgio._outside() == count
+        memoryview(again)[0] = 77
+        assert view[0] == 77, "the next Buffer didn't take the parked bytes"
+        tiny = svgio.Buffer(64)  # but not a block far too big for it
+        again.close()
+        tiny.close()
+        view = None
 
 # The compact form: one of every record, with the text each stands for.
 import struct  # noqa: E402

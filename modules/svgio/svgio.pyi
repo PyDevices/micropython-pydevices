@@ -144,8 +144,12 @@ class Buffer:
     The collector reads every block of the heap it keeps, so megabytes of
     pictures in `bytearray`s make each collection slow. It doesn't read a
     `Buffer`. Pass one to `SvgDecoder.decode()`, or a `memoryview` of part of
-    one; it isn't cleared. Keep the `Buffer` itself for as long as a
-    `memoryview` of it is in use: the view alone doesn't keep it.
+    one; it isn't cleared.
+
+    A `memoryview` of a `Buffer` stays safe to use after the `Buffer` is
+    collected: its bytes aren't given back to the system then, but kept for
+    the next `Buffer` they fit. Only `close()` returns them, so call it when
+    you are done.
     """
 
     def __init__(self, size: int) -> None:
@@ -158,7 +162,7 @@ class Buffer:
     def __len__(self) -> int: ...
     def __buffer__(self, flags: int, /) -> memoryview: ...
     def close(self) -> None:
-        """Give the bytes back now. A `memoryview` of them must not be used again."""
+        """Give the bytes back to the system now. A `memoryview` of them must not be used again."""
 
 def expand(drawing: bytes | bytearray | memoryview) -> bytes:
     """Give the SVG text a drawing in the compact form stands for.

@@ -102,7 +102,8 @@ decoder does the same.
 `decode()`, or a `memoryview` of part of one. Where the port has memory
 outside MicroPython's heap it comes from there, which is what it's for:
 [Pictures outside the heap](#pictures-outside-the-heap). It isn't cleared.
-`len()` gives its size, and `close()` gives the bytes back now.
+`len()` gives its size, and `close()` gives the bytes back now: call it when
+you're done, since collecting a `Buffer` keeps its bytes for the next one.
 
 ### `svgio.expand(drawing) -> bytes`
 
@@ -165,9 +166,15 @@ d.decode(view[: w * h * 2], view[w * h * 2 : w * h * 3])
 
 Both come from outside the heap on an ESP32 with PSRAM, on a desktop and in a
 browser. Ports that give MicroPython all of their memory have nowhere else,
-and there both are blocks of the heap as before. Keep the `Buffer` itself for
-as long as you use a `memoryview` of it: the view alone doesn't keep it, and
-its bytes go back when it is collected or closed.
+and there both are blocks of the heap as before.
+
+A `memoryview` points at the bytes, not at the `Buffer`, so the collector can
+take a `Buffer` whose views you still use. That is safe: collecting a
+`Buffer` doesn't hand its bytes back to the system. svgio keeps them for the
+next `Buffer` they fit, so an old view reads and writes memory that is still
+svgio's, at worst the next picture's. The price is that only `close()`
+returns the bytes to the system, so close a `Buffer` you are done with, and
+don't use a view of it afterwards.
 
 ## The compact form
 
