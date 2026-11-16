@@ -27,3 +27,8 @@ CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=9
 # the Panel and the Pico-sized board is not, so the shared P4 settings and the
 # DEV-KIT variant leave it off.
 CONFIG_SPI_FLASH_AUTO_SUSPEND=y
+
+# This board's flash suspends an erase (above), which already keeps a flash
+# write from stopping the cores, so it doesn't also pay 9 MB of PSRAM to run
+# the program from there as the other P4 boards do (sdkconfig.esp32p4).
+CONFIG_SPIRAM_XIP_FROM_PSRAM=n
