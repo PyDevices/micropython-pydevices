@@ -13,11 +13,11 @@ model, ``hello_world_int8.tflite``, from
 ``tensorflow/lite/micro/examples/hello_world/models/`` in tflite-micro,
 copied to the board:
 
-    mpftp put hello_world_int8.tflite /hello_world_int8.tflite
+    mcuctl put hello_world_int8.tflite /hello_world_int8.tflite
 
 Run it:
 
-    mpftp run tflite_hello_world.py
+    mcuctl run tflite_hello_world.py
 """
 
 import math

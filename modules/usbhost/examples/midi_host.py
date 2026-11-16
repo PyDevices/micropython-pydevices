@@ -27,7 +27,7 @@ passes it straight through.
 
 Run it:
 
-    mpftp run examples/midi_host.py
+    mcuctl run examples/midi_host.py
 
 Then play on the instrument.
 

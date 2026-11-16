@@ -13,7 +13,7 @@ Needs: a classic ESP32 board with firmware built with the btclassic module.
 
 Run it:
 
-    mpftp run btclassic_hid_keyboard.py
+    mcuctl run btclassic_hid_keyboard.py
 
 Tested on: Adafruit QT Py ESP32 Pico, MicroPython v1.30.0-preview with
 btclassic, paired with a Windows 11 PC typing into Notepad.

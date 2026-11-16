@@ -18,8 +18,8 @@ such as the ESP32-P4-WIFI6-DEV-KIT's Type-A socket.
 
 Run it:
 
-    mpftp put examples/uvc_display_helpers.py /uvc_display_helpers.py
-    mpftp run examples/uvc_display.py
+    mcuctl put examples/uvc_display_helpers.py /uvc_display_helpers.py
+    mcuctl run examples/uvc_display.py
 
 Success is the camera's picture on the display and a line every 25 frames
 giving the frame rate.

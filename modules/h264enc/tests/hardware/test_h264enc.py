@@ -16,7 +16,7 @@ b"", every later one the frame before, flush() the last; the access units
 match the plain Encoder's byte for byte up to the forced IDR; and the time a
 frame keeps its caller (wall_us) is printed beside the plain one's.
 
-    run on the board with h264_frames.py beside it (mpftp probe; see the README),
+    run on the board with h264_frames.py beside it (mcuctl probe; see the README),
     MicroPython or CircuitPython, with a /jt folder for the stream
 """
 

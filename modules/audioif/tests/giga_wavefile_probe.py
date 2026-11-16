@@ -5,8 +5,8 @@
 """Check that `audioio.AudioOut` plays a `WaveFile` on an Arduino GIGA R1, heard
 by the board's own ADC.
 
-    mpftp put -d COM5 tests/giga_wavefile_probe.py /flash/giga_wavefile_probe.py
-    mpftp exec -d COM5 "import giga_wavefile_probe as p; p.run()"
+    mcuctl put -d COM5 tests/giga_wavefile_probe.py /flash/giga_wavefile_probe.py
+    mcuctl exec -d COM5 "import giga_wavefile_probe as p; p.run()"
 
 The probe writes a one-second 551.25 Hz WAV to /flash if there isn't one, plays
 it through the DAC, and samples PA4 (the jack's right) at 48 kHz with the ADC.

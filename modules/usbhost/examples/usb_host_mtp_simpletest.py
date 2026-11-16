@@ -17,8 +17,8 @@ again if it said no storage was shared.
 
 Run it:
 
-    mpftp run --follow examples/usb_host_mtp_simpletest.py
-    mpftp get /photo.jpg photo.jpg
+    mcuctl run --follow examples/usb_host_mtp_simpletest.py
+    mcuctl get /photo.jpg photo.jpg
 
 Success is the photos listed and a JPEG on the board.
 

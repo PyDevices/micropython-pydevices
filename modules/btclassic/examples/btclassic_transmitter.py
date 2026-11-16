@@ -14,7 +14,7 @@ jack), and Bluetooth headphones or a speaker in pairing mode.
 
 Run it:
 
-    mpftp run btclassic_transmitter.py
+    mcuctl run btclassic_transmitter.py
 
 Plug a music player into the line-in jack. Its sound plays on the
 receiver about half a second later.

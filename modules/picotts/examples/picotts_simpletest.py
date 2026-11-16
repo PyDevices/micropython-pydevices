@@ -13,7 +13,7 @@ the picotts module, a board config with an audio_out role, and the en-US voice
 files in /lib/picotts/ (see the module README).
 
 Run it:
-    mpftp run picotts_simpletest.py
+    mcuctl run picotts_simpletest.py
 
 Tested on: LilyGO T-Embed (ESP32-S3, 8 MB PSRAM), MicroPython 1.30.0-preview.
 """

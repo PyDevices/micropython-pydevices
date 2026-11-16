@@ -16,7 +16,7 @@ ESP32, or a Pico W or Pico 2 W), and a phone with a music app.
 
 Run it:
 
-    mpftp run btclassic_remote.py
+    mcuctl run btclassic_remote.py
 
 Pair your phone with the board's hostname and open a music app. The board
 plays, skips, turns the volume to VOLUME and pauses, a few seconds apart.

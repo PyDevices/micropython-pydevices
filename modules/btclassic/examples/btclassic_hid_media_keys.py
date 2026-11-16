@@ -13,7 +13,7 @@ ESP32, or a Pico W or Pico 2 W).
 
 Run it:
 
-    mpftp run btclassic_hid_media_keys.py
+    mcuctl run btclassic_hid_media_keys.py
 
 Pair your phone or computer with the board's hostname. Its volume steps
 down three times.

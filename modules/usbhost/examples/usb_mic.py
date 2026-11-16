@@ -18,7 +18,7 @@ the hub passes it straight through.
 
 Run it:
 
-    mpftp run examples/usb_mic.py
+    mcuctl run examples/usb_mic.py
 
 Then speak into the microphone.
 

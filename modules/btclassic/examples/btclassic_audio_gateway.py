@@ -17,7 +17,7 @@ btclassic_call_tone.py works as the headset.
 
 Run it:
 
-    mpftp run btclassic_audio_gateway.py
+    mcuctl run btclassic_audio_gateway.py
 
 Tested on: ESP32 Audio Kit, MicroPython 1.30.0-preview with btclassic,
 calling an Adafruit QT Py ESP32 Pico running btclassic_phone_status.py

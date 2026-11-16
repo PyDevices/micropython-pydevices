@@ -4,8 +4,8 @@
 
 """Does a flash erase stall the I2S DMA itself, or only the pump?
 
-    mpftp put -d COM12 tests/s3_stall_witness.py /lib/s3_stall_witness.py
-    mpftp exec -d COM12 "import s3_stall_witness as w; w.run()"
+    mcuctl put -d COM12 tests/s3_stall_witness.py /lib/s3_stall_witness.py
+    mcuctl exec -d COM12 "import s3_stall_witness as w; w.run()"
 
 This is the probe that settled how `I2SOut.starved()` has to be counted
 (audioif#8), and the answer is not the one the issue assumed.

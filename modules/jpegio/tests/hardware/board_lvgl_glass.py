@@ -8,8 +8,8 @@
 # the glass shows, so a match means LVGL drew this JPEG on the glass through
 # jpegio's decoder.
 #
-#   mpftp put ../frames/baseline_jfif_320x240.jpg /baseline_jfif_320x240.jpg
-#   mpftp run board_lvgl_glass.py
+#   mcuctl put ../frames/baseline_jfif_320x240.jpg /baseline_jfif_320x240.jpg
+#   mcuctl run board_lvgl_glass.py
 #
 # Either byte order counts as a match (panels differ on RGB565 byte order).
 import board_config

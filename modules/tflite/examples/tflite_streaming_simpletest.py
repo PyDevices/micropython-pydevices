@@ -14,11 +14,11 @@ Needs: an ESP32-S3 or ESP32-P4 board with firmware built with tflite and
 ulab, and a microWakeWord model (``hey_jarvis.tflite`` from ESPHome's
 micro-wake-word-models) on the board:
 
-    mpftp put hey_jarvis.tflite /hey_jarvis.tflite
+    mcuctl put hey_jarvis.tflite /hey_jarvis.tflite
 
 Run it:
 
-    mpftp run tflite_streaming_simpletest.py
+    mcuctl run tflite_streaming_simpletest.py
 
 Tested on: an ESP32-P4 board on MicroPython v1.30.0-preview.160.gb70ae1aca6
 (built 2026-10-29).

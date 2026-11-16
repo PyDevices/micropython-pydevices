@@ -19,7 +19,7 @@ examples.
 
 Run it:
 
-    mpftp run btclassic_messages.py
+    mcuctl run btclassic_messages.py
 
 Tested on: ESP32 Audio Kit, MicroPython 1.30.0-preview with btclassic,
 with a Galaxy S21, after allowing the board to read its messages.

@@ -112,7 +112,7 @@ marks the faces in a photo.
 
 ## Run long scripts as `main.py`
 
-An mpftp `exec` that outlasts mpftp's wait resets the board over USB
+An mcuctl `exec` that outlasts mcuctl's wait resets the board over USB
 (`rst:0x17 CHIP_USB_UART_RESET`). Under a long-running script that looks like
 the firmware crashing. Run such scripts as `main.py`, or with nothing attached.
 

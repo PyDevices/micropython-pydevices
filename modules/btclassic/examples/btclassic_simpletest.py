@@ -13,7 +13,7 @@ with the btclassic module, and a board config with a pcm_out role.
 
 Run it:
 
-    mpftp run btclassic_simpletest.py
+    mcuctl run btclassic_simpletest.py
 
 Tested on: Adafruit QT Py ESP32 Pico with the Audio BFF, MicroPython
 1.30.0-preview, playing from a Windows 11 PC.

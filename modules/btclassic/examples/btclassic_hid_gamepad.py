@@ -16,7 +16,7 @@ board prints them.
 
 Run it:
 
-    mpftp run btclassic_hid_gamepad.py
+    mcuctl run btclassic_hid_gamepad.py
 
 Tested on: Adafruit QT Py ESP32 Pico, MicroPython 1.30.0-preview with
 btclassic, read by a Windows 11 PC's game controller settings.

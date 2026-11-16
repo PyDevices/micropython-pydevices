@@ -4,7 +4,7 @@
 
 """The proof matrix's host leg: a board's native port as USB host, checked
 against what's plugged into it. Runs in WSL; drives the host board (and a
-peer board, if one is given) over ``mpftp hold``. One command, one verdict:
+peer board, if one is given) over ``mcuctl hold``. One command, one verdict:
 
     python3 tools/matrix/run_host.py --host COM49 --peer COM31       # LCD-4.3 #1 with a board on its hub: all 8 checks
     python3 tools/matrix/run_host.py --host COM49 --host-only        # no peer: the 3 checks that need none
@@ -73,7 +73,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS_HOST = os.path.join(HERE, "..", "host")
 EXAMPLES = os.path.join(HERE, "..", "..", "examples")
-MPFTP = os.path.expanduser("~/gh/pydevices/mpftp/scripts/mpftp")
+MCUCTL = os.path.expanduser("~/gh/pydevices/mcuctl/scripts/mcuctl")
 CHECKS = ("enumerate", "msc", "hid", "hid_typed", "cdc", "midi", "audio", "video")
 NEEDS_PEER = {"hid_typed", "cdc", "midi", "audio", "video"}
 WHAT_PEER = {
@@ -107,7 +107,7 @@ class Board:
         self.dev = dev
 
     def hold(self, *args, timeout=60):
-        return sh([MPFTP, "hold", *args, "-d", self.dev], timeout=timeout)
+        return sh([MCUCTL, "hold", *args, "-d", self.dev], timeout=timeout)
 
     def run(self, code, timeout=30):
         return self.hold("ask", code, "--timeout", str(timeout), timeout=timeout + 30)
@@ -140,7 +140,7 @@ class Board:
 
 def put(dev, files):
     for f in files:
-        rc, out = sh([MPFTP, "put", "-d", dev, f, "/" + os.path.basename(f)], timeout=120)
+        rc, out = sh([MCUCTL, "put", "-d", dev, f, "/" + os.path.basename(f)], timeout=120)
         if rc:
             sys.exit("could not copy %s to %s: %s" % (os.path.basename(f), dev, out[-300:]))
 

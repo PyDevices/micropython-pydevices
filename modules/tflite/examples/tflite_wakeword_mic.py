@@ -17,12 +17,12 @@ board_peripherals (``pcm_in``), firmware built with tflite, ulab and
 audiodsp, and a model with its JSON manifest from ESPHome's
 micro-wake-word-models:
 
-    mpftp put hey_jarvis.tflite /hey_jarvis.tflite
-    mpftp put hey_jarvis.json /hey_jarvis.json
+    mcuctl put hey_jarvis.tflite /hey_jarvis.tflite
+    mcuctl put hey_jarvis.json /hey_jarvis.json
 
 Run it, then say the wake word:
 
-    mpftp run tflite_wakeword_mic.py
+    mcuctl run tflite_wakeword_mic.py
 
 Tested on: a Waveshare ESP32-P4-WIFI6-Touch-LCD-4B on MicroPython
 v1.30.0-preview.160.gb70ae1aca6 (built 2026-10-29), with its ES7210

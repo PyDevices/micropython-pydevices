@@ -22,7 +22,7 @@ micropython-lib's ``usb-device`` with usbhost's ``usb-device-video``.
 
 Run it:
 
-    mpftp run examples/usb_webcam.py
+    mcuctl run examples/usb_webcam.py
 
 Or from a program, with ``import usb_webcam; usb_webcam.main()``. Use
 ``main(packet=640)`` for a computer at full speed, which takes bigger packets

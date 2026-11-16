@@ -17,7 +17,7 @@ board.
 
 Run it:
 
-    mpftp run examples/midi_harmonizer.py
+    mcuctl run examples/midi_harmonizer.py
 
 Then play into the board's MIDI port.
 

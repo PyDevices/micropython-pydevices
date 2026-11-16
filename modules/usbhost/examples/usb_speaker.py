@@ -22,7 +22,7 @@ stream of 48 kHz stereo (196 bytes) and a USB-C DAC whose endpoint declares
 
 Run it:
 
-    mpftp run examples/usb_speaker.py
+    mcuctl run examples/usb_speaker.py
 
 Tested on: an ESP32-S3 hosting an ESP32-P4 panel that was running
 ``usb_soundcard.py``.

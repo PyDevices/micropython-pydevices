@@ -139,17 +139,17 @@ To stop the M4 starting at all, clear BCM4: ST's
 can change it in the option bytes. Changing option bytes is your call, since a
 wrong one can leave the board unable to boot until it is recovered over SWD.
 
-## With mpftp
+## With mcuctl
 
-mpftp writes either file for you, given the build's port and your board's
+mcuctl writes either file for you, given the build's port and your board's
 serial port:
 
 ```bash
-mpftp firmware flash --port esp32 --artifact firmware.bin -d /dev/ttyACM0
-mpftp firmware flash --port rp2 --uf2 --artifact firmware.uf2
+mcuctl firmware flash --port esp32 --artifact firmware.bin -d /dev/ttyACM0
+mcuctl firmware flash --port rp2 --uf2 --artifact firmware.uf2
 ```
 
-For a `.uf2`, mpftp copies it to the board's drive instead.
+For a `.uf2`, mcuctl copies it to the board's drive instead.
 
 ## After flashing
 

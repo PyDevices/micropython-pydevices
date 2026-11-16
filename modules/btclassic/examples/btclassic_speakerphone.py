@@ -15,7 +15,7 @@ one I2S port, such as the ESP32 Audio Kit's.
 
 Run it:
 
-    mpftp run btclassic_speakerphone.py
+    mcuctl run btclassic_speakerphone.py
 
 Pair your phone with the board's hostname, then call someone, or have
 someone call you. Their voice comes out of the board's speaker.

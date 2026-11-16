@@ -21,9 +21,9 @@ writes, so the arms can be compared register by register.
 Each run writes <OUT>/<arm>/<mode>.json, .jpg and .rgb565. Copy the folders to
 the desktop and run ab_compare.py on them.
 
-    mpftp put ab_capture.py /ab_capture.py
-    mpftp put ../../../sensors/ov2710.py /ov2710.py      (description arm only)
-    mpftp exec "import ab_capture; ab_capture.run('driver')"
+    mcuctl put ab_capture.py /ab_capture.py
+    mcuctl put ../../../sensors/ov2710.py /ov2710.py      (description arm only)
+    mcuctl exec "import ab_capture; ab_capture.run('driver')"
 
 Needs: firmware with cameraif, ppa and jpegio, and the board's config package.
 """

@@ -23,7 +23,7 @@ only lists, and ``usb_drive_log.py`` the one that writes.
 
 Run it:
 
-    mpftp run examples/usb_drive_read.py
+    mcuctl run examples/usb_drive_read.py
 
 Tested on: an ESP32-S3 hosting the microSD card of an ESP32-P4 board that
 was running ``sd_drive.py``.

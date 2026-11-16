@@ -37,7 +37,7 @@ then write the selection and copy it:
 
 ```bash
 python modules/audioinstruments/selection.py electric_piano,mono_synth,rhythm808 --out build-instruments --mpy-cross micropython/mpy-cross/build/mpy-cross
-mpftp put -r build-instruments/audioinstruments /lib/audioinstruments
+mcuctl put -r build-instruments/audioinstruments /lib/audioinstruments
 ```
 
 The script reads the package a build put under `deps/omnipython-lib`, which

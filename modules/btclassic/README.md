@@ -606,7 +606,7 @@ board discoverable and tap Scan.
 
 ## Examples
 
-Each runs as it is with `mpftp run`; its docstring says what it needs.
+Each runs as it is with `mcuctl run`; its docstring says what it needs.
 
 | Example | What it does |
 |---|---|

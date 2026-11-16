@@ -13,7 +13,7 @@ and Bluetooth headphones, a speaker or a car stereo in pairing mode.
 
 Run it:
 
-    mpftp run btclassic_source_tone.py
+    mcuctl run btclassic_source_tone.py
 
 Tested on: Adafruit QT Py ESP32 Pico with the Audio BFF, MicroPython
 1.30.0-preview, playing to a Windows 11 PC as the

@@ -7,7 +7,7 @@ Run it on a board whose camera is an OV2710 (the ESP32-P4X-EYE), with nothing
 else holding the camera. Each level must leave the registers Espressif's driver
 writes for it, and a level outside 2..235 must be clamped, not written raw.
 
-    mpftp run --follow -d COM119 ov2710_ae_level.py
+    mcuctl run --follow -d COM119 ov2710_ae_level.py
 """
 
 import board_config

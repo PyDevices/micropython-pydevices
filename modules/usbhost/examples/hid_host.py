@@ -25,7 +25,7 @@ ESP-IDF host lacks.
 
 Run it:
 
-    mpftp run examples/hid_host.py
+    mcuctl run examples/hid_host.py
 
 Then type on the keyboard.
 

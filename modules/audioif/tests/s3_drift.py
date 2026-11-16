@@ -9,9 +9,9 @@ clock dividers off one PLL are handed the same divisor but nothing LOCKS
 them the way one channel pair locks BCLK and WS, so forty seconds is not an
 answer for a stompbox somebody leaves on. This is the long run.
 
-    mpftp put -d COM12 s3_drift.py /lib/s3_drift.py
-    mpftp run -d COM12 <driver>          # no --follow: it takes an hour
-    mpftp get -d COM12 /s3_drift.txt
+    mcuctl put -d COM12 s3_drift.py /lib/s3_drift.py
+    mcuctl run -d COM12 <driver>          # no --follow: it takes an hour
+    mcuctl get -d COM12 /s3_drift.txt
 
 The speaker stays SILENT on purpose. Both DMA counters advance at their own
 port's frame clock whatever the wire carries -- the TX DMA clocks the zeros

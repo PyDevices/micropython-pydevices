@@ -13,7 +13,7 @@ page, or headphones in pairing mode.
 
 Run it:
 
-    mpftp run btclassic_scan.py
+    mcuctl run btclassic_scan.py
 
 Tested on: Adafruit QT Py ESP32 Pico with the Audio BFF, MicroPython
 1.30.0-preview, finding an ESP32 Audio Kit.

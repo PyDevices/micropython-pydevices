@@ -24,8 +24,8 @@ port.
 
 Run it:
 
-    mpftp run examples/phone_tether.py
-    mpftp monitor --seconds 150
+    mcuctl run examples/phone_tether.py
+    mcuctl monitor --seconds 150
 
 Watch what it prints while it waits for the phone.
 

@@ -11,9 +11,9 @@ with `board_compare.py`:
     frozen       whatever Camera() finds with no sensor=, which on an image
                  without the driver is a frozen description
 
-    mpftp put ../../sensors/ov2710.py /ov2710.py
-    mpftp put board_check.py /board_check.py
-    mpftp exec "import board_check; board_check.run('ov2710', 'driver')"
+    mcuctl put ../../sensors/ov2710.py /ov2710.py
+    mcuctl put board_check.py /board_check.py
+    mcuctl exec "import board_check; board_check.run('ov2710', 'driver')"
 
 For each mode it opens the camera with auto-exposure off, reads every
 register the description's lists write, then sets exposure, gain, flip, mirror

@@ -15,7 +15,7 @@ Its switch stays grey until the phone is plugged in.
 
 Run it:
 
-    mpftp run --follow examples/usb_host_net_simpletest.py
+    mcuctl run --follow examples/usb_host_net_simpletest.py
 
 Success is an address from the phone, such as 192.168.42.x.
 

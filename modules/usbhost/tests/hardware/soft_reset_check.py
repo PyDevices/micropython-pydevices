@@ -4,7 +4,7 @@
 
 """Soft reset check: usbhost shuts its hardware down on a soft reset.
 
-Run on the PC, with CPython and ``mpftp`` on the PATH (or named by ``MPFTP``),
+Run on the PC, with CPython and ``mcuctl`` on the PATH (or named by ``MCUCTL``),
 against a board running usbhost with a USB audio device on its host port: the
 ESP32-P4 DEV-KIT with a mic in its USB-A hub, say, or a USB speaker or DAC.
 
@@ -89,8 +89,8 @@ except Exception as e:
 say("stream_bytes", got)
 """
 
-def mpftp(args, device):
-    cmd = shlex.split(os.environ.get("MPFTP", "mpftp"))
+def mcuctl(args, device):
+    cmd = shlex.split(os.environ.get("MCUCTL", "mcuctl"))
     result = subprocess.run(cmd + [args[0], "-d", device] + args[1:],
                             capture_output=True, text=True, timeout=120)
     try:
@@ -100,7 +100,7 @@ def mpftp(args, device):
 
 
 def run_step(device, code):
-    reply = mpftp(["exec", code], device)
+    reply = mcuctl(["exec", code], device)
     text = reply.get("output") or reply.get("error") or ""
     values = {}
     for line in text.splitlines():
@@ -125,7 +125,7 @@ def main():
 
     for cycle in range(args.cycles + 1):
         if cycle:
-            mpftp(["soft-reset"], args.device)
+            mcuctl(["soft-reset"], args.device)
         values, text = run_step(args.device, BOARD_STEP)
         print("-- cycle %d%s" % (cycle, "" if cycle else " (the first program)"))
         if not values:

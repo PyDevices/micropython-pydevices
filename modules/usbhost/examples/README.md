@@ -40,11 +40,11 @@ A PC can replace either end. That is the point of standard classes.
 ### Headline: P4 as a USB sound card for an S3
 
 1. Console on each board's **UART bridge**, not on the OTG port under test.
-2. P4: `mpftp run examples/usb_soundcard.py` -- enumerates as Speakers, played
+2. P4: `mcuctl run examples/usb_soundcard.py` -- enumerates as Speakers, played
    by audiodsp's pump into the ES8311.
 3. S3: OTG adapter or powered hub on the host port (the Waveshare S3 touch
    boards do not switch VBUS; see also [usbif#5](https://github.com/PyDevices/usbif/issues/5)).
-4. S3: `mpftp run examples/usb_speaker.py` -- finds the P4, plays a 440 Hz tone.
+4. S3: `mcuctl run examples/usb_speaker.py` -- finds the P4, plays a 440 Hz tone.
 5. Hear it on the P4's speaker.
 
 ### Power

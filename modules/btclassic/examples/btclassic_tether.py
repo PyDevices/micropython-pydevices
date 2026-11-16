@@ -14,7 +14,7 @@ board with Bluetooth tethering turned on in its hotspot settings.
 
 Run it:
 
-    mpftp run btclassic_tether.py
+    mcuctl run btclassic_tether.py
 
 Tested on: Pimoroni Pico Plus 2 W, MicroPython 1.30.0-preview with
 btclassic, tethered to a Raspberry Pi 3 B+ running BlueZ as a Bluetooth

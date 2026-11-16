@@ -13,14 +13,14 @@ photo with a face in it, and the two models of ESP-DL's human_face_detect
 (MIT licence; the files for your chip, from its models/p4 or models/s3
 folder), copied to the board:
 
-    mpftp put face.jpg /face.jpg
-    mpftp put human_face_detect_msr_s8_v1.espdl /models/human_face_detect_msr_s8_v1.espdl
-    mpftp put human_face_detect_mnp_s8_v1.espdl /models/human_face_detect_mnp_s8_v1.espdl
+    mcuctl put face.jpg /face.jpg
+    mcuctl put human_face_detect_msr_s8_v1.espdl /models/human_face_detect_msr_s8_v1.espdl
+    mcuctl put human_face_detect_mnp_s8_v1.espdl /models/human_face_detect_mnp_s8_v1.espdl
 
 Run it:
 
-    mpftp run espdl_face_landmarks.py
-    mpftp get /faces.jpg faces.jpg
+    mcuctl run espdl_face_landmarks.py
+    mcuctl get /faces.jpg faces.jpg
 """
 
 import time

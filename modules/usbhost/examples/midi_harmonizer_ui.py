@@ -23,7 +23,7 @@ the ``usb-device-midi`` and ``adafruit_midi`` packages.
 
 Run it:
 
-    mpftp run examples/midi_harmonizer_ui.py
+    mcuctl run examples/midi_harmonizer_ui.py
 
 Then play into the board's MIDI port.
 

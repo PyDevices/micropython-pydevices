@@ -9,7 +9,7 @@ its input: a USB-C DAC dongle with a headset splitter, its headphone plug in
 its own mic jack. Nothing else should be connected to that output, and the
 level stays moderate (``TONE_DBFS``).
 
-    mpftp run --follow -d COM4 tests/hardware/uac_duplex_loopback.py
+    mcuctl run --follow -d COM4 tests/hardware/uac_duplex_loopback.py
 
 Both streams stay open for the whole run, through four phases:
 
@@ -74,7 +74,7 @@ def say(*args):
 
 
 def beat():
-    """A dot every 2 s: ``mpftp run --follow`` gives up on a quiet board.
+    """A dot every 2 s: ``mcuctl run --follow`` gives up on a quiet board.
 
     The UART carries it, never flash, so it costs the USB streams nothing.
     """

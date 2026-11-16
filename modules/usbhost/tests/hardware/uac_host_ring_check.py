@@ -36,7 +36,7 @@ broken on its own.
 The signal is a 400 Hz sine at -40 dBFS: quiet enough to leave running near
 people, loud enough to confirm by ear if you want to.
 
-    mpftp run --follow -d COM17 tests/hardware/uac_host_ring_check.py
+    mcuctl run --follow -d COM17 tests/hardware/uac_host_ring_check.py
 
 Prints one ``CASE`` line per case and a final ``GATE PASS``/``GATE FAIL``.
 """

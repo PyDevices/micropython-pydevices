@@ -15,7 +15,7 @@ and a computer, phone or another board to look the service up
 
 Run it:
 
-    mpftp run btclassic_service.py
+    mcuctl run btclassic_service.py
 
 Tested on: Ai-Thinker ESP32 Audio Kit, MicroPython 1.30.0-preview with
 btclassic, with a Windows 11 PC listing the board's serial services.

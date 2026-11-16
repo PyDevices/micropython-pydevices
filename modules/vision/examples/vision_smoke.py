@@ -9,7 +9,7 @@ frames of H.264 to a file. Each step prints ``ok`` or ``FAIL``, and the last
 line is ``PASS`` or the list of failures. To check the H.264 file on your
 computer, fetch it and probe it:
 
-    mpftp get /vision.h264 .
+    mcuctl get /vision.h264 .
     ffprobe vision.h264
 
 Needs: an ESP32-S3 or ESP32-P4 board with firmware built with vision. The
@@ -17,7 +17,7 @@ H.264 step runs only on a P4, and is skipped elsewhere. No camera or display.
 
 Run it:
 
-    mpftp run vision_smoke.py
+    mcuctl run vision_smoke.py
 """
 
 import time

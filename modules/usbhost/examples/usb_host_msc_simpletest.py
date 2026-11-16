@@ -19,7 +19,7 @@ reach a full-speed drive otherwise.
 
 Run it:
 
-    mpftp run --follow examples/usb_host_msc_simpletest.py
+    mcuctl run --follow examples/usb_host_msc_simpletest.py
 
 Success is the drive's size and its files listed.
 
