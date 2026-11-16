@@ -106,7 +106,7 @@ first `cp`. mpremote compiles each `.py` to `.mpy` on the way when the
 release writes `.mpy` files this firmware reads). Without it, mpremote copies
 the `.py` files and the board compiles them as they're imported. The board's
 own drivers go in the same folder:
-[the GIGA Display Shield's board page](https://github.com/PyDevices/omnipython/blob/main/docs/boards/display-boards.md#arduino-giga-r1-wifi--giga-display-shield)
+[the GIGA Display Shield's board page](https://github.com/PyDevices/omnipython/blob/main/docs/boards/arduino-giga-display-shield.md)
 has that recipe.
 
 The H747 has a second core, a Cortex-M4, and upstream's layout leaves it the

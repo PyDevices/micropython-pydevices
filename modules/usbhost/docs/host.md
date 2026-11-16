@@ -4,7 +4,7 @@ What the host does today, where its limits are, and why it is built the way
 it is. The [README](../README.md) says what usbhost is and how to build it.
 
 Which device classes the packages drive, and which boards run them, are in
-[USB host support](https://github.com/PyDevices/omnipython/blob/main/docs/reference/usb-host-support.md).
+[USB host support](https://github.com/PyDevices/omnipython/blob/main/docs/reference/usb-support.md).
 
 ## Limits, and what has been proven
 
