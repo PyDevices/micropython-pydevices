@@ -1,0 +1,134 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 07:00:00 -0600
+Subject: [PATCH] esp32: A task lent a priority is scheduled at once.
+
+When a task waits for a mutex, FreeRTOS lends its priority to the mutex's
+holder. On a chip with two cores, ESP-IDF's xTaskPriorityInherit() moves a
+holder that is ready to run into the ready list of its new priority and
+does nothing more. If the holder is pinned to the other core, and a task of
+the holder's old priority is running there, that core is never told to
+choose again: its tick shares time only between tasks of the running task's
+priority, and the holder has just left that list. The holder stays off the
+CPU until the running task blocks or yields by itself, and the task that
+lent the priority waits with it.
+
+On an ESP32-P4 the main thread, cut off by a time slice while it held a
+mutex, stayed off the CPU for 50 to 90 ms at priority 7 or 21, while a
+second Python thread at priority 1 computed a TLS handshake on the same
+core without the GIL. A USB host task and an audio task on the other core
+waited for it that long.
+
+Wrap xTaskPriorityInherit() at link time: once a priority has been lent,
+each other core the holder may run on and isn't running on is asked to
+choose its task again. A chip with one core is unchanged.
+---
+diff --git a/ports/esp32/esp32_common.cmake b/ports/esp32/esp32_common.cmake
+index 376b393f9..baa037c3e 100644
+--- a/ports/esp32/esp32_common.cmake
++++ b/ports/esp32/esp32_common.cmake
+@@ -144,6 +144,7 @@ list(APPEND MICROPY_SOURCE_PORT
+     modesp32.c
+     machine_hw_spi.c
+     mpthreadport.c
++    mutexholder.c
+     machine_rtc.c
+     machine_sdcard.c
+     modespnow.c
+@@ -320,6 +321,9 @@ target_link_options(${MICROPY_TARGET} PUBLIC
+   -Wl,--wrap=memp_malloc
+   -Wl,--wrap=memp_free
+ 
++  # A task that inherits a priority is scheduled at once (mutexholder.c)
++  -Wl,--wrap=xTaskPriorityInherit
++
+   # Enable the panic handler wrapper
+   -Wl,--undefined=esp_panic_handler
+   -Wl,--wrap=esp_panic_handler
+diff --git a/ports/esp32/mutexholder.c b/ports/esp32/mutexholder.c
+new file mode 100644
+index 000000000..c38fd32fc
+--- /dev/null
++++ b/ports/esp32/mutexholder.c
+@@ -0,0 +1,81 @@
++/*
++ * This file is part of the MicroPython project, http://micropython.org/
++ *
++ * The MIT License (MIT)
++ *
++ * Copyright (c) 2026 Brad Barnett
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++ */
++
++// A task that inherits a priority is scheduled at once, on a chip with two
++// cores.
++//
++// When a task waits for a mutex, FreeRTOS lends its priority to the mutex's
++// holder. ESP-IDF's xTaskPriorityInherit() moves a holder that is ready to
++// run into the ready list of its new priority, and stops there. If the holder
++// is pinned to the other core and a task of its old priority is running
++// there, nothing tells that core to look again: the tick only shares time
++// between tasks of the running task's own priority, and the holder has just
++// left that list. The holder then waits until the running task blocks or
++// yields of its own accord, and the high-priority task waits with it.
++//
++// Seen on an ESP32-P4: the main thread, cut off by a time slice while holding
++// a mutex, stayed off the CPU for 50 to 90 ms although it had been lent
++// priority 7 or 21, while a second Python thread at priority 1 computed a TLS
++// handshake on the same core. An audio task on the other core waited for it.
++//
++// So the link wraps xTaskPriorityInherit(): after a priority has been lent,
++// each other core the holder may run on, and isn't running on, is asked to
++// choose its task again.
++
++#include "freertos/FreeRTOS.h"
++#include "freertos/task.h"
++#include "freertos/idf_additions.h"
++
++#if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
++
++BaseType_t __real_xTaskPriorityInherit(TaskHandle_t const pxMutexHolder);
++
++BaseType_t __wrap_xTaskPriorityInherit(TaskHandle_t const pxMutexHolder) {
++    BaseType_t inherited = __real_xTaskPriorityInherit(pxMutexHolder);
++    if (inherited != pdFALSE && pxMutexHolder != NULL) {
++        const BaseType_t here = xPortGetCoreID();
++        const BaseType_t affinity = xTaskGetCoreID(pxMutexHolder);
++        for (BaseType_t core = 0; core < CONFIG_FREERTOS_NUMBER_OF_CORES; core++) {
++            // This core's task is about to block on the mutex, and will
++            // choose again then.
++            if (core != here && (affinity == tskNO_AFFINITY || affinity == core)
++                && xTaskGetCurrentTaskHandleForCore(core) != pxMutexHolder) {
++                vPortYieldOtherCore(core);
++            }
++        }
++    }
++    return inherited;
++}
++
++#else
++
++BaseType_t __real_xTaskPriorityInherit(TaskHandle_t const pxMutexHolder);
++
++BaseType_t __wrap_xTaskPriorityInherit(TaskHandle_t const pxMutexHolder) {
++    return __real_xTaskPriorityInherit(pxMutexHolder);
++}
++
++#endif
