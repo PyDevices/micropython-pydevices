@@ -7,6 +7,7 @@
 //
 //   d = svgio.SvgDecoder(memory=256 * 1024)       # its own working memory
 //   d.decode(pixels, alpha, rows=(0, 120))        # a band of the picture
+//   d.decode(pixels, alpha, colors={0xFF0000: 0x00A0FF})    # in other colours
 //
 // The engine is NanoSVG (svgio_nanosvg.c). On CPython, pydevices-desktop's
 // svgio.py gives the same API over resvg.
@@ -274,9 +275,9 @@ static void svgio_check_room(const char *what, size_t have, size_t need) {
     }
 }
 
-// decode(target, alpha=None, *, x=0, y=0, stride=None, rows=None)
+// decode(target, alpha=None, *, x=0, y=0, stride=None, rows=None, colors=None)
 static mp_obj_t svgio_decoder_decode(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
-    enum { ARG_self, ARG_target, ARG_alpha, ARG_x, ARG_y, ARG_stride, ARG_rows };
+    enum { ARG_self, ARG_target, ARG_alpha, ARG_x, ARG_y, ARG_stride, ARG_rows, ARG_colors };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_self, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
         { MP_QSTR_target, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
@@ -285,6 +286,7 @@ static mp_obj_t svgio_decoder_decode(size_t n_args, const mp_obj_t *pos, mp_map_
         { MP_QSTR_y, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 0 } },
         { MP_QSTR_stride, MP_ARG_KW_ONLY | MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
         { MP_QSTR_rows, MP_ARG_KW_ONLY | MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+        { MP_QSTR_colors, MP_ARG_KW_ONLY | MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
     };
     mp_arg_val_t a[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all(n_args, pos, kw, MP_ARRAY_SIZE(allowed), allowed, a);
@@ -329,6 +331,32 @@ static mp_obj_t svgio_decoder_decode(size_t n_args, const mp_obj_t *pos, mp_map_
     if (t.pixels == NULL && t.alpha == NULL) {
         mp_raise_ValueError(MP_ERROR_TEXT("give a target, an alpha buffer, or both"));
     }
+    // colors: {0xRRGGBB: 0xRRGGBB}, each a colour of the SVG and what to
+    // draw in its place.
+    uint32_t swaps[2 * SVGIO_MAX_SWAPS];
+    int nswaps = 0;
+    if (a[ARG_colors].u_obj != mp_const_none) {
+        if (!mp_obj_is_type(a[ARG_colors].u_obj, &mp_type_dict)) {
+            mp_raise_TypeError(MP_ERROR_TEXT("colors is a dict of 0xRRGGBB to 0xRRGGBB"));
+        }
+        mp_map_t *map = mp_obj_dict_get_map(a[ARG_colors].u_obj);
+        for (size_t i = 0; i < map->alloc; i++) {
+            if (!mp_map_slot_is_filled(map, i)) {
+                continue;
+            }
+            if (nswaps == SVGIO_MAX_SWAPS) {
+                mp_raise_ValueError(MP_ERROR_TEXT("colors takes at most 128 colours"));
+            }
+            const uint32_t from = mp_obj_get_int(map->table[i].key), to = mp_obj_get_int(map->table[i].value);
+            if ((from | to) > 0xFFFFFF) {
+                mp_raise_ValueError(MP_ERROR_TEXT("colors is a dict of 0xRRGGBB to 0xRRGGBB"));
+            }
+            // as NanoSVG holds a colour: red in the low byte
+            swaps[2 * nswaps] = (from >> 16) | (from & 0x00FF00) | ((from & 0xFF) << 16);
+            swaps[2 * nswaps + 1] = (to >> 16) | (to & 0x00FF00) | ((to & 0xFF) << 16);
+            nswaps++;
+        }
+    }
     if (y1 == y0) {
         return mp_const_none;
     }
@@ -358,7 +386,7 @@ static mp_obj_t svgio_decoder_decode(size_t n_args, const mp_obj_t *pos, mp_map_
     }
     if (why == NULL) {
         why = svgio_render(self->image, prepare ? self->prepared : NULL, self->scale, w, h, y0, y1,
-            strip, rows, svgio_put_rows, &t);
+            swaps, nswaps, strip, rows, svgio_put_rows, &t);
     }
     svgio_mem_free(strip);
     svgio_mem_use(NULL);

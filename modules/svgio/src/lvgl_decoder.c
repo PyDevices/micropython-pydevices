@@ -312,7 +312,7 @@ static lv_result_t decoder_open(lv_image_decoder_t *decoder, lv_image_decoder_ds
         svgio_lvgl_target_t t = {
             decoded->data, decoded->data + (size_t)decoded->header.stride * h, decoded->header.stride,
         };
-        why = svgio_render(k->image, k->prepared, 1.0f, w, h, 0, h, strip, rows, put_rows, &t);
+        why = svgio_render(k->image, k->prepared, 1.0f, w, h, 0, h, NULL, 0, strip, rows, put_rows, &t);
         lv_free(strip);
     }
     if (why != NULL) {
