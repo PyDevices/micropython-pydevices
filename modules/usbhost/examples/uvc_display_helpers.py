@@ -247,6 +247,10 @@ def make_tick(cam, display_drv, jpegio, geometry, tear_free):
                 display_drv.show()
             count_frame()
 
+        # Whether a frame has ever been painted direct. Until one has, a
+        # refusal may mean this decoder or panel can't do it at all.
+        direct_worked = [False]
+
         def tick(_=None):
             n = cam.read(src)
             if n <= 0:
@@ -257,20 +261,34 @@ def make_tick(cam, display_drv, jpegio, geometry, tear_free):
                 return
             if decoder.width != cam.width or decoder.height != cam.height:
                 return
+            decoded = False
             if direct[0]:
                 try:
                     _direct(n)
+                    direct_worked[0] = True
                     return
                 except (OSError, ValueError, TypeError) as e:
-                    # A decoder or buffer that won't take it (hardware decode
-                    # wanting its own buffer): the blit path from now on.
-                    print("direct paint off:", e)
-                    direct[0] = False
-                    decoder.open(memoryview(src)[:n])
-            try:
-                decoder.decode(rgb, scale=0)
-            except Exception:
-                return
+                    # One frame refused: a camera sharing a busy bus loses a
+                    # packet now and then, and a hardware decoder can turn
+                    # down a frame it would take a moment later. Decode this
+                    # frame the other way. If that fails too the frame is
+                    # skipped; if it works and no frame has ever been painted
+                    # direct, the decoder or buffer can't do it (hardware
+                    # decode wanting its own buffer): the blit path from now on.
+                    try:
+                        decoder.open(memoryview(src)[:n])
+                        decoder.decode(rgb, scale=0)
+                    except Exception:
+                        return
+                    decoded = True
+                    if not direct_worked[0]:
+                        print("direct paint off:", e)
+                        direct[0] = False
+            if not decoded:
+                try:
+                    decoder.decode(rgb, scale=0)
+                except Exception:
+                    return
             if scale == 1:
                 # The decoded frame is already the picture: one blit. Row by
                 # row cost one call per line, about 448 of them per frame.
