@@ -211,6 +211,9 @@
   },
   "0070-micropython-esp32-a-task-lent-a-priority-is-scheduled-at-once.patch": {
    "sha256": "248b1201fb911995c5f4d5e46e6929effc4f14d654c877e726e785ed0adba634"
+  },
+  "0071-micropython-esp32-a-collection-on-a-p4-no-longer-overflows-its-mark-stack.patch": {
+   "sha256": "c960b52a8706abd0a458a5d3fa6f8b4e9a77a700c38d54408cfe5fa1256b1ee8"
   }
  },
  "tinyusb_patches": {

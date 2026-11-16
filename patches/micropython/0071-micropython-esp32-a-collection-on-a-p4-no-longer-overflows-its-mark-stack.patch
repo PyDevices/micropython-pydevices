@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 07:10:00 -0600
+Subject: [PATCH] esp32: A collection on a P4 no longer overflows its mark
+ stack.
+
+The collector keeps the blocks it has still to trace on a stack of
+MICROPY_ALLOC_GC_STACK_SIZE entries, 64 by default. When the stack is full
+it sets a flag instead, and gc_deal_with_stack_overflow() then walks the
+whole heap and traces every marked block again, once for each time the
+flag was set. An application with a few thousand objects overflows it many
+times in one collection.
+
+On an ESP32-P4 with 1 MB of live objects in a 2 MB heap (a synthesizer
+application with an LVGL screen), gc.collect() took 77 ms, and a task
+sampler found nearly all of it in gc_deal_with_stack_overflow(). With 4096
+entries the same collection takes 28 ms and none of it is there. Every
+thread waits for a collection, so that is 49 ms less in the longest pause
+the interpreter makes.
+
+4096 entries are 32 KB of internal RAM (a block index and its heap area
+each), which a P4 has. Other chips keep the default; a board header can
+still set its own.
+---
+diff --git a/ports/esp32/mpconfigport.h b/ports/esp32/mpconfigport.h
+index f6ae6b4b4..a13aaf574 100644
+--- a/ports/esp32/mpconfigport.h
++++ b/ports/esp32/mpconfigport.h
+@@ -60,6 +60,13 @@
+ // Python internal features
+ #define MICROPY_READER_VFS                  (1)
+ #define MICROPY_ENABLE_GC                   (1)
++#if CONFIG_IDF_TARGET_ESP32P4 && !defined(MICROPY_ALLOC_GC_STACK_SIZE)
++// The collector's mark stack. When it overflows, the collector walks the
++// whole heap again for every overflow: with the default 64 entries a
++// collection of 1 MB of live objects took 77 ms on an ESP32-P4, and 28 ms
++// with room for 4096. Each entry is 8 bytes of internal RAM.
++#define MICROPY_ALLOC_GC_STACK_SIZE         (4096)
++#endif
+ #define MICROPY_STACK_CHECK_MARGIN          (1024)
+ #define MICROPY_ENABLE_EMERGENCY_EXCEPTION_BUF (1)
+ #define MICROPY_LONGINT_IMPL                (MICROPY_LONGINT_IMPL_MPZ)
