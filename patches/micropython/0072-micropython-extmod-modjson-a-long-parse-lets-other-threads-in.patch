@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 11:40:00 -0600
+Subject: [PATCH] extmod/modjson: A long parse lets other threads in.
+
+json.load() and json.loads() build their whole result without letting go
+of the GIL, so on a port with threads every other thread stops for as long
+as the document takes to parse. On an ESP32-P4, json.loads() of a 22 KB
+document on a second thread held the main thread for 50 to 63 ms, and a
+thread that parsed 179 KB documents in a loop kept the main thread out for
+4.9 s.
+
+The parser now gives the GIL up after every 64 values, the way the VM does
+after every few branches. Nothing else can reach the objects it has built
+so far, and a thread parked there is scanned by a collection like any
+other. The main thread's longest wait during the 22 KB parse is now 0 to
+20 ms, and beside the 179 KB loop 40 ms. A parse with no other thread
+running takes as long as before (133 ms for 29 KB on an ESP32-S3).
+---
+diff --git a/extmod/modjson.c b/extmod/modjson.c
+index 11aedd198..2af09d8c4 100644
+--- a/extmod/modjson.c
++++ b/extmod/modjson.c
+@@ -156,6 +156,9 @@ static mp_obj_t mod_json_load(mp_obj_t stream_obj) {
+     mp_obj_t stack_top = MP_OBJ_NULL;
+     const mp_obj_type_t *stack_top_type = NULL;
+     mp_obj_t stack_key = MP_OBJ_NULL;
++    #if MICROPY_PY_THREAD_GIL
++    unsigned int values = 0;
++    #endif
+     S_NEXT(s);
+     for (;;) {
+     cont:
+@@ -336,6 +339,15 @@ static mp_obj_t mod_json_load(mp_obj_t stream_obj) {
+                 stack_top_type = mp_obj_get_type(stack_top);
+             }
+         }
++        #if MICROPY_PY_THREAD_GIL
++        // A large document takes tens of milliseconds to parse, and nothing
++        // in this loop lets go of the GIL. Let another thread in after every
++        // 64 values, as the VM does after every few branches.
++        if ((++values & 0x3f) == 0) {
++            MP_THREAD_GIL_EXIT();
++            MP_THREAD_GIL_ENTER();
++        }
++        #endif
+     }
+ success:
+     // eat trailing whitespace
