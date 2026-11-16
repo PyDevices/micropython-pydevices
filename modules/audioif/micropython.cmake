@@ -63,7 +63,11 @@ target_sources(usermod_audiopump INTERFACE
     ${AUDIOPUMP_MOD_DIR}/src/_audioif.c
     ${AUDIOPUMP_MOD_DIR}/src/audiobusio.c
     ${AUDIOPUMP_MOD_DIR}/src/audioi2sin.c
+    ${AUDIOPUMP_MOD_DIR}/src/audioif_cache_sync.c
 )
+
+# A small cache sync must not wait for a large one: see audioif_cache_sync.c.
+target_link_options(usermod_audiopump INTERFACE "-Wl,--wrap=esp_cache_msync")
 
 target_include_directories(usermod_audiopump INTERFACE
     ${AUDIOPUMP_AUDIODSP_DIR}/src
