@@ -40,7 +40,16 @@ nest 32 deep; deeper than that, styles go wrong.
 
 ## API
 
-### `svgio.SvgDecoder()`
+### `svgio.SvgDecoder(*, memory=None)`
+
+`memory` gives the decoder that many bytes of working memory of its own,
+taken from the heap once, when it's made. Every `open()` and `decode()` then
+works inside it and asks the heap for nothing. Leave it out and the decoder
+takes what it needs from the heap each time, as before. [Memory and speed](#memory-and-speed)
+says when to give it and how much.
+
+`memory` and `memory_peak` are properties: the bytes it was given (0 without),
+and the most it held at once since the last `open()`.
 
 ### `open(source, *, width=None, height=None, scale=None) -> (width, height)`
 
@@ -51,10 +60,25 @@ the SVG's own, from its `width` and `height` or its `viewBox`. Give one of
 
 The SVG stays parsed, so you can `decode()` it as often as you like.
 
-### `decode(target, alpha=None, *, x=0, y=0, stride=None)`
+### `decode(target, alpha=None, *, x=0, y=0, stride=None, rows=None)`
 
 Draws the image with its top-left at `(x, y)` and rows `stride` pixels apart
 (default: the image's width). Pixels outside the image are left alone.
+
+`rows=(first, end)` draws only those rows of the image, where they sit in the
+whole picture. A picture drawn in bands is byte for byte the picture drawn
+whole, so a screen-sized drawing can be parsed once and painted a band at a
+time between other work:
+
+```python
+w, h = d.open(scene, width=480)
+for y in range(0, h, 120):
+    d.decode(fb_buf, rows=(y, min(y + 120, h)))    # then let the display run
+```
+
+The target need only reach the last row drawn. The drawing runs in strips of
+`65536 // (4 * width)` rows counted from the top; a band whose edges fall on
+multiples of that draws no row twice.
 
 - `target` and `alpha`: native-order RGB565 colour into `target`, and
   coverage, 0 to 255, into `alpha`. That pair is LVGL's RGB565A8.
@@ -81,6 +105,28 @@ along.
 
 On a desktop, an 800x480 gauge with gradients draws in a few milliseconds,
 and an icon in well under one.
+
+### Working memory
+
+A parse makes thousands of small blocks, and a draw a few large ones. On a
+board whose heap already holds megabytes of pictures, finding room for each
+one is what takes the time, and it varies: the same sprite can parse in 50 ms
+or in 500. A decoder made with `memory=` does all of that in its own block
+instead:
+
+```python
+d = svgio.SvgDecoder(memory=256 * 1024)
+d.open(sprite, width=200)
+d.decode(pixels, alpha)
+print(d.memory_peak)        # what this picture needed
+```
+
+To size it, open and draw your largest picture and read `memory_peak`, then
+give it that and some room to spare. It counts the SVG's text while it is
+parsed, the parsed shapes, the kept outlines and one strip. A picture that
+needs more than the decoder has still draws: what doesn't fit comes from the
+heap, and `memory_peak` comes out larger than `memory`. Each `open()` starts
+the block afresh, so one decoder serves any number of pictures, one at a time.
 
 ## LVGL image decoder
 

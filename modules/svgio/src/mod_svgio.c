@@ -5,6 +5,9 @@
 //   d.decode(pixels, alpha)                       # colour and coverage
 //   d.decode(fb_buf, x=10, y=10, stride=320)      # or blended over a framebuffer
 //
+//   d = svgio.SvgDecoder(memory=256 * 1024)       # its own working memory
+//   d.decode(pixels, alpha, rows=(0, 120))        # a band of the picture
+//
 // The engine is NanoSVG (svgio_nanosvg.c). On CPython, pydevices-desktop's
 // svgio.py gives the same API over resvg.
 //
@@ -37,15 +40,43 @@ typedef struct {
     svgio_prepared_t *prepared;     // its outlines at scale, from the first decode
     float scale;
     int width, height;      // the size open() chose, in pixels
+    svgio_arena_t mem;      // what it holds, and its working memory if it was given some
 } svgio_decoder_obj_t;
 
+// The least working memory worth having: a 24 px icon needs more.
+#define SVGIO_MEMORY_MIN 4096
+
+// SvgDecoder(*, memory=None)
 static mp_obj_t svgio_decoder_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
-    mp_arg_check_num(n_args, n_kw, 0, 0, false);
+    enum { ARG_memory };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_memory, MP_ARG_KW_ONLY | MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+    };
+    mp_arg_val_t a[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed), allowed, a);
+    mp_int_t memory = 0;
+    if (a[ARG_memory].u_obj != mp_const_none) {
+        memory = mp_obj_get_int(a[ARG_memory].u_obj);
+        if (memory < SVGIO_MEMORY_MIN || memory > 0x7FFFFFF8) {
+            mp_raise_ValueError(MP_ERROR_TEXT("svgio: memory must be at least 4096 bytes"));
+        }
+        memory &= ~(mp_int_t)7;
+    }
     svgio_decoder_obj_t *self = mp_obj_malloc(svgio_decoder_obj_t, type);
     self->image = NULL;
     self->prepared = NULL;
     self->scale = 0;
     self->width = self->height = 0;
+    self->mem.base = NULL;
+    self->mem.size = 0;
+    svgio_arena_reset(&self->mem);
+    if (memory != 0) {
+        // One block, asked for once. The decoder points at its head, which is
+        // what keeps it, and everything the parser builds inside it, alive.
+        self->mem.base = m_new(uint8_t, memory);
+        self->mem.size = (uint32_t)memory;
+        svgio_arena_reset(&self->mem);
+    }
     return MP_OBJ_FROM_PTR(self);
 }
 
@@ -70,6 +101,13 @@ static int svgio_side(float v) {
     return n < 1 ? 1 : n;
 }
 
+// An image open() parsed and then can't use goes back to the decoder's memory.
+static void svgio_decoder_drop(svgio_decoder_obj_t *self, svgio_image_t *image) {
+    svgio_mem_use(&self->mem);
+    svgio_image_free(image);
+    svgio_mem_use(NULL);
+}
+
 // open(source, *, width=None, height=None, scale=None) -> (width, height)
 static mp_obj_t svgio_decoder_open(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
     enum { ARG_self, ARG_source, ARG_width, ARG_height, ARG_scale };
@@ -90,10 +128,13 @@ static mp_obj_t svgio_decoder_open(size_t n_args, const mp_obj_t *pos, mp_map_t 
         mp_raise_ValueError(MP_ERROR_TEXT("give one of width, height and scale"));
     }
 
+    svgio_mem_use(&self->mem);
     svgio_prepared_free(self->prepared);
     self->prepared = NULL;
     svgio_image_free(self->image);
     self->image = NULL;
+    svgio_arena_reset(&self->mem);
+    svgio_mem_use(NULL);
     self->width = self->height = 0;
 
     mp_obj_t source = a[ARG_source].u_obj;
@@ -104,19 +145,25 @@ static mp_obj_t svgio_decoder_open(size_t n_args, const mp_obj_t *pos, mp_map_t 
         mp_get_buffer_raise(source, &b, MP_BUFFER_READ);
     }
     // The parser writes into its text, and wants it NUL-terminated.
-    char *text = m_new(char, b.len + 1);
-    memcpy(text, b.buf, b.len);
-    text[b.len] = '\0';
-    float sw = 0, sh = 0;
     svgio_mem_reset();
-    svgio_image_t *image = svgio_parse(text, &sw, &sh);
-    m_del(char, text, b.len + 1);
+    svgio_mem_use(&self->mem);
+    char *text = svgio_mem_alloc(b.len + 1);
+    float sw = 0, sh = 0;
+    svgio_image_t *image = NULL;
+    if (text != NULL) {
+        memcpy(text, b.buf, b.len);
+        text[b.len] = '\0';
+        image = svgio_parse(text, &sw, &sh);
+        svgio_mem_free(text);
+    }
+    if (image != NULL && !(sw > 0 && sh > 0)) {
+        svgio_image_free(image);
+        svgio_mem_use(NULL);
+        mp_raise_ValueError(MP_ERROR_TEXT("svgio: not an SVG with a size (no <svg> with width and height, or viewBox)"));
+    }
+    svgio_mem_use(NULL);
     if (image == NULL) {
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("svgio: not enough memory to parse the SVG"));
-    }
-    if (!(sw > 0 && sh > 0)) {
-        svgio_image_free(image);
-        mp_raise_ValueError(MP_ERROR_TEXT("svgio: not an SVG with a size (no <svg> with width and height, or viewBox)"));
     }
 
     float scale = 1.0f;
@@ -129,7 +176,7 @@ static mp_obj_t svgio_decoder_open(size_t n_args, const mp_obj_t *pos, mp_map_t 
     }
     const float fw = sw * scale, fh = sh * scale;
     if (!(scale > 0) || fw > SVGIO_MAX_SIDE || fh > SVGIO_MAX_SIDE) {
-        svgio_image_free(image);
+        svgio_decoder_drop(self, image);
         mp_raise_ValueError(MP_ERROR_TEXT("svgio: the size must come to 1..32767 pixels a side"));
     }
     self->image = image;
@@ -137,7 +184,7 @@ static mp_obj_t svgio_decoder_open(size_t n_args, const mp_obj_t *pos, mp_map_t 
     self->width = by_w ? mp_obj_get_int(a[ARG_width].u_obj) : svgio_side(fw);
     self->height = by_h ? mp_obj_get_int(a[ARG_height].u_obj) : svgio_side(fh);
     if (self->width < 1 || self->height < 1) {
-        svgio_image_free(self->image);
+        svgio_decoder_drop(self, self->image);
         self->image = NULL;
         self->width = self->height = 0;
         mp_raise_ValueError(MP_ERROR_TEXT("svgio: the size must come to 1..32767 pixels a side"));
@@ -169,9 +216,9 @@ static void svgio_check_room(const char *what, size_t have, size_t need) {
     }
 }
 
-// decode(target, alpha=None, *, x=0, y=0, stride=None)
+// decode(target, alpha=None, *, x=0, y=0, stride=None, rows=None)
 static mp_obj_t svgio_decoder_decode(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
-    enum { ARG_self, ARG_target, ARG_alpha, ARG_x, ARG_y, ARG_stride };
+    enum { ARG_self, ARG_target, ARG_alpha, ARG_x, ARG_y, ARG_stride, ARG_rows };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_self, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
         { MP_QSTR_target, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
@@ -179,6 +226,7 @@ static mp_obj_t svgio_decoder_decode(size_t n_args, const mp_obj_t *pos, mp_map_
         { MP_QSTR_x, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 0 } },
         { MP_QSTR_y, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 0 } },
         { MP_QSTR_stride, MP_ARG_KW_ONLY | MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+        { MP_QSTR_rows, MP_ARG_KW_ONLY | MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
     };
     mp_arg_val_t a[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all(n_args, pos, kw, MP_ARRAY_SIZE(allowed), allowed, a);
@@ -186,13 +234,28 @@ static mp_obj_t svgio_decoder_decode(size_t n_args, const mp_obj_t *pos, mp_map_
     if (self->image == NULL) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("decode() without open()"));
     }
+    // The rows to draw, of the picture's own: all of them, or (first, end).
+    mp_int_t y0 = 0, y1 = self->height;
+    if (a[ARG_rows].u_obj != mp_const_none) {
+        size_t n;
+        mp_obj_t *pair;
+        mp_obj_get_array(a[ARG_rows].u_obj, &n, &pair);
+        if (n == 2) {
+            y0 = mp_obj_get_int(pair[0]);
+            y1 = mp_obj_get_int(pair[1]);
+        }
+        if (n != 2 || y0 < 0 || y0 > y1 || y1 > self->height) {
+            mp_raise_ValueError(MP_ERROR_TEXT("rows is (first, end) within the image's height"));
+        }
+    }
     const mp_int_t w = self->width, h = self->height;
     const mp_int_t x = a[ARG_x].u_int, y = a[ARG_y].u_int;
     const mp_int_t stride = a[ARG_stride].u_obj == mp_const_none ? w : mp_obj_get_int(a[ARG_stride].u_obj);
     if (x < 0 || y < 0 || x + w > stride) {
         mp_raise_ValueError(MP_ERROR_TEXT("the image doesn't fit across the target at that x and stride"));
     }
-    const size_t pixels = (size_t)(y + h - 1) * stride + x + w;
+    // The target need only reach the last row drawn.
+    const size_t pixels = y1 > y0 ? (size_t)(y + y1 - 1) * stride + x + w : 0;
     svgio_target_t t = { NULL, NULL, x, y, stride };
     mp_buffer_info_t buf;
     if (a[ARG_target].u_obj != mp_const_none) {
@@ -208,32 +271,39 @@ static mp_obj_t svgio_decoder_decode(size_t n_args, const mp_obj_t *pos, mp_map_
     if (t.pixels == NULL && t.alpha == NULL) {
         mp_raise_ValueError(MP_ERROR_TEXT("give a target, an alpha buffer, or both"));
     }
+    if (y1 == y0) {
+        return mp_const_none;
+    }
 
     int rows = SVGIO_STRIP_BYTES / (w * 4);
     rows = rows < 1 ? 1 : rows > h ? h : rows;
     const size_t strip_len = (size_t)w * rows * 4;
-    uint8_t *strip = m_new_maybe(uint8_t, strip_len);
-    if (strip == NULL) {
-        mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("svgio: not enough memory to render"));
-    }
     svgio_mem_reset();
+    svgio_mem_use(&self->mem);
     #if SVGIO_BENCH
     const bool prepare = svgio_opts & 4;
     #else
     const bool prepare = true;
     #endif
+    const char *why = NULL;
     if (prepare && self->prepared == NULL) {
-        // Flattened once here, the outlines serve every strip and every
-        // later decode() until the next open().
+        // Flattened once here, the outlines serve every strip, every band and
+        // every later decode() until the next open().
         self->prepared = svgio_prepare(self->image, self->scale);
         if (self->prepared == NULL) {
-            m_del(uint8_t, strip, strip_len);
-            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("svgio: not enough memory to render"));
+            why = "not enough memory to render";
         }
     }
-    const char *why = svgio_render(self->image, prepare ? self->prepared : NULL, self->scale, w, h,
-        strip, rows, svgio_put_rows, &t);
-    m_del(uint8_t, strip, strip_len);
+    uint8_t *strip = why == NULL ? svgio_mem_alloc(strip_len) : NULL;
+    if (why == NULL && strip == NULL) {
+        why = "not enough memory to render";
+    }
+    if (why == NULL) {
+        why = svgio_render(self->image, prepare ? self->prepared : NULL, self->scale, w, h, y0, y1,
+            strip, rows, svgio_put_rows, &t);
+    }
+    svgio_mem_free(strip);
+    svgio_mem_use(NULL);
     if (why != NULL) {
         mp_raise_msg_varg(&mp_type_MemoryError, MP_ERROR_TEXT("svgio: %s"), why);
     }
@@ -245,7 +315,10 @@ static void svgio_decoder_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     if (dest[0] != MP_OBJ_NULL) {
         return;                         // width and height can't be set
     }
-    if (attr == MP_QSTR_width || attr == MP_QSTR_height) {
+    if (attr == MP_QSTR_memory || attr == MP_QSTR_memory_peak) {
+        svgio_decoder_obj_t *self = MP_OBJ_TO_PTR(self_in);
+        dest[0] = mp_obj_new_int_from_uint(attr == MP_QSTR_memory ? self->mem.size : self->mem.peak);
+    } else if (attr == MP_QSTR_width || attr == MP_QSTR_height) {
         svgio_decoder_obj_t *self = MP_OBJ_TO_PTR(self_in);
         if (self->image == NULL) {
             mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("width and height need a successful open()"));
