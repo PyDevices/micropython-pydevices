@@ -200,8 +200,8 @@ def main():
         sh(["cp", os.path.join(HERE, f), WIN_TMP])
     sh(["cp", os.path.expanduser("~/gh/pydevices/.toolbox/scripts/midi_roundtrip.py"), WIN_TMP])
     if not os.path.isdir(os.path.join(WIN_TMP, "midiports")):
-        sh(["cp", "-r", os.path.expanduser("~/gh/pydevices/pydevices/midiports/midiports"), WIN_TMP])
-        sh(["cp", os.path.expanduser("~/gh/pydevices/pydevices/utils/uwin32.py"), WIN_TMP])
+        sh(["cp", "-r", os.path.expanduser("~/gh/pydevices/omnipython/midiports/midiports"), WIN_TMP])
+        sh(["cp", os.path.expanduser("~/gh/pydevices/omnipython/utils/uwin32.py"), WIN_TMP])
         sh(["cp", "-r", "/tmp/midiports-adafruit_midi/1.6.0/adafruit_midi", WIN_TMP])
 
     if not (args.ws or args.dev):
