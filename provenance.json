@@ -205,6 +205,15 @@
   },
   "0068-micropython-py-scheduler-callbacks-run-on-the-main-thread-only.patch": {
    "sha256": "c2ec86c82e42466e902a07090361acb211322bb104523212254b25e86512b1b7"
+  },
+  "0069-micropython-extmod-modtls-give-the-gil-back-while-mbedtls-works.patch": {
+   "sha256": "66c5be34344eda4c270d6221b858a681f2322604b831ef4ff58c475c43d85985"
+  },
+  "0070-micropython-esp32-a-task-lent-a-priority-is-scheduled-at-once.patch": {
+   "sha256": "248b1201fb911995c5f4d5e46e6929effc4f14d654c877e726e785ed0adba634"
+  },
+  "0071-micropython-esp32-a-collection-on-a-p4-no-longer-overflows-its-mark-stack.patch": {
+   "sha256": "c960b52a8706abd0a458a5d3fa6f8b4e9a77a700c38d54408cfe5fa1256b1ee8"
   }
  },
  "tinyusb_patches": {
