@@ -1,0 +1,250 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 05:00:00 -0600
+Subject: [PATCH] extmod/modtls_mbedtls: Give the GIL back while mbedtls works.
+
+A TLS handshake's public-key work and a record's cipher work run inside
+mbedtls_ssl_handshake(), mbedtls_ssl_read() and mbedtls_ssl_write() with
+the GIL held. The socket calls under them give it back while they wait,
+but the computing between them does not, so a request on a worker thread
+stops every other thread for as long as mbedtls computes.
+
+On an ESP32-P4 with one HTTPS request at a time on a worker thread, a
+10 ms timer on the main thread was held for 112 to 121 ms once in every
+handshake, and for 23 to 30 ms while a 53 KB page was read 4 KB at a time.
+A note struck from the main thread waited that long.
+
+Give the GIL back around those three calls, where a port says its mbedtls
+does not allocate from the MicroPython heap
+(MICROPY_PY_SSL_MBEDTLS_GIL_RELEASE, set for esp32, whose mbedtls is
+ESP-IDF's). The callbacks mbedtls makes meanwhile take it for their own
+length: the two that read and write the underlying socket, the certificate
+verify callback, the PSK lookup, the alternative ECDSA signer and the debug
+print. A callback that raises leaves with the GIL held, which is what the
+code it unwinds to expects. A thread-state flag says whether this thread
+gave the GIL back, so the same callbacks reached with it held (an alert sent
+after a failed handshake) leave it alone.
+---
+diff --git a/extmod/modtls_mbedtls.c b/extmod/modtls_mbedtls.c
+--- a/extmod/modtls_mbedtls.c
++++ b/extmod/modtls_mbedtls.c
+@@ -132,11 +132,62 @@
+ /******************************************************************************/
+ // Helper functions.
+ 
++// A handshake's public-key work and a record's cipher work are long, and none
++// of it touches the MicroPython heap, so a thread gives the GIL back around
++// the three calls that do them. The callbacks mbedtls makes meanwhile do need
++// it: each takes it on the way in and gives it back on the way out, and one
++// that raises leaves with it held, as the code it lands in expects.
++#if MICROPY_PY_SSL_MBEDTLS_GIL_RELEASE && MICROPY_PY_THREAD && MICROPY_PY_THREAD_GIL
++static inline void tls_gil_exit(void) {
++    MP_STATE_THREAD(tls_gil_out) = true;
++    MP_THREAD_GIL_EXIT();
++}
++
++static inline void tls_gil_enter(void) {
++    if (MP_STATE_THREAD(tls_gil_out)) {
++        MP_THREAD_GIL_ENTER();
++        MP_STATE_THREAD(tls_gil_out) = false;
++    }
++}
++
++static inline bool tls_callback_enter(void) {
++    if (!MP_STATE_THREAD(tls_gil_out)) {
++        return false;
++    }
++    MP_THREAD_GIL_ENTER();
++    MP_STATE_THREAD(tls_gil_out) = false;
++    return true;
++}
++
++static inline void tls_callback_exit(bool was_out) {
++    if (was_out) {
++        MP_STATE_THREAD(tls_gil_out) = true;
++        MP_THREAD_GIL_EXIT();
++    }
++}
++#else
++static inline void tls_gil_exit(void) {
++}
++
++static inline void tls_gil_enter(void) {
++}
++
++static inline bool tls_callback_enter(void) {
++    return false;
++}
++
++static inline void tls_callback_exit(bool was_out) {
++    (void)was_out;
++}
++#endif
++
+ #ifdef MBEDTLS_DEBUG_C
+ static void mbedtls_debug(void *ctx, int level, const char *file, int line, const char *str) {
+     (void)ctx;
+     (void)level;
++    bool was_out = tls_callback_enter();
+     mp_printf(&mp_plat_print, "DBG:%s:%04d: %s\n", file, line, str);
++    tls_callback_exit(was_out);
+ }
+ #endif
+ 
+@@ -273,9 +324,12 @@
+     if (o->handler == mp_const_none) {
+         return 0;
+     }
++    bool was_out = tls_callback_enter();
+     mp_obj_array_t cert;
+     mp_obj_memoryview_init(&cert, 'B', 0, crt->raw.len, crt->raw.p);
+-    return mp_obj_get_int(mp_call_function_2(o->handler, MP_OBJ_FROM_PTR(&cert), MP_OBJ_NEW_SMALL_INT(depth)));
++    int ret = mp_obj_get_int(mp_call_function_2(o->handler, MP_OBJ_FROM_PTR(&cert), MP_OBJ_NEW_SMALL_INT(depth)));
++    tls_callback_exit(was_out);
++    return ret;
+ }
+ 
+ /******************************************************************************/
+@@ -605,6 +659,7 @@
+     if (self->server_psk_keys == mp_const_none) {
+         return -1;
+     }
++    bool was_out = tls_callback_enter();
+     nlr_buf_t nlr;
+     if (nlr_push(&nlr) == 0) {
+         // Call server_psk_keys.get(identity), returning None for an unknown
+@@ -620,10 +675,12 @@
+             ret = mbedtls_ssl_set_hs_psk(ssl, bufinfo.buf, bufinfo.len);
+         }
+         nlr_pop();
++        tls_callback_exit(was_out);
+         return ret;
+     } else {
+         // The lookup misbehaved (e.g. server_psk_keys has no get() method, or
+         // get() raised, or returned a non-bytes value); reject the handshake.
++        tls_callback_exit(was_out);
+         return -1;
+     }
+ }
+@@ -684,10 +741,12 @@
+ static int _mbedtls_ssl_send(void *ctx, const byte *buf, size_t len) {
+     mp_obj_t sock = *(mp_obj_t *)ctx;
+ 
++    bool was_out = tls_callback_enter();
+     const mp_stream_p_t *sock_stream = mp_get_stream(sock);
+     int err;
+ 
+     mp_uint_t out_sz = sock_stream->write(sock, buf, len, &err);
++    tls_callback_exit(was_out);
+     if (out_sz == MP_STREAM_ERROR) {
+         if (mp_is_nonblocking_error(err)) {
+             return MBEDTLS_ERR_SSL_WANT_WRITE;
+@@ -702,10 +761,12 @@
+ static int _mbedtls_ssl_recv(void *ctx, byte *buf, size_t len) {
+     mp_obj_t sock = *(mp_obj_t *)ctx;
+ 
++    bool was_out = tls_callback_enter();
+     const mp_stream_p_t *sock_stream = mp_get_stream(sock);
+     int err;
+ 
+     mp_uint_t out_sz = sock_stream->read(sock, buf, len, &err);
++    tls_callback_exit(was_out);
+     if (out_sz == MP_STREAM_ERROR) {
+         if (mp_is_nonblocking_error(err)) {
+             return MBEDTLS_ERR_SSL_WANT_READ;
+@@ -822,7 +883,13 @@
+     mbedtls_ssl_set_bio(&o->ssl, &o->sock, _mbedtls_ssl_send, _mbedtls_ssl_recv, NULL);
+ 
+     if (do_handshake_on_connect) {
+-        while ((ret = mbedtls_ssl_handshake(&o->ssl)) != 0) {
++        for (;;) {
++            tls_gil_exit();
++            ret = mbedtls_ssl_handshake(&o->ssl);
++            tls_gil_enter();
++            if (ret == 0) {
++                break;
++            }
+             if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+                 goto cleanup;
+             }
+@@ -891,7 +958,9 @@
+     // Store the current SSL context.
+     store_active_context(o->ssl_context);
+ 
++    tls_gil_exit();
+     int ret = mbedtls_ssl_read(&o->ssl, buf, size);
++    tls_gil_enter();
+     if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
+         // end of stream
+         return 0;
+@@ -935,7 +1004,9 @@
+     // Store the current SSL context.
+     store_active_context(o->ssl_context);
+ 
++    tls_gil_exit();
+     int ret = mbedtls_ssl_write(&o->ssl, buf, size);
++    tls_gil_enter();
+     if (ret >= 0) {
+         return ret;
+     }
+@@ -1069,7 +1140,16 @@
+ // ssl module.
+ 
+ #if MICROPY_PY_SSL_ECDSA_SIGN_ALT
++static int ecdsa_sign_alt_with_gil(const mbedtls_mpi *d, const unsigned char *hash, size_t hlen, unsigned char *sig, size_t sig_size, size_t *slen);
++
+ int micropy_mbedtls_ecdsa_sign_alt(const mbedtls_mpi *d, const unsigned char *hash, size_t hlen, unsigned char *sig, size_t sig_size, size_t *slen) {
++    bool was_out = tls_callback_enter();
++    int ret = ecdsa_sign_alt_with_gil(d, hash, hlen, sig, sig_size, slen);
++    tls_callback_exit(was_out);
++    return ret;
++}
++
++static int ecdsa_sign_alt_with_gil(const mbedtls_mpi *d, const unsigned char *hash, size_t hlen, unsigned char *sig, size_t sig_size, size_t *slen) {
+     uint8_t key[256];
+ 
+     // Check if the current context has an alternative sign function.
+diff --git a/ports/esp32/mpconfigport.h b/ports/esp32/mpconfigport.h
+--- a/ports/esp32/mpconfigport.h
++++ b/ports/esp32/mpconfigport.h
+@@ -86,6 +86,8 @@
+ #define MICROPY_PY_THREAD                   (1)
+ #define MICROPY_PY_THREAD_GIL               (1)
+ #define MICROPY_PY_THREAD_GIL_VM_DIVISOR    (32)
++// ESP-IDF's mbedtls allocates from the IDF heap, so it can work without the GIL.
++#define MICROPY_PY_SSL_MBEDTLS_GIL_RELEASE  (1)
+ 
+ #define MICROPY_GC_SPLIT_HEAP               (1)
+ #define MICROPY_GC_SPLIT_HEAP_AUTO          (1)
+diff --git a/py/mpconfig.h b/py/mpconfig.h
+--- a/py/mpconfig.h
++++ b/py/mpconfig.h
+@@ -2178,6 +2178,13 @@
+ #define MICROPY_PY_SSL_MBEDTLS_NEED_ACTIVE_CONTEXT (MICROPY_PY_SSL_ECDSA_SIGN_ALT)
+ #endif
+ 
++// Whether the mbedtls ssl module gives the GIL back while mbedtls works on a
++// handshake or a record, so other threads run meanwhile. Only for a port
++// whose mbedtls does not allocate from the MicroPython heap.
++#ifndef MICROPY_PY_SSL_MBEDTLS_GIL_RELEASE
++#define MICROPY_PY_SSL_MBEDTLS_GIL_RELEASE (0)
++#endif
++
+ // Whether to support DTLS protocol (non-CPython feature)
+ #ifndef MICROPY_PY_SSL_DTLS
+ #define MICROPY_PY_SSL_DTLS (MICROPY_SSL_MBEDTLS && MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
+diff --git a/py/mpstate.h b/py/mpstate.h
+--- a/py/mpstate.h
++++ b/py/mpstate.h
+@@ -329,6 +329,11 @@
+     #if MICROPY_PY_SSL_MBEDTLS_NEED_ACTIVE_CONTEXT
+     struct _mp_obj_ssl_context_t *tls_ssl_context;
+     #endif
++
++    #if MICROPY_PY_SSL_MBEDTLS_GIL_RELEASE
++    // This thread gave the GIL back around a call into mbedtls.
++    bool tls_gil_out;
++    #endif
+ } mp_state_thread_t;
+ 
+ // This structure combines the above 3 structures.

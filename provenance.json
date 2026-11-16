@@ -205,6 +205,9 @@
   },
   "0068-micropython-py-scheduler-callbacks-run-on-the-main-thread-only.patch": {
    "sha256": "c2ec86c82e42466e902a07090361acb211322bb104523212254b25e86512b1b7"
+  },
+  "0069-micropython-extmod-modtls-give-the-gil-back-while-mbedtls-works.patch": {
+   "sha256": "66c5be34344eda4c270d6221b858a681f2322604b831ef4ff58c475c43d85985"
   }
  },
  "tinyusb_patches": {
