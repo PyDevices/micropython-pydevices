@@ -87,8 +87,8 @@ index 670d404da..544a2e4b5 100644
  
 +void mp_js_deinit(void) {
 +    #if defined(MICROPY_PY_WASM_BRIDGE) && MICROPY_PY_WASM_BRIDGE
-+    extern void pydevices_bridge_deinit(void);
-+    pydevices_bridge_deinit();
++    extern void omnipython_bridge_deinit(void);
++    omnipython_bridge_deinit();
 +    #endif
 +    mp_deinit();
 +    free(mp_js_heap);

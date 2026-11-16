@@ -6,7 +6,7 @@ mergeInto(LibraryManager.library, {
     // process-global — only display + input needs to be per-canvas, since
     // EncoderEmu-style secondary surfaces (lv_encoder_emu.py) register their
     // own canvas alongside the primary display.
-    $pydevices_state: {
+    $omnipython_state: {
         displays: new Map(),
         animation: 0,
         timers: new Map(),
@@ -26,7 +26,7 @@ mergeInto(LibraryManager.library, {
         processor: null,
     },
 
-    $pydevices_write_event: (ptr, event) => {
+    $omnipython_write_event: (ptr, event) => {
         const types={pointerdown:1,pointermove:2,pointerup:3,pointercancel:4,wheel:5,keydown:6,keyup:7,focus:8,blur:9};
         const pointerTypes={mouse:0,touch:1,pen:2};
         const ints=new Int32Array(HEAPU8.buffer,ptr,18);
@@ -46,19 +46,19 @@ mergeInto(LibraryManager.library, {
         return ints[0];
     },
 
-    $pydevices_get_display__deps: ['$pydevices_state'],
-    $pydevices_get_display: (canvasId) => {
-        let display = pydevices_state.displays.get(canvasId);
+    $omnipython_get_display__deps: ['$omnipython_state'],
+    $omnipython_get_display: (canvasId) => {
+        let display = omnipython_state.displays.get(canvasId);
         if (!display) {
             display = {framebuffer:null, canvas:null, context:null, image:null, framesPainted:0, eventRing:null, events:[]};
-            pydevices_state.displays.set(canvasId, display);
+            omnipython_state.displays.set(canvasId, display);
         }
         return display;
     },
 
-    $pydevices_push_event__deps: ['$pydevices_get_display', '$pydevices_write_event'],
-    $pydevices_push_event: (canvasId, event) => {
-        const display = pydevices_get_display(canvasId);
+    $omnipython_push_event__deps: ['$omnipython_get_display', '$omnipython_write_event'],
+    $omnipython_push_event: (canvasId, event) => {
+        const display = omnipython_get_display(canvasId);
         const ring = display.eventRing;
         if(ring && event.type!=='gamepad') {
             const base=ring.ptr, head=HEAPU32[base>>2], tail=HEAPU32[(base>>2)+1];
@@ -66,11 +66,11 @@ mergeInto(LibraryManager.library, {
                 const last=(head+ring.capacity-1)%ring.capacity;
                 const lastPtr=base+8+last*ring.stride;
                 if(HEAP32[lastPtr>>2]===2 && HEAP32[(lastPtr>>2)+8]===(event.pointerId||0)) {
-                    pydevices_write_event(lastPtr,event); return;
+                    omnipython_write_event(lastPtr,event); return;
                 }
             }
             const recordPtr=base+8+head*ring.stride;
-            if(pydevices_write_event(recordPtr,event)) {
+            if(omnipython_write_event(recordPtr,event)) {
                 const next=(head+1)%ring.capacity;
                 if(next===tail) HEAPU32[(base>>2)+1]=(tail+1)%ring.capacity;
                 HEAPU32[base>>2]=next;
@@ -93,7 +93,7 @@ mergeInto(LibraryManager.library, {
         }
     },
 
-    $pydevices_relative_point: (canvas, event) => {
+    $omnipython_relative_point: (canvas, event) => {
         const rect = canvas.getBoundingClientRect();
         return {
             x: Math.round((event.clientX - rect.left) * canvas.width / rect.width),
@@ -101,15 +101,15 @@ mergeInto(LibraryManager.library, {
         };
     },
 
-    $pydevices_install_input__deps: ['$pydevices_state', '$pydevices_push_event', '$pydevices_relative_point'],
-    $pydevices_install_input: (canvas, canvasId) => {
-        if (canvas.__pydevicesInputInstalled) return;
-        canvas.__pydevicesInputInstalled = true;
+    $omnipython_install_input__deps: ['$omnipython_state', '$omnipython_push_event', '$omnipython_relative_point'],
+    $omnipython_install_input: (canvas, canvasId) => {
+        if (canvas.__omnipythonInputInstalled) return;
+        canvas.__omnipythonInputInstalled = true;
         canvas.tabIndex = canvas.tabIndex >= 0 ? canvas.tabIndex : 0;
         const modifiers = (e) => ({altKey:e.altKey, ctrlKey:e.ctrlKey, metaKey:e.metaKey, shiftKey:e.shiftKey});
         // Named and tracked on the element (rather than anonymous closures) so a
         // future register on this same canvas - a new WASM instance after a VM
-        // restart, most likely - can strip them via pydevices_release_canvas
+        // restart, most likely - can strip them via omnipython_release_canvas
         // before installing its own. Without that, events from a second
         // instance would keep calling into the first instance's closures - and
         // with them, its whole WASM heap - forever.
@@ -118,11 +118,11 @@ mergeInto(LibraryManager.library, {
             canvas.addEventListener(name, handler, opts);
             listeners.push([name, handler, opts]);
         };
-        canvas.__pydevicesListeners = listeners;
+        canvas.__omnipythonListeners = listeners;
         for (const name of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
             on(name, (e) => {
-                const p = pydevices_relative_point(canvas, e);
-                pydevices_push_event(canvasId, Object.assign({type:name, x:p.x, y:p.y, movementX:e.movementX||0, movementY:e.movementY||0, button:e.button, buttons:e.buttons, pressure:e.pressure, pointerId:e.pointerId, pointerType:e.pointerType, primary:e.isPrimary}, modifiers(e)));
+                const p = omnipython_relative_point(canvas, e);
+                omnipython_push_event(canvasId, Object.assign({type:name, x:p.x, y:p.y, movementX:e.movementX||0, movementY:e.movementY||0, button:e.button, buttons:e.buttons, pressure:e.pressure, pointerId:e.pointerId, pointerType:e.pointerType, primary:e.isPrimary}, modifiers(e)));
                 if (name === 'pointerdown') {
                     canvas.focus();
                     try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* Synthetic events have no active pointer. */ }
@@ -131,38 +131,38 @@ mergeInto(LibraryManager.library, {
             });
         }
         on('wheel', (e) => {
-            const p = pydevices_relative_point(canvas, e);
-            pydevices_push_event(canvasId, Object.assign({type:'wheel', x:p.x, y:p.y, deltaX:e.deltaX, deltaY:e.deltaY, deltaZ:e.deltaZ, deltaMode:e.deltaMode}, modifiers(e)));
+            const p = omnipython_relative_point(canvas, e);
+            omnipython_push_event(canvasId, Object.assign({type:'wheel', x:p.x, y:p.y, deltaX:e.deltaX, deltaY:e.deltaY, deltaZ:e.deltaZ, deltaMode:e.deltaMode}, modifiers(e)));
             e.preventDefault();
         }, {passive:false});
         for (const name of ['keydown', 'keyup']) {
             on(name, (e) => {
-                pydevices_push_event(canvasId, Object.assign({type:name, key:e.key, code:e.code, repeat:e.repeat, location:e.location}, modifiers(e)));
+                omnipython_push_event(canvasId, Object.assign({type:name, key:e.key, code:e.code, repeat:e.repeat, location:e.location}, modifiers(e)));
                 if (e.key === 'Backspace' || e.key === 'Escape' || e.key === 'BrowserBack') e.preventDefault();
             });
         }
-        on('focus', () => pydevices_push_event(canvasId, {type:'focus'}));
-        on('blur', () => pydevices_push_event(canvasId, {type:'blur'}));
+        on('focus', () => omnipython_push_event(canvasId, {type:'focus'}));
+        on('blur', () => omnipython_push_event(canvasId, {type:'blur'}));
         canvas.focus();
     },
 
-    // The other half of $pydevices_install_input's guard: drops this instance's
+    // The other half of $omnipython_install_input's guard: drops this instance's
     // listeners from a canvas so whichever WASM instance registers on it next -
     // typically a fresh one after a VM restart - can install its own instead of
     // silently reusing ours. Safe to call on a canvas that never had listeners.
-    $pydevices_release_canvas: (canvas) => {
-        for (const [name, handler, opts] of canvas.__pydevicesListeners || []) {
+    $omnipython_release_canvas: (canvas) => {
+        for (const [name, handler, opts] of canvas.__omnipythonListeners || []) {
             canvas.removeEventListener(name, handler, opts);
         }
-        canvas.__pydevicesListeners = null;
-        canvas.__pydevicesInputInstalled = false;
+        canvas.__omnipythonListeners = null;
+        canvas.__omnipythonInputInstalled = false;
     },
 
     // RGB565 to the canvas's RGBA, one entry for each of the 65536 values.
-    $pydevices_rgba__deps: ['$pydevices_state'],
-    $pydevices_rgba: () => {
-        if (!pydevices_state.rgba) {
-            const table = pydevices_state.rgba = new Uint32Array(65536);
+    $omnipython_rgba__deps: ['$omnipython_state'],
+    $omnipython_rgba: () => {
+        if (!omnipython_state.rgba) {
+            const table = omnipython_state.rgba = new Uint32Array(65536);
             const color = new Uint8ClampedArray(4);
             const word = new Uint32Array(color.buffer);
             for (let value = 0; value < 65536; value++) {
@@ -173,12 +173,12 @@ mergeInto(LibraryManager.library, {
                 table[value] = word[0];
             }
         }
-        return pydevices_state.rgba;
+        return omnipython_state.rgba;
     },
 
-    $pydevices_paint__deps: ['$pydevices_state', '$pydevices_push_event', '$pydevices_rgba'],
-    $pydevices_paint: () => {
-        const state = pydevices_state;
+    $omnipython_paint__deps: ['$omnipython_state', '$omnipython_push_event', '$omnipython_rgba'],
+    $omnipython_paint: () => {
+        const state = omnipython_state;
         let active = false;
         for (const display of state.displays.values()) {
             const fb = display.framebuffer;
@@ -191,7 +191,7 @@ mergeInto(LibraryManager.library, {
             const src = fb.ptr & 1 ? new Uint16Array(HEAPU8.slice(fb.ptr, fb.ptr + count * 2).buffer)
                                    : new Uint16Array(HEAPU8.buffer, fb.ptr, count);
             const {shown, pixels} = display;
-            const rgba = pydevices_rgba();
+            const rgba = omnipython_rgba();
             let changed = !display.painted;
             for (let i = 0; i < count; i++) {
                 const value = src[i];
@@ -211,18 +211,18 @@ mergeInto(LibraryManager.library, {
         if (navigator.getGamepads) {
             for (const pad of navigator.getGamepads()) if (pad) {
                 for (const canvasId of state.displays.keys()) {
-                    pydevices_push_event(canvasId, {type:'gamepad', index:pad.index, connected:pad.connected, buttons:pad.buttons.map(b => ({pressed:b.pressed, touched:b.touched, value:b.value})), axes:Array.from(pad.axes)});
+                    omnipython_push_event(canvasId, {type:'gamepad', index:pad.index, connected:pad.connected, buttons:pad.buttons.map(b => ({pressed:b.pressed, touched:b.touched, value:b.value})), axes:Array.from(pad.axes)});
                 }
                 break;
             }
         }
-        state.animation = requestAnimationFrame(pydevices_paint);
+        state.animation = requestAnimationFrame(omnipython_paint);
     },
 
-    $pydevices_export_host__deps: ['$pydevices_state', '$pydevices_release_canvas', '$pydevices_disarm_audio_unlock', '$pydevices_enable_audio'],
-    $pydevices_export_host: () => {
-        if (Module.pydevicesBridge) return;
-        Module.pydevicesBridge = {
+    $omnipython_export_host__deps: ['$omnipython_state', '$omnipython_release_canvas', '$omnipython_disarm_audio_unlock', '$omnipython_enable_audio'],
+    $omnipython_export_host: () => {
+        if (Module.omnipythonBridge) return;
+        Module.omnipythonBridge = {
             /*
              * Releases everything this instance holds in the host page: the
              * paint loop, the canvas listeners, pending timers, and any audio
@@ -238,13 +238,13 @@ mergeInto(LibraryManager.library, {
              * registered a display, does nothing harmful.
              */
             shutdown: () => {
-                const state = pydevices_state;
+                const state = omnipython_state;
                 if (state.animation) {
                     cancelAnimationFrame(state.animation);
                     state.animation = 0;
                 }
                 for (const display of state.displays.values()) {
-                    if (display.canvas) pydevices_release_canvas(display.canvas);
+                    if (display.canvas) omnipython_release_canvas(display.canvas);
                 }
                 state.displays.clear();
                 for (const timer of state.timers.values()) {
@@ -256,7 +256,7 @@ mergeInto(LibraryManager.library, {
                     try { source.stop(); } catch (_) { /* already finished */ }
                 }
                 state.audioSources.clear();
-                pydevices_disarm_audio_unlock();
+                omnipython_disarm_audio_unlock();
                 state.audioQueuedBytes = 0;
                 state.inputFrames.length = 0;
                 if (state.processor) { try { state.processor.disconnect(); } catch (_) {} }
@@ -272,37 +272,37 @@ mergeInto(LibraryManager.library, {
                 }
                 state.audioEnabled = false;
             },
-            enableAudio: (microphone=false) => pydevices_enable_audio(microphone),
-            permissions: () => ({audio:pydevices_state.audioEnabled, microphone:pydevices_state.microphoneEnabled}),
+            enableAudio: (microphone=false) => omnipython_enable_audio(microphone),
+            permissions: () => ({audio:omnipython_state.audioEnabled, microphone:omnipython_state.microphoneEnabled}),
             stats: () => ({
-                events:Array.from(pydevices_state.displays.values()).reduce((n,d)=>n+d.events.length,0),
-                timers:pydevices_state.timers.size,
-                frames:Array.from(pydevices_state.displays.values()).reduce((n,d)=>n+d.framesPainted,0),
-                queuedAudioBytes:pydevices_state.audioQueuedBytes,
-                queuedAudioMs:Math.max(0, (pydevices_state.audioEnd - (pydevices_state.audioContext?.currentTime || 0)) * 1000),
-                timerFirings:pydevices_state.timerFirings.slice(),
-                timerDeliveries:pydevices_state.timerDeliveries.slice(),
+                events:Array.from(omnipython_state.displays.values()).reduce((n,d)=>n+d.events.length,0),
+                timers:omnipython_state.timers.size,
+                frames:Array.from(omnipython_state.displays.values()).reduce((n,d)=>n+d.framesPainted,0),
+                queuedAudioBytes:omnipython_state.audioQueuedBytes,
+                queuedAudioMs:Math.max(0, (omnipython_state.audioEnd - (omnipython_state.audioContext?.currentTime || 0)) * 1000),
+                timerFirings:omnipython_state.timerFirings.slice(),
+                timerDeliveries:omnipython_state.timerDeliveries.slice(),
             }),
             resetTimerFirings: () => {
-                pydevices_state.timerFirings.length = 0;
-                pydevices_state.timerDeliveries.length = 0;
+                omnipython_state.timerFirings.length = 0;
+                omnipython_state.timerDeliveries.length = 0;
             },
             injectMicrophone: (channels, rate=48000) => {
-                pydevices_state.microphoneEnabled = true;
-                pydevices_state.inputFrames.push({channels:channels.map(x => Float32Array.from(x)), rate, offset:0});
+                omnipython_state.microphoneEnabled = true;
+                omnipython_state.inputFrames.push({channels:channels.map(x => Float32Array.from(x)), rate, offset:0});
             },
         };
     },
 
-    pydevices_display_register__deps: ['$pydevices_get_display', '$pydevices_install_input', '$pydevices_paint', '$pydevices_export_host', '$pydevices_rgba'],
-    pydevices_display_register: (ptr, len, width, height, canvasPtr) => {
+    omnipython_display_register__deps: ['$omnipython_get_display', '$omnipython_install_input', '$omnipython_paint', '$omnipython_export_host', '$omnipython_rgba'],
+    omnipython_display_register: (ptr, len, width, height, canvasPtr) => {
         if (typeof document === 'undefined') return 0;
         const canvasId = UTF8ToString(canvasPtr);
         const canvas = document.getElementById(canvasId);
         if (!canvas) return 0;
         canvas.width = width; canvas.height = height;
         const context = canvas.getContext('2d', {alpha:false});
-        const display = pydevices_get_display(canvasId);
+        const display = omnipython_get_display(canvasId);
         display.framebuffer = {ptr, len, width, height};
         display.canvas = canvas;
         display.context = context;
@@ -311,23 +311,23 @@ mergeInto(LibraryManager.library, {
         // the image: both start black, to match the framebuffer's zeros.
         display.shown = new Uint16Array(width * height);
         display.pixels = new Uint32Array(display.image.data.buffer);
-        display.pixels.fill(pydevices_rgba()[0]);
+        display.pixels.fill(omnipython_rgba()[0]);
         display.painted = false;
         display.framesPainted = 0;
-        pydevices_install_input(canvas, canvasId);
-        pydevices_export_host();
-        if (!pydevices_state.animation) pydevices_state.animation = requestAnimationFrame(pydevices_paint);
+        omnipython_install_input(canvas, canvasId);
+        omnipython_export_host();
+        if (!omnipython_state.animation) omnipython_state.animation = requestAnimationFrame(omnipython_paint);
         return 1;
     },
 
-    pydevices_display_unregister__deps: ['$pydevices_state'],
-    pydevices_display_unregister: (canvasPtr) => {
-        pydevices_state.displays.delete(UTF8ToString(canvasPtr));
+    omnipython_display_unregister__deps: ['$omnipython_state'],
+    omnipython_display_unregister: (canvasPtr) => {
+        omnipython_state.displays.delete(UTF8ToString(canvasPtr));
     },
 
-    pydevices_event_poll__deps: ['$pydevices_get_display'],
-    pydevices_event_poll: (canvasPtr, lenPtr) => {
-        const display = pydevices_get_display(UTF8ToString(canvasPtr));
+    omnipython_event_poll__deps: ['$omnipython_get_display'],
+    omnipython_event_poll: (canvasPtr, lenPtr) => {
+        const display = omnipython_get_display(UTF8ToString(canvasPtr));
         if (!display.events.length) return 0;
         const text = JSON.stringify(display.events.shift());
         const len = lengthBytesUTF8(text);
@@ -336,27 +336,27 @@ mergeInto(LibraryManager.library, {
         HEAPU32[lenPtr >> 2] = len;
         return ptr;
     },
-    pydevices_event_set_buffer__deps: ['$pydevices_get_display'],
-    pydevices_event_set_buffer: (canvasPtr, ptr, capacity, stride) => {
-        pydevices_get_display(UTF8ToString(canvasPtr)).eventRing = ptr ? {ptr,capacity,stride} : null;
+    omnipython_event_set_buffer__deps: ['$omnipython_get_display'],
+    omnipython_event_set_buffer: (canvasPtr, ptr, capacity, stride) => {
+        omnipython_get_display(UTF8ToString(canvasPtr)).eventRing = ptr ? {ptr,capacity,stride} : null;
     },
-    pydevices_event_clear__deps: ['$pydevices_get_display'],
-    pydevices_event_clear: (canvasPtr) => {
-        const display = pydevices_get_display(UTF8ToString(canvasPtr));
+    omnipython_event_clear__deps: ['$omnipython_get_display'],
+    omnipython_event_clear: (canvasPtr) => {
+        const display = omnipython_get_display(UTF8ToString(canvasPtr));
         display.events.length = 0;
         const ring = display.eventRing;
         if(ring) { HEAPU32[ring.ptr>>2]=0; HEAPU32[(ring.ptr>>2)+1]=0; }
     },
 
-    pydevices_host_reset__deps: ['$pydevices_state', '$pydevices_release_canvas'],
-    pydevices_host_reset: () => {
-        const state = pydevices_state;
+    omnipython_host_reset__deps: ['$omnipython_state', '$omnipython_release_canvas'],
+    omnipython_host_reset: () => {
+        const state = omnipython_state;
         if (state.animation) {
             cancelAnimationFrame(state.animation);
             state.animation = 0;
         }
         for (const display of state.displays.values()) {
-            if (display.canvas) pydevices_release_canvas(display.canvas);
+            if (display.canvas) omnipython_release_canvas(display.canvas);
         }
         state.displays.clear();
         state.firedTimers.length = 0;
@@ -371,15 +371,15 @@ mergeInto(LibraryManager.library, {
         state.inputFrames.length = 0;
     },
 
-    pydevices_timer_start__deps: ['$pydevices_state'],
-    pydevices_timer_start: (id, delay, periodic) => {
-        const state = pydevices_state;
+    omnipython_timer_start__deps: ['$omnipython_state'],
+    omnipython_timer_start: (id, delay, periodic) => {
+        const state = omnipython_state;
         const old = state.timers.get(id); if (old) clearTimeout(old.handle);
         const fire = () => {
             state.timerFirings.push({id, at:performance.now()});
             if (state.timerFirings.length > 512) state.timerFirings.shift();
-            if((typeof Asyncify==='undefined' || !Asyncify.currData) && Module._pydevices_timer_dispatch) {
-                Module._pydevices_timer_dispatch(id);
+            if((typeof Asyncify==='undefined' || !Asyncify.currData) && Module._omnipython_timer_dispatch) {
+                Module._omnipython_timer_dispatch(id);
                 state.timerDeliveries.push({id, at:performance.now()});
                 if (state.timerDeliveries.length > 512) state.timerDeliveries.shift();
             } else if (state.firedTimers.length < 256) {
@@ -390,14 +390,14 @@ mergeInto(LibraryManager.library, {
         const handle = periodic ? setInterval(fire, delay) : setTimeout(fire, delay);
         state.timers.set(id, {handle, periodic});
     },
-    pydevices_timer_cancel__deps: ['$pydevices_state'],
-    pydevices_timer_cancel: (id) => { const t=pydevices_state.timers.get(id); if (t) { t.periodic ? clearInterval(t.handle) : clearTimeout(t.handle); pydevices_state.timers.delete(id); } },
-    pydevices_timer_poll__deps: ['$pydevices_state'],
-    pydevices_timer_poll: () => pydevices_state.firedTimers.length ? pydevices_state.firedTimers.shift() : -1,
+    omnipython_timer_cancel__deps: ['$omnipython_state'],
+    omnipython_timer_cancel: (id) => { const t=omnipython_state.timers.get(id); if (t) { t.periodic ? clearInterval(t.handle) : clearTimeout(t.handle); omnipython_state.timers.delete(id); } },
+    omnipython_timer_poll__deps: ['$omnipython_state'],
+    omnipython_timer_poll: () => omnipython_state.firedTimers.length ? omnipython_state.firedTimers.shift() : -1,
 
-    $pydevices_enable_audio__deps: ['$pydevices_state'],
-    $pydevices_enable_audio: async (microphone=false) => {
-        const state = pydevices_state;
+    $omnipython_enable_audio__deps: ['$omnipython_state'],
+    $omnipython_enable_audio: async (microphone=false) => {
+        const state = omnipython_state;
         const AudioContext = globalThis.AudioContext || globalThis.webkitAudioContext;
         if (!AudioContext) throw new Error('Web Audio is unavailable');
         state.audioContext ||= new AudioContext();
@@ -427,35 +427,35 @@ mergeInto(LibraryManager.library, {
      * needs no Enable Audio button and no retry of its own. The listeners
      * come off once audio runs, and in shutdown().
      */
-    $pydevices_disarm_audio_unlock__deps: ['$pydevices_state'],
-    $pydevices_disarm_audio_unlock: () => {
-        const state = pydevices_state;
+    $omnipython_disarm_audio_unlock__deps: ['$omnipython_state'],
+    $omnipython_disarm_audio_unlock: () => {
+        const state = omnipython_state;
         if (!state.audioUnlock) return;
         for (const name of state.audioUnlock.names) document.removeEventListener(name, state.audioUnlock.handler, true);
         state.audioUnlock = null;
     },
-    $pydevices_arm_audio_unlock__deps: ['$pydevices_state', '$pydevices_disarm_audio_unlock', '$pydevices_enable_audio'],
-    $pydevices_arm_audio_unlock: () => {
-        const state = pydevices_state;
+    $omnipython_arm_audio_unlock__deps: ['$omnipython_state', '$omnipython_disarm_audio_unlock', '$omnipython_enable_audio'],
+    $omnipython_arm_audio_unlock: () => {
+        const state = omnipython_state;
         if (state.audioUnlock || typeof document === 'undefined') return;
         const names = ['pointerdown', 'pointerup', 'keydown'];
         const handler = () => {
-            if (state.audioEnabled) { pydevices_disarm_audio_unlock(); return; }
-            pydevices_enable_audio(false).then(
-                () => { if (state.audioEnabled) pydevices_disarm_audio_unlock(); },
+            if (state.audioEnabled) { omnipython_disarm_audio_unlock(); return; }
+            omnipython_enable_audio(false).then(
+                () => { if (state.audioEnabled) omnipython_disarm_audio_unlock(); },
                 () => {});
         };
         state.audioUnlock = {names, handler};
         for (const name of names) document.addEventListener(name, handler, true);
     },
-    pydevices_audio_state__deps: ['$pydevices_state', '$pydevices_arm_audio_unlock'],
-    pydevices_audio_state: (input) => {
-        if (input) return +pydevices_state.microphoneEnabled;
-        if (!pydevices_state.audioEnabled) pydevices_arm_audio_unlock();
-        return +pydevices_state.audioEnabled;
+    omnipython_audio_state__deps: ['$omnipython_state', '$omnipython_arm_audio_unlock'],
+    omnipython_audio_state: (input) => {
+        if (input) return +omnipython_state.microphoneEnabled;
+        if (!omnipython_state.audioEnabled) omnipython_arm_audio_unlock();
+        return +omnipython_state.audioEnabled;
     },
 
-    $pydevices_decode_pcm: (bytes, frames, channels, bits, signed, bigEndian) => {
+    $omnipython_decode_pcm: (bytes, frames, channels, bits, signed, bigEndian) => {
         const result = Array.from({length:channels}, () => new Float32Array(frames));
         const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
         const width = bits >> 3, little = !bigEndian;
@@ -469,12 +469,12 @@ mergeInto(LibraryManager.library, {
         return result;
     },
 
-    pydevices_audio_write__deps: ['$pydevices_state', '$pydevices_decode_pcm'],
-    pydevices_audio_write: (ptr, len, rate, channels, bits, signed, bigEndian) => {
-        const state=pydevices_state, ctx=state.audioContext;
+    omnipython_audio_write__deps: ['$omnipython_state', '$omnipython_decode_pcm'],
+    omnipython_audio_write: (ptr, len, rate, channels, bits, signed, bigEndian) => {
+        const state=omnipython_state, ctx=state.audioContext;
         if (!state.audioEnabled || !ctx) return -1;
         const width=bits>>3, frames=Math.floor(len/(width*channels));
-        const decoded=pydevices_decode_pcm(HEAPU8.subarray(ptr, ptr+frames*width*channels),frames,channels,bits,signed,bigEndian);
+        const decoded=omnipython_decode_pcm(HEAPU8.subarray(ptr, ptr+frames*width*channels),frames,channels,bits,signed,bigEndian);
         const buffer=ctx.createBuffer(channels,frames,rate);
         for(let c=0;c<channels;c++) buffer.copyToChannel(decoded[c],c);
         const source=ctx.createBufferSource(); source.buffer=buffer; source.connect(ctx.destination);
@@ -489,23 +489,23 @@ mergeInto(LibraryManager.library, {
         return byteLength;
     },
 
-    $pydevices_encode_sample: (view, p, value, bits, signed, bigEndian) => {
+    $omnipython_encode_sample: (view, p, value, bits, signed, bigEndian) => {
         const little=!bigEndian, clamped=Math.max(-1,Math.min(1,value));
         if(bits===8) signed?view.setInt8(p,Math.round(clamped*127)):view.setUint8(p,Math.round((clamped+1)*127.5));
         else if(bits===16) signed?view.setInt16(p,Math.round(clamped*32767),little):view.setUint16(p,Math.round((clamped+1)*32767.5),little);
         else signed?view.setInt32(p,Math.round(clamped*2147483647),little):view.setUint32(p,Math.round((clamped+1)*2147483647.5),little);
     },
 
-    pydevices_audio_read__deps: ['$pydevices_state', '$pydevices_encode_sample'],
-    pydevices_audio_read: (ptr, len, rate, channels, bits, signed, bigEndian) => {
-        const state=pydevices_state; if(!state.microphoneEnabled) return -1;
+    omnipython_audio_read__deps: ['$omnipython_state', '$omnipython_encode_sample'],
+    omnipython_audio_read: (ptr, len, rate, channels, bits, signed, bigEndian) => {
+        const state=omnipython_state; if(!state.microphoneEnabled) return -1;
         const width=bits>>3, capacity=Math.floor(len/(width*channels)); let written=0;
         const view=new DataView(HEAPU8.buffer,ptr,len);
         while(written<capacity && state.inputFrames.length){
             const frame=state.inputFrames[0];
             while(written<capacity && frame.offset<frame.channels[0].length){
                 const sourceIndex=Math.min(frame.channels[0].length-1,Math.floor(frame.offset));
-                for(let c=0;c<channels;c++) pydevices_encode_sample(view,(written*channels+c)*width,frame.channels[Math.min(c,frame.channels.length-1)][sourceIndex],bits,signed,bigEndian);
+                for(let c=0;c<channels;c++) omnipython_encode_sample(view,(written*channels+c)*width,frame.channels[Math.min(c,frame.channels.length-1)][sourceIndex],bits,signed,bigEndian);
                 written++; frame.offset += frame.rate/rate;
             }
             if(frame.offset>=frame.channels[0].length) state.inputFrames.shift();
@@ -513,22 +513,22 @@ mergeInto(LibraryManager.library, {
         return written*channels*width;
     },
 
-    pydevices_audio_clear__deps: ['$pydevices_state'],
-    pydevices_audio_clear: (input) => { const s=pydevices_state; if(input)s.inputFrames.length=0; else { for(const x of s.audioSources)x.stop(); s.audioSources.clear(); s.audioQueuedBytes=0; s.audioEnd=s.audioContext?.currentTime||0; } },
-    pydevices_audio_queued__deps: ['$pydevices_state'],
-    pydevices_audio_queued: (input) => input ? pydevices_state.inputFrames.reduce((n,f)=>n+(f.channels[0].length-f.offset)*f.channels.length*4,0) : pydevices_state.audioQueuedBytes,
+    omnipython_audio_clear__deps: ['$omnipython_state'],
+    omnipython_audio_clear: (input) => { const s=omnipython_state; if(input)s.inputFrames.length=0; else { for(const x of s.audioSources)x.stop(); s.audioSources.clear(); s.audioQueuedBytes=0; s.audioEnd=s.audioContext?.currentTime||0; } },
+    omnipython_audio_queued__deps: ['$omnipython_state'],
+    omnipython_audio_queued: (input) => input ? omnipython_state.inputFrames.reduce((n,f)=>n+(f.channels[0].length-f.offset)*f.channels.length*4,0) : omnipython_state.audioQueuedBytes,
 
-    pydevices_http_get__deps: ['$Asyncify'],
-    pydevices_http_get: (urlPtr, statusPtr, lenPtr, finalUrlPtr) => Asyncify.handleSleep(async (wakeUp) => {
+    omnipython_http_get__deps: ['$Asyncify'],
+    omnipython_http_get: (urlPtr, statusPtr, lenPtr, finalUrlPtr) => Asyncify.handleSleep(async (wakeUp) => {
         try {
             const response=await fetch(UTF8ToString(urlPtr)); const bytes=new Uint8Array(await response.arrayBuffer());
             const ptr=_malloc(bytes.length || 1); HEAPU8.set(bytes,ptr);
             const urlLen=lengthBytesUTF8(response.url), outUrl=_malloc(urlLen+1); stringToUTF8(response.url,outUrl,urlLen+1);
             HEAP32[statusPtr>>2]=response.status; HEAPU32[lenPtr>>2]=bytes.length; HEAPU32[finalUrlPtr>>2]=outUrl; wakeUp(ptr);
         } catch(error) {
-            console.error('PyDevices Fetch failed',error); HEAP32[statusPtr>>2]=0; HEAPU32[lenPtr>>2]=0; HEAPU32[finalUrlPtr>>2]=0; wakeUp(0);
+            console.error('OmniPython fetch failed',error); HEAP32[statusPtr>>2]=0; HEAPU32[lenPtr>>2]=0; HEAPU32[finalUrlPtr>>2]=0; wakeUp(0);
         }
     }),
-    pydevices_sleep_ms__deps: ['$Asyncify'],
-    pydevices_sleep_ms: (ms) => Asyncify.handleSleep((wakeUp) => setTimeout(wakeUp, Math.max(0, ms))),
+    omnipython_sleep_ms__deps: ['$Asyncify'],
+    omnipython_sleep_ms: (ms) => Asyncify.handleSleep((wakeUp) => setTimeout(wakeUp, Math.max(0, ms))),
 });

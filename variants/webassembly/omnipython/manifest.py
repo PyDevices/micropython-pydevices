@@ -8,7 +8,7 @@
 # the socket-backed one, because frozen module lookup keeps the first match.
 include("$(PORT_DIR)/variants/manifest.py")
 freeze(".", "requests.py", opt=3)
-# The port's patched main.c calls pydevices_bridge_deinit() (overlay 0006),
+# The port's patched main.c calls omnipython_bridge_deinit() (overlay 0006),
 # which the wasm bridge usermod beside this variant provides.
 c_module("../wasmbridge")
 # mip without resolving its socket-based requests dependency; the sources

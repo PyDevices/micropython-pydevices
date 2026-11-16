@@ -1,4 +1,4 @@
-// Direct browser services for the PyDevices MicroPython WebAssembly variant.
+// Direct browser services for the OmniPython MicroPython WebAssembly variant.
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,39 +33,39 @@ typedef struct {
     int32_t repeat;
     char key[64];
     char code[64];
-} pydevices_event_record_t;
+} omnipython_event_record_t;
 
 typedef struct {
     volatile uint32_t head;
     volatile uint32_t tail;
-    pydevices_event_record_t records[256];
-} pydevices_event_ring_t;
+    omnipython_event_record_t records[256];
+} omnipython_event_ring_t;
 
 // One ring per registered canvas — EncoderEmu-style secondary displays
 // (lv_encoder_emu.py) register alongside the primary, and each needs its own
 // input queue so events route to the display that received them.
-#define PYDEVICES_MAX_DISPLAYS 4
-static pydevices_event_ring_t event_rings[PYDEVICES_MAX_DISPLAYS];
-static char event_ring_canvas_ids[PYDEVICES_MAX_DISPLAYS][64];
+#define OMNIPYTHON_MAX_DISPLAYS 4
+static omnipython_event_ring_t event_rings[OMNIPYTHON_MAX_DISPLAYS];
+static char event_ring_canvas_ids[OMNIPYTHON_MAX_DISPLAYS][64];
 static int timer_callback_ids[64];
 MP_REGISTER_ROOT_POINTER(mp_obj_t wasm_timer_callbacks[64]);
 
-extern int pydevices_display_register(uintptr_t, size_t, int, int, const char *);
-extern void pydevices_display_unregister(const char *);
-extern uintptr_t pydevices_event_poll(const char *, size_t *);
-extern void pydevices_event_set_buffer(const char *, uintptr_t, size_t, size_t);
-extern void pydevices_event_clear(const char *);
-extern void pydevices_timer_start(int, int, int);
-extern void pydevices_timer_cancel(int);
-extern int pydevices_timer_poll(void);
-extern int pydevices_audio_state(int);
-extern int pydevices_audio_write(uintptr_t, size_t, int, int, int, int, int);
-extern int pydevices_audio_read(uintptr_t, size_t, int, int, int, int, int);
-extern void pydevices_audio_clear(int);
-extern int pydevices_audio_queued(int);
-extern uintptr_t pydevices_http_get(const char *, int *, size_t *, uintptr_t *);
-extern void pydevices_sleep_ms(int);
-extern void pydevices_host_reset(void);
+extern int omnipython_display_register(uintptr_t, size_t, int, int, const char *);
+extern void omnipython_display_unregister(const char *);
+extern uintptr_t omnipython_event_poll(const char *, size_t *);
+extern void omnipython_event_set_buffer(const char *, uintptr_t, size_t, size_t);
+extern void omnipython_event_clear(const char *);
+extern void omnipython_timer_start(int, int, int);
+extern void omnipython_timer_cancel(int);
+extern int omnipython_timer_poll(void);
+extern int omnipython_audio_state(int);
+extern int omnipython_audio_write(uintptr_t, size_t, int, int, int, int, int);
+extern int omnipython_audio_read(uintptr_t, size_t, int, int, int, int, int);
+extern void omnipython_audio_clear(int);
+extern int omnipython_audio_queued(int);
+extern uintptr_t omnipython_http_get(const char *, int *, size_t *, uintptr_t *);
+extern void omnipython_sleep_ms(int);
+extern void omnipython_host_reset(void);
 extern void external_call_depth_inc(void);
 // MicroPython v1.29.0 gives the decrement the object to keep rooted while
 // the call unwinds (ports/webassembly/main.c). Declaring it without that
@@ -74,8 +74,8 @@ extern void external_call_depth_inc(void);
 // function signature mismatch": fatal under node, a console error in a page.
 extern void external_call_depth_dec(mp_obj_t root_obj);
 
-void pydevices_bridge_deinit(void) {
-    pydevices_host_reset();
+void omnipython_bridge_deinit(void) {
+    omnipython_host_reset();
     memset(event_rings, 0, sizeof(event_rings));
     memset(event_ring_canvas_ids, 0, sizeof(event_ring_canvas_ids));
     memset(timer_callback_ids, 0, sizeof(timer_callback_ids));
@@ -88,7 +88,7 @@ void pydevices_bridge_deinit(void) {
 // requested and none exists yet. Returns -1 when not found / table full.
 static int find_event_ring_slot(const char *canvas_id, bool allocate) {
     int free_slot = -1;
-    for (int i = 0; i < PYDEVICES_MAX_DISPLAYS; ++i) {
+    for (int i = 0; i < OMNIPYTHON_MAX_DISPLAYS; ++i) {
         if (event_ring_canvas_ids[i][0] != '\0' && strcmp(event_ring_canvas_ids[i], canvas_id) == 0) {
             return i;
         }
@@ -117,15 +117,15 @@ static mp_obj_t bridge_display_register(size_t n_args, const mp_obj_t *args) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("too many WASM displays registered"));
     }
     memset(&event_rings[slot], 0, sizeof(event_rings[slot]));
-    pydevices_event_set_buffer(canvas, (uintptr_t)&event_rings[slot], 256, sizeof(pydevices_event_record_t));
-    return mp_obj_new_bool(pydevices_display_register((uintptr_t)buf.buf, buf.len, width, height, canvas));
+    omnipython_event_set_buffer(canvas, (uintptr_t)&event_rings[slot], 256, sizeof(omnipython_event_record_t));
+    return mp_obj_new_bool(omnipython_display_register((uintptr_t)buf.buf, buf.len, width, height, canvas));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(bridge_display_register_obj, 3, 4, bridge_display_register);
 
 static mp_obj_t bridge_display_unregister(size_t n_args, const mp_obj_t *args) {
     const char *canvas = n_args > 0 ? mp_obj_str_get_str(args[0]) : "display_canvas";
-    pydevices_display_unregister(canvas);
-    pydevices_event_set_buffer(canvas, 0, 0, 0);
+    omnipython_display_unregister(canvas);
+    omnipython_event_set_buffer(canvas, 0, 0, 0);
     int slot = find_event_ring_slot(canvas, false);
     if (slot >= 0) {
         memset(&event_rings[slot], 0, sizeof(event_rings[slot]));
@@ -135,7 +135,7 @@ static mp_obj_t bridge_display_unregister(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(bridge_display_unregister_obj, 0, 1, bridge_display_unregister);
 
-static mp_obj_t bridge_pointer_event(const pydevices_event_record_t *event, mp_obj_t contract) {
+static mp_obj_t bridge_pointer_event(const omnipython_event_record_t *event, mp_obj_t contract) {
     size_t count;
     mp_obj_t *types;
     mp_obj_get_array(contract, &count, &types);
@@ -181,7 +181,7 @@ static mp_obj_t bridge_pointer_event(const pydevices_event_record_t *event, mp_o
     return mp_obj_new_list(2, output);
 }
 
-static mp_obj_t bridge_fast_event(const pydevices_event_record_t *event, mp_obj_t contract) {
+static mp_obj_t bridge_fast_event(const omnipython_event_record_t *event, mp_obj_t contract) {
     if (contract != mp_const_none) {
         mp_obj_t converted = bridge_pointer_event(event, contract);
         if (converted != MP_OBJ_NULL) {
@@ -228,7 +228,7 @@ static mp_obj_t bridge_poll_event(size_t n_args, const mp_obj_t *args) {
         return result;
     }
     size_t len = 0;
-    uintptr_t ptr = pydevices_event_poll(canvas, &len);
+    uintptr_t ptr = omnipython_event_poll(canvas, &len);
     if (!ptr) {
         return mp_const_none;
     }
@@ -243,7 +243,7 @@ static mp_obj_t bridge_poll_events(mp_obj_t canvas_obj, mp_obj_t contract) {
     mp_obj_t output = mp_obj_new_list(0, NULL);
     size_t raw_count = 0;
     int slot = find_event_ring_slot(canvas, false);
-    pydevices_event_ring_t *ring = slot >= 0 ? &event_rings[slot] : NULL;
+    omnipython_event_ring_t *ring = slot >= 0 ? &event_rings[slot] : NULL;
     while (ring != NULL && ring->tail != ring->head) {
         uint32_t tail = ring->tail;
         if (ring->records[tail].type < 1 || ring->records[tail].type > 4) {
@@ -264,7 +264,7 @@ static mp_obj_t bridge_poll_events(mp_obj_t canvas_obj, mp_obj_t contract) {
     }
     while (true) {
         size_t len = 0;
-        uintptr_t ptr = pydevices_event_poll(canvas, &len);
+        uintptr_t ptr = omnipython_event_poll(canvas, &len);
         if (!ptr) {
             break;
         }
@@ -286,7 +286,7 @@ static mp_obj_t bridge_clear_events(mp_obj_t canvas_obj) {
     if (slot >= 0) {
         event_rings[slot].head = event_rings[slot].tail = 0;
     }
-    pydevices_event_clear(canvas);
+    omnipython_event_clear(canvas);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(bridge_clear_events_obj, bridge_clear_events);
@@ -307,12 +307,12 @@ static mp_obj_t bridge_timer_start(size_t n_args, const mp_obj_t *args) {
             mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("WASM timer callback table is full"));
         }
     }
-    pydevices_timer_start(id, mp_obj_get_int(args[1]), mp_obj_is_true(args[2]));
+    omnipython_timer_start(id, mp_obj_get_int(args[1]), mp_obj_is_true(args[2]));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(bridge_timer_start_obj, 3, 4, bridge_timer_start);
 
-EMSCRIPTEN_KEEPALIVE void pydevices_timer_dispatch(int id) {
+EMSCRIPTEN_KEEPALIVE void omnipython_timer_dispatch(int id) {
     external_call_depth_inc();
     for (size_t i = 0; i < 64; ++i) {
         mp_obj_t callback = MP_STATE_VM(wasm_timer_callbacks)[i];
@@ -333,7 +333,7 @@ EMSCRIPTEN_KEEPALIVE void pydevices_timer_dispatch(int id) {
 
 static mp_obj_t bridge_timer_cancel(mp_obj_t id) {
     int timer_id = mp_obj_get_int(id);
-    pydevices_timer_cancel(timer_id);
+    omnipython_timer_cancel(timer_id);
     for (size_t i = 0; i < 64; ++i) {
         if (MP_STATE_VM(wasm_timer_callbacks)[i] != MP_OBJ_NULL && timer_callback_ids[i] == timer_id) {
             MP_STATE_VM(wasm_timer_callbacks)[i] = MP_OBJ_NULL;
@@ -345,20 +345,20 @@ static mp_obj_t bridge_timer_cancel(mp_obj_t id) {
 static MP_DEFINE_CONST_FUN_OBJ_1(bridge_timer_cancel_obj, bridge_timer_cancel);
 
 static mp_obj_t bridge_timer_poll(void) {
-    int id = pydevices_timer_poll();
+    int id = omnipython_timer_poll();
     return id < 0 ? mp_const_none : mp_obj_new_int(id);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(bridge_timer_poll_obj, bridge_timer_poll);
 
 static mp_obj_t bridge_audio_state(mp_obj_t input) {
-    return mp_obj_new_int(pydevices_audio_state(mp_obj_is_true(input)));
+    return mp_obj_new_int(omnipython_audio_state(mp_obj_is_true(input)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(bridge_audio_state_obj, bridge_audio_state);
 
 static mp_obj_t bridge_audio_write(size_t n_args, const mp_obj_t *args) {
     mp_buffer_info_t buf;
     mp_get_buffer_raise(args[0], &buf, MP_BUFFER_READ);
-    int result = pydevices_audio_write((uintptr_t)buf.buf, buf.len,
+    int result = omnipython_audio_write((uintptr_t)buf.buf, buf.len,
         mp_obj_get_int(args[1]), mp_obj_get_int(args[2]), mp_obj_get_int(args[3]),
         mp_obj_is_true(args[4]), mp_obj_is_true(args[5]));
     if (result < 0) {
@@ -371,7 +371,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(bridge_audio_write_obj, 6, 6, bridge_
 static mp_obj_t bridge_audio_read(size_t n_args, const mp_obj_t *args) {
     mp_buffer_info_t buf;
     mp_get_buffer_raise(args[0], &buf, MP_BUFFER_WRITE);
-    int result = pydevices_audio_read((uintptr_t)buf.buf, buf.len,
+    int result = omnipython_audio_read((uintptr_t)buf.buf, buf.len,
         mp_obj_get_int(args[1]), mp_obj_get_int(args[2]), mp_obj_get_int(args[3]),
         mp_obj_is_true(args[4]), mp_obj_is_true(args[5]));
     if (result < 0) {
@@ -382,13 +382,13 @@ static mp_obj_t bridge_audio_read(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(bridge_audio_read_obj, 6, 6, bridge_audio_read);
 
 static mp_obj_t bridge_audio_clear(mp_obj_t input) {
-    pydevices_audio_clear(mp_obj_is_true(input));
+    omnipython_audio_clear(mp_obj_is_true(input));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(bridge_audio_clear_obj, bridge_audio_clear);
 
 static mp_obj_t bridge_audio_queued(mp_obj_t input) {
-    return mp_obj_new_int(pydevices_audio_queued(mp_obj_is_true(input)));
+    return mp_obj_new_int(omnipython_audio_queued(mp_obj_is_true(input)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(bridge_audio_queued_obj, bridge_audio_queued);
 
@@ -397,7 +397,7 @@ static mp_obj_t bridge_http_get(mp_obj_t url_obj) {
     int status = 0;
     size_t len = 0;
     uintptr_t final_url_ptr = 0;
-    uintptr_t data_ptr = pydevices_http_get(url, &status, &len, &final_url_ptr);
+    uintptr_t data_ptr = omnipython_http_get(url, &status, &len, &final_url_ptr);
     if (!data_ptr && status == 0) {
         mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("Fetch failed: %s"), url);
     }
@@ -413,7 +413,7 @@ static mp_obj_t bridge_http_get(mp_obj_t url_obj) {
 static MP_DEFINE_CONST_FUN_OBJ_1(bridge_http_get_obj, bridge_http_get);
 
 static mp_obj_t bridge_sleep_ms(mp_obj_t ms) {
-    pydevices_sleep_ms(mp_obj_get_int(ms));
+    omnipython_sleep_ms(mp_obj_get_int(ms));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(bridge_sleep_ms_obj, bridge_sleep_ms);
