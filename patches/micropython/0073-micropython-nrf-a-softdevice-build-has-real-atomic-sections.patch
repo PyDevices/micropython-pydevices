@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 00:00:00 -0600
+Subject: [PATCH] nrf/mphalport: Give a SoftDevice build real atomic sections.
+
+A board built with a SoftDevice (SD=s140 and the like, the XIAO nRF52840
+among them) never defined MICROPY_BEGIN_ATOMIC_SECTION, so it fell back to
+py/mphal.h's empty one. The scheduler's sections then exclude nothing, while
+a machine.Timer callback runs straight from the interrupt and calls
+micropython.schedule(). A fire that lands in mp_sched_unlock(), after it
+counted an empty queue and before it wrote MP_SCHED_IDLE, leaves its
+callback queued with the scheduler idle. Nothing runs it until some other
+schedule() sets the scheduler pending again, which at an idle REPL is the
+next key typed. machine.disable_irq() masked nothing either.
+
+Seen on a Seeed XIAO nRF52840 Sense with a 20 ms timer that re-arms a
+one-shot hardware timer from its scheduled callback: it stopped for 5 to 34
+seconds at a time, every few minutes, at the REPL. With a 1 ms periodic
+timer counting, 20 interrupts arrived in the 20 ms after
+machine.disable_irq().
+
+Use the SoftDevice's critical region, as nrfx_glue.h already does for the
+drivers. It masks the application's interrupts and leaves the SoftDevice's
+own alone, and works whether or not the SoftDevice is enabled.
+
+diff --git a/ports/nrf/mphalport.c b/ports/nrf/mphalport.c
+index 7c846b7a4..2149b644a 100644
+--- a/ports/nrf/mphalport.c
++++ b/ports/nrf/mphalport.c
+@@ -55,6 +55,20 @@
+ #include "soc/nrfx_coredep.h"
+ #endif
+ 
++#ifdef BLUETOOTH_SD
++#include "nrf_nvic.h"
++
++mp_uint_t mp_hal_begin_atomic_section(void) {
++    uint8_t nested;
++    sd_nvic_critical_region_enter(&nested);
++    return nested;
++}
++
++void mp_hal_end_atomic_section(mp_uint_t state) {
++    sd_nvic_critical_region_exit(state);
++}
++#endif
++
+ #ifndef MICROPY_HW_STDIN_BUFFER_LEN
+ #define MICROPY_HW_STDIN_BUFFER_LEN 512
+ #endif
+diff --git a/ports/nrf/mphalport.h b/ports/nrf/mphalport.h
+index 60c651839..31b786205 100644
+--- a/ports/nrf/mphalport.h
++++ b/ports/nrf/mphalport.h
+@@ -39,6 +39,16 @@
+ #ifndef BLUETOOTH_SD
+ #define MICROPY_BEGIN_ATOMIC_SECTION()     disable_irq()
+ #define MICROPY_END_ATOMIC_SECTION(state)  enable_irq(state)
++#else
++// A SoftDevice build masks the application's interrupts the way the
++// SoftDevice allows, which works whether or not it has been enabled. Without
++// this the section is empty: a timer interrupt that schedules a callback can
++// then land inside mp_sched_unlock() and leave the callback queued with the
++// scheduler idle, and machine.disable_irq() masks nothing.
++mp_uint_t mp_hal_begin_atomic_section(void);
++void mp_hal_end_atomic_section(mp_uint_t state);
++#define MICROPY_BEGIN_ATOMIC_SECTION()     mp_hal_begin_atomic_section()
++#define MICROPY_END_ATOMIC_SECTION(state)  mp_hal_end_atomic_section(state)
+ #endif
+ 
+ static inline void enable_irq(mp_uint_t state) {
+-- 
+2.43.0
