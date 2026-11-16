@@ -9,6 +9,9 @@ or missing for you, open an
 - **Your own firmware from the firmware page.** A build you made, in a
   codespace or anywhere else, goes onto your board from the browser; it's
   planned on the [site's roadmap](https://github.com/PyDevices/PyDevices.github.io/blob/main/ROADMAP.md).
+- **A pull request is linked for each chip family.** A check builds an ESP32-S3,
+  an ESP32-P4 and a classic ESP32 image, so a change that compiles for one chip
+  and doesn't link for another is caught before it merges.
 
 ## Watching a board
 
