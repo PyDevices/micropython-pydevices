@@ -17,7 +17,7 @@ board to read what was written.
 Needs: a board with USB device support and the ``usb-device-msc`` package.
 Install it with ``mip`` if your firmware doesn't freeze it:
 
-    mip.install("github:PyDevices/omnipython/usb-device-msc")
+    mip.install("github:PyDevices/omnipython/packages/usb/usb-device-msc")
 
 Run it:
 

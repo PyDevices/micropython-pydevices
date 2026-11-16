@@ -43,7 +43,7 @@ beside `midiports`, and installs with `mip`:
   overlay's streaming endpoints (`USBDevice.Ring`, `USBDevice.stream()`).
 
 ```python
-mip.install("github:PyDevices/omnipython/usb-host-msc")   # brings usb-core with it
+mip.install("github:PyDevices/omnipython/packages/usb/usb-host-msc")   # brings usb-core with it
 ```
 
 ```python
