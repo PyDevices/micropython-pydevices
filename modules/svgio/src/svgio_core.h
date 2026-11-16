@@ -75,13 +75,26 @@ extern unsigned svgio_opts;
 extern uint32_t svgio_phase_us[SVGIO_PHASES];
 #endif
 
-// A decoder's working memory. With size set, base is one block of the
-// MicroPython heap that the parser and the rasteriser take their memory from,
-// a small allocator of its own inside it, so an open() or a decode() asks the
-// heap for nothing. What doesn't fit spills to the heap. With size 0 it only
-// counts what its decoder holds.
+// Memory from outside the MicroPython heap, where the port has some: the
+// collector never reads it, so megabytes of it cost a collection nothing. It
+// isn't cleared, and whoever takes it gives it back. NULL when there is none
+// or not that much. Ports without any always give NULL.
+void *svgio_outside_alloc(size_t n);
+void svgio_outside_free(void *p);
+// How many blocks from there are held now.
+size_t svgio_outside_held(void);
+
+// A decoder's working memory. With size set, base is one block that the
+// parser and the rasteriser take their memory from, a small allocator of its
+// own inside it, so an open() or a decode() asks the heap for nothing. What
+// doesn't fit spills: to the MicroPython heap when base is a block of it, and
+// outside it when base is (outside), since the collector can't see into base
+// to find what would be kept. With size 0 it only counts what its decoder
+// holds.
 typedef struct {
     uint8_t *base;          // the block's head, which keeps it alive; NULL without one
+    bool outside;           // base came from svgio_outside_alloc()
+    void *spilled;          // the blocks that spilled outside, a list
     uint32_t size;          // bytes of it, a multiple of 8
     uint32_t rover;         // where the next search for room starts
     size_t used;            // bytes of base in use, block headers included
@@ -89,7 +102,8 @@ typedef struct {
     size_t peak;            // the most used + spill since svgio_arena_reset()
 } svgio_arena_t;
 
-// Everything in the arena is forgotten. Free what spilled first.
+// Everything in the arena is forgotten, and what spilled outside is given
+// back. Free what spilled to the heap first.
 void svgio_arena_reset(svgio_arena_t *arena);
 
 // Whose memory the calls below, the parser and the rasteriser use until the

@@ -9,8 +9,8 @@
 // - memory comes from the MicroPython heap, so a parse that runs out returns
 //   NULL (NanoSVG then frees what it had) instead of failing in a C library
 //   allocator the port may not have, and the garbage collector sees every
-//   block NanoSVG holds; or from a decoder's own block of that heap, an
-//   arena, when it was made with one;
+//   block NanoSVG holds; or from a decoder's own block, an arena, when it was
+//   made with one, which is outside that heap where the port has memory there;
 // - sscanf, strtoll, strtol and qsort are small local versions, because
 //   bare-metal ports don't all link a C library that has them;
 // - the two double-precision calls, pow and sqrt, go through single-precision
@@ -28,14 +28,103 @@
 #include <string.h>
 
 #include "py/gc.h"
+#include "py/mpconfig.h"
 #include "py/mphal.h"
 
 #include "svgio_core.h"
 
 // --- memory ------------------------------------------------------------------
 
+// Memory the collector doesn't read: ESP-IDF's heap where there is PSRAM in
+// it, the C library's on a desktop or in a browser. Other ports give all of
+// their memory to MicroPython, and CircuitPython manages its own. Without
+// finalisers a decoder that was never closed couldn't give its block back.
+#if defined(CIRCUITPY) || !MICROPY_ENABLE_FINALISER
+#define SVGIO_OUTSIDE 0
+#elif defined(ESP_PLATFORM)
+#include "esp_heap_caps.h"
+#define SVGIO_OUTSIDE 1
+#define SVGIO_OUTSIDE_ALLOC(n) heap_caps_malloc((n), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+#define SVGIO_OUTSIDE_FREE(p) heap_caps_free(p)
+#elif defined(__unix__) || defined(__APPLE__) || defined(_WIN32) || defined(__EMSCRIPTEN__)
+#define SVGIO_OUTSIDE 1
+#define SVGIO_OUTSIDE_ALLOC(n) malloc(n)
+#define SVGIO_OUTSIDE_FREE(p) free(p)
+#else
+#define SVGIO_OUTSIDE 0
+#endif
+
+static size_t svgio_outside_blocks;
+
+size_t svgio_outside_held(void) {
+    return svgio_outside_blocks;
+}
+
+void *svgio_outside_alloc(size_t n) {
+    #if SVGIO_OUTSIDE
+    void *p = n ? SVGIO_OUTSIDE_ALLOC(n) : NULL;
+    svgio_outside_blocks += p != NULL;
+    return p;
+    #else
+    (void)n;
+    return NULL;
+    #endif
+}
+
+void svgio_outside_free(void *p) {
+    #if SVGIO_OUTSIDE
+    if (p != NULL) {
+        SVGIO_OUTSIDE_FREE(p);
+        svgio_outside_blocks--;
+    }
+    #else
+    (void)p;
+    #endif
+}
+
 static size_t svgio_held, svgio_peak;
 static svgio_arena_t *svgio_arena;      // whose memory is in use, or NULL
+
+// A block that spilled from an arena whose memory is outside the heap: its
+// size, and its place in the arena's list, ahead of its bytes.
+typedef struct svgio_spill {
+    struct svgio_spill *prev, *next;
+    size_t n;
+    size_t unused;      // keeps the bytes that follow aligned to 8
+} svgio_spill_t;
+
+static void *svgio_spill_alloc(svgio_arena_t *a, size_t n) {
+    svgio_spill_t *b = svgio_outside_alloc(sizeof(svgio_spill_t) + n);
+    if (b == NULL) {
+        return NULL;
+    }
+    b->n = n;
+    b->prev = NULL;
+    b->next = a->spilled;
+    if (b->next != NULL) {
+        b->next->prev = b;
+    }
+    a->spilled = b;
+    return b + 1;
+}
+
+static void svgio_spill_free(svgio_arena_t *a, void *p) {
+    svgio_spill_t *b = (svgio_spill_t *)p - 1;
+    if (b->prev != NULL) {
+        b->prev->next = b->next;
+    } else {
+        a->spilled = b->next;
+    }
+    if (b->next != NULL) {
+        b->next->prev = b->prev;
+    }
+    svgio_outside_free(b);
+}
+
+// How many bytes the block p, which isn't in an arena, holds.
+static size_t svgio_block_bytes(svgio_arena_t *a, void *p) {
+    return a != NULL && a->outside ? ((svgio_spill_t *)p - 1)->n : gc_nbytes(p);
+}
 
 static void svgio_count(size_t n, int sign) {
     svgio_held = sign > 0 ? svgio_held + n : svgio_held - n;
@@ -62,6 +151,9 @@ static inline uint32_t *svgio_blk(svgio_arena_t *a, uint32_t off) {
 }
 
 void svgio_arena_reset(svgio_arena_t *a) {
+    while (a->outside && a->spilled != NULL) {
+        svgio_spill_free(a, (svgio_spill_t *)a->spilled + 1);
+    }
     a->rover = 0;
     a->used = a->spill = a->peak = 0;
     if (a->size != 0) {
@@ -160,12 +252,12 @@ static void *svgio_malloc(size_t n) {
             return p;
         }
     }
-    void *p = gc_alloc(n, 0);
+    void *p = a != NULL && a->outside ? svgio_spill_alloc(a, n) : gc_alloc(n, 0);
     if (p != NULL) {
         if (a != NULL) {
-            a->spill += gc_nbytes(p);
+            a->spill += svgio_block_bytes(a, p);
         }
-        svgio_count(gc_nbytes(p), 1);
+        svgio_count(svgio_block_bytes(a, p), 1);
     }
     return p;
 }
@@ -180,10 +272,14 @@ static void svgio_free(void *p) {
         return;
     }
     if (a != NULL) {
-        a->spill -= gc_nbytes(p);
+        a->spill -= svgio_block_bytes(a, p);
     }
-    svgio_count(gc_nbytes(p), -1);
-    gc_free(p);
+    svgio_count(svgio_block_bytes(a, p), -1);
+    if (a != NULL && a->outside) {
+        svgio_spill_free(a, p);
+    } else {
+        gc_free(p);
+    }
 }
 
 static void *svgio_realloc(void *p, size_t n) {
@@ -227,6 +323,18 @@ static void *svgio_realloc(void *p, size_t n) {
         if (q != NULL) {
             memcpy(q, p, sz - SVGIO_BLK);
             svgio_arena_free(a, p);
+        }
+        return q;
+    }
+    if (a != NULL && a->outside) {
+        const size_t had = svgio_block_bytes(a, p);
+        if (n <= had) {
+            return p;
+        }
+        void *q = svgio_malloc(n);
+        if (q != NULL) {
+            memcpy(q, p, had);
+            svgio_free(p);
         }
         return q;
     }
