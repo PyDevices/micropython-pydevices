@@ -491,11 +491,11 @@ the directory that contains both, which builds every module in it.
 headers are looked for.
 
 [omnipython-builds](https://github.com/PyDevices/omnipython-builds)'
-`build_mp.py` builds the pairing on any port, with upstream's own boards:
+`build.py` builds the pairing on any port, with upstream's own boards:
 
 ```bash
-omnipython-builds/build_mp.py --port unix --variant omnipython --modules audiodsp,audioif
-omnipython-builds/build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI \
+omnipython-builds/build.py --port unix --variant omnipython --modules audiodsp,audioif
+omnipython-builds/build.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI \
     --flash 16MB --modules audiodsp,audioif
 ```
 

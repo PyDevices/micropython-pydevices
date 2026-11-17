@@ -17,7 +17,7 @@ everything else.
 Build MicroPython for your desktop with the pygraphics module inside:
 
 ```bash
-./build_mp.py --port unix --modules pygraphics
+./build.py --port unix --modules pygraphics
 ```
 
 Save this as `hello.py`:
@@ -42,7 +42,7 @@ micropython native_cmod Area(8, 8, 64, 40)
 For a board, name its port, board and variant, and the modules you want:
 
 ```bash
-./build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI \
+./build.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI \
     --flash 16MB --modules displayif,pygraphics
 ```
 

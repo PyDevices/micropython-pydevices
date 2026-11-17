@@ -10,7 +10,7 @@ It is opt-in: `--modules all` leaves it out because it adds TensorFlow Lite
 Micro to the image. Name it, and ulab, which `predict()` takes and returns:
 
 ```bash
-./build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB --modules ulab,tflite
+./build.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB --modules ulab,tflite
 ```
 
 ```python

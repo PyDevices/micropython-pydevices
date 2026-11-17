@@ -2,7 +2,7 @@
 
 omnipython-builds builds firmware: MicroPython-compatible and
 CircuitPython-compatible interpreters with the OmniPython C modules compiled in,
-for boards, desktops and the browser. One command, [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py), does it.
+for boards, desktops and the browser. One command, [`build.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build.py), does it.
 
 ## Get started
 

@@ -5,7 +5,7 @@ top. Find yours in [the boards table](../reference/boards.md), which gives the
 `--port`, `--board`, `--variant` and `--flash` to use, and add `--modules`:
 
 ```bash
-./build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI \
+./build.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI \
     --flash 16MB --modules displayif,pygraphics,/home/you/earful
 ```
 

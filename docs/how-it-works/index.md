@@ -39,7 +39,7 @@ is the user's side of this.
 - Upstream is **pinned**. Moving the `micropython` line of `DEPENDENCIES.lock` re-validates every patch.
 - Patches are justified in their headers. Never hand-edit a patched tree: change
   the patch and prepare again.
-- [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py) names no version and no setting. Pins move in the lock files,
+- [`build.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build.py) names no version and no setting. Pins move in the lock files,
   and esp32 settings live in sdkconfig fragments it finds by convention.
 - Publishing binaries is a separate decision from this source repository.
 
@@ -49,7 +49,7 @@ is the user's side of this.
 mpy-cross sub-make and breaks an esp32 link
 ([micropython#19667](https://github.com/micropython/micropython/issues/19667)).
 Both build systems skip that sub-make when `MICROPY_MPYCROSS` names a built
-mpy-cross, so `build_mp.py` builds mpy-cross on its own first and exports its
+mpy-cross, so `build.py` builds mpy-cross on its own first and exports its
 path.
 
 **Upstream's generic esp32 boards give the app 1.94 MiB**
@@ -62,7 +62,7 @@ gen_esp32part refuses a table larger than the configured flash. Hence `--flash`.
 yet.
 
 **Two esp32 builds at once in one port race** on `managed_components/`, so
-`build_mp.py` builds esp32 one at a time.
+`build.py` builds esp32 one at a time.
 
 ## The vst3-engine variants
 

@@ -5,9 +5,9 @@ CircuitPython with our C modules compiled in, for CircuitPython's own ports and
 boards. Add `--interpreter circuitpython`:
 
 ```bash
-./build_mp.py --interpreter circuitpython --port raspberrypi \
+./build.py --interpreter circuitpython --port raspberrypi \
     --board adafruit_feather_rp2040 --modules pygraphics
-./build_mp.py --interpreter circuitpython --port unix --modules pygraphics
+./build.py --interpreter circuitpython --port unix --modules pygraphics
 ```
 
 Ports and boards are CircuitPython's own (`raspberrypi`, `atmel-samd`,
@@ -28,7 +28,7 @@ Arguments the script doesn't recognise go to make. `CIRCUITPY_ULAB=0`, for
 example, frees flash on a small board:
 
 ```bash
-./build_mp.py --interpreter circuitpython --port espressif \
+./build.py --interpreter circuitpython --port espressif \
     --board adafruit_qtpy_esp32_pico --modules audiodsp CIRCUITPY_ULAB=0
 ```
 

@@ -6,7 +6,7 @@ files. Both are ESP32-P4 and ESP32-S3 only, both need ulab, and both are
 opt-in: `--modules all` leaves them out, so name them:
 
 ```bash
-./build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB --modules ulab,tflite,vision
+./build.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB --modules ulab,tflite,vision
 ```
 
 On a P4 before chip revision 3, build the `PRE_REV3_C6_WIFI` variant instead.

@@ -6,6 +6,9 @@ or missing for you, open an
 
 ## Firmware
 
+- **One `build.py` for MicroPython and CircuitPython.** It's restructured inside so
+  each interpreter's code sits apart from the shared steps. `build_mp.py` keeps
+  working for a while.
 - **Your own firmware from the firmware page.** A build you made, in a
   codespace or anywhere else, goes onto your board from the browser; it's
   planned on the [site's roadmap](https://github.com/PyDevices/PyDevices.github.io/blob/main/ROADMAP.md).
