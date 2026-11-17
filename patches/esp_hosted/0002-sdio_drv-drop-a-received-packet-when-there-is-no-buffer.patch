@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 22:28:10 -0600
+Subject: [PATCH] sdio_drv: drop received packets when there's no buffer for
+ them, instead of writing them to NULL.
+
+sdio_push_data_to_queue takes a receive buffer for each packet in the
+stream from sdio_buffer_alloc, which comes from internal, DMA-capable
+memory, and only asserts the result. With asserts compiled out, when that
+memory runs out the packet is copied to address 0 and the board resets
+(Store access fault in memcpy, MTVAL 0, in sdio_data_to_rx_buf_task). The
+transmit side already checks after its assert. Now the receive side drops
+the rest of the stream, as it does for a stream it can't decode, and the
+network stack sees lost frames instead.
+---
+ host/drivers/transport/sdio/sdio_drv.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/host/drivers/transport/sdio/sdio_drv.c b/host/drivers/transport/sdio/sdio_drv.c
+index a5ade7c..b2557db 100644
+--- a/host/drivers/transport/sdio/sdio_drv.c
++++ b/host/drivers/transport/sdio/sdio_drv.c
+@@ -860,6 +860,13 @@ static esp_err_t sdio_push_data_to_queue(uint8_t * buf, uint32_t buf_len)
+ 		/* Allocate rx buffer */
+ 		pkt_rxbuff = sdio_buffer_alloc(MEMSET_REQUIRED);
+ 		assert(pkt_rxbuff);
++		if (unlikely(!pkt_rxbuff)) {
++			/* No DMA-capable memory for a receive buffer: drop the rest
++			 * of the stream, as a stream that can't be decoded is
++			 * dropped above, instead of copying it to NULL. */
++			ESP_LOGE(TAG, "No rx buffer: dropping packet(s) from stream");
++			return ESP_FAIL;
++		}
+ 
+ 		packet_size = len + offset;
+ 		if (packet_size > buf_len) {
+-- 
+2.43.0
+
