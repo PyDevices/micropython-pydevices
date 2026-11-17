@@ -16,7 +16,11 @@ include("../library.py")
 require("omnipython", library="omnipython-lib", opt=3)
 require("bledev", library="omnipython-lib", opt=3)
 # MIDI ports for a program or app: UART, USB device and host, Bluetooth LE.
-require("midiports", library="omnipython-lib", opt=3)
+# Frozen where the image has room for them, a flash of 8 MB or more as
+# --flash gives it; a smaller board installs midiports with omip.
+_flash = os.environ.get("OMNIPYTHON_FLASH", "")
+if _flash.endswith("MB") and int(_flash[:-2]) >= 8:
+    require("midiports", library="omnipython-lib", opt=3)
 
 # omnipython-desktop also holds mip.py, micropython.py, pngio.py and mdns.py,
 # which would stand in front of the firmware's own mip and of the C modules

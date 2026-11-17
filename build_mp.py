@@ -2359,7 +2359,7 @@ def main():
 
     env = dict(os.environ)
     for leak in ("USER_C_MODULES", "FROZEN_MANIFEST", "BUILD", "BOARD", "VARIANT", "BOARD_DIR", "VARIANT_DIR",
-                 "BINDINGS_DIR", "OMNIPYTHON_LVGL", "OMNIPYTHON_BOARD_MANIFEST"):
+                 "BINDINGS_DIR", "OMNIPYTHON_LVGL", "OMNIPYTHON_BOARD_MANIFEST", "OMNIPYTHON_FLASH"):
         env.pop(leak, None)
     env["OMNIPYTHON_MODULES"] = spec
     own = board_manifest(port, board)
@@ -2381,6 +2381,10 @@ def main():
     env["OMNIPYTHON_PLATFORM"] = "desktop" if port in ("unix", "windows", "webassembly") else "board"
     # Which target this is, for a module whose manifest freezes something for one board family only.
     env["OMNIPYTHON_TARGET"] = f"{port}/{board}" if board else port
+    # The flash size --flash asked for, for a manifest that freezes something
+    # only where the image has room for it. Unset when the board keeps its own.
+    if flash:
+        env["OMNIPYTHON_FLASH"] = flash
     if version:
         # makeversionhdr.py takes these instead of asking git, which a shallow clone can't answer.
         env["MICROPY_GIT_TAG"], env["MICROPY_GIT_HASH"] = version
