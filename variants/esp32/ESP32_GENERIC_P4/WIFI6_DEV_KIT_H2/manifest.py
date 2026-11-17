@@ -5,7 +5,10 @@
 # The DEV-KIT's frozen content: the port's and the modules you named
 # (modules/manifest.py), plus the USB packages this board's apps import and
 # midiports, frozen so the board runs without a mip install. Only this variant
-# freezes them; every other build still installs them with mip.
+# freezes the USB packages; every other build still installs them with mip.
+# midiports is also frozen by modules/omnipython in any build whose flash is
+# 8 MB or more. That require comes first and freezes the same files, so the
+# one here only matters for a build without the omnipython module.
 #
 # They come from omnipython-lib, whose usb-* packages require each other there;
 # usb-device-audio's require("usb-device") and the device classes come from

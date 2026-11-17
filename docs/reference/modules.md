@@ -29,7 +29,7 @@ tracked here or linked from a sibling checkout or cloned at the commit in
 |---|---|
 | `audiodsp`, `pygraphics`, `ulab` | Cloned at the commit in `DEPENDENCIES.lock` when `modules/<name>` is missing, or linked from a sibling checkout. |
 | `lvgl` | [omnipython-lvgl](https://github.com/PyDevices/omnipython-lvgl), fetched at the commit in `DEPENDENCIES.lock` into `modules/.omnipython-lvgl`, or linked from a sibling checkout. A build compiles its `ports/micropython` or `ports/circuitpython`, whichever the interpreter is, and `all` includes it. |
-| `omnipython`, `palettes`, `pdwidgets`, `iconkit`, `audioinstruments`, `audioeffects` | Manifests here that require the Python packages from omnipython-lib. `audiocomponents` is the old name for the last two together and still builds both. |
+| `omnipython`, `palettes`, `pdwidgets`, `iconkit`, `audioinstruments`, `audioeffects` | Manifests here that require the Python packages from omnipython-lib. `audiocomponents` is the old name for the last two together and still builds both. `omnipython` also freezes `midiports` (MIDI over UART, USB and Bluetooth LE) when the build's `--flash` is 8 MB or more; a smaller image leaves it out, and the board installs it with `omip`. |
 | `micropython-lib` | MicroPython's own upstream packages, frozen from the checkout the MicroPython tree carries. |
 | `tflite`, `vision` | [esp-vision's modules](../guides/use-esp-vision-modules.md), opt-in: `all` leaves them out. |
 
