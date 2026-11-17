@@ -35,6 +35,17 @@ ours to port.
 - **The USB host drivers on CircuitPython's own `usb.core`**, on the RP2040
   and i.MX: planned in [omnipython](https://github.com/PyDevices/omnipython/blob/main/ROADMAP.md#usb).
 
+## CircuitPython 11's new modules, on MicroPython
+
+The same names and arguments as CircuitPython 11, so code moves between the two.
+
+- **`async_spi`.** Await an SPI transfer, so a display update or a sensor read
+  doesn't hold up the rest of an asyncio program.
+- **`usb_host_audio`.** Play to and record from a USB sound card or headset on
+  a board's USB host port.
+- **`audiopwmio` on the ESP32-S2 and S3.** Sound from a single pin, with no DAC
+  or codec, for boards that have neither.
+
 ## tflite models
 
 - **Small int8 models on the ESP32-S3:** the microWakeWord wake words,
