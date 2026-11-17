@@ -1,5 +1,5 @@
 # The website (PyDevices.github.io) and workbench serve a WebAssembly build of
-# this repository: the webassembly port, omnipython variant, every module. Its
+# this repository: the webassembly port, omnipython variant, every module and pdwidgets (which "all" leaves out). Its
 # sources move here, in DEPENDENCIES.lock, the patch series and the module
 # manifests, and nothing on either site notices. So when main changes what
 # goes into that build, this rebuilds it from the pins, checks it starts and
@@ -57,7 +57,7 @@ jobs:
           push: never
           runCmd: |
             set -e
-            ./build_mp.py --port webassembly --variant omnipython --modules all
+            ./build_mp.py --port webassembly --variant omnipython --modules all,pdwidgets
 
       - name: It starts and imports what it freezes
         run: |

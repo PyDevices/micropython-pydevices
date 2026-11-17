@@ -188,7 +188,7 @@ main() {
         if [ -n "$LAST" ]; then
             section "run unix-all"
             (cd "$WORK" && env -u MICROPYPATH "$LAST/micropython" -c "
-import sys, ulab, pygraphics, displaydev, board_config, audioeffects, audioinstruments, palettes, pdwidgets
+import sys, ulab, pygraphics, displaydev, board_config, audioeffects, audioinstruments, palettes
 from ulab import numpy as np
 print('RUN', sys.implementation._machine, np.sum(np.array([1, 2, 3])), board_config.display_drv.width)
 " < /dev/null 2>&1 | tail -3 | tee -a "$REPORT")

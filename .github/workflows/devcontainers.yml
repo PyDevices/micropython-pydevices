@@ -47,7 +47,7 @@ jobs:
               builds/unix/omnipython/micropython -c "import sys; print(sys.implementation); import displaydev; print('displaydev imports')"
           - port: webassembly
             run: |
-              ./build_mp.py --port webassembly --variant omnipython --modules all
+              ./build_mp.py --port webassembly --variant omnipython --modules all,pdwidgets
               b=builds/webassembly/omnipython
               printf 'import sys\nprint(sys.implementation)\nimport displaydev\nprint("displaydev imports")\n' > /tmp/check.py
               node $b/micropython.mjs /tmp/check.py

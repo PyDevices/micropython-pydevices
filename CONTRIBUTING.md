@@ -70,7 +70,8 @@ scripts/exercise_build.sh --report builds/rp2/RPI_PICO2/default ...
 ## The website's WebAssembly runtime
 
 PyDevices.github.io and workbench serve the webassembly port's `omnipython`
-variant, built with every module. When a push to main changes what goes into it
+variant, built with every module and `pdwidgets`, which `all` leaves out because it is
+opt-in and the browser would otherwise have to fetch its many files one by one. When a push to main changes what goes into it
 (`DEPENDENCIES.lock`, the patch series, `modules/`, the webassembly
 variant), the **WebAssembly runtime** workflow
 ([`wasm-runtime.yml`](.github/workflows/wasm-runtime.yml)) rebuilds it from the
