@@ -316,6 +316,8 @@ static mp_obj_t mipidsi_display_make(const mp_obj_type_t *type, size_t n_args, s
         ARG_color_depth,
         ARG_non_burst,
         ARG_continuous_clock,
+        ARG_output_color_depth,
+        ARG_low_power_blanking,
     };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_bus, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
@@ -333,6 +335,8 @@ static mp_obj_t mipidsi_display_make(const mp_obj_type_t *type, size_t n_args, s
         { MP_QSTR_color_depth, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 16 } },
         { MP_QSTR_non_burst, MP_ARG_KW_ONLY | MP_ARG_BOOL, { .u_bool = false } },
         { MP_QSTR_continuous_clock, MP_ARG_KW_ONLY | MP_ARG_BOOL, { .u_bool = false } },
+        { MP_QSTR_output_color_depth, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 16 } },
+        { MP_QSTR_low_power_blanking, MP_ARG_KW_ONLY | MP_ARG_BOOL, { .u_bool = true } },
     };
     mp_arg_val_t vals[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all_kw_array(n_args, n_kw, args, MP_ARRAY_SIZE(allowed_args), allowed_args, vals);
@@ -347,6 +351,20 @@ static mp_obj_t mipidsi_display_make(const mp_obj_type_t *type, size_t n_args, s
     }
     if (vals[ARG_color_depth].u_int != 16) {
         mp_raise_ValueError(MP_ERROR_TEXT("only color_depth=16 is supported"));
+    }
+    lcd_color_format_t out_color_format;
+    switch (vals[ARG_output_color_depth].u_int) {
+        case 16:
+            out_color_format = LCD_COLOR_FMT_RGB565;
+            break;
+        case 18:
+            out_color_format = LCD_COLOR_FMT_RGB666;
+            break;
+        case 24:
+            out_color_format = LCD_COLOR_FMT_RGB888;
+            break;
+        default:
+            mp_raise_ValueError(MP_ERROR_TEXT("output_color_depth must be 16, 18 or 24"));
     }
     if (vals[ARG_width].u_int <= 0 || vals[ARG_height].u_int <= 0) {
         mp_raise_ValueError(MP_ERROR_TEXT("width and height must be positive"));
@@ -392,7 +410,8 @@ static mp_obj_t mipidsi_display_make(const mp_obj_type_t *type, size_t n_args, s
         .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
         .dpi_clock_freq_mhz = dpi_clock_mhz,
         .in_color_format = LCD_COLOR_FMT_RGB565,
-        .out_color_format = LCD_COLOR_FMT_RGB565,
+        .out_color_format = out_color_format,
+        .flags.disable_lp = !vals[ARG_low_power_blanking].u_bool,
         .video_timing = {
             .h_size = vals[ARG_width].u_int,
             .v_size = vals[ARG_height].u_int,

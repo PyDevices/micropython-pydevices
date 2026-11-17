@@ -64,6 +64,12 @@ class Display:
         non_burst: ESP32-P4 only: non-burst video with sync pulses.
         continuous_clock: ESP32-P4 only: keep the clock lane in high-speed
             mode between lines.
+        output_color_depth: ESP32-P4 only: bits per pixel on the DSI wire,
+            16, 18 or 24. The framebuffer stays RGB565 whatever this is: the
+            DSI bridge converts each pixel on the way out.
+        low_power_blanking: ESP32-P4 only: let the lanes drop to low power
+            during blanking. ``False`` keeps them in high-speed mode, which
+            some DSI-to-HDMI bridges need.
     """
 
     width: int
@@ -90,6 +96,8 @@ class Display:
         color_depth: int = 16,
         non_burst: bool = False,
         continuous_clock: bool = False,
+        output_color_depth: int = 16,
+        low_power_blanking: bool = True,
     ) -> None: ...
     def refresh(self, *args: Any) -> None:
         """Present what has been drawn into the framebuffer."""
