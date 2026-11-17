@@ -15,6 +15,8 @@ import os
 include("../library.py")
 require("omnipython", library="omnipython-lib", opt=3)
 require("bledev", library="omnipython-lib", opt=3)
+# MIDI ports for a program or app: UART, USB device and host, Bluetooth LE.
+require("midiports", library="omnipython-lib", opt=3)
 
 # omnipython-desktop also holds mip.py, micropython.py, pngio.py and mdns.py,
 # which would stand in front of the firmware's own mip and of the C modules
