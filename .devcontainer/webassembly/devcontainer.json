@@ -20,5 +20,5 @@
       "onAutoForward": "openBrowser"
     }
   },
-  "postCreateCommand": "echo 'To build: ./build_mp.py --port webassembly --variant omnipython --modules all,pdwidgets, then scripts/serve_workbench.sh'"
+  "postCreateCommand": "echo 'To build: ./build.py --port webassembly --variant omnipython --modules all,pdwidgets, then scripts/serve_workbench.sh'"
 }

@@ -1,7 +1,7 @@
 # The build command
 
 ```text
-./build_mp.py [--interpreter {micropython,circuitpython}] [--port PORT]
+./build.py [--interpreter {micropython,circuitpython}] [--port PORT]
               [--board BOARD] [--variant VARIANT] [--modules MODULES]
               [--flash FLASH] [--no-autosize] [--keep-fs SIZE] [--coredump] [--clean]
               [make arguments]

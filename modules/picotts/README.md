@@ -29,7 +29,7 @@ sentences and prints how long each took.
 - **Firmware built with picotts.** It is opt-in, so `all` leaves it out:
 
   ```bash
-  ./build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --modules all,picotts
+  ./build.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --modules all,picotts
   ```
 
   It adds about 170 KB of engine code to the image. MicroPython only: on

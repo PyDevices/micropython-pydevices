@@ -122,7 +122,7 @@ keeps ready-made manifests, variants and boards.
 CircuitPython unix: build CircuitPython's unix port with this repository as a
 user C module, `make -C ports/unix USER_C_MODULES=/path/to/displayif` from a
 CircuitPython 11 checkout, or omnipython-builds'
-`./build_mp.py --interpreter circuitpython --port unix --modules displayif`.
+`./build.py --interpreter circuitpython --port unix --modules displayif`.
 Only `usdl2` builds there; any other CircuitPython port refuses this module,
 because boards there use CircuitPython's own `displayio`.
 

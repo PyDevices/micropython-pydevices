@@ -5,7 +5,7 @@ beside LVGL and the audio modules. Name the instruments you play in
 `AUDIOINSTRUMENTS`, and the build freezes only those and what they import:
 
 ```bash
-AUDIOINSTRUMENTS=electric_piano,mono_synth,rhythm808 ./build_mp.py --port esp32 --board ESP32_GENERIC --variant SPIRAM --flash 4MB --modules omnipython,displayif,lvgl,audioif,audiodsp,ulab,audioinstruments
+AUDIOINSTRUMENTS=electric_piano,mono_synth,rhythm808 ./build.py --port esp32 --board ESP32_GENERIC --variant SPIRAM --flash 4MB --modules omnipython,displayif,lvgl,audioif,audiodsp,ulab,audioinstruments
 ```
 
 On the board, `audioinstruments.ALL` lists just those three, so an app that
@@ -60,7 +60,7 @@ the package's `__init__` and the base they share, and any effect they build
 on:
 
 ```bash
-AUDIOEFFECTS=chorus,reverb ./build_mp.py --port esp32 --board ESP32_GENERIC --variant AUDIO_KIT --flash 4MB --modules omnipython,displayif,lvgl,btclassic,audioif,audiodsp,audioeffects
+AUDIOEFFECTS=chorus,reverb ./build.py --port esp32 --board ESP32_GENERIC --variant AUDIO_KIT --flash 4MB --modules omnipython,displayif,lvgl,btclassic,audioif,audiodsp,audioeffects
 ```
 
 On the board, `audioeffects.ALL` lists `Chorus` and `Reverb`, and

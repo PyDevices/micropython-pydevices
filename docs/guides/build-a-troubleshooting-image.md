@@ -5,7 +5,7 @@ dump to flash when the firmware crashes. When you need one, to find out why a
 board resets or hangs, add `--coredump` on esp32:
 
 ```bash
-./build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB --modules all --coredump
+./build.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB --modules all --coredump
 ```
 
 It builds into its own folder, `builds/esp32/<board>/<variant>-coredump/`, so it

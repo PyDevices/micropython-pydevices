@@ -220,7 +220,7 @@ ordinary user C module, so a stock MicroPython esp32 build takes it with
 in the board's `SDKCONFIG_DEFAULTS` turns Bluedroid, A2DP, AVRCP cover art, HID and
 HFP on, and `micropython.cmake` puts the `bluetooth` module on Bluedroid
 ([`src/modbluetooth_bluedroid.c`](src/modbluetooth_bluedroid.c)), with two
-small MicroPython patches in [`patches/`](patches). `build_mp.py` does the
+small MicroPython patches in [`patches/`](patches). `build.py` does the
 first for you.
 
 ## BLE on Bluedroid

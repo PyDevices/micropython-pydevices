@@ -1549,5 +1549,30 @@ class CircuitPythonMakeArgs(unittest.TestCase):
                          ["CFLAGS_EXTRA=-DFOO -DMICROPY_QSTR_OFFSET_BYTES=4"])
 
 
+class BuildPyShim(unittest.TestCase):
+    """build.py is the name to run; it behaves exactly as build_mp.py does."""
+
+    def run_script(self, name, *args, cwd=None):
+        return subprocess.run([sys.executable, str(REPO / name), *args], capture_output=True,
+                              text=True, cwd=cwd)
+
+    def test_help_is_the_same(self):
+        old, new = self.run_script("build_mp.py", "--help"), self.run_script("build.py", "--help")
+        self.assertEqual((old.returncode, new.returncode), (0, 0))
+        self.assertEqual(new.stdout, old.stdout)
+
+    def test_a_bad_argument_exits_non_zero_from_both(self):
+        for name in ("build_mp.py", "build.py"):
+            got = self.run_script(name, "--interpreter", "nosuch")
+            self.assertEqual(got.returncode, 2, name)
+            self.assertIn("invalid choice", got.stderr, name)
+
+    def test_it_runs_from_any_directory_as_a_program(self):
+        with tempfile.TemporaryDirectory() as elsewhere:
+            got = subprocess.run([str(REPO / "build.py"), "--help"], capture_output=True, text=True, cwd=elsewhere)
+        self.assertEqual(got.returncode, 0)
+        self.assertIn("--interpreter", got.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

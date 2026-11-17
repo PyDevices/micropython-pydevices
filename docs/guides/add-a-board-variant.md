@@ -7,7 +7,7 @@ cache sizes and tick.
 
 ## An esp32 board
 
-On esp32, [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py) appends our ESP-IDF settings after the board's, so ours
+On esp32, [`build.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build.py) appends our ESP-IDF settings after the board's, so ours
 win. They come from files it finds by name, each used only if it exists, in
 this order:
 
@@ -71,7 +71,7 @@ says so when it finishes, with the lines to set.
 
 An rp2 board of ours is a variant of one of upstream's, in
 `variants/rp2/<BOARD>/<VARIANT>/`. The port only knows variants that sit in the
-board's own folder, so `build_mp.py` makes a folder of its own for every rp2
+board's own folder, so `build.py` makes a folder of its own for every rp2
 build, `builds/rp2/<BOARD>/<VARIANT>/<BOARD>/`, links upstream's board into it
 unchanged, adds
 [`variants/rp2/board.cmake`](https://github.com/PyDevices/omnipython-builds/blob/main/variants/rp2/board.cmake)
@@ -99,7 +99,7 @@ runs below its chip's rating says so when it finishes.
 
 An stm32 variant of ours works the same way, in
 `variants/stm32/<BOARD>/<VARIANT>/`, with `make` files instead of cmake ones.
-`build_mp.py` makes `builds/stm32/<BOARD>/<VARIANT>/<BOARD>/` from upstream's
+`build.py` makes `builds/stm32/<BOARD>/<VARIANT>/<BOARD>/` from upstream's
 board, unchanged, and adds:
 
 - `mpconfigvariant.mk` (required): make settings, included after the board's
@@ -112,7 +112,7 @@ board, unchanged, and adds:
 `ARDUINO_GIGA`'s `DISPLAY_SHIELD` is the one stm32 variant of ours. It moves
 the Wi-Fi chip's firmware into QSPI flash with a linker script fragment and
 turns on the HAL's DSI driver for displayif's `mipidsi`. Its `manifest.py`
-freezes no Python: it hands its modules to `build_mp.py`, which compiles them
+freezes no Python: it hands its modules to `build.py`, which compiles them
 into `romfs.img` for the board's ROMFS partition. Its
 `mpconfigboard.h` also switches USB to TinyUSB, which is one line:
 `#define MICROPY_HW_TINYUSB_STACK (1)`.

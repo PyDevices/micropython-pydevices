@@ -61,10 +61,10 @@ why events are drained rather than called back:
 
 ## Building
 
-Name it in a `build_mp.py` build, or take `all`:
+Name it in a `build.py` build, or take `all`:
 
 ```bash
-python3 build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --modules usbhost
+python3 build.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --modules usbhost
 ```
 
 The build applies what the host needs on its own: overlay patch 0039 lets
@@ -73,11 +73,11 @@ settings in [sdkconfig](sdkconfig) and [sdkconfig.esp32s3](sdkconfig.esp32s3)
 (hub support, a larger control-transfer buffer, and on the S3 a FIFO split
 that favours IN) are appended whenever usbhost is selected.
 
-On CircuitPython, `build_mp.py` also fetches Espressif's `usb` component,
+On CircuitPython, `build.py` also fetches Espressif's `usb` component,
 which holds the USB host library from ESP-IDF 6 on:
 
 ```bash
-python3 build_mp.py --interpreter circuitpython --port espressif --board waveshare_esp32p4_wifi6_touch_lcd_4b --modules usbhost
+python3 build.py --interpreter circuitpython --port espressif --board waveshare_esp32p4_wifi6_touch_lcd_4b --modules usbhost
 ```
 
 ## Examples
