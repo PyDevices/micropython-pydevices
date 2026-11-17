@@ -312,8 +312,9 @@ static mp_obj_t bridge_timer_start(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(bridge_timer_start_obj, 3, 4, bridge_timer_start);
 
-EMSCRIPTEN_KEEPALIVE void omnipython_timer_dispatch(int id) {
-    external_call_depth_inc();
+// Call the callback timer `id` holds, printing what it raises. A timer
+// cancelled since it fired holds none, and its firing is dropped.
+static void timer_deliver(int id) {
     for (size_t i = 0; i < 64; ++i) {
         mp_obj_t callback = MP_STATE_VM(wasm_timer_callbacks)[i];
         if (callback != MP_OBJ_NULL && timer_callback_ids[i] == id) {
@@ -324,11 +325,27 @@ EMSCRIPTEN_KEEPALIVE void omnipython_timer_dispatch(int id) {
             } else {
                 mp_obj_print_exception(&mp_plat_print, MP_OBJ_FROM_PTR(nlr.ret_val));
             }
-            external_call_depth_dec(mp_const_none);
             return;
         }
     }
+}
+
+// The page calls this when a timer fires while the VM is idle.
+EMSCRIPTEN_KEEPALIVE void omnipython_timer_dispatch(int id) {
+    external_call_depth_inc();
+    timer_deliver(id);
     external_call_depth_dec(mp_const_none);
+}
+
+// A timer that fires while Python is inside an Asyncify call (sleep_ms,
+// http_get) can't be called then, so the page queues the firing. Each of
+// those calls delivers the queue on its way back to Python, every timer to
+// its own callback, so no firing waits for someone to poll.
+static void timer_deliver_queued(void) {
+    int id;
+    while ((id = omnipython_timer_poll()) >= 0) {
+        timer_deliver(id);
+    }
 }
 
 static mp_obj_t bridge_timer_cancel(mp_obj_t id) {
@@ -344,9 +361,13 @@ static mp_obj_t bridge_timer_cancel(mp_obj_t id) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(bridge_timer_cancel_obj, bridge_timer_cancel);
 
+// Delivers any queued firings to their callbacks and returns None. It once
+// returned the queued ids for the caller to deliver; a caller that loops
+// until None still works, and one that kept only its own id no longer loses
+// everyone else's firings.
 static mp_obj_t bridge_timer_poll(void) {
-    int id = omnipython_timer_poll();
-    return id < 0 ? mp_const_none : mp_obj_new_int(id);
+    timer_deliver_queued();
+    return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(bridge_timer_poll_obj, bridge_timer_poll);
 
@@ -398,6 +419,7 @@ static mp_obj_t bridge_http_get(mp_obj_t url_obj) {
     size_t len = 0;
     uintptr_t final_url_ptr = 0;
     uintptr_t data_ptr = omnipython_http_get(url, &status, &len, &final_url_ptr);
+    timer_deliver_queued();
     if (!data_ptr && status == 0) {
         mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("Fetch failed: %s"), url);
     }
@@ -414,6 +436,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(bridge_http_get_obj, bridge_http_get);
 
 static mp_obj_t bridge_sleep_ms(mp_obj_t ms) {
     omnipython_sleep_ms(mp_obj_get_int(ms));
+    timer_deliver_queued();
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(bridge_sleep_ms_obj, bridge_sleep_ms);
