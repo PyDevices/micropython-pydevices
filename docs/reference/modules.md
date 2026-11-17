@@ -34,7 +34,7 @@ tracked here or linked from a sibling checkout or cloned at the commit in
 | `tflite`, `vision` | [esp-vision's modules](../guides/use-esp-vision-modules.md), opt-in: `all` leaves them out. |
 
 [`modules/all`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/all) is not a module but the rule behind `all`: every module beside it
-except those with an `OPT_IN` file: `btclassic`, `picotts`, `tflite` and `vision`.
+except those with an `OPT_IN` file: `btclassic`, `pdwidgets`, `picotts`, `tflite` and `vision`.
 
 ## Which modules build on CircuitPython
 
@@ -56,16 +56,16 @@ it is. "Unix" is CircuitPython's unix port, built and imported in
 | jpegio | yes | ESP32-P4 | Adds only the encoder's C API: CircuitPython has its own `jpegio` decoder. |
 | cameraif | yes (`available()` is False) | ESP32-P4 | |
 | mdns | yes | no, on purpose | CircuitPython's boards have an `mdns` of their own; its unix port has none. |
-| usbhost | yes, as `_usbhost`, with no host engine | ESP32-P4 | The host engine runs on ESP-IDF's USB host library, which from ESP-IDF 6 is Espressif's `usb` component: [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py) fetches it at the version `DEPENDENCIES.lock` pins. The P4's boards leave its high-speed controller to us. Tethering is left out until the port has a network. The S3's one controller is CircuitPython's drive and REPL, so it gets the module without the engine. On the RP2040 and i.MX, CircuitPython's own `usb.core` is the host. |
+| usbhost | yes, as `_usbhost`, with no host engine | ESP32-P4 | The host engine runs on ESP-IDF's USB host library, which from ESP-IDF 6 is Espressif's `usb` component: [`build.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build.py) fetches it at the version `DEPENDENCIES.lock` pins. The P4's boards leave its high-speed controller to us. Tethering is left out until the port has a network. The S3's one controller is CircuitPython's drive and REPL, so it gets the module without the engine. On the RP2040 and i.MX, CircuitPython's own `usb.core` is the host. |
 | audioif | no | no | Links against audiodsp's audio pump and `cp_compat`, which audiodsp's CircuitPython glue doesn't build. It isn't needed there: audioif gives MicroPython the `audiobusio` and `audioi2sin` that CircuitPython boards already have. |
 | ulab | CircuitPython's own | CircuitPython's own | |
 | castif | no: it is the ESP32-P4's | ESP32-P4, with no network | Talks to lwIP directly, the lwIP under CircuitPython's own `socketpool`. CircuitPython's P4 port has no network until it drives the boards' ESP32-C6, so castif is built without one and `start()` says so. Name tsmux, h264enc and ppa with it. |
-| h264enc | no: it is the ESP32-P4's encoder | ESP32-P4 | Espressif's `esp_h264`, which CircuitPython's port, built with the component manager off, can't fetch itself, is pinned in `DEPENDENCIES.lock` and fetched by [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py). Name ppa with it. |
+| h264enc | no: it is the ESP32-P4's encoder | ESP32-P4 | Espressif's `esp_h264`, which CircuitPython's port, built with the component manager off, can't fetch itself, is pinned in `DEPENDENCIES.lock` and fetched by [`build.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build.py). Name ppa with it. |
 | picotts | no | no, on purpose | CircuitPython has Adafruit's `adafruit_picotts`, the same engine and API as a native `.mpy`. |
 | btclassic | no | no | MicroPython only for now. |
 | tflite, vision | no | no, on purpose | esp-vision's modules, for MicroPython only. |
 | lvgl | yes | all five | One name for both interpreters: a CircuitPython build compiles omnipython-lvgl's `ports/circuitpython`. A board build needs `CIRCUITPY_GIFIO=0`, since LVGL links its own AnimatedGIF decoder; our boards set it. |
 | micropython-lib | no | no | MicroPython's own upstream packages. |
-| omnipython, palettes, pdwidgets | frozen | frozen | Python only. On unix, omnipython also freezes its desktop files (the boards drop them), and pdwidgets and palettes with it: together their names pass CircuitPython's 64 KB frozen-string pool, so [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py) builds the unix port with four-byte qstr offsets (patches 0001 and 0010). Boards keep two-byte offsets. |
+| omnipython, palettes, pdwidgets | frozen | frozen | Python only; `pdwidgets` is frozen only when named, since `all` leaves it out. On unix, omnipython also freezes its desktop files (the boards drop them), and pdwidgets and palettes with it: together their names pass CircuitPython's 64 KB frozen-string pool, so [`build.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build.py) builds the unix port with four-byte qstr offsets (patches 0001 and 0010). Boards keep two-byte offsets. |
 
 What is planned for the rest is in the [roadmap](https://github.com/PyDevices/omnipython-builds/blob/main/ROADMAP.md).

@@ -1,7 +1,7 @@
 # Reference
 
 This repository has no Python package to document, so these pages are tables:
-what [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py) takes, the modules you can name, the boards and variants
+what [`build.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build.py) takes, the modules you can name, the boards and variants
 built, and the files that pin what a build uses.
 
 - [The build command](build-command.md): every option, environment variable and

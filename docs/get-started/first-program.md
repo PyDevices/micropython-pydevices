@@ -8,7 +8,7 @@ hour on an esp32 one.
 From the clone:
 
 ```bash
-./build_mp.py --port unix --modules pygraphics
+./build.py --port unix --modules pygraphics
 ```
 
 The first run fetches MicroPython and the module. When it ends it prints where

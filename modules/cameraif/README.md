@@ -68,7 +68,7 @@ v1.29.0). Point the script at your own MicroPython tree:
 /path/to/cameraif/apply_patches.sh --apply /path/to/micropython
 ```
 
-omnipython-builds' `build_mp.py` applies them on its own, with the rest of
+omnipython-builds' `build.py` applies them on its own, with the rest of
 its patch series.
 
 Then, on MicroPython 1.29 or later, add one line to the manifest your P4 build
@@ -118,11 +118,11 @@ CircuitPython's espressif port builds with make, through
 [micropython.mk](micropython.mk). It needs the port to build the camera's
 ESP-IDF components and the sensor drivers, which it doesn't on its own, so
 build with [omnipython-builds](https://github.com/PyDevices/omnipython-builds):
-its CircuitPython patches add that, and its `build_mp.py` fetches the sensor
+its CircuitPython patches add that, and its `build.py` fetches the sensor
 drivers at a pinned version.
 
 ```bash
-./build_mp.py --interpreter circuitpython --port espressif \
+./build.py --interpreter circuitpython --port espressif \
     --board waveshare_esp32p4_wifi6_dev_kit --modules cameraif,jpegio,ppa
 ```
 

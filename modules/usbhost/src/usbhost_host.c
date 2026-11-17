@@ -31,6 +31,7 @@
 // host_devices() or as an ATTACH event.
 
 #include "py/mpconfig.h"
+#include "py/mphal.h"   // MP_TASK_COREID
 
 // Usermod sources build with MicroPython's define set, not the IDF's, so
 // ESP_PLATFORM is NOT defined here -- learned the hard way when this gate
@@ -87,13 +88,28 @@ extern void usb_phy_otg_device_mode(void);
 #endif
 
 // mod_usbhost.c owns the event ring; usbhost_host_emit() is its producer
-// hook. Single producer holds: only the host task below ever calls it.
+// hook. Single producer holds: only the host's tasks below ever call it,
+// and never both at once (the loop's task while the host runs, the
+// installing task once the loop has ended).
 
 #define USBHOST_HOST_MAX_DEVS (8)
-// Below the pump (10) -- enumeration control transfers are not realtime
-// audio -- and above MicroPython's task so events keep flowing while the
-// interpreter is busy, which is the transport's whole reason to exist.
+// Above MicroPython's task so events keep flowing while the interpreter is
+// busy, which is the transport's whole reason to exist.
 #define USBHOST_HOST_TASK_PRIO (7)
+// On a chip with two cores the event loop runs on the interpreter's core,
+// away from the audio pump (core 0, priority 21). An isochronous stream has
+// to be serviced every few milliseconds, and below a pump that renders for
+// tens of milliseconds at a stretch it wasn't: a USB microphone lost a tenth
+// of its packets beside a synth. Above the pump on the same core it took the
+// time the pump had none of to spare, and the synth ran dry instead. The
+// controller's interrupt stays on core 0 (see the install rendezvous below);
+// only the loop moves. A build that doesn't say which core the interpreter
+// has (CircuitPython) keeps the one task.
+#if defined(MP_TASK_COREID) && !defined(CONFIG_FREERTOS_UNICORE)
+#define USBHOST_HOST_SERVE_CORE (MP_TASK_COREID)
+#else
+#define USBHOST_HOST_SERVE_CORE (-1)
+#endif
 // Measured with a camera streaming and a soft reset tearing it down: about
 // 900 bytes of 8192 were ever used.
 #define USBHOST_HOST_TASK_STACK (4096)
@@ -131,6 +147,15 @@ static SemaphoreHandle_t usbhost_host_client_mutex;
 // Declared here rather than at its definition below: the lock helpers need
 // to tell the host task apart from an API caller, and they come first.
 static TaskHandle_t usbhost_host_task_handle;
+// The task that services events, where it is a second one (see
+// usbhost_host_serve_task); NULL otherwise.
+static TaskHandle_t usbhost_host_serve_handle;
+
+// Whether the caller is one of the host's own tasks, not an API caller.
+static bool usbhost_host_in_host_task(void) {
+    const TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    return self == usbhost_host_task_handle || self == usbhost_host_serve_handle;
+}
 
 // Depth held by API-side callers (i.e. anyone that is not the host task).
 // Only that side ever suspends the lock, so only that side is counted.
@@ -153,7 +178,7 @@ static void usbhost_host_shutdown(void) {
 void usbhost_host_lock(void) {
     if (usbhost_host_client_mutex != NULL) {
         xSemaphoreTakeRecursive(usbhost_host_client_mutex, portMAX_DELAY);
-        if (xTaskGetCurrentTaskHandle() != usbhost_host_task_handle) {
+        if (!usbhost_host_in_host_task()) {
             usbhost_api_lock_depth++;
         }
     }
@@ -161,7 +186,7 @@ void usbhost_host_lock(void) {
 
 void usbhost_host_unlock(void) {
     if (usbhost_host_client_mutex != NULL) {
-        if (xTaskGetCurrentTaskHandle() != usbhost_host_task_handle) {
+        if (!usbhost_host_in_host_task()) {
             usbhost_api_lock_depth--;
         }
         xSemaphoreGiveRecursive(usbhost_host_client_mutex);
@@ -194,7 +219,7 @@ void usbhost_host_lock_debug(const char *tag) {
 
 int usbhost_host_lock_suspend(void) {
     if (usbhost_host_client_mutex == NULL ||
-        xTaskGetCurrentTaskHandle() == usbhost_host_task_handle) {
+        usbhost_host_in_host_task()) {
         return 0;
     }
     int held = usbhost_api_lock_depth;
@@ -579,7 +604,8 @@ static void usbhost_host_client_cb(const usb_host_client_event_msg_t *msg, void 
 // line. So the task is pinned to core 0 and does the install itself;
 // start_c waits here for the verdict. Teardown, including
 // usb_host_uninstall(), also runs in the task, because freeing an interrupt
-// belongs to the core that owns it.
+// belongs to the core that owns it. Between the two, where there is a second
+// core, the task only waits: the event loop runs in usbhost_host_serve_task.
 #define USBHOST_HOST_INSTALL_PENDING (0x7FFFFFFF)
 static volatile int usbhost_host_install_result = USBHOST_HOST_INSTALL_PENDING;
 
@@ -666,6 +692,56 @@ static void usbhost_host_fifo_for(uint16_t classes, usb_host_config_t *config) {
     printf("\n");
 }
 
+// The event loop: until the host is asked to stop.
+static void usbhost_host_serve(void) {
+    // One task services both the library and the client. The library call
+    // blocks up to a tick so the loop idles cheaply; the client call then
+    // collects whatever that produced without waiting.
+    while (usbhost_host_task_running) {
+        uint32_t flags = 0;
+        // Both pumps, under the lock. The first version locked only the
+        // client pump, on the theory that enumeration lived there -- it does
+        // not. Enumeration runs in the *library* context, so leaving that
+        // call unlocked left the race open; the observable effect was that
+        // the panic moved later (past SET_INTERFACE, into the next
+        // allocation) rather than going away. A crash that merely relocates
+        // is evidence of a narrowed race, not a fixed one.
+        //
+        // Both timeouts are 0 so the lock is held for microseconds rather
+        // than across an idle wait, and the sleep that paces the loop is
+        // taken *outside* it. Holding a 10 ms blocking pump under this mutex
+        // would leave the task re-acquiring it almost continuously and could
+        // starve the API side it exists to admit.
+        usbhost_host_stage = 1;
+        usbhost_host_lock();
+        usbhost_host_stage = 2;
+        usb_host_lib_handle_events(0, &flags);
+        #if defined(CONFIG_IDF_TARGET_ESP32P4)
+        if (usbhost_host_full_speed) {
+            usbhost_host_hold_full_speed();
+        }
+        #endif
+        usbhost_host_stage = 3;
+        usb_host_client_handle_events(usbhost_host_client, 0);
+        usbhost_host_stage = 4;
+        usbhost_host_pump_count++;
+        usbhost_host_unlock();
+        usbhost_host_stage = 5;
+        vTaskDelay(1);
+    }
+}
+
+#if USBHOST_HOST_SERVE_CORE >= 0
+static void usbhost_host_serve_task(void *arg) {
+    usbhost_host_serve();
+    // Hand back to the task that installed the library: it tears it down on
+    // the core that owns the controller's interrupt.
+    usbhost_host_serve_handle = NULL;
+    xTaskNotifyGive((TaskHandle_t)arg);
+    vTaskDelete(NULL);
+}
+#endif
+
 static void usbhost_host_task(void *arg) {
     (void)arg;
     printf("usbhost_host: task up on core %d\n", esp_cpu_get_core_id());
@@ -727,6 +803,17 @@ static void usbhost_host_task(void *arg) {
         }
     }
     #endif
+    #if USBHOST_HOST_SERVE_CORE >= 0
+    if (err == ESP_OK && xTaskCreatePinnedToCore(usbhost_host_serve_task, "usbhost_serve",
+        USBHOST_HOST_TASK_STACK, xTaskGetCurrentTaskHandle(), USBHOST_HOST_TASK_PRIO,
+        &usbhost_host_serve_handle, USBHOST_HOST_SERVE_CORE) != pdPASS) {
+        // No memory for the loop's task: the host doesn't start.
+        usbhost_host_serve_handle = NULL;
+        usb_host_client_deregister(usbhost_host_client);
+        usb_host_uninstall();
+        err = ESP_ERR_NO_MEM;
+    }
+    #endif
     usbhost_host_install_result = (int)err;
     if (err != ESP_OK) {
         usbhost_host_task_handle = NULL;
@@ -734,41 +821,17 @@ static void usbhost_host_task(void *arg) {
         return;
     }
 
-    // One task services both the library and the client. The library call
-    // blocks up to a tick so the loop idles cheaply; the client call then
-    // collects whatever that produced without waiting.
-    while (usbhost_host_task_running) {
-        uint32_t flags = 0;
-        // Both pumps, under the lock. The first version locked only the
-        // client pump, on the theory that enumeration lived there -- it does
-        // not. Enumeration runs in the *library* context, so leaving that
-        // call unlocked left the race open; the observable effect was that
-        // the panic moved later (past SET_INTERFACE, into the next
-        // allocation) rather than going away. A crash that merely relocates
-        // is evidence of a narrowed race, not a fixed one.
-        //
-        // Both timeouts are 0 so the lock is held for microseconds rather
-        // than across an idle wait, and the sleep that paces the loop is
-        // taken *outside* it. Holding a 10 ms blocking pump under this mutex
-        // would leave the task re-acquiring it almost continuously and could
-        // starve the API side it exists to admit.
-        usbhost_host_stage = 1;
-        usbhost_host_lock();
-        usbhost_host_stage = 2;
-        usb_host_lib_handle_events(0, &flags);
-        #if defined(CONFIG_IDF_TARGET_ESP32P4)
-        if (full_speed) {
-            usbhost_host_hold_full_speed();
-        }
-        #endif
-        usbhost_host_stage = 3;
-        usb_host_client_handle_events(usbhost_host_client, 0);
-        usbhost_host_stage = 4;
-        usbhost_host_pump_count++;
-        usbhost_host_unlock();
-        usbhost_host_stage = 5;
-        vTaskDelay(1);
+    #if USBHOST_HOST_SERVE_CORE >= 0
+    // Wait here, on the controller's core, while the loop runs on the other.
+    // The loop's task clears its handle and then notifies, on its way out; a
+    // notification from anywhere else finds the handle still set and the
+    // wait goes on.
+    while (usbhost_host_serve_handle != NULL) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     }
+    #else
+    usbhost_host_serve();
+    #endif
 
     // Teardown, in the order the library requires: close what we opened,
     // walk away as a client, free the devices, and drain events until the

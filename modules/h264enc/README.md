@@ -20,7 +20,7 @@ ESP32-P4 only, and C only: the module is skipped on every other chip and port,
 so `import h264enc` raises `ImportError` there. `--modules all` includes it;
 name it with `--modules h264enc` otherwise. CircuitPython's ESP32-P4 boards
 take it too (`--interpreter circuitpython --modules h264enc,ppa`), and
-`build_mp.py` fetches Espressif's `esp_h264` for that build.
+`build.py` fetches Espressif's `esp_h264` for that build.
 
 [`examples/h264enc_simpletest.py`](examples/h264enc_simpletest.py) encodes two seconds of a moving square to an H.264 file.
 
@@ -132,5 +132,5 @@ with h264enc to check it compiles and links.
 
 [`components/h264enc_esp_h264/`](components/h264enc_esp_h264/) is an ESP-IDF component with no sources whose
 [`idf_component.yml`](components/h264enc_esp_h264/idf_component.yml) fetches Espressif's `esp_h264` (1.4.1);
-[`build_mp.py`](../../build_mp.py) adds it to the build whenever h264enc is selected. It lived in
+[`build.py`](../../build.py) adds it to the build whenever h264enc is selected. It lived in
 castif until the media roadmap's Phase 3 (2026-10-06).

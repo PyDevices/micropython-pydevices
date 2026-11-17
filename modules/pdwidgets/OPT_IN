@@ -1,0 +1,4 @@
+Opt-in: name pdwidgets to build it; --modules all leaves it out.
+It is a whole widget toolkit written in Python, a demonstration of what the
+OmniPython core can carry without C, and it takes about 105 KB of flash that an
+image with LVGL has no use for. mip install pdwidgets adds it to a running board.

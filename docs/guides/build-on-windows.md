@@ -1,7 +1,7 @@
 # Build on Windows
 
 A Linux or WSL machine cross-builds the same `micropython.exe` with the same
-command, `./build_mp.py --port windows --variant omnipython --modules all`,
+command, `./build.py --port windows --variant omnipython --modules all`,
 once the MinGW packages in [Install](../get-started/install.md#install-what-each-port-needs)
 are installed; the SDL2 it links against is fetched. This page is for building
 on Windows itself.
@@ -22,11 +22,11 @@ once more. Then, in any PowerShell:
 ```powershell
 git clone https://github.com/PyDevices/omnipython-builds.git
 cd omnipython-builds
-python build_mp.py --port windows --variant omnipython --modules all
+python build.py --port windows --variant omnipython --modules all
 .\builds\windows\omnipython\micropython.exe
 ```
 
-That's all you type. [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py) finds MSYS2 in `C:\msys64` (set
+That's all you type. [`build.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build.py) finds MSYS2 in `C:\msys64` (set
 `MSYS2_ROOT` if it's elsewhere), puts its tools first on the build's `PATH`,
 and uses its `bash`. Left to `PATH`, `bash` from PowerShell is WSL's, which
 would run the build inside Linux. Without MSYS2 it stops and prints the install
@@ -37,7 +37,7 @@ shell, MSYS2 or not.
 
 ## What differs from Linux
 
-- Type `python build_mp.py`, not `./build_mp.py`: Windows doesn't read the
+- Type `python build.py`, not `./build.py`: Windows doesn't read the
   `#!` line, and python.org's Python is `python` or `py`, never `python3`. If
   `python` opens the Microsoft Store, turn off the `python.exe` and
   `python3.exe` App Execution Aliases (Settings, Apps, Advanced app settings,

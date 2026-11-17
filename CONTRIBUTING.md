@@ -9,14 +9,14 @@ fix is a good first contribution.
 
 | Path | What's there |
 |---|---|
-| [`build_mp.py`](build_mp.py) | The build command. |
+| [`build.py`](build.py) | The build command. For now it runs [`build_mp.py`](build_mp.py), where the code is. |
 | [`DEPENDENCIES.lock`](DEPENDENCIES.lock) | Everything a build fetches when it's missing, one pin per line: the MicroPython commit the patches apply to, the modules, omnipython-lvgl, esp-vision and the toolchains. [`scripts/pins.py`](scripts/pins.py) reads it for every script and workflow. |
 | [`modules/`](modules) | The module manifest, `all/`, `tflite/` and `vision/` (esp-vision's), the modules linked or cloned, and the C modules that live only here: `audioif`, `cameraif`, `castif`, `displayif`, `h264enc`, `jpegio`, `mdns`, `pngio`, `ppa`, `svgio`, `tsmux`, `usbhost`. Each has its own README and tests. |
 | `modules/.omnipython-lvgl` | LVGL, its bindings and its ports, which `--modules lvgl` compiles: the sibling checkout, linked, or its `DEPENDENCIES.lock` commit, fetched. |
 | [`patches/`](patches) | The patch series and `apply_patches.py`. |
 | [`variants/`](variants), [`boards/`](boards) | Our variants and CircuitPython boards. |
 | [`scripts/`](scripts) | `pins.py`, `exercise_build.sh`, `release_firmware.py`, `stage_firmware_page.py`, `serve_workbench.sh`, `freeze_list.py`, `update_provenance.py`, `ci_scope.py`, `wasm_provenance.py`. |
-| [`tests/`](tests) | The unit tests for `build_mp.py`, the scripts, the provenance record and `lib-overrides`. |
+| [`tests/`](tests) | The unit tests for `build_mp.py` and `build.py`, the scripts, the provenance record and `lib-overrides`. |
 | [`.devcontainer/`](.devcontainer) | One dev container per port. |
 | [`docs/`](docs) | The documentation site. |
 
@@ -28,13 +28,13 @@ describe what each of these does.
 - Upstream is pinned. Moving the `micropython` line of `DEPENDENCIES.lock` re-validates every patch.
 - Never hand-edit a patched tree. Change the patch and prepare again.
 - Patches are justified in their headers.
-- `build_mp.py` names no version and no setting. Pins move in `DEPENDENCIES.lock`, and
+- The build code (`build_mp.py`, run through `build.py`) names no version and no setting. Pins move in `DEPENDENCIES.lock`, and
   esp32 settings live in sdkconfig fragments it finds by convention.
 - Publishing binaries is a separate decision from this source repository.
 
 ## Run the tests
 
-`build_mp.py`'s unit tests decide things before any build, such as when a build
+The build code's unit tests decide things before any build, such as when a build
 directory has to be wiped. They need no toolchain:
 
 ```bash
@@ -70,7 +70,8 @@ scripts/exercise_build.sh --report builds/rp2/RPI_PICO2/default ...
 ## The website's WebAssembly runtime
 
 PyDevices.github.io and workbench serve the webassembly port's `omnipython`
-variant, built with every module. When a push to main changes what goes into it
+variant, built with every module and `pdwidgets`, which `all` leaves out because it is
+opt-in and the browser would otherwise have to fetch its many files one by one. When a push to main changes what goes into it
 (`DEPENDENCIES.lock`, the patch series, `modules/`, the webassembly
 variant), the **WebAssembly runtime** workflow
 ([`wasm-runtime.yml`](.github/workflows/wasm-runtime.yml)) rebuilds it from the
@@ -86,7 +87,7 @@ A firmware set is every board's flashable file, built from one commit of this
 repository by the **Release firmware** workflow
 ([`release-firmware.yml`](.github/workflows/release-firmware.yml); the cells are
 in [`scripts/release_firmware.py`](scripts/release_firmware.py), and
-`release_firmware.py cells` lists them). Each cell is one `build_mp.py` call; the
+`release_firmware.py cells` lists them). Each cell is one `build.py` call; the
 `assemble` job checks every file (checksums, the ESP image magic, the app image
 inside the flash image, UF2 blocks, the vector table of a GIGA's main image and the modules in its ROMFS image) and writes `firmware.json`, which records
 every file's sha256 and size, the flash offset, and the pins the set was built

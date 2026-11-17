@@ -18,5 +18,5 @@
     "storage": "32gb"
   },
   "onCreateCommand": "sh .devcontainer/on-create.sh && sh .devcontainer/esp32/prefetch.sh",
-  "postCreateCommand": "echo 'To build: ./build_mp.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB --modules all'"
+  "postCreateCommand": "echo 'To build: ./build.py --port esp32 --board ESP32_GENERIC_S3 --variant SPIRAM_OCT --flash 8MB --modules all'"
 }

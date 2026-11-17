@@ -12,7 +12,7 @@ It is opt-in: `--modules all` leaves it out because ESP-DL makes the image about
 works with:
 
 ```bash
-./build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB --modules ulab,vision
+./build.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB --modules ulab,vision
 ```
 
 ```python

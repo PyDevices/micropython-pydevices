@@ -7,7 +7,7 @@ MicroPython firmware built with this module uses this one. It exists so a
 without carrying LVGL for its decoder.
 
 ```bash
-./build_mp.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB --modules displayif,jpegio
+./build.py --port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB --modules displayif,jpegio
 ```
 
 It lived in displayif until 2026-10-06, when it moved here on its own (the
@@ -299,7 +299,7 @@ self-detects).** LVGL's own TJPGD is off by config on MicroPython
 (`LV_USE_TJPGD 0` in omnipython-lvgl's `lv_conf.h`), so nothing clashes with
 the vendored copy and LVGL has no JPEG decoder of its own; this module
 supplies one. When LVGL is in the same build (`USER_C_MODULES`
-names omnipython-lvgl's `ports/micropython`, which a [`build_mp.py`](../../build_mp.py) build with both modules does), both glue files
+names omnipython-lvgl's `ports/micropython`, which a [`build.py`](../../build.py) build with both modules does), both glue files
 compile [`lvgl_decoder.c`](src/lvgl_decoder.c) with `-DJPEGIO_LVGL_DECODER=1`; its `lvgl/lvgl.h`
 resolves through the repository root that port puts on the include
 path. `JPEGIO_LVGL=0` / `1` (make) or `-DJPEGIO_LVGL=OFF` / `ON` (CMake)

@@ -30,7 +30,7 @@ installed at all, use [a codespace](../guides/build-in-a-codespace.md).
 
 ## Install what each port needs
 
-[`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py) fetches the big pieces itself: MicroPython, the modules, ESP-IDF,
+[`build.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build.py) fetches the big pieces itself: MicroPython, the modules, ESP-IDF,
 emsdk, the pico-sdk and picotool, and SDL2 for MinGW. What it can't fetch are
 your distribution's packages. On Debian or Ubuntu (WSL included):
 
@@ -59,7 +59,7 @@ port that is still missing something stops and says so.
 ## Room on disk
 
 The first run of each port fetches what it needs. Where the repositories are
-already checked out side by side, `build_mp.py` links those sibling checkouts
+already checked out side by side, `build.py` links those sibling checkouts
 instead of fetching.
 
 An esp32 build's first run clones ESP-IDF into the clone's `deps/` and

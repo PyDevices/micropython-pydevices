@@ -91,7 +91,7 @@ and a service the process advertises and finds itself.
 another process, both ways.
 
 ```bash
-./build_mp.py --port unix --modules mdns
+./build.py --port unix --modules mdns
 ./builds/unix/standard/micropython modules/mdns/tests/test_mdns.py
 pip install zeroconf
 python3 modules/mdns/tests/check_mdns_zeroconf.py ./builds/unix/standard/micropython

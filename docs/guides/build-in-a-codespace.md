@@ -19,7 +19,7 @@ When the container is ready, its terminal prints the build line for its port,
 and you build as you would anywhere else:
 
 ```bash
-./build_mp.py --port rp2 --board RPI_PICO2 --modules all
+./build.py --port rp2 --board RPI_PICO2 --modules all
 ```
 
 The first build fetches the port's toolchain into `deps/`, a volume that

@@ -6,6 +6,9 @@ or missing for you, open an
 
 ## Firmware
 
+- **One `build.py` for MicroPython and CircuitPython.** It's restructured inside so
+  each interpreter's code sits apart from the shared steps. `build_mp.py` keeps
+  working for a while.
 - **Your own firmware from the firmware page.** A build you made, in a
   codespace or anywhere else, goes onto your board from the browser; it's
   planned on the [site's roadmap](https://github.com/PyDevices/PyDevices.github.io/blob/main/ROADMAP.md).
@@ -34,6 +37,17 @@ ours to port.
   webcam's stream haven't been tried on CircuitPython there yet.
 - **The USB host drivers on CircuitPython's own `usb.core`**, on the RP2040
   and i.MX: planned in [omnipython](https://github.com/PyDevices/omnipython/blob/main/ROADMAP.md#usb).
+
+## CircuitPython 11's new modules, on MicroPython
+
+The same names and arguments as CircuitPython 11, so code moves between the two.
+
+- **`async_spi`.** Await an SPI transfer, so a display update or a sensor read
+  doesn't hold up the rest of an asyncio program.
+- **`usb_host_audio`.** Play to and record from a USB sound card or headset on
+  a board's USB host port.
+- **`audiopwmio` on the ESP32-S2 and S3.** Sound from a single pin, with no DAC
+  or codec, for boards that have neither.
 
 ## tflite models
 
