@@ -103,8 +103,9 @@ extern void usb_phy_otg_device_mode(void);
 // of its packets beside a synth. Above the pump on the same core it took the
 // time the pump had none of to spare, and the synth ran dry instead. The
 // controller's interrupt stays on core 0 (see the install rendezvous below);
-// only the loop moves.
-#if !CONFIG_FREERTOS_UNICORE && defined(MP_TASK_COREID)
+// only the loop moves. A build that doesn't say which core the interpreter
+// has (CircuitPython) keeps the one task.
+#if defined(MP_TASK_COREID) && !defined(CONFIG_FREERTOS_UNICORE)
 #define USBHOST_HOST_SERVE_CORE (MP_TASK_COREID)
 #else
 #define USBHOST_HOST_SERVE_CORE (-1)
