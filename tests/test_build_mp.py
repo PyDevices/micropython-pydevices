@@ -18,6 +18,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
@@ -282,6 +283,55 @@ class GitRepo:
         git("add", name)
         git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "one")
         return path
+
+
+class ManagedComponents(unittest.TestCase):
+    """TinyUSB and esp_hosted are built from our patched copies: one override
+    component names both, and a copy at another version than the port's
+    manifest asks for is refused."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.dir.name)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_override_names_each_copy(self):
+        shim = build_mp.component_override(self.root / "shim", {
+            build_mp.TINYUSB: self.root / "deps" / "tu", build_mp.ESP_HOSTED: self.root / "deps" / "eh"})
+        text = (shim / "idf_component.yml").read_text()
+        self.assertIn("  espressif/tinyusb:\n    override_path: \"%s\"" % (self.root / "deps" / "tu").as_posix(), text)
+        self.assertIn("  espressif/esp_hosted:\n    override_path: \"%s\"" % (self.root / "deps" / "eh").as_posix(), text)
+
+    def test_esp_hosted_only_on_the_p4(self):
+        self.assertIsNone(build_mp.component_copy(self.root, "esp32s3", build_mp.ESP_HOSTED))
+
+    def _hosted(self, port_version):
+        deps = self.root / "deps"
+        copy = GitRepo.git_repo(deps / build_mp.ESP_HOSTED, "idf_component.yml")
+        (copy / "idf_component.yml").write_text('version: "2.7.0"\n')
+        subprocess.run(["git", "-C", str(copy), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "v"],
+                       check=True, capture_output=True)
+        head = subprocess.run(["git", "-C", str(copy), "rev-parse", "HEAD"], check=True, capture_output=True,
+                              text=True).stdout.strip()
+        main = self.root / "mp" / "ports" / "esp32" / "main"
+        main.mkdir(parents=True)
+        (main / "idf_component.yml").write_text(
+            "dependencies:\n  espressif/esp_hosted:\n    rules:\n      - if: \"target == esp32p4\"\n"
+            "    version: \"%s\"\n" % port_version)
+        lock = build_mp.pins.Pin(build_mp.ESP_HOSTED, "https://example.invalid/h.git", head)
+        with mock.patch.object(build_mp, "DEPS", deps), mock.patch.object(build_mp, "pin", lambda name: lock), \
+                mock.patch.object(build_mp, "REPO", self.root), contextlib.redirect_stdout(io.StringIO()):
+            return build_mp.component_copy(self.root / "mp", "esp32p4", build_mp.ESP_HOSTED)
+
+    def test_same_version_is_used(self):
+        self.assertEqual(self._hosted("2.7.0"), self.root / "deps" / build_mp.ESP_HOSTED)
+
+    def test_another_version_is_refused(self):
+        with self.assertRaises(SystemExit) as e:
+            self._hosted("2.8.0")
+        self.assertIn("espressif/esp_hosted 2.8.0", str(e.exception))
 
 
 class Lvgl(unittest.TestCase):

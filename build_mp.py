@@ -1368,17 +1368,23 @@ def stm32_m4_settle(image, text, pad, pad_at, relink):
     return pad, words, first
 
 
-# TinyUSB, for the esp32 targets that build it. The port takes it from the
-# IDF component manager, which fetches it into managed_components/ at
-# configure time, so the overlay can't patch it. Instead a copy at the same
-# tag, with patches/tinyusb/ applied, replaces it through the component
-# manager's own override_path, declared by a one-file component of ours that
-# the generated board directory adds to EXTRA_COMPONENT_DIRS. (A component of
-# the same name in EXTRA_COMPONENT_DIRS isn't enough: the managed copy is
-# still fetched, and ESP-IDF adds it later, so it wins.)
-TINYUSB = "espressif__tinyusb"  # ESP-IDF names a component after its directory
-TINYUSB_CHIPS = ("esp32s2", "esp32s3", "esp32p4")
-TINYUSB_PATCHES = REPO / "patches" / "tinyusb"
+# Managed components we build from our own copy, with patches/<short name>/
+# applied: TinyUSB on the esp32 targets that build it, and esp_hosted (Wi-Fi
+# through a companion chip) on the P4. The port takes them from the IDF
+# component manager, which fetches them into managed_components/ at
+# configure time, so the overlay can't patch them. Instead a copy at the same
+# version replaces each through the component manager's own override_path,
+# declared by a one-file component of ours that the generated board directory
+# adds to EXTRA_COMPONENT_DIRS. (A component of the same name in
+# EXTRA_COMPONENT_DIRS isn't enough: the managed copy is still fetched, and
+# ESP-IDF adds it later, so it wins.) Each is name: (chips, manifest key);
+# ESP-IDF names a component after its directory.
+TINYUSB = "espressif__tinyusb"
+ESP_HOSTED = "espressif__esp_hosted"
+COMPONENTS = {
+    TINYUSB: (("esp32s2", "esp32s3", "esp32p4"), "espressif/tinyusb"),
+    ESP_HOSTED: (("esp32p4",), "espressif/esp_hosted"),
+}
 
 
 def make_submodules(shell, make, mp):
@@ -1390,44 +1396,52 @@ def make_submodules(shell, make, mp):
     apply_patches.prepare_submodules(mp)
 
 
-def tinyusb_component(mp, chip):
-    """deps/espressif__tinyusb at its DEPENDENCIES.lock tag with patches/tinyusb/
+def component_copy(mp, chip, name):
+    """deps/<name> at its DEPENDENCIES.lock pin with patches/<short name>/
     applied (one local commit, like the MicroPython tree's), or None for a
-    chip without TinyUSB."""
-    if chip not in TINYUSB_CHIPS:
+    chip that doesn't build it."""
+    chips, key = COMPONENTS[name]
+    if chip not in chips:
         return None
-    p = pin(TINYUSB)
-    url, tag = p.url, p.tag
-    # The copy replaces whatever TinyUSB the port asks for, so it must be the
-    # one the prepared tree's manifest names (patch 0014).
-    manifest = (mp / "ports" / "esp32" / "main" / "idf_component.yml").read_text()
-    block = re.search(r"^  espressif/tinyusb:\n((?:    .*\n|\s*\n)+)", manifest, re.M)
-    git_src = re.search(r"^\s+git:\s*(\S+)", block.group(1), re.M) if block else None
-    version = re.search(r"^\s+version:\s*(\S+)", block.group(1), re.M) if block else None
-    if not (git_src and version) or (git_src.group(1), version.group(1)) != (url, tag):
-        die(f"the port builds TinyUSB {git_src.group(1) if git_src else '?'} {version.group(1) if version else '?'}, "
-            f"but {pins.LOCK} patches {url} {tag}: move them together")
-    dest = DEPS / TINYUSB
+    p = pin(name)
+    url, ref = p.url, p.tag or p.ref
+    short = name.partition("__")[2]
+    dest = DEPS / name
     if not dest.exists():
         DEPS.mkdir(exist_ok=True)
-        clone_at(url, tag, dest, commit=p.ref)
-    patches = sorted(TINYUSB_PATCHES.glob("*.patch"))
+        clone_at(url, ref, dest, recursive=True, commit=p.ref)
+    # The copy replaces whatever version the port asks for, so it must be the
+    # one the prepared tree's manifest names: by git and tag where the
+    # manifest takes it from git (TinyUSB, patch 0014), else by the version
+    # the copy's own manifest gives.
+    manifest = (mp / "ports" / "esp32" / "main" / "idf_component.yml").read_text()
+    block = re.search(rf"^  {re.escape(key)}:\n((?:    .*\n|\s*\n)+)", manifest, re.M)
+    git_src = re.search(r"^\s+git:\s*(\S+)", block.group(1), re.M) if block else None
+    version = re.search(r"^\s+version:\s*\"?([^\s\"]+)", block.group(1), re.M) if block else None
+    if git_src:
+        want, have = (url, p.tag), (git_src.group(1), version.group(1) if version else "?")
+    else:
+        own = re.search(r"^version:\s*\"?([^\s\"]+)", git_out(dest, "show", f"{p.ref}:idf_component.yml"), re.M)
+        want, have = (own.group(1) if own else "?",), (version.group(1) if version else "?",)
+    if want != have:
+        die(f"the port builds {key} {' '.join(have)}, but {pins.LOCK} patches {url} at {' '.join(want)}: move them together")
+    patches = sorted((REPO / "patches" / short).glob("*.patch"))
     digest = hashlib.sha256()
     for patch in patches:
         digest.update(patch.read_bytes())
     sid = "Patch-Series: " + digest.hexdigest()[:16]
-    mark = f"PyDevices patches applied to {tag} (a local record, never pushed)"
+    mark = f"PyDevices patches applied to {ref} (a local record, never pushed)"
     head = git_out(dest, "log", "-1", "--format=%s%n%b").splitlines()
     clean = not git_out(dest, "status", "--porcelain")
     if patches and head[:1] == [mark] and sid in head and clean:
         return dest
-    if not patches and git_out(dest, "describe", "--tags", "--exact-match") == tag and clean:
+    if not patches and git_out(dest, "rev-parse", "HEAD") == p.ref and clean:
         return dest
-    run(["git", "-C", str(dest), "-c", "advice.detachedHead=false", "checkout", "-q", "--force", tag])
+    run(["git", "-C", str(dest), "-c", "advice.detachedHead=false", "checkout", "-q", "--force", ref])
     run(["git", "-C", str(dest), "clean", "-fdq"])
     for patch in patches:
         if subprocess.run(["git", "-C", str(dest), "apply", str(patch)]).returncode != 0:
-            die(f"{patch.relative_to(REPO)} does not apply to TinyUSB {tag}")
+            die(f"{patch.relative_to(REPO)} does not apply to {key} {ref}")
         say(f"applied {patch.relative_to(REPO)}")
     if patches:
         run(["git", "-C", str(dest), "add", "-A"])
@@ -1436,17 +1450,17 @@ def tinyusb_component(mp, chip):
     return dest
 
 
-def tinyusb_override(shim, tinyusb):
-    """The component that points the port's espressif/tinyusb at `tinyusb`."""
+def component_override(shim, copies):
+    """The component that points the port's managed components at our copies
+    (name: path)."""
     if shim.exists():
         shutil.rmtree(shim)
     shim.mkdir(parents=True)
     (shim / "CMakeLists.txt").write_text("# Generated by build_mp.py: no sources, only the manifest beside it.\nidf_component_register()\n")
-    (shim / "idf_component.yml").write_text(
-        "# Generated by build_mp.py: the port's TinyUSB, with patches/tinyusb/ applied.\n"
-        "dependencies:\n"
-        "  espressif/tinyusb:\n"
-        f'    override_path: "{tinyusb.as_posix()}"\n')
+    lines = ["# Generated by build_mp.py: the port's managed components, with patches/ applied.", "dependencies:"]
+    for name, path in copies.items():
+        lines += [f"  {COMPONENTS[name][1]}:", f'    override_path: "{path.as_posix()}"']
+    (shim / "idf_component.yml").write_text("\n".join(lines) + "\n")
     return shim
 
 
@@ -2438,7 +2452,7 @@ def main():
         dep.unlink()
 
     rc, out = 0, ""
-    tinyusb = None
+    copies = {}
     stm32_grown = False
     stm32_m4_pad = 0
     try:
@@ -2451,7 +2465,10 @@ def main():
             if args.coredump and not (table and has_coredump_partition(table)):
                 die("--coredump: this board's table has no coredump partition yet, and the dump needs one. "
                     "The ESP32-S3 boards' table has it.")
-            tinyusb = tinyusb_component(mp, chip)
+            for name in COMPONENTS:
+                copy = component_copy(mp, chip, name)
+                if copy:
+                    copies[name] = copy
             flash_bytes = int(flash[:-2]) * 1024 * 1024 if flash else 0
             kept = build / "partitions-keep-fs.csv"
             if keep_fs and table:
@@ -2459,7 +2476,7 @@ def main():
             for attempt in (1, 2):
                 text, used = esp32_fragment(chip, module_dirs, board, variant, flash, table, args.coredump)
                 frag.write_text(text)
-                shims = [tinyusb_override(build / "tinyusb_override", tinyusb)] if tinyusb else []
+                shims = [component_override(build / "component_override", copies)] if copies else []
                 esp32_board_dir(gen, base, board, variant, frag, module_dirs, shims)
                 make_esp = [c for c in make if not c.startswith("BOARD=")] + [f"BOARD={board}", f"BOARD_DIR={gen}"]
                 # A saved sdkconfig beats SDKCONFIG_DEFAULTS; ours is generated.
@@ -2672,8 +2689,8 @@ def main():
         rec["micropython_version"] = version[0]
     rec["module_revisions"] = revisions
     rec["micropython_lib"] = apply_patches.lib_record(mp)
-    if port == "esp32" and tinyusb:
-        rec["tinyusb"] = git_out(tinyusb, "describe", "--tags", "--always")
+    for name, copy in copies.items():
+        rec[name.partition("__")[2]] = git_out(copy, "describe", "--tags", "--always")
     rec_path.write_text(json.dumps(rec, indent=1) + "\n")
     say(f"\nBuilt into {build}")
     for name in ("firmware.bin", "firmware0.bin", "firmware1.bin", "firmware.dfu", "firmware.uf2",

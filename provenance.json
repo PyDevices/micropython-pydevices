@@ -232,5 +232,10 @@
   "0003-dcd_dwc2-esp32p4-device-interrupt-runs-from-iram-through-a-flash-erase.patch": {
    "sha256": "e8dec7da4b6b71e1cb4b9edeb9a42d4101660a4498aeaa850f79cb26b2545ac8"
   }
+ },
+ "esp_hosted_patches": {
+  "0001-transport_drv-drop-a-packet-when-there-is-no-buffer.patch": {
+   "sha256": "8511e218839f0dfce56ac057d966264fabf2b595cf3a8068ea98ee43cd43e2b2"
+  }
  }
 }

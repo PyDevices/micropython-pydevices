@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 21:00:00 -0600
+Subject: [PATCH] transport_drv: drop a Wi-Fi packet when there's no buffer
+ for it, instead of writing it to NULL.
+
+transport_drv_sta_tx and transport_drv_ap_tx take each outgoing packet's
+transport buffer from mempool_alloc, which comes from internal, DMA-capable
+memory, and only assert the result. Asserts are compiled out of a release
+build, so when that memory runs out the packet is copied to address 0xc and
+the board resets (Store access fault in memcpy, MTVAL 0xc). On an ESP32-P4
+casting video over Wi-Fi, opening the camera takes enough of that memory to
+do it.
+
+Both now return ESP_ERR_ESP_NETIF_NO_MEM when there's no buffer, as the
+flow-control path just above them already does, so lwIP drops that packet
+and the next one tries again.
+---
+diff --git a/host/drivers/transport/transport_drv.c b/host/drivers/transport/transport_drv.c
+index de7cf3e..6aea8ae 100644
+--- a/host/drivers/transport/transport_drv.c
++++ b/host/drivers/transport/transport_drv.c
+@@ -264,7 +264,12 @@ static esp_err_t transport_drv_sta_tx(void *h, void *buffer, size_t len)
+ 
+ 	/*  Prepare transport buffer directly consumable */
+ 	copy_buff = mempool_alloc(((struct mempool*)chan_arr[ESP_STA_IF]->memp), MAX_TRANSPORT_BUFFER_SIZE, true);
+-	assert(copy_buff);
++	if (unlikely(!copy_buff)) {
++		/* No DMA-capable memory for the buffer: drop this packet, as
++		 * flow control does above, instead of copying it to NULL. */
++		errno = -ENOMEM;
++		return ESP_ERR_ESP_NETIF_NO_MEM;
++	}
+ 	g_h.funcs->_h_memcpy(copy_buff+H_ESP_PAYLOAD_HEADER_OFFSET, buffer, len);
+ 
+ 	return esp_hosted_tx(ESP_STA_IF, 0, copy_buff, len, H_BUFF_ZEROCOPY, copy_buff, transport_sta_free_cb, 0);
+@@ -281,7 +286,12 @@ static esp_err_t transport_drv_ap_tx(void *h, void *buffer, size_t len)
+ 
+ 	/*  Prepare transport buffer directly consumable */
+ 	copy_buff = mempool_alloc(((struct mempool*)chan_arr[ESP_AP_IF]->memp), MAX_TRANSPORT_BUFFER_SIZE, true);
+-	assert(copy_buff);
++	if (unlikely(!copy_buff)) {
++		/* No DMA-capable memory for the buffer: drop this packet, as
++		 * flow control does above, instead of copying it to NULL. */
++		errno = -ENOMEM;
++		return ESP_ERR_ESP_NETIF_NO_MEM;
++	}
+ 	g_h.funcs->_h_memcpy(copy_buff+H_ESP_PAYLOAD_HEADER_OFFSET, buffer, len);
+ 
+ 	return esp_hosted_tx(ESP_AP_IF, 0, copy_buff, len, H_BUFF_ZEROCOPY, copy_buff, transport_ap_free_cb, 0);
