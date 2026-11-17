@@ -1,0 +1,68 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PyDevices <pydevices@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 00:00:00 -0600
+Subject: [PATCH] webassembly: Take ticks from a monotonic clock.
+
+mp_js_ticks_ms was Date.now() - MP_JS_EPOCH, so time.ticks_ms() followed
+the host's wall clock. When that clock is stepped (an NTP correction, a
+virtual machine syncing to its host, someone changing the time) the ticks
+jump with it. A step back stalls every deadline computed from ticks_ms for
+as long as the step, and audio that paces itself on ticks goes silent for
+that long; a step forward makes every pending deadline fall due at once.
+Under WSL 2 the clock steps back about 1.8 s every 32 s.
+
+performance.now() is monotonic in browsers, in workers and in Node, so the
+ticks come from it with the same epoch arithmetic. ticks_us was ticks_ms
+times 1000; it now reads the same clock in microseconds, at whatever
+resolution the host gives performance.now() (100 us or better in browsers).
+"| 0" truncates and wraps both to the 32-bit value the C side expects, which
+the ticks period then masks. time.time() keeps the wall clock.
+
+diff --git a/ports/webassembly/library.h b/ports/webassembly/library.h
+index 04b408d..13f3d11 100644
+--- a/ports/webassembly/library.h
++++ b/ports/webassembly/library.h
+@@ -28,6 +28,7 @@
+ 
+ extern void mp_js_write(const char *str, mp_uint_t len);
+ extern int mp_js_ticks_ms(void);
++extern int mp_js_ticks_us(void);
+ extern void mp_js_hook(void);
+ extern double mp_js_time_ms(void);
+ extern uint32_t mp_js_random_u32(void);
+diff --git a/ports/webassembly/library.js b/ports/webassembly/library.js
+index 0c38cce..ebac047 100644
+--- a/ports/webassembly/library.js
++++ b/ports/webassembly/library.js
+@@ -26,9 +26,16 @@
+ 
+ mergeInto(LibraryManager.library, {
+     // This string will be emitted directly into the output file by Emscripten.
+-    mp_js_ticks_ms__postset: "var MP_JS_EPOCH = Date.now()",
++    // performance.now() is monotonic, unlike Date.now(), which follows every
++    // step of the host's wall clock (an NTP correction, a virtual machine
++    // syncing to its host) and would take the ticks with it.
++    mp_js_ticks_ms__postset: "var MP_JS_EPOCH = performance.now()",
+ 
+-    mp_js_ticks_ms: () => Date.now() - MP_JS_EPOCH,
++    mp_js_ticks_ms: () => (performance.now() - MP_JS_EPOCH) | 0,
++
++    // The same clock in microseconds; "| 0" wraps it like the ticks it feeds.
++    mp_js_ticks_us__deps: ["mp_js_ticks_ms"],
++    mp_js_ticks_us: () => ((performance.now() - MP_JS_EPOCH) * 1000) | 0,
+ 
+     mp_js_hook: () => {
+         if (ENVIRONMENT_IS_NODE) {
+diff --git a/ports/webassembly/mphalport.c b/ports/webassembly/mphalport.c
+index 3935068..107ff5b 100644
+--- a/ports/webassembly/mphalport.c
++++ b/ports/webassembly/mphalport.c
+@@ -52,7 +52,7 @@ void mp_hal_delay_us(mp_uint_t us) {
+ }
+ 
+ mp_uint_t mp_hal_ticks_us(void) {
+-    return mp_js_ticks_ms() * 1000;
++    return mp_js_ticks_us();
+ }
+ 
+ mp_uint_t mp_hal_ticks_ms(void) {

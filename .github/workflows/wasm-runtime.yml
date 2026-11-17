@@ -29,6 +29,7 @@ on:
   pull_request:
     paths:
       - 'DEPENDENCIES.lock'
+      - 'patches/micropython/*webassembly*'
       - 'variants/webassembly/**'
       - 'scripts/wasm_provenance.py'
       - '.github/workflows/wasm-runtime.yml'
@@ -71,6 +72,9 @@ jobs:
               print("imports", name)
           EOF
           node $b/micropython.mjs /tmp/check.py
+
+      - name: Its clock
+        run: node variants/webassembly/tests/clock.mjs builds/webassembly/omnipython
 
       - name: Stamp its provenance
         run: |
