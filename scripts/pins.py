@@ -35,8 +35,8 @@ MICROPYTHON = "micropython"
 # Sources a build reads that are not one module directory each.
 SOURCES = ("omnipython-lvgl", "omnipython-lib", "esp-vision")
 # Toolchains and components, fetched into deps/ only by the builds that use them.
-TOOLCHAINS = ("esp-idf", "emsdk", "SDL2", "espressif__tinyusb", "circuitpython",
-              "esp_cam_sensor", "esp_sccb_intf", "cmake_utilities", "esp_h264", "usb")
+TOOLCHAINS = ("esp-idf", "emsdk", "SDL2", "espressif__tinyusb", "espressif__esp_hosted",
+              "circuitpython", "esp_cam_sensor", "esp_sccb_intf", "cmake_utilities", "esp_h264", "usb")
 
 COMMIT = re.compile(r"[0-9a-f]{40}")
 ARCHIVE = re.compile(r"\.(zip|tar\.gz|tgz|tar\.xz|tar\.bz2)$")

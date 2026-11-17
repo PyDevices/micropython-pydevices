@@ -304,6 +304,15 @@ class ManagedComponents(unittest.TestCase):
         self.assertIn("  espressif/tinyusb:\n    override_path: \"%s\"" % (self.root / "deps" / "tu").as_posix(), text)
         self.assertIn("  espressif/esp_hosted:\n    override_path: \"%s\"" % (self.root / "deps" / "eh").as_posix(), text)
 
+    def test_copies_are_not_modules(self):
+        # A lock line in no group is a module, fetched into modules/ and built
+        # into every image: each component copy has to be a toolchain line.
+        sys.path.insert(0, str(Path(build_mp.__file__).parent / "scripts"))
+        import pins
+
+        for name in build_mp.COMPONENTS:
+            self.assertEqual(pins.read(Path(build_mp.__file__).parent)[name].group, "toolchains", name)
+
     def test_esp_hosted_only_on_the_p4(self):
         self.assertIsNone(build_mp.component_copy(self.root, "esp32s3", build_mp.ESP_HOSTED))
 
