@@ -61,6 +61,7 @@ typedef struct {
 static jpeg_encoder_handle_t jpegio_hw_encoder;
 static jpeg_decoder_handle_t jpegio_hw_decoder;
 static jpegio_hw_buf_t jpegio_hw_enc_in, jpegio_hw_enc_out, jpegio_hw_dec_in, jpegio_hw_dec_out;
+bool jpegio_hw_no_room;
 
 // Makes b at least `need` bytes. Keeps it when it is big enough and not more
 // than twice what is asked. false when the memory is not there.
@@ -156,6 +157,7 @@ static void jpegio_hw_widen(const uint8_t *src, int width, int height, size_t st
 
 mp_obj_t jpegio_hw_encode(const void *pixels, int width, int height, size_t stride,
     int format, bool swap, int quality, bool subsample, bool exact) {
+    jpegio_hw_no_room = false;
     if (jpegio_hw_encoder == NULL) {
         jpeg_encode_engine_cfg_t eng = { .timeout_ms = JPEGIO_HW_TIMEOUT_MS };
         if (jpeg_new_encoder_engine(&eng, &jpegio_hw_encoder) != ESP_OK) {
@@ -197,6 +199,7 @@ mp_obj_t jpegio_hw_encode(const void *pixels, int width, int height, size_t stri
         // given RGB888 widened the way a display does it (31 -> 255) instead.
         in_len = (size_t)width * height * 3;
         if (!jpegio_hw_reserve(&jpegio_hw_enc_in, in_len, true, JPEG_ENC_ALLOC_INPUT_BUFFER)) {
+            jpegio_hw_no_room = true;
             return MP_OBJ_NULL;
         }
         jpegio_hw_widen(pixels, width, height, stride, swap, jpegio_hw_enc_in.buf);
@@ -433,6 +436,8 @@ const char *jpegio_hw_decode(const uint8_t *data, size_t len, int width, int hei
 }
 
 #else // !JPEGIO_HW
+
+bool jpegio_hw_no_room;
 
 mp_obj_t jpegio_hw_encode(const void *pixels, int width, int height, size_t stride,
     int format, bool swap, int quality, bool subsample, bool exact) {

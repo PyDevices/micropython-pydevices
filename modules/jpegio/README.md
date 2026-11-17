@@ -185,6 +185,20 @@ quality 80, 4:2:0:
 The engine's input copy and output buffer are kept for the next call, and
 given back when a much smaller image comes along.
 
+The default `exact=True` needs that copy at 3 bytes a pixel, in one piece:
+6.2 MB for a 1920x1080 frame. With a camera running, an ESP32-P4X-EYE had
+about 4 MB in one piece, so anything over about 1280x720 doesn't get it.
+`hardware=None` then encodes in software, about 9 s for that frame at
+quality 90, and `hardware=True` raises `OSError` saying so. With
+`exact=False` the same frame takes 57 ms on the engine, so use it for camera
+frames this size:
+
+| 1920x1080 camera frame, quality 90, camera running | ms |
+|---|---|
+| ESP32-P4 engine, `exact=False` | 57 |
+| ESP32-P4 engine, `exact=True` | no room |
+| ESP32-P4 software | about 9,400 |
+
 The software and hardware encoders write different bytes for the same image
 (different quantisation and rounding); both decode to the source within the
 same quality threshold (the test, [`tests/test_jpegio_encode.py`](tests/test_jpegio_encode.py), holds both
