@@ -220,6 +220,9 @@
   },
   "0073-micropython-nrf-a-softdevice-build-has-real-atomic-sections.patch": {
    "sha256": "9d26e0a6605baa561eb18952809d79dba35cb4cd6c95fea7d96288cb4f11d0e3"
+  },
+  "0074-micropython-webassembly-ticks-from-a-monotonic-clock.patch": {
+   "sha256": "a85eae00aba8b5d87aeffe391212a9e6b8d9818985c9bb23792404e0fcdf7d6a"
   }
  },
  "tinyusb_patches": {
