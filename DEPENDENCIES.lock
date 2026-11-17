@@ -64,6 +64,11 @@ emsdk             https://github.com/emscripten-core/emsdk.git        1518bec61a
 # applies patches/tinyusb/ to this copy and builds it in place of the managed
 # component. The name is the component's: ESP-IDF names one by its directory.
 espressif__tinyusb https://github.com/micropython/tinyusb-espressif.git 5c5c660317943820d49ce5c188f1bd60cd8aade6  # tag v0.21.0.1-micropython1
+# esp_hosted, Wi-Fi through the companion chip on the esp32 port's P4
+# builds, at the commit the component registry's version the port names was
+# made from. build_mp.py checks the two agree, applies patches/esp_hosted/
+# to this copy and builds it in place of the managed component.
+espressif__esp_hosted https://github.com/espressif/esp-hosted-mcu.git 627d5d90461264c64f90de4416a93bb14a278890  # version 2.7.0
 # CircuitPython is the second interpreter, and the one toolchain pin that is a
 # source tree. Always our own checkout in deps/, never a link to a sibling. Its
 # core is MicroPython 1.29, like the micropython pin, and its espressif port

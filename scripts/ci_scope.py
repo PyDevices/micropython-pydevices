@@ -55,13 +55,13 @@ INERT = (
 )
 
 # What the three CircuitPython jobs can read. They build CircuitPython, so
-# MicroPython's patches and TinyUSB's patches reach none of them, and no job
+# MicroPython's, TinyUSB's and esp_hosted's patches reach none of them, and no job
 # builds a module's examples or docs. DEPENDENCIES.lock is one file, so a move
 # of any pin in it, MicroPython's too, reaches all three.
 CP_COMMON = ("build_mp.py", "DEPENDENCIES.lock", "scripts/pins.py", "patches/circuitpython/**",
              "modules/library.py", "modules/manifest.py", "scripts/ci_scope.py")
 CP_NOT_BUILT = ("patches/micropython/**", "patches/micropython-lib/**", "patches/tinyusb/**",
-                "patches/apply_patches.py", "modules/*/examples/**", "modules/*/docs/**")
+                "patches/esp_hosted/**", "patches/apply_patches.py", "modules/*/examples/**", "modules/*/docs/**")
 # The modules the unix-modules job names. The rest (audioif, picotts, tflite,
 # vision, audioinstruments, audioeffects, audiocomponents, all) are not in its list.
 UNIX_MODULES = ("displayif", "omnipython", "pdwidgets", "palettes", "pngio", "tsmux", "ppa", "jpegio", "cameraif",

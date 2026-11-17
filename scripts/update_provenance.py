@@ -6,8 +6,8 @@
 """Keep provenance.json in step with the tree.
 
 provenance.json records the MicroPython pin and the SHA-256 of every patch in
-patches/micropython/ and patches/tinyusb/. This script rewrites those from
-the files, so nobody types a hash:
+patches/micropython/, patches/tinyusb/ and patches/esp_hosted/. This script
+rewrites those from the files, so nobody types a hash:
 
     python3 scripts/update_provenance.py            # rewrite provenance.json
     python3 scripts/update_provenance.py --check    # exit 1 if it is stale (CI)
@@ -31,7 +31,8 @@ from pathlib import Path
 import pins
 
 REPO = Path(__file__).resolve().parent.parent
-SERIES = (("patches", "patches/micropython"), ("tinyusb_patches", "patches/tinyusb"))
+SERIES = (("patches", "patches/micropython"), ("tinyusb_patches", "patches/tinyusb"),
+          ("esp_hosted_patches", "patches/esp_hosted"))
 UPSTREAM_RE = re.compile(r"^micropython/micropython main at (?P<sha>[0-9a-f]{12})(?: \((?P<label>.*)\))?$")
 
 
