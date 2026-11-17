@@ -213,7 +213,7 @@
    "sha256": "248b1201fb911995c5f4d5e46e6929effc4f14d654c877e726e785ed0adba634"
   },
   "0071-micropython-esp32-a-collection-on-a-p4-no-longer-overflows-its-mark-stack.patch": {
-   "sha256": "c960b52a8706abd0a458a5d3fa6f8b4e9a77a700c38d54408cfe5fa1256b1ee8"
+   "sha256": "c839edaffd4d04642ac8480bbe4f9e7231f556515fded1fcf62eec7fbed95a62"
   },
   "0072-micropython-extmod-modjson-a-long-parse-lets-other-threads-in.patch": {
    "sha256": "1fba5e4bf43ee45256c5ace059ffc81c881574b18e5169ac0f42599463bcfbf9"

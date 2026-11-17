@@ -18,15 +18,45 @@ entries the same collection takes 28 ms and none of it is there. Every
 thread waits for a collection, so that is 49 ms less in the longest pause
 the interpreter makes.
 
-4096 entries are 32 KB of internal RAM (a block index and its heap area
-each), which a P4 has. Other chips keep the default; a board header can
-still set its own.
+4096 entries are 32 KB (a block index and its heap area each). The stack
+is part of the interpreter's state, which is internal RAM, and 32 KB less
+there left the P4's H.264 encoder without its one 92 KB internal block. So
+a port can now supply the stack's memory (MICROPY_GC_STACK_FROM_PORT), and
+on a P4 the port allocates it once at start-up, from PSRAM when the board
+has some and from internal RAM when it has none. The heap the collector
+walks is in PSRAM too, and a collection takes as long with the stack there.
+
+Other chips keep the default, with the stack where it was; a board header
+that sets its own size keeps it in the interpreter's state too.
 ---
-diff --git a/ports/esp32/mpconfigport.h b/ports/esp32/mpconfigport.h
-index f6ae6b4b4..a13aaf574 100644
+--- a/ports/esp32/main.c
++++ b/ports/esp32/main.c
+@@ -136,6 +136,22 @@
+         esp_restart();
+     }
+ 
++    #if MICROPY_GC_STACK_FROM_PORT
++    // The collector's mark stack, kept through every soft reset. PSRAM first:
++    // the heap it walks is there too, and internal RAM is the scarce kind.
++    // A board without PSRAM gets it where it always was.
++    {
++        size_t n = MICROPY_ALLOC_GC_STACK_SIZE * (sizeof(MICROPY_GC_STACK_ENTRY_TYPE) + sizeof(mp_state_mem_area_t *));
++        void *gc_stack = heap_caps_malloc_prefer(n, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
++        if (gc_stack == NULL) {
++            printf("gc stack allocation failed!\n");
++            esp_restart();
++        }
++        MP_STATE_MEM(gc_block_stack) = gc_stack;
++        MP_STATE_MEM(gc_area_stack) = (mp_state_mem_area_t **)((MICROPY_GC_STACK_ENTRY_TYPE *)gc_stack + MICROPY_ALLOC_GC_STACK_SIZE);
++    }
++    #endif
++
+ soft_reset:
+     // initialise the stack pointer for the main thread
+     mp_cstack_init_with_top((void *)sp, MICROPY_TASK_STACK_SIZE);
 --- a/ports/esp32/mpconfigport.h
 +++ b/ports/esp32/mpconfigport.h
-@@ -60,6 +60,13 @@
+@@ -60,6 +60,17 @@
  // Python internal features
  #define MICROPY_READER_VFS                  (1)
  #define MICROPY_ENABLE_GC                   (1)
@@ -34,9 +64,52 @@ index f6ae6b4b4..a13aaf574 100644
 +// The collector's mark stack. When it overflows, the collector walks the
 +// whole heap again for every overflow: with the default 64 entries a
 +// collection of 1 MB of live objects took 77 ms on an ESP32-P4, and 28 ms
-+// with room for 4096. Each entry is 8 bytes of internal RAM.
++// with room for 4096. Each entry is 8 bytes, so the stack is allocated at
++// start-up, from PSRAM when the board has some (main.c): as part of the
++// interpreter's state it took 32 KB of internal RAM, and the H.264
++// encoder's one large internal block with it.
 +#define MICROPY_ALLOC_GC_STACK_SIZE         (4096)
++#define MICROPY_GC_STACK_FROM_PORT          (1)
 +#endif
  #define MICROPY_STACK_CHECK_MARGIN          (1024)
  #define MICROPY_ENABLE_EMERGENCY_EXCEPTION_BUF (1)
  #define MICROPY_LONGINT_IMPL                (MICROPY_LONGINT_IMPL_MPZ)
+--- a/py/mpconfig.h
++++ b/py/mpconfig.h
+@@ -265,6 +265,14 @@
+ #define MICROPY_GC_STACK_ENTRY_TYPE size_t
+ #endif
+ 
++// Whether the port supplies the memory of the GC stack. When set, the stack
++// is not part of the interpreter's state: before gc_init() the port points
++// MP_STATE_MEM(gc_block_stack), and with MICROPY_GC_SPLIT_HEAP also
++// MP_STATE_MEM(gc_area_stack), at MICROPY_ALLOC_GC_STACK_SIZE entries each.
++#ifndef MICROPY_GC_STACK_FROM_PORT
++#define MICROPY_GC_STACK_FROM_PORT (0)
++#endif
++
+ // Be conservative and always clear to zero newly (re)allocated memory in the GC.
+ // This helps eliminate stray pointers that hold on to memory that's no longer
+ // used.  It decreases performance due to unnecessary memory clearing.
+--- a/py/mpstate.h
++++ b/py/mpstate.h
+@@ -135,11 +135,19 @@
+     #endif
+ 
+     int gc_stack_overflow;
++    #if MICROPY_GC_STACK_FROM_PORT
++    // The port sets these before gc_init(), MICROPY_ALLOC_GC_STACK_SIZE entries each.
++    MICROPY_GC_STACK_ENTRY_TYPE *gc_block_stack;
++    #if MICROPY_GC_SPLIT_HEAP
++    mp_state_mem_area_t **gc_area_stack;
++    #endif
++    #else
+     MICROPY_GC_STACK_ENTRY_TYPE gc_block_stack[MICROPY_ALLOC_GC_STACK_SIZE];
+     #if MICROPY_GC_SPLIT_HEAP
+     // Array that tracks the area for each block on gc_block_stack.
+     mp_state_mem_area_t *gc_area_stack[MICROPY_ALLOC_GC_STACK_SIZE];
+     #endif
++    #endif
+ 
+     // This variable controls auto garbage collection.  If set to 0 then the
+     // GC won't automatically run when gc_alloc can't find enough blocks.  But
