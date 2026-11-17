@@ -43,3 +43,11 @@ CONFIG_ESP_MM_CACHE_MSYNC_C2M_CHUNKED_OPS_MAX_LEN=0x2000
 # frame cost the spibus ten milliseconds in a wait (ten strips, 100 ms) for
 # 1.2 ms of SPI data.
 CONFIG_FREERTOS_HZ=1000
+
+# The program runs from PSRAM, copied there from flash at boot. Without this
+# a flash write or erase stops both cores for as long as the chip takes, about
+# 45 ms for each 4 KB block: nothing can refill the I2S ring meanwhile, and
+# saving a 64 KB file cost most of a second of sound. With the code in PSRAM
+# IDF leaves the cache and the scheduler running during a flash operation.
+# It costs PSRAM the size of the firmware (9 MB of 32 with every module).
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
