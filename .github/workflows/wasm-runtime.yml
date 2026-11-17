@@ -81,6 +81,9 @@ jobs:
           python3 scripts/wasm_provenance.py builds/webassembly/omnipython \
             --built-by "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
+      - name: Its timers
+        run: node variants/webassembly/tests/timers.mjs builds/webassembly/omnipython
+
       - uses: actions/upload-artifact@v7
         with:
           name: wasm-runtime

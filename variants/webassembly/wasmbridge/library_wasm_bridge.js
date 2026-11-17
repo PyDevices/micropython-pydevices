@@ -371,10 +371,17 @@ mergeInto(LibraryManager.library, {
         state.inputFrames.length = 0;
     },
 
-    omnipython_timer_start__deps: ['$omnipython_state'],
+    $omnipython_drop_fired__deps: ['$omnipython_state'],
+    $omnipython_drop_fired: (id) => {
+        const fired = omnipython_state.firedTimers;
+        for (let i = fired.length - 1; i >= 0; i--) if (fired[i] === id) fired.splice(i, 1);
+    },
+    omnipython_timer_start__deps: ['$omnipython_state', '$omnipython_drop_fired'],
     omnipython_timer_start: (id, delay, periodic) => {
         const state = omnipython_state;
-        const old = state.timers.get(id); if (old) clearTimeout(old.handle);
+        const old = state.timers.get(id); if (old) old.periodic ? clearInterval(old.handle) : clearTimeout(old.handle);
+        // A restart drops the old timer's firings that are still queued.
+        omnipython_drop_fired(id);
         const fire = () => {
             state.timerFirings.push({id, at:performance.now()});
             if (state.timerFirings.length > 512) state.timerFirings.shift();
@@ -390,10 +397,18 @@ mergeInto(LibraryManager.library, {
         const handle = periodic ? setInterval(fire, delay) : setTimeout(fire, delay);
         state.timers.set(id, {handle, periodic});
     },
-    omnipython_timer_cancel__deps: ['$omnipython_state'],
-    omnipython_timer_cancel: (id) => { const t=omnipython_state.timers.get(id); if (t) { t.periodic ? clearInterval(t.handle) : clearTimeout(t.handle); omnipython_state.timers.delete(id); } },
+    omnipython_timer_cancel__deps: ['$omnipython_state', '$omnipython_drop_fired'],
+    omnipython_timer_cancel: (id) => { const t=omnipython_state.timers.get(id); if (t) { t.periodic ? clearInterval(t.handle) : clearTimeout(t.handle); omnipython_state.timers.delete(id); } omnipython_drop_fired(id); },
+    // The next queued firing, which the C side then delivers, or -1.
     omnipython_timer_poll__deps: ['$omnipython_state'],
-    omnipython_timer_poll: () => omnipython_state.firedTimers.length ? omnipython_state.firedTimers.shift() : -1,
+    omnipython_timer_poll: () => {
+        const state = omnipython_state;
+        if (!state.firedTimers.length) return -1;
+        const id = state.firedTimers.shift();
+        state.timerDeliveries.push({id, at:performance.now()});
+        if (state.timerDeliveries.length > 512) state.timerDeliveries.shift();
+        return id;
+    },
 
     $omnipython_enable_audio__deps: ['$omnipython_state'],
     $omnipython_enable_audio: async (microphone=false) => {
