@@ -12,9 +12,8 @@ A name is one of three things:
   `displayif`, `pygraphics`, `omnipython`.
 - **A path**, to a module of your own: a directory with a `manifest.py`, or a
   C module with its `micropython.mk` or `micropython.cmake`.
-- **`all`**: every module except the opt-in ones. `picotts`, `tflite` and
-  `vision` are opt-in (each has an `OPT_IN` file saying why), so name them to get them:
-  `--modules all,picotts`, and for tflite and vision
+- **`all`**: every module except the opt-in ones. `picotts`, `tflite`, `vision` and `pdwidgets` are opt-in (each has an `OPT_IN` file saying why), so name them to get them:
+  `--modules all,pdwidgets`, `--modules all,picotts`, and for tflite and vision
   [Use esp-vision's modules](use-esp-vision-modules.md).
 
 A module never brings another, and nothing checks dependencies. If you name

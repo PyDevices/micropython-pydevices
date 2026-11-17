@@ -34,7 +34,7 @@ tracked here or linked from a sibling checkout or cloned at the commit in
 | `tflite`, `vision` | [esp-vision's modules](../guides/use-esp-vision-modules.md), opt-in: `all` leaves them out. |
 
 [`modules/all`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/all) is not a module but the rule behind `all`: every module beside it
-except those with an `OPT_IN` file: `btclassic`, `picotts`, `tflite` and `vision`.
+except those with an `OPT_IN` file: `btclassic`, `pdwidgets`, `picotts`, `tflite` and `vision`.
 
 ## Which modules build on CircuitPython
 
@@ -66,6 +66,6 @@ it is. "Unix" is CircuitPython's unix port, built and imported in
 | tflite, vision | no | no, on purpose | esp-vision's modules, for MicroPython only. |
 | lvgl | yes | all five | One name for both interpreters: a CircuitPython build compiles omnipython-lvgl's `ports/circuitpython`. A board build needs `CIRCUITPY_GIFIO=0`, since LVGL links its own AnimatedGIF decoder; our boards set it. |
 | micropython-lib | no | no | MicroPython's own upstream packages. |
-| omnipython, palettes, pdwidgets | frozen | frozen | Python only. On unix, omnipython also freezes its desktop files (the boards drop them), and pdwidgets and palettes with it: together their names pass CircuitPython's 64 KB frozen-string pool, so [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py) builds the unix port with four-byte qstr offsets (patches 0001 and 0010). Boards keep two-byte offsets. |
+| omnipython, palettes, pdwidgets | frozen | frozen | Python only; `pdwidgets` is frozen only when named, since `all` leaves it out. On unix, omnipython also freezes its desktop files (the boards drop them), and pdwidgets and palettes with it: together their names pass CircuitPython's 64 KB frozen-string pool, so [`build_mp.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build_mp.py) builds the unix port with four-byte qstr offsets (patches 0001 and 0010). Boards keep two-byte offsets. |
 
 What is planned for the rest is in the [roadmap](https://github.com/PyDevices/omnipython-builds/blob/main/ROADMAP.md).

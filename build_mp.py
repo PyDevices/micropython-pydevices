@@ -374,7 +374,7 @@ def lvgl_checkout(ws):
 
 
 # omnipython-lib is the repository of our Python-only packages: omnipython,
-# palettes, pdwidgets, appkit, audioinstruments, audioeffects, and every board
+# palettes, pdwidgets (opt-in), appkit, audioinstruments, audioeffects, and every board
 # config and driver. It is pinned in DEPENDENCIES.lock beside the modules but is not
 # one: a build asks its tools/libbuild.py for the library tree, one directory
 # per package with a manifest.py beside its sources, and registers that tree
@@ -2003,7 +2003,7 @@ def build_dir_for(build, want, clean, revisions):
     return rec_path
 
 
-# The unix port freezes pdwidgets and palettes beside omnipython and the C
+# A unix build that names pdwidgets and palettes freezes them beside omnipython and the C
 # modules, and their names together pass the 64 KB a ROM qstr pool's two-byte
 # offsets can address. Four-byte offsets (patches/circuitpython/0001 and 0010)
 # lift that for about two bytes of flash per qstr: fine on a desktop, so only
