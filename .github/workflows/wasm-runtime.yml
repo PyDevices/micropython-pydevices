@@ -72,6 +72,9 @@ jobs:
           EOF
           node $b/micropython.mjs /tmp/check.py
 
+      - name: Its timers
+        run: node variants/webassembly/tests/timers.mjs builds/webassembly/omnipython
+
       - name: Stamp its provenance
         run: |
           python3 scripts/wasm_provenance.py builds/webassembly/omnipython \
