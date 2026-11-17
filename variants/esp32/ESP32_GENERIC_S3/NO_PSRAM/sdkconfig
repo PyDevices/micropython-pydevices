@@ -1,10 +1,13 @@
-# An S3 with no PSRAM: nothing to put the TLS library or Wi-Fi buffers in, so
-# they stay in internal RAM, where Wi-Fi can join a WPA2 network. The other S3
-# builds move them into PSRAM (sdkconfig.esp32s3), and fail without it.
+# An S3 with no PSRAM: nothing to put the TLS library, the Wi-Fi buffers or
+# Bluetooth's host (NimBLE) in, so they stay in internal RAM, where Wi-Fi can
+# join a WPA2 network. The other S3 builds move them into PSRAM
+# (sdkconfig.esp32s3), and fail without it.
 CONFIG_SPIRAM=n
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=n
 CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=n
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=n
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_INTERNAL=y
 
 # Internal RAM is all there is, so undo what sdkconfig.esp32s3 spends on speed:
 # the caches go back to the port's sizes and Wi-Fi takes fewer receive buffers.
