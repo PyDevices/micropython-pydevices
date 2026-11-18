@@ -9,6 +9,11 @@
 // returns. A later command, or more data than the buffers hold, waits for the
 // transfers ahead of it. busy() and wait() say when the wire is idle.
 //
+// swap_bytes=True makes send_color() swap each 16-bit word of the data on its
+// way into those buffers, so a panel that wants its RGB565 colours the other
+// way round costs no pass of its own over the caller's frame. send() never
+// swaps: commands and their parameters are not colours.
+//
 // The bus falls back to the common machine.SPI implementation, with the same
 // methods, where esp_lcd can't or shouldn't own the SPI host: soft=True, no
 // command (D/C) pin (9-bit mode), bits other than 8, no sck/mosi given, a miso
@@ -92,6 +97,7 @@ typedef struct _spibus_obj_t {
     mp_obj_t callback;  // register_callback(), or None
     bool has_reset;
     bool deinited;
+    bool swap_bytes;    // send_color() swaps each 16-bit word (DMA path only)
 } spibus_obj_t;
 
 static const mp_obj_type_t spibus_type;
@@ -308,7 +314,7 @@ static void spibus_raise_timeout(void) {
 // Keyword-only, as the common bus, plus dma=None|True|False:
 //   SPIBus(*, id=2, baudrate=24_000_000, polarity=0, phase=0, bits=8,
 //           lsb_first=False, soft=False, sck=-1, mosi=-1, miso=-1,
-//           command=-1, chip_select=-1, reset=-1, dma=None)
+//           command=-1, chip_select=-1, reset=-1, dma=None, swap_bytes=False)
 static mp_obj_t spibus_make(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     if (n_args != 0) {
         mp_raise_TypeError(MP_ERROR_TEXT("extra positional arguments given"));
@@ -329,6 +335,8 @@ static mp_obj_t spibus_make(const mp_obj_type_t *type, size_t n_args, size_t n_k
     mp_obj_t reset = MP_OBJ_NEW_SMALL_INT(-1);
     mp_obj_t dma = mp_const_none;
     size_t dma_kw = n_kw;
+    bool swap_bytes = false;
+    size_t swap_kw = n_kw;
 
     for (size_t i = 0; i < n_kw; i++) {
         mp_obj_t key = args[2 * i];
@@ -366,6 +374,9 @@ static mp_obj_t spibus_make(const mp_obj_type_t *type, size_t n_args, size_t n_k
         } else if (q == MP_QSTR_dma) {
             dma = val;
             dma_kw = i;
+        } else if (q == MP_QSTR_swap_bytes) {
+            swap_bytes = mp_obj_is_true(val);
+            swap_kw = i;
         } else {
             mp_raise_TypeError(MP_ERROR_TEXT("extra keyword arguments given"));
         }
@@ -406,6 +417,7 @@ static mp_obj_t spibus_make(const mp_obj_type_t *type, size_t n_args, size_t n_k
     self->callback = mp_const_none;
     self->has_reset = false;
     self->deinited = false;
+    self->swap_bytes = swap_bytes;
 
     if (want_dma) {
         mp_printf(&mp_plat_print, "SPIBus loading...\n");
@@ -426,11 +438,17 @@ static mp_obj_t spibus_make(const mp_obj_type_t *type, size_t n_args, size_t n_k
     }
 
     if (!want_dma) {
-        // The common bus takes the same keywords, without dma.
+        // The common machine.SPI bus has no send_color(), so a swap can't be
+        // honoured there, and silently sending unswapped colours is worse
+        // than refusing.
+        if (swap_bytes) {
+            mp_raise_ValueError(MP_ERROR_TEXT("swap_bytes needs the DMA bus"));
+        }
+        // The common bus takes the same keywords, without dma or swap_bytes.
         mp_obj_t kw[2 * n_kw + 1];
         size_t m = 0;
         for (size_t i = 0; i < n_kw; i++) {
-            if (i != dma_kw) {
+            if (i != dma_kw && i != swap_kw) {
                 kw[2 * m] = args[2 * i];
                 kw[2 * m + 1] = args[2 * i + 1];
                 m++;
@@ -487,16 +505,40 @@ static void spibus_tx_color(int cmd, const uint8_t *buf, size_t len) {
     }
 }
 
+// memcpy that swaps the two bytes of every 16-bit word; `len` is even. A word
+// at a time when both ends are 4-aligned, which a bytearray's buffer and the
+// DMA block are, and a byte pair at a time for the odd slice of a memoryview.
+static void spibus_copy(uint8_t *dst, const uint8_t *src, size_t len, bool swap) {
+    if (!swap) {
+        memcpy(dst, src, len);
+        return;
+    }
+    size_t i = 0;
+    if ((((uintptr_t)dst | (uintptr_t)src) & 3) == 0) {
+        uint32_t *d = (uint32_t *)dst;
+        const uint32_t *s = (const uint32_t *)src;
+        for (size_t n = len / 4; n > 0; n--) {
+            uint32_t w = *s++;
+            *d++ = ((w & 0x00FF00FFu) << 8) | ((w >> 8) & 0x00FF00FFu);
+        }
+        i = len & ~(size_t)3;
+    }
+    for (; i + 1 < len; i += 2) {
+        dst[i] = src[i + 1];
+        dst[i + 1] = src[i];
+    }
+}
+
 // Copy `len` bytes into the DMA block and queue them, after `cmd` unless it
 // is -1. Waits first for the transfers ahead, which also keeps the order of
 // commands and data on the wire.
-static void spibus_queue_data(int cmd, const uint8_t *data, size_t len) {
+static void spibus_queue_data(int cmd, const uint8_t *data, size_t len, bool swap) {
     if (!spibus_wait_inflight(0)) {
         spibus_raise_timeout();
     }
     if (len <= s_dma.ring_size) {
         // One send: esp_lcd splits it into chunks and holds chip select.
-        memcpy(s_dma.ring, data, len);
+        spibus_copy(s_dma.ring, data, len, swap);
         spibus_tx_color(cmd, s_dma.ring, len);
         return;
     }
@@ -510,7 +552,7 @@ static void spibus_queue_data(int cmd, const uint8_t *data, size_t len) {
         }
         size_t n = len > SPIBUS_CHUNK ? SPIBUS_CHUNK : len;
         uint8_t *buf = s_dma.ring + slot * SPIBUS_CHUNK;
-        memcpy(buf, data, n);
+        spibus_copy(buf, data, n, swap);
         spibus_tx_color(cmd, buf, n);
         slot = (slot + 1) % slots;
         cmd = -1;
@@ -519,7 +561,9 @@ static void spibus_queue_data(int cmd, const uint8_t *data, size_t len) {
     }
 }
 
-static mp_obj_t spibus_send(size_t n_args, const mp_obj_t *args) {
+// send() and send_color(): `colour` says the data is pixels, which the bus
+// swaps when it was built with swap_bytes=True.
+static mp_obj_t spibus_send_impl(size_t n_args, const mp_obj_t *args, bool colour) {
     spibus_obj_t *self = MP_OBJ_TO_PTR(args[0]);
     mp_obj_t command = (n_args > 1) ? args[1] : mp_const_none;
     mp_obj_t data = (n_args > 2) ? args[2] : mp_const_none;
@@ -540,13 +584,17 @@ static mp_obj_t spibus_send(size_t n_args, const mp_obj_t *args) {
             mp_get_buffer(data, &bufinfo, MP_BUFFER_READ);
         }
 
+        const bool swap = colour && self->swap_bytes;
+        if (swap && (bufinfo.len & 1)) {
+            mp_raise_ValueError(MP_ERROR_TEXT("swap_bytes needs whole 16-bit words"));
+        }
         if (bufinfo.len > SPIBUS_PARAM_MAX) {
-            spibus_queue_data(cmd, bufinfo.buf, bufinfo.len);
+            spibus_queue_data(cmd, bufinfo.buf, bufinfo.len, swap);
         } else if (cmd >= 0 || bufinfo.len > 0) {
             if (!spibus_wait_inflight(0)) {
                 spibus_raise_timeout();
             }
-            memcpy(s_dma.param_buf, bufinfo.buf, bufinfo.len);
+            spibus_copy(s_dma.param_buf, bufinfo.buf, bufinfo.len, swap);
             esp_err_t err = esp_lcd_panel_io_tx_param(s_dma.io, cmd,
                 bufinfo.len ? s_dma.param_buf : NULL, bufinfo.len);
             if (err != ESP_OK) {
@@ -561,7 +609,17 @@ static mp_obj_t spibus_send(size_t n_args, const mp_obj_t *args) {
     }
     return mp_const_none;
 }
+static mp_obj_t spibus_send(size_t n_args, const mp_obj_t *args) {
+    return spibus_send_impl(n_args, args, false);
+}
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(spibus_send_obj, 1, 3, spibus_send);
+
+// send(command, data) for pixel data: the same, except that a bus built with
+// swap_bytes=True swaps each 16-bit word as it copies the data.
+static mp_obj_t spibus_send_color(size_t n_args, const mp_obj_t *args) {
+    return spibus_send_impl(n_args, args, true);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(spibus_send_color_obj, 1, 3, spibus_send_color);
 
 static mp_obj_t spibus_busy(mp_obj_t self_in) {
     spibus_obj_t *self = MP_OBJ_TO_PTR(self_in);
@@ -603,6 +661,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(spibus_deinit_obj, spibus_deinit);
 static const mp_rom_map_elem_t spibus_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_reset), MP_ROM_PTR(&spibus_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_send), MP_ROM_PTR(&spibus_send_obj) },
+    { MP_ROM_QSTR(MP_QSTR_send_color), MP_ROM_PTR(&spibus_send_color_obj) },
     { MP_ROM_QSTR(MP_QSTR_busy), MP_ROM_PTR(&spibus_busy_obj) },
     { MP_ROM_QSTR(MP_QSTR_wait), MP_ROM_PTR(&spibus_wait_obj) },
     { MP_ROM_QSTR(MP_QSTR_register_callback), MP_ROM_PTR(&spibus_register_callback_obj) },

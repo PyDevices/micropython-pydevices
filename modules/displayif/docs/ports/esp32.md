@@ -34,7 +34,7 @@ common bus, so a board config written for any port runs unchanged:
 spibus.SPIBus(
     *, id=2, baudrate=24_000_000, polarity=0, phase=0, bits=8,
     lsb_first=False, soft=False, sck=-1, mosi=-1, miso=-1,
-    command=-1, chip_select=-1, reset=-1, dma=None,
+    command=-1, chip_select=-1, reset=-1, dma=None, swap_bytes=False,
 )
 ```
 
@@ -93,6 +93,41 @@ of a frame is queued at once. While waiting for a transfer the bus
 releases the GIL, so other threads run. `deinit()`, `__del__` and a soft reset
 wait for queued transfers (up to a second), then free the panel IO, the SPI
 host and the buffers.
+
+#### Swapping colour bytes in the bus's copy
+
+A panel that wants its 16-bit colours in the other byte order than your frame
+buffer has them in costs a pass over every frame if the driver swaps the
+buffer itself. `swap_bytes=True` has the bus do it instead, as it copies the
+data into its own DMA buffers, and leaves your buffer as it was:
+
+```python
+bus = spibus.SPIBus(id=2, baudrate=40_000_000, sck=18, mosi=13, command=38,
+                    chip_select=12, swap_bytes=True)
+bus.send_color(0x2C, frame)   # each 16-bit word goes out byte-swapped
+```
+
+Only `send_color(command, data)` swaps. `send()` never does, because commands
+and their parameters aren't colours, so a driver sends its pixel writes with
+`send_color()` and everything else with `send()`. `displaydev`'s `BusDisplay`
+already prefers `send_color()` when the bus has one, so pass it
+`reverse_bytes_in_word=False` (or the driver swaps a second time). The data must
+be a whole number of 16-bit words. Without `swap_bytes`, `send_color()` is
+`send()`. The bus refuses `swap_bytes=True` where it would use the blocking bus
+(`soft=True`, `dma=False`, a `miso` pin and the other cases above), which has no
+`send_color()`.
+
+On an ST7789 at 40 MHz on an ESP32-S3 with the frame in PSRAM, `blit_rect()`
+returned after, with `ulab`'s in-place swap in the driver and with `swap_bytes`:
+
+| Blit | Driver swaps | `swap_bytes=True` |
+|------|--------------|-------------------|
+| 240 x 240 (115,200 bytes) | 28.8 ms | 24.0 ms |
+| 240 x 60 (28,800 bytes) | 1.54 ms | 0.76 ms |
+| 64 x 64 (8,192 bytes) | 0.65 ms | 0.42 ms |
+| 16 x 16 (512 bytes) | 0.39 ms | 0.30 ms |
+
+The full frame is then limited by the wire (115,200 bytes at 40 MHz is 23 ms).
 
 #### Measuring it
 
