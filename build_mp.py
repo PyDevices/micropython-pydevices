@@ -386,9 +386,11 @@ def lvgl_checkout(ws):
 # every other module, anywhere else a clone at the pinned commit. The tree is
 # assembled into deps/omnipython-lib on every build that needs it; the outside
 # packages the library pins by tag (pygraphics, audioinstruments, audioeffects) are
-# cloned once into deps/omnipython-lib-sources. In the workspace those come
-# from the sibling checkouts instead, the way every module does, so a
-# workspace build freezes the code beside it rather than the pinned tag.
+# cloned once into deps/omnipython-lib-sources, at the tag lib-lock.json names,
+# so a build reproduces what DEPENDENCIES.lock describes. To develop one of
+# them across repositories, pass --library-siblings: in the workspace those
+# packages then come from the sibling checkouts instead, whatever commit they
+# are on.
 LIBRARY = "omnipython-lib"
 
 
@@ -418,8 +420,9 @@ def library_checkout(ws):
 class Library:
     """The library tree, assembled the first time a build asks for it."""
 
-    def __init__(self, ws):
+    def __init__(self, ws, siblings=False):
         self.ws = ws
+        self.siblings = siblings
         self.source = None
         self.tree = None
 
@@ -444,8 +447,9 @@ class Library:
 
     def sibling_sources(self):
         """[(package, checkout)] for each package the library's lib-lock.json pins
-        from another repository that the workspace has a checkout of."""
-        if not self.ws:
+        from another repository that the workspace has a checkout of; empty unless
+        --library-siblings asked for them, so the pinned tags are what freezes."""
+        if not self.ws or not self.siblings:
             return []
         try:
             pinned = json.loads((self.source / "lib-lock.json").read_text())["pinned"]
@@ -2104,7 +2108,7 @@ def build_circuitpython(args, make_extra, ws):
             die("--modules: not given, and there is no terminal to ask on")
         say("Modules: " + ", ".join(module_choices()))
         spec = input('Which (comma list; full paths for others; empty for none)? ').strip()
-    library = Library(ws)
+    library = Library(ws, args.library_siblings)
     spec, module_dirs, library_packages = resolve_modules(spec, library, "circuitpython", lambda: lvgl_checkout(ws))
     if library_packages or any(LIBRARY in (d.resolve() / "manifest.py").read_text()
                                for d in module_dirs if cp_frozen_manifest_dir(d)):
@@ -2250,6 +2254,10 @@ def main():
     ap.add_argument("--coredump", action="store_true",
                     help="esp32: a troubleshooting build that writes a core dump to flash on a crash (standard builds don't)")
     ap.add_argument("--clean", action="store_true", help="delete this target's build dir first")
+    ap.add_argument("--library-siblings", action="store_true",
+                    help="in a workspace, freeze the omnipython-lib packages that come from other repositories "
+                    "(audioinstruments, audioeffects, pygraphics...) from their sibling checkouts, whatever commit "
+                    "those are on, instead of the tags lib-lock.json pins")
     args, make_extra = ap.parse_known_args()
     if args.coredump and args.interpreter != "micropython":
         die("--coredump is for MicroPython on esp32")
@@ -2334,7 +2342,7 @@ def main():
             die("--modules: not given, and there is no terminal to ask on")
         say("Modules: " + ", ".join(module_choices()))
         spec = input('Which (comma list; full paths for others; "all"; empty for none)? ').strip()
-    library = Library(ws)
+    library = Library(ws, args.library_siblings)
     spec, module_dirs, library_packages = resolve_modules(spec, library, "micropython", lambda: lvgl_checkout(ws))
     lvgl_root = lvgl_in(module_dirs)
     if library_packages or uses_library(module_dirs, frozen_manifest(port, board, variant)):

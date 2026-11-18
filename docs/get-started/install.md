@@ -60,7 +60,11 @@ port that is still missing something stops and says so.
 
 The first run of each port fetches what it needs. Where the repositories are
 already checked out side by side, `build.py` links those sibling checkouts
-instead of fetching.
+instead of fetching. The library's packages from other repositories
+(`audioinstruments`, `audioeffects`, `pygraphics`) are the exception: a build
+freezes them at the tags `DEPENDENCIES.lock` leads to, so it matches what
+others build. To freeze your sibling checkouts of them instead, whatever commit
+they are on, add `--library-siblings`.
 
 An esp32 build's first run clones ESP-IDF into the clone's `deps/` and
 installs its toolchains, for every ESP chip, under `~/.espressif`, outside the
