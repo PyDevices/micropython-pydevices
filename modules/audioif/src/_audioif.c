@@ -55,6 +55,11 @@
 // firmware once; it is the reason audiopump.driver() exists.
 #if defined(AUDIOIF_DRIVER_ESP32) || defined(ESP_PLATFORM)
 #include "driver/i2s_std.h"
+#include "driver/gpio.h"
+#include "soc/soc_caps.h"
+#if SOC_I2S_SUPPORTS_PDM_RX
+#include "driver/i2s_pdm.h"
+#endif
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_rom_sys.h"
@@ -1215,6 +1220,12 @@ static void audiopump_i2s_close_rx_alone(void) {
         i2s_channel_disable(audiopump_i2s_rx);
         i2s_del_channel(audiopump_i2s_rx);
         audiopump_i2s_rx = NULL;
+        if (audiopump_i2s_rx_live.pdm) {
+            // The microphone's pins go back to plain GPIO, as CircuitPython's
+            // deinit does, so the next owner starts from a clean pad.
+            gpio_reset_pin((gpio_num_t)audiopump_i2s_rx_live.bclk);
+            gpio_reset_pin((gpio_num_t)audiopump_i2s_rx_live.din);
+        }
     }
     audiopump_i2s_rx_alone = false;
 }
@@ -1872,8 +1883,11 @@ static MP_DEFINE_CONST_FUN_OBJ_0(audiopump_i2s_starved_bytes_obj,
 // records at half speed.
 static void audiopump_i2s_open_rx_only(const audiopump_i2s_cfg_t *cfg) {
     audiopump_arm_guard();
+    // PDM receive is I2S0's alone: the PDM-to-PCM filter is not on the others,
+    // and an automatic port would be the first free one, which can be I2S1.
     i2s_chan_config_t chan_config = I2S_CHANNEL_DEFAULT_CONFIG(
-        cfg->port < 0 ? I2S_NUM_AUTO : (i2s_port_t)cfg->port,
+        cfg->pdm ? I2S_NUM_0
+        : (cfg->port < 0 ? I2S_NUM_AUTO : (i2s_port_t)cfg->port),
         I2S_ROLE_MASTER);
     chan_config.dma_desc_num = (uint32_t)cfg->dma_desc;
     chan_config.dma_frame_num = (uint32_t)cfg->dma_frame;
@@ -1886,6 +1900,51 @@ static void audiopump_i2s_open_rx_only(const audiopump_i2s_cfg_t *cfg) {
         }
         mp_raise_OSError(MP_EIO);
     }
+    #if SOC_I2S_SUPPORTS_PDM_RX
+    if (cfg->pdm) {
+        // The microphone's two edges are the two slots, so the channel is
+        // opened STEREO and the recorder keeps the slot it wants, as the
+        // standard-mode channel below does.
+        i2s_pdm_rx_config_t pdm_cfg = {
+            .clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG((uint32_t)cfg->rate),
+            .slot_cfg = I2S_PDM_RX_SLOT_DEFAULT_CONFIG(
+                I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+            .gpio_cfg = {
+                .clk = (gpio_num_t)cfg->bclk,
+                .din = (gpio_num_t)cfg->din,
+                .invert_flags = { .clk_inv = false },
+            },
+        };
+        pdm_cfg.slot_cfg.slot_mask = I2S_PDM_SLOT_BOTH;
+        err = i2s_channel_init_pdm_rx_mode(audiopump_i2s_rx, &pdm_cfg);
+        if (err == ESP_OK) {
+            i2s_event_callbacks_t pdm_cbs = { .on_recv = audiopump_on_recv };
+            err = i2s_channel_register_event_callback(audiopump_i2s_rx,
+                &pdm_cbs, NULL);
+        }
+        if (err == ESP_OK) {
+            audiopump_rx_bytes = 0;
+            err = i2s_channel_enable(audiopump_i2s_rx);
+        }
+        if (err != ESP_OK) {
+            i2s_del_channel(audiopump_i2s_rx);
+            audiopump_i2s_rx = NULL;
+            if (err == ESP_ERR_INVALID_ARG) {
+                mp_raise_ValueError(MP_ERROR_TEXT("sample_rate"));
+            }
+            mp_raise_OSError(MP_EIO);
+        }
+        audiopump_i2s_rx_alone = true;
+        audiopump_i2s_rx_live = *cfg;
+        return;
+    }
+    #else
+    if (cfg->pdm) {
+        i2s_del_channel(audiopump_i2s_rx);
+        audiopump_i2s_rx = NULL;
+        mp_raise_NotImplementedError(MP_ERROR_TEXT("PDMIn"));
+    }
+    #endif
     const i2s_data_bit_width_t width = cfg->bits == 32
         ? I2S_DATA_BIT_WIDTH_32BIT
         : (cfg->bits == 8 ? I2S_DATA_BIT_WIDTH_8BIT : I2S_DATA_BIT_WIDTH_16BIT);
@@ -1945,8 +2004,14 @@ uint32_t audiopump_i2s_rx_begin(const audiopump_i2s_cfg_t *cfg, uint32_t ring,
     // An output holding a TX/RX pair: join it. An output holding TX alone:
     // a recorder on its clocks has nothing to join, and one on other pins
     // gets a receive-only channel of its own.
-    const bool join = audiopump_i2s_tx != NULL && audiopump_i2s_rx != NULL
-        && !audiopump_i2s_rx_alone;
+    if (cfg->pdm && audiopump_i2s_rx != NULL) {
+        // An output's duplex pair or another receive channel has the RX half,
+        // and PDM mode can't be opened on a channel that is already in
+        // another mode.
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("Peripheral in use"));
+    }
+    const bool join = !cfg->pdm && audiopump_i2s_tx != NULL
+        && audiopump_i2s_rx != NULL && !audiopump_i2s_rx_alone;
     if (audiopump_i2s_tx != NULL && !join
         && (cfg->dout >= 0 || cfg->bclk == audiopump_i2s_live.bclk
             || cfg->ws == audiopump_i2s_live.ws)) {

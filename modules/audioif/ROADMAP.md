@@ -9,11 +9,6 @@ to [issues](https://github.com/PyDevices/omnipython-builds/issues).
   slot rather than mixing, `I2SOut` plays `(L + R) / 2` so neither channel is
   lost. Boards state how their wire reaches their speaker.
 
-## Capture
-
-- `audiobusio.PDMIn` on an ESP32, through its I2S peripheral's PDM mode, as
-  an STM32H7 already records one through DFSDM.
-
 ## Examples
 
 - Audio from one board to another over I2S, with no network: a sender that

@@ -1063,11 +1063,14 @@ MP_DEFINE_CONST_OBJ_TYPE(
 // decimation filter. An STM32H7 has one, DFSDM, and audioin_stm32.c is the
 // class there.
 //
+// An ESP32 has one too: the I2S peripheral's PDM receive mode, in
+// audiobusio_pdmin.c, which on a chip without it says so itself.
+//
 // Elsewhere the name exists and says so, which is displayif's precedent for a
 // bus a port cannot do (src/ports/common/notimpl/): a NotImplementedError
 // naming the class, rather than an AttributeError that reads like a typo.
 
-#if defined(AUDIOIF_DRIVER_STM32)
+#if defined(AUDIOIF_DRIVER_STM32) || defined(AUDIOIF_DRIVER_ESP32)
 extern const mp_obj_type_t audiobusio_pdmin_type;
 #else
 static mp_obj_t audiobusio_pdmin_make_new(const mp_obj_type_t *type,
