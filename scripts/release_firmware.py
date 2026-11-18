@@ -29,8 +29,13 @@ on Linux or WSL.
         Release's notes (to FILE, or stdout). A set built from preview pins
         only takes a tag that starts with "staged-", so publishing it by
         accident would look wrong. With --previous, the firmware.json of the
-        last set people could download, the notes name every board whose
+        set to compare with, the notes name every board whose
         filesystem this set moves. This is what the workflow's draft step runs.
+
+    release_firmware.py previous <releases.json>
+        From the API's release list, print "<firmware.json asset id> <tag>" of
+        the set to compare with: the newest published one, else the newest
+        draft. Prints nothing when there is none.
 
     release_firmware.py cells
         List the cells.
@@ -763,6 +768,14 @@ def fs_text(b):
     return f"{b['fs_bytes'] // 1024:,} KB at {b['fs_offset']}" if b.get("fs_offset") else ""
 
 
+def pick_previous(releases):
+    """The release to compare a new set with, from the GitHub API's release list (newest first):
+    the newest published one that carries a firmware.json, else the newest draft that does,
+    else None. Drafts are all there is before the first publication."""
+    withset = [r for r in releases if any(a.get("name") == "firmware.json" for a in r.get("assets") or [])]
+    return next((r for r in withset if not r.get("draft")), withset[0] if withset else None)
+
+
 def moved(doc, previous):
     """The builds whose filesystem isn't where the previous set put it."""
     before = {b["id"]: b for b in (previous or {}).get("builds", []) if b.get("fs_offset")}
@@ -788,9 +801,16 @@ def notes(doc, previous=None):
                   "leaves it with an empty filesystem, so copy its files off first, and put them back after.", ""]
         lines += [f"- {b['label']}, {kind_of(b)}: {fs_text(b)}, was {fs_text(old)}" for b, old in shifted]
         lines += [""]
-    lines += ["**Before you flash,** copy your files off the board, `secrets.py` above all. Each MicroPython "
-              "board's filesystem keeps its size and place from one release to the next, as the table gives it, "
-              "and a release that moves one says so at the top. After a flash across a layout change MicroPython "
+    if previous is None:
+        lines += ["**Nothing to compare with.** No earlier set was available when these notes were written, so they "
+                  "can't say whether this one moved your board's filesystem. A board that ran another build, "
+                  "including one built from a branch or on your own machine, may keep its filesystem somewhere "
+                  "else, and then it starts empty. Compare the Filesystem column below with where yours is, and "
+                  "copy its files off first either way.", ""]
+    lines += ["**Before you flash,** copy your files off the board, `secrets.py` above all. "
+              + ("Each MicroPython board's filesystem keeps its size and place from one release to the next, as "
+                 "the table gives it, and a release that moves one says so at the top. " if previous is not None else "")
+              + "After a flash across a layout change MicroPython "
               "finds the old data where its filesystem now starts, says it looks corrupted and mounts nothing. "
               "So when the filesystem moves, or you come from another firmware (MicroPython to CircuitPython or "
               "back), run `esptool --chip <chip> erase-flash` first, then put your files back.", "",
@@ -856,6 +876,8 @@ def main(argv=None):
     n.add_argument("firmware_json")
     n.add_argument("--previous", help="the firmware.json of the last set people could download")
     n.add_argument("--out")
+    pv = sub.add_parser("previous")
+    pv.add_argument("releases_json", help="the GitHub API's release list for this repository")
     sub.add_parser("cells")
     args = ap.parse_args(argv)
     try:
@@ -865,6 +887,11 @@ def main(argv=None):
             for c in CELLS:
                 print(f"{c['id']:20} {c['interpreter']:14} {c['board']} {c['variant'] or ''}"
                       f"{'  (off by default)' if c.get('optional') else ''}")
+        elif args.cmd == "previous":
+            rel = pick_previous(json.loads(Path(args.releases_json).read_text()))
+            if rel:
+                asset = next(a for a in rel["assets"] if a["name"] == "firmware.json")
+                print(asset["id"], rel["tag_name"])
         elif args.cmd == "notes":
             doc = json.loads(Path(args.firmware_json).read_text())
             check_draft_tag(doc)

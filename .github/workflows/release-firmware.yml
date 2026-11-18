@@ -295,14 +295,16 @@ jobs:
           path: firmware
 
       # The notes name every board whose filesystem this set moves, against the
-      # newest set people could download (a published release, pre-releases too).
+      # newest published set, or the newest draft while nothing is published yet.
       - name: The tag may go on a draft, and the Release's notes
         run: |
-          prev=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-            --jq '[.[] | select(.draft | not) | select(any(.assets[]; .name == "firmware.json"))][0].tag_name // empty')
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          read -r asset prev < <(python3 scripts/release_firmware.py previous "$RUNNER_TEMP/releases.json") || true
           previous=()
-          if [[ -n "$prev" ]]; then
-            gh release download "$prev" -p firmware.json -D "$RUNNER_TEMP/previous"
+          if [[ -n "${asset:-}" ]]; then
+            mkdir -p "$RUNNER_TEMP/previous"
+            gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$asset" \
+              > "$RUNNER_TEMP/previous/firmware.json"
             previous=(--previous "$RUNNER_TEMP/previous/firmware.json")
             echo "comparing with $prev"
           fi

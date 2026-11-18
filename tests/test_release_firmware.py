@@ -692,6 +692,26 @@ class DraftRelease(unittest.TestCase):
         self.assertIn("- ESP32-S3-Touch-LCD-7, MicroPython: 2,624 KB at 0x570000, was 2,432 KB at 0x5a0000", text)
         self.assertNotIn("- ESP32-S3-Touch-LCD-4.3", text)
 
+    def test_the_notes_without_a_previous_set_say_they_cannot_say_what_moved(self):
+        text = rf.notes(self.doc)
+        self.assertIn("**Nothing to compare with.**", text)
+        self.assertIn("copy its files off first", text)
+        self.assertIn("Filesystem column", text)
+        previous = json.loads(json.dumps(self.doc))
+        previous["tag"] = "v1.30.0-20261101"
+        self.assertNotIn("Nothing to compare with", rf.notes(self.doc, previous))
+
+    def test_the_previous_set_is_the_newest_published_one_else_the_newest_draft(self):
+        def rel(tag, draft, manifest=True):
+            return {"id": len(tag), "tag_name": tag, "draft": draft,
+                    "assets": [{"id": 7, "name": "firmware.json" if manifest else "x.bin"}]}
+        drafts = [rel("staged-b", True), rel("staged-a", True)]
+        self.assertEqual(rf.pick_previous(drafts)["tag_name"], "staged-b")
+        mixed = [rel("staged-c", True), rel("v1.30.0-20261101", False), rel("v1.29.0-20260901", False)]
+        self.assertEqual(rf.pick_previous(mixed)["tag_name"], "v1.30.0-20261101")
+        self.assertIsNone(rf.pick_previous([rel("junk", False, manifest=False)]))
+        self.assertIsNone(rf.pick_previous([]))
+
     def test_the_command_reads_the_previous_set(self):
         j = self.root / "out" / "firmware.json"
         previous = json.loads(j.read_text())
