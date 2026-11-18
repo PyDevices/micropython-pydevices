@@ -226,6 +226,16 @@ by board_config (not `Display`). CircuitPython-only kwargs (`rotation`,
 `brightness`, `backlight_pin`, `backlight_on_high`, `native_frames_per_second`)
 are not accepted.
 
+Two more optional kwargs suit a DSI-to-HDMI bridge such as the Lontium LT8912B.
+`output_color_depth` (16, 18 or 24; default 16) sets the pixel format on the DSI
+wire only: the framebuffer stays RGB565, and the P4's DSI bridge converts each
+pixel on the way out, so `blit`, `fill_rect` and the buffer protocol are
+unchanged. CircuitPython has no name for this, so it is a displayif extra.
+`low_power_blanking=False` keeps the lanes in high-speed mode during blanking
+instead of dropping to low power, which some bridges need to lock. Both work on
+ESP-IDF v5.5.4 and v6. The default of each matches the behaviour before they
+existed.
+
 | Topic | Behavior |
 |-------|----------|
 | `refresh()` | Full-FB `esp_cache_msync` + `esp_lcd_panel_draw_bitmap` |
