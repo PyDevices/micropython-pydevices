@@ -73,7 +73,7 @@ espressif__esp_hosted https://github.com/espressif/esp-hosted-mcu.git 627d5d9046
 # source tree. Always our own checkout in deps/, never a link to a sibling. Its
 # core is MicroPython 1.29, like the micropython pin, and its espressif port
 # moved to ESP-IDF 6.1.
-circuitpython     https://github.com/adafruit/circuitpython.git       d53b2277cfad71589028e5da77c984c045db990d  # tag 11.0.0-alpha.2
+circuitpython     https://github.com/adafruit/circuitpython.git       792011f19a7f95274d14c8114d9957d5fde2bc7f  # tag 11.0.0-alpha.3
 
 # Downloads: <name> <archive-url> <version>. A build unpacks one into deps/
 # and refuses it if its files say another version.
