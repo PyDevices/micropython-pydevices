@@ -6,8 +6,9 @@
 
 Built on the ESP32-P4, the MIMXRT1176 and the STM32H747/H757; elsewhere the
 module imports and its constructors raise `NotImplementedError`. A
-`Display` is a buffer of RGB565 pixels that displaydev's ``FBDisplay``
-draws into.
+`Display` is a buffer of RGB565 pixels (RGB888 on the ESP32-P4 with
+``color_depth=24``) that displaydev's ``FBDisplay`` draws into. A Python class
+can subclass it, as CircuitPython's drivers for DSI bridges do.
 """
 
 from typing import Any
@@ -18,17 +19,27 @@ class Bus:
     """The DSI host and its PHY.
 
     Args:
-        frequency: The bit rate of each data lane, in Hz.
+        minimum_frequency: The least bit rate of each data lane, in Hz. The
+            ESP32-P4's PHY makes only certain rates, so the bus runs at the
+            first of them that is at least this; read it back as
+            ``frequency``.
         num_lanes: The number of data lanes, 1 to 4 (1 or 2 on the
             STM32H747).
         ldo_chan: ESP32-P4 only: the LDO channel that powers the DSI PHY.
         ldo_voltage_mv: ESP32-P4 only: that LDO's voltage, in millivolts.
     """
 
+    frequency: int
+    """The bit rate of each data lane the bus really runs at, in Hz. On the
+    ESP32-P4 it is read from the PHY on ESP-IDF v5.5.4 only. 0 after
+    `deinit`."""
+    num_lanes: int
+    """The number of data lanes. 0 after `deinit`."""
+
     def __init__(
         self,
         *,
-        frequency: int = 500_000_000,
+        minimum_frequency: int = 500_000_000,
         num_lanes: int = 2,
         ldo_chan: int = 3,
         ldo_voltage_mv: int = 2500,
@@ -39,8 +50,8 @@ class Bus:
 class Display:
     """A DSI panel in video mode, scanning a framebuffer.
 
-    Supports the buffer protocol: the bytes are the framebuffer, RGB565,
-    ``row_stride`` bytes per row.
+    Supports the buffer protocol: the bytes are the framebuffer, RGB565 (RGB888
+    with ``color_depth=24``), ``row_stride`` bytes per row.
 
     Args:
         bus: The `Bus` the panel is on.
@@ -60,13 +71,17 @@ class Display:
             ``pixel_clock_frequency``.
         virtual_channel: The DSI virtual channel, 0 to 3 on the ESP32-P4;
             0 elsewhere.
-        color_depth: Bits per pixel; only 16 is supported.
+        color_depth: The framebuffer's bits per pixel: 16 (RGB565). The
+            ESP32-P4 also takes 24 (RGB888, which goes out on the wire as
+            24 bits).
         non_burst: ESP32-P4 only: non-burst video with sync pulses.
         continuous_clock: ESP32-P4 only: keep the clock lane in high-speed
             mode between lines.
         output_color_depth: ESP32-P4 only: bits per pixel on the DSI wire,
-            16, 18 or 24. The framebuffer stays RGB565 whatever this is: the
-            DSI bridge converts each pixel on the way out.
+            16, 18 or 24, which saves memory against a 24-bit framebuffer.
+            With ``color_depth=16`` the framebuffer stays RGB565 whatever this
+            is: the DSI bridge converts each pixel on the way out. The default
+            is ``color_depth``, and 24-bit pixels only go out as 24.
         low_power_blanking: ESP32-P4 only: let the lanes drop to low power
             during blanking. ``False`` keeps them in high-speed mode, which
             some DSI-to-HDMI bridges need.
@@ -75,8 +90,11 @@ class Display:
     width: int
     height: int
     row_stride: int
+    color_depth: int
+    """ESP32-P4 only: the framebuffer's bits per pixel."""
     pixel_clock_frequency: int
-    """STM32H747 only: the pixel clock the display runs at, in Hz."""
+    """The pixel clock the display runs at, in Hz. On the ESP32-P4 it is read
+    from the DPI divider on ESP-IDF v5.5.4 only."""
 
     def __init__(
         self,
@@ -96,7 +114,7 @@ class Display:
         color_depth: int = 16,
         non_burst: bool = False,
         continuous_clock: bool = False,
-        output_color_depth: int = 16,
+        output_color_depth: int | None = None,
         low_power_blanking: bool = True,
     ) -> None: ...
     def refresh(self, *args: Any) -> None:

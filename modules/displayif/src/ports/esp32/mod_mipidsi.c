@@ -10,6 +10,7 @@
 // (see src/include/displayif/soft_reset.h, docs/idempotent-lifecycle.md,
 // docs/soft-reset-and-bring-up.md).
 
+#include <math.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -36,7 +37,8 @@
 #include "esp_heap_caps.h"
 #include "esp_idf_version.h"
 
-/* Video mode and clock lane: ESP-IDF's DPI panel always sends burst-mode video
+/* Video mode, clock lane, and the rates the hardware really runs at: ESP-IDF's
+ * DPI panel always sends burst-mode video
  * and lets the clock lane drop to LP between lines, with no public way to ask
  * for anything else. A bridge such as the Chipone ICN6211 on Raspberry Pi-style
  * DSI panels needs non-burst video with sync pulses and a continuous HS clock,
@@ -44,17 +46,26 @@
  * inside ESP-IDF's private esp_lcd_dsi_bus_t (components/esp_lcd/dsi/
  * mipi_dsi_priv.h), whose leading fields are mirrored below. That layout is
  * checked for v5.5.4 only: on any other ESP-IDF the options raise instead of
- * reaching into a struct that may have moved. */
+ * reaching into a struct that may have moved.
+ *
+ * The same HAL context holds the lane bit rate the PHY's PLL really produced
+ * and the pixel clock the DPI divider really gave (v5.5.4 has no public call
+ * for either; later ESP-IDF has), which `Bus.frequency` and
+ * `Display.pixel_clock_frequency` report. Without the context they report the
+ * rate that was asked for. */
 #if ESP_IDF_VERSION == ESP_IDF_VERSION_VAL(5, 5, 4)
 #define MIPIDSI_VIDEO_MODE_CTRL (1)
 #include "hal/mipi_dsi_hal.h"
 #include "hal/mipi_dsi_host_ll.h"
+#include "hal/mipi_dsi_phy_ll.h"
 typedef struct {
     int bus_id;
     mipi_dsi_hal_context_t hal;
 } mipidsi_idf_dsi_bus_t;
 #else
 #define MIPIDSI_VIDEO_MODE_CTRL (0)
+#define MIPI_DSI_LL_MIN_PHY_MBPS 80
+#define MIPI_DSI_LL_MAX_PHY_MBPS 1500
 #endif
 
 #define MIPIDSI_INIT_DELAY_FLAG 0x80
@@ -62,12 +73,21 @@ typedef struct {
 #define MIPIDSI_LDO_CHAN_DEFAULT 3
 #define MIPIDSI_LDO_VOLTAGE_MV_DEFAULT 2500
 
+/* The PHY PLL and the reported rate are quantized, so a lane rate a few hertz
+ * below the minimum asked for is still the intended rate. Without this, a
+ * shortfall of a few hertz would push the link up to the next PHY step. */
+#define MIPIDSI_FREQUENCY_TOLERANCE_HZ 1000
+/* The finest step between rates the PHY can make. */
+#define MIPIDSI_PHY_STEP_MBPS 10
+#define MIPIDSI_PHY_ATTEMPTS 8
+
 typedef struct _mipidsi_bus_obj_t {
     mp_obj_base_t base;
     esp_lcd_dsi_bus_handle_t dsi_bus;
     esp_ldo_channel_handle_t ldo_phy;
     uint8_t num_lanes;
     uint32_t lane_bit_rate_mbps;
+    uint32_t frequency; /* Hz, the lane rate the PHY really runs at */
     bool deinited;
 } mipidsi_bus_obj_t;
 
@@ -79,6 +99,8 @@ typedef struct _mipidsi_display_obj_t {
     uint16_t width;
     uint16_t height;
     uint16_t row_stride;
+    uint8_t bytes_per_pixel; /* 2 (RGB565) or 3 (RGB888) */
+    uint32_t pixel_clock_frequency; /* Hz, the clock the DPI divider really gave */
     uint8_t *buf;
     size_t buf_len;
     uint8_t virtual_channel;
@@ -212,6 +234,8 @@ static void mipidsi_bus_deinit_internal(mipidsi_bus_obj_t *self) {
     if (self != NULL) {
         self->dsi_bus = NULL;
         self->ldo_phy = NULL;
+        self->frequency = 0;
+        self->num_lanes = 0;
         self->deinited = true;
     }
 }
@@ -241,13 +265,13 @@ static void mipidsi_display_deinit_internal(mipidsi_display_obj_t *self) {
 
 static mp_obj_t mipidsi_bus_make(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     enum {
-        ARG_frequency,
+        ARG_minimum_frequency,
         ARG_num_lanes,
         ARG_ldo_chan,
         ARG_ldo_voltage_mv,
     };
     static const mp_arg_t allowed_args[] = {
-        { MP_QSTR_frequency, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 500000000 } },
+        { MP_QSTR_minimum_frequency, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 500000000 } },
         { MP_QSTR_num_lanes, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 2 } },
         { MP_QSTR_ldo_chan, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = MIPIDSI_LDO_CHAN_DEFAULT } },
         { MP_QSTR_ldo_voltage_mv, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = MIPIDSI_LDO_VOLTAGE_MV_DEFAULT } },
@@ -255,8 +279,11 @@ static mp_obj_t mipidsi_bus_make(const mp_obj_type_t *type, size_t n_args, size_
     mp_arg_val_t vals[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all_kw_array(n_args, n_kw, args, MP_ARRAY_SIZE(allowed_args), allowed_args, vals);
 
-    if (vals[ARG_frequency].u_int <= 0) {
-        mp_raise_ValueError(MP_ERROR_TEXT("frequency must be positive"));
+    if (vals[ARG_minimum_frequency].u_int <= 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("minimum_frequency must be positive"));
+    }
+    if (vals[ARG_minimum_frequency].u_int > (mp_int_t)MIPI_DSI_LL_MAX_PHY_MBPS * 1000000) {
+        mp_raise_ValueError(MP_ERROR_TEXT("minimum_frequency is above what the PHY can run"));
     }
     if (vals[ARG_num_lanes].u_int <= 0 || vals[ARG_num_lanes].u_int > 4) {
         mp_raise_ValueError(MP_ERROR_TEXT("num_lanes out of range"));
@@ -270,23 +297,49 @@ static mp_obj_t mipidsi_bus_make(const mp_obj_type_t *type, size_t n_args, size_
     self->dsi_bus = NULL;
     self->ldo_phy = NULL;
     self->num_lanes = vals[ARG_num_lanes].u_int;
-    self->lane_bit_rate_mbps = (uint32_t)(vals[ARG_frequency].u_int / 1000000);
     self->deinited = false;
-    if (self->lane_bit_rate_mbps == 0) {
-        self->lane_bit_rate_mbps = 1;
-    }
 
     mipidsi_enable_phy_power(self, vals[ARG_ldo_chan].u_int, vals[ARG_ldo_voltage_mv].u_int);
 
-    esp_lcd_dsi_bus_config_t bus_config = {
-        .bus_id = 0,
-        .num_data_lanes = self->num_lanes,
-        .lane_bit_rate_mbps = self->lane_bit_rate_mbps,
-    };
-    mipidsi_raise_esp_err(esp_lcd_new_dsi_bus(&bus_config, &self->dsi_bus));
-    s_host.dsi_bus = self->dsi_bus;
-
-    return MP_OBJ_FROM_PTR(self);
+    /* The PHY's PLL makes only certain rates and rounds down. Ask for the
+     * minimum in whole Mbps, then step up until the rate it made is at least
+     * the minimum. Without the HAL's read-back (see the top of the file) the
+     * rate asked for is all there is to report. */
+    uint32_t minimum_hz = (uint32_t)vals[ARG_minimum_frequency].u_int;
+    uint32_t requested_mbps = (minimum_hz + 999999u) / 1000000u;
+    if (requested_mbps < MIPI_DSI_LL_MIN_PHY_MBPS) {
+        requested_mbps = MIPI_DSI_LL_MIN_PHY_MBPS;
+    }
+    for (int attempt = 0; attempt < MIPIDSI_PHY_ATTEMPTS; attempt++) {
+        esp_lcd_dsi_bus_config_t bus_config = {
+            .bus_id = 0,
+            .num_data_lanes = self->num_lanes,
+            .lane_bit_rate_mbps = requested_mbps,
+        };
+        mipidsi_raise_esp_err(esp_lcd_new_dsi_bus(&bus_config, &self->dsi_bus));
+        s_host.dsi_bus = self->dsi_bus;
+        self->lane_bit_rate_mbps = requested_mbps;
+        self->frequency = requested_mbps * 1000000u;
+        #if MIPIDSI_VIDEO_MODE_CTRL
+        float made_mbps = ((mipidsi_idf_dsi_bus_t *)self->dsi_bus)->hal.lane_bit_rate_mbps;
+        self->frequency = (uint32_t)lroundf(made_mbps * 1000000.0f);
+        #endif
+        if (self->frequency + MIPIDSI_FREQUENCY_TOLERANCE_HZ >= minimum_hz) {
+            return MP_OBJ_FROM_PTR(self);
+        }
+        /* The PLL rounded down: try again one step above what it made. */
+        esp_lcd_del_dsi_bus(self->dsi_bus);
+        self->dsi_bus = NULL;
+        s_host.dsi_bus = NULL;
+        requested_mbps = (uint32_t)(self->frequency / 1000000u) + MIPIDSI_PHY_STEP_MBPS;
+        if (requested_mbps > MIPI_DSI_LL_MAX_PHY_MBPS) {
+            break;
+        }
+    }
+    mipidsi_host_teardown();
+    self->ldo_phy = NULL;
+    self->deinited = true;
+    mp_raise_ValueError(MP_ERROR_TEXT("minimum_frequency is not reachable by the PHY"));
 }
 
 static mp_obj_t mipidsi_bus_deinit(mp_obj_t self_in) {
@@ -335,7 +388,7 @@ static mp_obj_t mipidsi_display_make(const mp_obj_type_t *type, size_t n_args, s
         { MP_QSTR_color_depth, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 16 } },
         { MP_QSTR_non_burst, MP_ARG_KW_ONLY | MP_ARG_BOOL, { .u_bool = false } },
         { MP_QSTR_continuous_clock, MP_ARG_KW_ONLY | MP_ARG_BOOL, { .u_bool = false } },
-        { MP_QSTR_output_color_depth, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 16 } },
+        { MP_QSTR_output_color_depth, MP_ARG_KW_ONLY | MP_ARG_OBJ, { .u_obj = mp_const_none } },
         { MP_QSTR_low_power_blanking, MP_ARG_KW_ONLY | MP_ARG_BOOL, { .u_bool = true } },
     };
     mp_arg_val_t vals[MP_ARRAY_SIZE(allowed_args)];
@@ -349,11 +402,19 @@ static mp_obj_t mipidsi_display_make(const mp_obj_type_t *type, size_t n_args, s
     if (bus->deinited || bus->dsi_bus == NULL || s_host.dsi_bus == NULL) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("MIPI DSI bus is not initialized"));
     }
-    if (vals[ARG_color_depth].u_int != 16) {
-        mp_raise_ValueError(MP_ERROR_TEXT("only color_depth=16 is supported"));
+    /* color_depth is the framebuffer's, as in CircuitPython: RGB565 or RGB888.
+     * output_color_depth is ours: what goes on the wire, which only a 16-bit
+     * framebuffer may differ from. The default is the framebuffer's depth. */
+    int color_depth = vals[ARG_color_depth].u_int;
+    if (color_depth != 16 && color_depth != 24) {
+        mp_raise_ValueError(MP_ERROR_TEXT("color_depth must be 16 or 24"));
+    }
+    int output_color_depth = color_depth;
+    if (vals[ARG_output_color_depth].u_obj != mp_const_none) {
+        output_color_depth = mp_obj_get_int(vals[ARG_output_color_depth].u_obj);
     }
     lcd_color_format_t out_color_format;
-    switch (vals[ARG_output_color_depth].u_int) {
+    switch (output_color_depth) {
         case 16:
             out_color_format = LCD_COLOR_FMT_RGB565;
             break;
@@ -365,6 +426,9 @@ static mp_obj_t mipidsi_display_make(const mp_obj_type_t *type, size_t n_args, s
             break;
         default:
             mp_raise_ValueError(MP_ERROR_TEXT("output_color_depth must be 16, 18 or 24"));
+    }
+    if (color_depth == 24 && output_color_depth != 24) {
+        mp_raise_ValueError(MP_ERROR_TEXT("a color_depth of 24 goes out as 24"));
     }
     if (vals[ARG_width].u_int <= 0 || vals[ARG_height].u_int <= 0) {
         mp_raise_ValueError(MP_ERROR_TEXT("width and height must be positive"));
@@ -400,16 +464,15 @@ static mp_obj_t mipidsi_display_make(const mp_obj_type_t *type, size_t n_args, s
 
     mipidsi_send_init_sequence(io, init_bufinfo.buf, init_bufinfo.len);
 
-    uint32_t dpi_clock_mhz = (uint32_t)(vals[ARG_pixel_clock_frequency].u_int / 1000000);
-    if (dpi_clock_mhz == 0) {
-        dpi_clock_mhz = 1;
-    }
+    /* ESP-IDF takes the clock in MHz as a float, so a rate such as HDMI's
+     * 74.25 MHz reaches it whole. */
+    float dpi_clock_mhz = (float)vals[ARG_pixel_clock_frequency].u_int / 1000000.0f;
 
     esp_lcd_dpi_panel_config_t dpi_config = {
         .virtual_channel = virtual_channel,
         .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
         .dpi_clock_freq_mhz = dpi_clock_mhz,
-        .in_color_format = LCD_COLOR_FMT_RGB565,
+        .in_color_format = color_depth == 24 ? LCD_COLOR_FMT_RGB888 : LCD_COLOR_FMT_RGB565,
         .out_color_format = out_color_format,
         .flags.disable_lp = !vals[ARG_low_power_blanking].u_bool,
         .video_timing = {
@@ -427,8 +490,11 @@ static mp_obj_t mipidsi_display_make(const mp_obj_type_t *type, size_t n_args, s
     esp_lcd_panel_handle_t panel = NULL;
     mipidsi_raise_esp_err(esp_lcd_new_panel_dpi(bus->dsi_bus, &dpi_config, &panel));
     s_host.panel = panel;
+    uint32_t pixel_clock_frequency = (uint32_t)vals[ARG_pixel_clock_frequency].u_int;
     #if MIPIDSI_VIDEO_MODE_CTRL
     mipi_dsi_hal_context_t *hal = &((mipidsi_idf_dsi_bus_t *)bus->dsi_bus)->hal;
+    /* The DPI divider is an integer: this is the clock it really gave. */
+    pixel_clock_frequency = (uint32_t)lroundf(hal->real_dpi_clock_freq_mhz * 1000000.0f);
     if (vals[ARG_non_burst].u_bool) {
         /* Before panel init, which turns video mode on. */
         mipi_dsi_host_ll_dpi_set_video_burst_type(hal->host, MIPI_DSI_LL_VIDEO_NON_BURST_WITH_SYNC_PULSES);
@@ -448,7 +514,9 @@ static mp_obj_t mipidsi_display_make(const mp_obj_type_t *type, size_t n_args, s
     self->panel = panel;
     self->width = vals[ARG_width].u_int;
     self->height = vals[ARG_height].u_int;
-    self->row_stride = self->width * sizeof(uint16_t);
+    self->bytes_per_pixel = color_depth / 8;
+    self->pixel_clock_frequency = pixel_clock_frequency;
+    self->row_stride = self->width * self->bytes_per_pixel;
     self->buf_len = (size_t)self->row_stride * self->height;
     self->buf = mipidsi_alloc_framebuffer(self->buf_len);
     if (self->buf == NULL) {
@@ -547,12 +615,12 @@ static mp_obj_t mipidsi_display_blit(size_t n_args, const mp_obj_t *args) {
     if (x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > self->width || y + h > self->height) {
         mp_raise_ValueError(MP_ERROR_TEXT("blit rect out of range"));
     }
-    size_t row_bytes = (size_t)w * sizeof(uint16_t);
+    size_t row_bytes = (size_t)w * self->bytes_per_pixel;
     if (srcinfo.len < row_bytes * (size_t)h) {
         mp_raise_ValueError(MP_ERROR_TEXT("blit buffer too small"));
     }
     const uint8_t *src = srcinfo.buf;
-    uint8_t *dst = self->buf + (size_t)y * self->row_stride + (size_t)x * sizeof(uint16_t);
+    uint8_t *dst = self->buf + (size_t)y * self->row_stride + (size_t)x * self->bytes_per_pixel;
     for (int row = 0; row < h; row++) {
         memcpy(dst, src, row_bytes);
         dst += self->row_stride;
@@ -577,11 +645,15 @@ static mp_obj_t mipidsi_display_fill_rect(size_t n_args, const mp_obj_t *args) {
     int y = mp_obj_get_int(args[2]);
     int w = mp_obj_get_int(args[3]);
     int h = mp_obj_get_int(args[4]);
-    uint16_t color = (uint16_t)mp_obj_get_int(args[5]);
+    uint32_t color = (uint32_t)mp_obj_get_int_truncated(args[5]);
     if (!displayif_fb_rect_ok(x, y, w, h, self->width, self->height)) {
         mp_raise_ValueError(MP_ERROR_TEXT("fill_rect out of range"));
     }
-    displayif_fb_fill_rect16(self->buf, self->row_stride, x, y, w, h, color);
+    if (self->bytes_per_pixel == 2) {
+        displayif_fb_fill_rect16(self->buf, self->row_stride, x, y, w, h, (uint16_t)color);
+    } else {
+        displayif_fb_fill_rect_packed(self->buf, self->row_stride, x, y, w, h, color, 24);
+    }
     mipidsi_msync_rows(self, y, h);
     return mp_const_none;
 }
@@ -620,6 +692,10 @@ static void mipidsi_display_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             dest[0] = mp_obj_new_int(self->height);
         } else if (attr == MP_QSTR_row_stride) {
             dest[0] = mp_obj_new_int(self->row_stride);
+        } else if (attr == MP_QSTR_color_depth) {
+            dest[0] = mp_obj_new_int(self->bytes_per_pixel * 8);
+        } else if (attr == MP_QSTR_pixel_clock_frequency) {
+            dest[0] = mp_obj_new_int_from_uint(self->pixel_clock_frequency);
         } else if (attr == MP_QSTR_refresh) {
             dest[0] = MP_OBJ_FROM_PTR(&mipidsi_display_refresh_obj);
             dest[1] = self_in;
@@ -638,6 +714,18 @@ static void mipidsi_display_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         } else if (attr == MP_QSTR___del__) {
             dest[0] = MP_OBJ_FROM_PTR(&mipidsi_display_deinit_obj);
             dest[1] = self_in;
+        }
+    }
+}
+
+static void mipidsi_bus_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    mipidsi_bus_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (dest[0] == MP_OBJ_NULL) {
+        /* What the PHY really runs at, which can be above minimum_frequency. */
+        if (attr == MP_QSTR_frequency) {
+            dest[0] = mp_obj_new_int_from_uint(self->frequency);
+        } else if (attr == MP_QSTR_num_lanes) {
+            dest[0] = mp_obj_new_int(self->num_lanes);
         }
     }
 }
@@ -673,6 +761,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     MP_QSTR_Bus,
     MP_TYPE_FLAG_NONE,
     make_new, mipidsi_bus_make,
+    attr, mipidsi_bus_attr,
     locals_dict, &mipidsi_bus_locals_dict
 );
 

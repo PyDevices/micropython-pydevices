@@ -94,18 +94,18 @@ static void mipidsi_display_deinit_internal(mipidsi_display_obj_t *self) {
 
 static mp_obj_t mipidsi_bus_make(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     enum {
-        ARG_frequency,
+        ARG_minimum_frequency,
         ARG_num_lanes,
     };
     static const mp_arg_t allowed_args[] = {
-        { MP_QSTR_frequency, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 500000000 } },
+        { MP_QSTR_minimum_frequency, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 500000000 } },
         { MP_QSTR_num_lanes, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 2 } },
     };
     mp_arg_val_t vals[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all_kw_array(n_args, n_kw, args, MP_ARRAY_SIZE(allowed_args), allowed_args, vals);
 
-    if (vals[ARG_frequency].u_int <= 0) {
-        mp_raise_ValueError(MP_ERROR_TEXT("frequency must be positive"));
+    if (vals[ARG_minimum_frequency].u_int <= 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("minimum_frequency must be positive"));
     }
     if (vals[ARG_num_lanes].u_int <= 0 || vals[ARG_num_lanes].u_int > 4) {
         mp_raise_ValueError(MP_ERROR_TEXT("num_lanes out of range"));
@@ -116,7 +116,8 @@ static mp_obj_t mipidsi_bus_make(const mp_obj_type_t *type, size_t n_args, size_
 
     mipidsi_bus_obj_t *self = mp_obj_malloc(mipidsi_bus_obj_t, type);
     self->num_lanes = vals[ARG_num_lanes].u_int;
-    self->lane_bit_rate_hz = (uint32_t)vals[ARG_frequency].u_int;
+    /* The DPHY here runs at the rate it is given, so the minimum is the rate. */
+    self->lane_bit_rate_hz = (uint32_t)vals[ARG_minimum_frequency].u_int;
     self->ready = false;
     self->deinited = false;
 
@@ -317,6 +318,17 @@ static mp_int_t mipidsi_display_get_buffer(mp_obj_t self_in, mp_buffer_info_t *b
     return 0;
 }
 
+static void mipidsi_bus_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    mipidsi_bus_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (dest[0] == MP_OBJ_NULL) {
+        if (attr == MP_QSTR_frequency) {
+            dest[0] = mp_obj_new_int_from_uint(self->deinited ? 0 : self->lane_bit_rate_hz);
+        } else if (attr == MP_QSTR_num_lanes) {
+            dest[0] = mp_obj_new_int(self->deinited ? 0 : self->num_lanes);
+        }
+    }
+}
+
 static const mp_rom_map_elem_t mipidsi_bus_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&mipidsi_bus_deinit_obj) },
     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&mipidsi_bus_deinit_obj) },
@@ -346,6 +358,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     MP_QSTR_Bus,
     MP_TYPE_FLAG_NONE,
     make_new, mipidsi_bus_make,
+    attr, mipidsi_bus_attr,
     locals_dict, &mipidsi_bus_locals_dict
 );
 

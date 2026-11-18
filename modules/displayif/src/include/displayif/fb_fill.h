@@ -38,7 +38,7 @@ static inline void displayif_fb_fill_rect16(uint8_t *buf, size_t row_stride,
 }
 
 // Fill w x h pixels at (x, y) in a buffer of `bpp` bits per pixel, where bpp
-// may be smaller than a byte. For `picodvi.Framebuffer`, the one backend here
+// may be smaller than a byte, or 24 (RGB888, which mipidsi's framebuffer can be). For `picodvi.Framebuffer`, the one backend here
 // that is not fixed at 16bpp: its `color_depth` is 1, 2, 4, 8, 16 or 32 and
 // defaults to 8 (displayif#34). Everything else should use the 16bpp fill
 // above, which is this one's fast path written out.
@@ -75,6 +75,22 @@ static inline void displayif_fb_fill_rect_packed(uint8_t *buf, size_t row_stride
                 + (size_t)x;
             for (int col = 0; col < w; col++) {
                 dst[col] = color;
+            }
+        }
+        return;
+    }
+    if (bpp == 24) {
+        // RGB888: the colour's low byte first, so 0xRRGGBB lands as B, G, R in
+        // memory, the order ESP-IDF's RGB888 and CircuitPython's both read.
+        const uint8_t b0 = (uint8_t)color;
+        const uint8_t b1 = (uint8_t)(color >> 8);
+        const uint8_t b2 = (uint8_t)(color >> 16);
+        for (int row = 0; row < h; row++) {
+            uint8_t *dst = buf + (size_t)(y + row) * row_stride + (size_t)x * 3;
+            for (int col = 0; col < w; col++) {
+                dst[col * 3] = b0;
+                dst[col * 3 + 1] = b1;
+                dst[col * 3 + 2] = b2;
             }
         }
         return;
