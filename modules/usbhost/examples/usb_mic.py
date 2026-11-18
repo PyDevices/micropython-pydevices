@@ -27,6 +27,9 @@ Also on a Waveshare ESP32-P4-WIFI6-DEV-KIT on MicroPython
 v1.30.0-preview.160.gb70ae1aca6 (built 2026-11-11), behind its onboard hub, with
 FULL_SPEED = True, hosting an Arduino GIGA R1 WiFi presenting a microphone
 (``usb.device.audio``) with a 500 Hz tone: 3 s captured, the tone at its full level.
+And on the same board and firmware built 2026-11-17, hosting an ESP32-P4 board
+presenting a microphone at high speed, with FULL_SPEED = False: 576000 bytes
+of a 500 Hz tone, peak 8000, no dropped packets.
 """
 
 import time
@@ -78,7 +81,6 @@ def main():
     if dev is None:
         print("no USB audio input found")
         print("attach a USB microphone")
-        print("note: an OmniPython board cannot present as a mic yet (usbif#7)")
         usb.core.stop()
         return
 
@@ -107,11 +109,15 @@ def main():
                 continue
             got += n
     finally:
-        peak, rms = _peak_rms(buf[:got])
-        print("got %d / %d bytes; peak=%d rms=%.1f; stats %r"
-              % (got, want, peak, rms, mic.stats()))
+        # Read the counters and stop the stream before the arithmetic: the
+        # sums below take seconds, and packets that arrive meanwhile with
+        # nobody reading would be counted as dropped.
+        stats = mic.stats()
         mic.stop()
         usb.core.stop()
+        peak, rms = _peak_rms(buf[:got])
+        print("got %d / %d bytes; peak=%d rms=%.1f; stats %r"
+              % (got, want, peak, rms, stats))
 
 
 if __name__ == "__main__":
