@@ -115,13 +115,17 @@ class I2SOut:
         pump is ahead, the opposite of `starved()`."""
 
 class PDMIn:
-    """A PDM microphone, recorded through the STM32H7's DFSDM filter.
+    """A PDM microphone: recorded through the STM32H7's DFSDM filter, or on an
+    ESP32 through the I2S peripheral's PDM receive mode.
 
-    On every other build, making one raises `NotImplementedError`.
+    On the ESP32 the PDM-to-PCM filter is on I2S0 only, so an output playing
+    through `I2SOut` has to be on port 1. A chip without PDM receive, and every
+    other build, raises `NotImplementedError` when you make one.
     """
 
     sample_rate: int
-    """The rate it really runs at: the nearest the filter can divide to."""
+    """The rate it really runs at: the nearest the STM32 filter can divide to,
+    and on an ESP32 the rate you asked for."""
 
     def __init__(
         self,
@@ -139,17 +143,20 @@ class PDMIn:
         Args:
             clock_pin: The PDM clock pin.
             data_pin: The PDM data pin.
-            sample_rate: The rate to record at. 8, 16, 24, 32 and 48 kHz are exact.
+            sample_rate: The rate to record at. On an STM32H7, 8, 16, 24, 32 and
+                48 kHz are exact.
             bit_depth: 8 or 16.
-            mono: Must be True; the board has one microphone.
-            oversample: Checked to be a multiple of 8 and otherwise unused: the
-                decimation follows the rate.
+            mono: True records one microphone. False is an ESP32's two PDM slots,
+                interleaved, and an STM32H7 raises `ValueError`.
+            oversample: A multiple of 8 from 8 to 255, checked and otherwise
+                unused: the decimation follows the rate.
             startup_delay: Seconds to wait for the microphone to settle, 0 to 1;
                 None waits 0.11.
 
         Raises:
             ValueError: A setting isn't one the board supports.
-            RuntimeError: A recording is already open.
+            RuntimeError: A recording is already open, or the ESP32's I2S0 is in
+                use.
         """
     def __enter__(self) -> "PDMIn": ...
     def __exit__(self, *exc: Any) -> None: ...

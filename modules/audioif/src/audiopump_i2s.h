@@ -51,6 +51,12 @@ typedef struct {
     // stm32 only: the audio the DAC's ring holds, in milliseconds, or 0 for
     // the default (about 93 ms). audioio.AudioOut's buffer_ms= fills it.
     int dac_ring_ms;
+    // esp32 only: 1 opens the capture channel in PDM receive mode, for
+    // audiobusio.PDMIn: `bclk` is the microphone's clock pin, `din` its data
+    // pin, `ws`, `mclk` and `msb` are unused, and `port` must be 0 or -1
+    // because only I2S0 has the PDM-to-PCM filter. The ring then holds the
+    // filter's 16-bit samples, two slots a frame like any other capture.
+    int pdm;
 } audiopump_i2s_cfg_t;
 
 // Who is holding the open channel. The output (`audiobusio.I2SOut`, or
@@ -124,6 +130,8 @@ void audiopump_i2s_shutdown(void);
 //     own (`cfg->port`, or the first free one). An output open on other pins
 //     is left alone; one on the same pins without a microphone is refused,
 //     because its TX half cannot grow an RX half under it.
+//
+// `cfg->pdm` is the last case in PDM mode: always receive-only, on I2S0.
 //
 // Samples land in the ring at the channel's width: one byte at 8 bits, two at
 // 16, four at 24 and 32. Raises; needs an nlr handler above it. Returns the

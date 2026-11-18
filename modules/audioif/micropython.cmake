@@ -62,6 +62,7 @@ add_library(usermod_audiopump INTERFACE)
 target_sources(usermod_audiopump INTERFACE
     ${AUDIOPUMP_MOD_DIR}/src/_audioif.c
     ${AUDIOPUMP_MOD_DIR}/src/audiobusio.c
+    ${AUDIOPUMP_MOD_DIR}/src/audiobusio_pdmin.c
     ${AUDIOPUMP_MOD_DIR}/src/audioi2sin.c
     ${AUDIOPUMP_MOD_DIR}/src/audioif_cache_sync.c
 )

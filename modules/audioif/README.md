@@ -246,7 +246,7 @@ for the I2S driver, so the microphone itself paces an effect graph.
 **The mono path is not written.** A board with one transducer fed by a
 two-slot wire gets the same signal in both slots and has no answer here.
 
-## `audiobusio.PDMIn` and `analogbufio.BufferedIn` — recording on an STM32H7
+## `audiobusio.PDMIn` and `analogbufio.BufferedIn` — recording on an STM32H7, and `PDMIn` on an ESP32
 
 The Arduino GIGA R1 has no I2S microphone, but it has two others: the GIGA
 Display Shield's MP34DT06J, a PDM microphone on PD3 (clock) and PC1 (data), and
@@ -289,6 +289,35 @@ ends a recording.
 
 audiodev's `pcm_in` reads the same ring, through `_audioif.pdm_open` and
 `_audioif.adc_open` below, with a high-pass near 20 Hz and a gain applied.
+
+### `PDMIn` on an ESP32
+
+An ESP32, S3 or P4 records a PDM microphone through I2S0's PDM receive mode,
+which has its own PDM-to-PCM filter in hardware:
+
+```python
+import array, audiobusio
+
+buf = array.array("H", [0] * 16000)
+with audiobusio.PDMIn(44, 47, sample_rate=16000, bit_depth=16) as mic:
+    mic.record(buf, len(buf))          # one second; clock on 44, data on 47
+```
+
+The arguments, `record()`, `sample_rate` and the errors are CircuitPython's,
+and `clock_pin` and `data_pin` take a pin number or a `machine.Pin`. The
+filter's decimation is fixed, so `oversample` is checked and not used, and
+`sample_rate` reports the rate you asked for. `mono=True` keeps the left PDM
+slot; `mono=False` returns both, interleaved. A 16-bit `'H'` buffer rests at
+32768 and a signed `'h'` (or `'b'` at 8 bits) buffer gets signed samples;
+the filter's own DC offset is left in. `record()` returns the number of
+samples. A recording runs through the same quarter-second ring as `I2SIn`,
+so a pause between two calls loses nothing.
+
+Only I2S0 has the filter, so an output on `I2SOut` that plays beside the
+microphone has to use `port=1`. While a `PDMIn` is open, a second one raises
+`RuntimeError("Peripheral in use")`; `deinit()` (or leaving the `with`) stops
+the clock and returns both pins to plain GPIO. A chip without PDM
+receive (the C3, C6) raises `NotImplementedError`.
 
 ## `_audioif` — the module this half publishes
 
