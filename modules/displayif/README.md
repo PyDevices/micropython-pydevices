@@ -61,7 +61,7 @@ RGB and DSI framebuffers prefer **PSRAM** (`MALLOC_CAP_SPIRAM`). Ensure `CONFIG_
 ## 🚀 Build
 
 Tested against the MicroPython this repository pins ([DEPENDENCIES.lock](../../DEPENDENCIES.lock)), the CircuitPython
-11.0.0-alpha.2 oracle, and SDL2 >= 2.0 (desktop `usdl2`) — see [this module's DEPENDENCIES.lock](DEPENDENCIES.lock) for the
+11.0.0-alpha.3 oracle, and SDL2 >= 2.0 (desktop `usdl2`) — see [this module's DEPENDENCIES.lock](DEPENDENCIES.lock) for the
 other pins and how to verify them locally.
 
 On MicroPython 1.29 or later, clone omnipython-builds anywhere (displayif is

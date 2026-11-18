@@ -24,9 +24,10 @@ is closed in reset_port_early(), before the board buses are deleted, when it
 is in the firmware.
 
 diff --git a/ports/espressif/CMakeLists.txt b/ports/espressif/CMakeLists.txt
+index e31099b..e100d00 100644
 --- a/ports/espressif/CMakeLists.txt
 +++ b/ports/espressif/CMakeLists.txt
-@@ -13,6 +13,20 @@ if(CIRCUITPY_ESP_HOSTED)
+@@ -28,6 +28,20 @@ if(CIRCUITPY_ESP_HOSTED)
      list(APPEND COMPONENTS esp-hosted)
  endif()
  
@@ -48,11 +49,12 @@ diff --git a/ports/espressif/CMakeLists.txt b/ports/espressif/CMakeLists.txt
  set(ENV{ESP_IDF_VERSION} "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}")
  project(circuitpython)
 diff --git a/ports/espressif/Makefile b/ports/espressif/Makefile
+index c5fb86d..dab8dce 100644
 --- a/ports/espressif/Makefile
 +++ b/ports/espressif/Makefile
-@@ -935,13 +935,19 @@ endif
+@@ -972,13 +972,19 @@ endif
  
- SDKCONFIGS := esp-idf-config/sdkconfig.defaults;$(DEBUG_SDKCONFIG);$(FLASH_SIZE_SDKCONFIG);$(FLASH_MODE_SDKCONFIG);$(FLASH_SPEED_SDKCONFIG);$(PSRAM_SDKCONFIG);$(PSRAM_SIZE_SDKCONFIG);$(PSRAM_MODE_SDKCONFIG);$(PSRAM_SPEED_SDKCONFIG);$(BLE_SDKCONFIG)$(NATIVE_SDKCONFIG);$(TARGET_SDKCONFIG);boards/$(BOARD)/sdkconfig
+ SDKCONFIGS := esp-idf-config/sdkconfig.defaults;$(DEBUG_SDKCONFIG);$(FLASH_SIZE_SDKCONFIG);$(FLASH_MODE_SDKCONFIG);$(FLASH_SPEED_SDKCONFIG);$(PSRAM_SDKCONFIG);$(PSRAM_SIZE_SDKCONFIG);$(PSRAM_MODE_SDKCONFIG);$(PSRAM_SPEED_SDKCONFIG);$(BLE_SDKCONFIG)$(NATIVE_SDKCONFIG)$(HARDWAREKEY_SDKCONFIG);$(TARGET_SDKCONFIG);boards/$(BOARD)/sdkconfig
  
 +# A user C module's ESP-IDF components (see CMakeLists.txt), as CMake lists.
 +USER_ESP_IDF_SPACE := $() $()
@@ -66,16 +68,18 @@ diff --git a/ports/espressif/Makefile b/ports/espressif/Makefile
  QSTR_GLOBAL_REQUIREMENTS += $(BUILD)/esp-idf/config/sdkconfig.h
  $(BUILD)/esp-idf/config/sdkconfig.h: boards/$(BOARD)/sdkconfig boards/$(BOARD)/mpconfigboard.mk CMakeLists.txt | $(BUILD)/esp-idf
  	$(STEPECHO) "Create $@"
--	$(Q)env IDF_PATH=$(IDF_PATH) IDF_COMPONENT_MANAGER=0 cmake -S . -B $(BUILD)/esp-idf -DSDKCONFIG=$(BUILD)/esp-idf/sdkconfig -DSDKCONFIG_DEFAULTS="$(SDKCONFIGS)" -DCMAKE_TOOLCHAIN_FILE=$(IDF_PATH)/tools/cmake/toolchain-$(IDF_TARGET).cmake -DIDF_TARGET=$(IDF_TARGET) -DCIRCUITPY_ESP_HOSTED=$(CIRCUITPY_ESP_HOSTED) -GNinja
-+	$(Q)env IDF_PATH=$(IDF_PATH) IDF_COMPONENT_MANAGER=0 cmake -S . -B $(BUILD)/esp-idf -DSDKCONFIG=$(BUILD)/esp-idf/sdkconfig -DSDKCONFIG_DEFAULTS="$(SDKCONFIGS)" -DCMAKE_TOOLCHAIN_FILE=$(IDF_PATH)/tools/cmake/toolchain-$(IDF_TARGET).cmake -DIDF_TARGET=$(IDF_TARGET) -DCIRCUITPY_ESP_HOSTED=$(CIRCUITPY_ESP_HOSTED) $(USER_ESP_IDF_CMAKE_ARGS) -GNinja
+-	$(Q)env IDF_PATH=$(IDF_PATH) IDF_COMPONENT_MANAGER=0 cmake -S . -B $(BUILD)/esp-idf -DSDKCONFIG=$(BUILD)/esp-idf/sdkconfig -DSDKCONFIG_DEFAULTS="$(SDKCONFIGS)" -DCMAKE_TOOLCHAIN_FILE=$(IDF_PATH)/tools/cmake/toolchain-$(IDF_TARGET).cmake -DIDF_TARGET=$(IDF_TARGET) -DCIRCUITPY_ESP_HOSTED=$(CIRCUITPY_ESP_HOSTED) -DCIRCUITPY_MIPICSI=$(CIRCUITPY_MIPICSI) -GNinja
++	$(Q)env IDF_PATH=$(IDF_PATH) IDF_COMPONENT_MANAGER=0 cmake -S . -B $(BUILD)/esp-idf -DSDKCONFIG=$(BUILD)/esp-idf/sdkconfig -DSDKCONFIG_DEFAULTS="$(SDKCONFIGS)" -DCMAKE_TOOLCHAIN_FILE=$(IDF_PATH)/tools/cmake/toolchain-$(IDF_TARGET).cmake -DIDF_TARGET=$(IDF_TARGET) -DCIRCUITPY_ESP_HOSTED=$(CIRCUITPY_ESP_HOSTED) -DCIRCUITPY_MIPICSI=$(CIRCUITPY_MIPICSI) $(USER_ESP_IDF_CMAKE_ARGS) -GNinja
  	$(Q)$(PYTHON) tools/check-sdkconfig.py \
  		CIRCUITPY_DUALBANK=$(CIRCUITPY_DUALBANK) \
  		CIRCUITPY_STORAGE_EXTEND=$(CIRCUITPY_STORAGE_EXTEND) \
-@@ -1124,6 +1130,21 @@ endif
- ifneq ($(CIRCUITPY_SDIOIO),0)
+@@ -1165,6 +1171,24 @@ ifneq ($(CIRCUITPY_SDIOIO),0)
  	ESP_IDF_COMPONENTS_LINK += sdmmc esp_driver_sdmmc esp_driver_sd_intf esp_hal_sd
  endif
-+# Each component a user C module named builds a library; link them all.
+ 
++# Each component a user C module named builds a library; link them all. A
++# component the port already links, such as the camera ones CIRCUITPY_MIPICSI
++# brings in, is named twice, which the link tolerates.
 +ESP_IDF_COMPONENTS_LINK += $(USER_ESP_IDF_COMPONENTS)
 +# esp_cam_sensor registers each camera sensor's probe in a linker section that
 +# no code names. Under CMake its CMakeLists.txt adds `-u <sensor>_detect` for
@@ -90,13 +94,15 @@ diff --git a/ports/espressif/Makefile b/ports/espressif/Makefile
 +	$(BUILD)/esp-idf/sdkconfig | tr A-Z a-z | sort -u)))
 +REGISTRATION_FUNCTIONS += $(ESP_CAM_SENSOR_DETECT)
 +endif
- 
++
  ESP_IDF_COMPONENTS_EXPANDED = $(foreach component, $(ESP_IDF_COMPONENTS_LINK), $(BUILD)/esp-idf/esp-idf/$(component)/lib$(component).a)
  
+ MBEDTLS_COMPONENTS_LINK = crypto tls x509
 diff --git a/ports/espressif/supervisor/port.c b/ports/espressif/supervisor/port.c
+index e453863..706ad63 100644
 --- a/ports/espressif/supervisor/port.c
 +++ b/ports/espressif/supervisor/port.c
-@@ -436,6 +436,9 @@ void *esp_native_code_commit(void *buf, size_t len, void *reloc) {
+@@ -453,6 +453,9 @@ void *esp_native_code_commit(void *buf, size_t len, void *reloc) {
  }
  #endif
  
@@ -106,14 +112,15 @@ diff --git a/ports/espressif/supervisor/port.c b/ports/espressif/supervisor/port
  void reset_port_early(void) {
      // esp-camera adds an I2C device on the ESP I2C bus, and keeps it there. This
      // is unlike busio.I2C, which adds and removes the device on each operation.
-@@ -444,6 +447,13 @@ void reset_port_early(void) {
-     #if CIRCUITPY_ESPCAMERA
-     espcamera_reset();
-     #endif
+@@ -460,6 +463,14 @@ void reset_port_early(void) {
+     // esp_camera_deinit() from here. Instead, let GC finalization (via __del__)
+     // deinit the camera before reset_board_buses() deletes the I2C bus.
+     // Unfortunately, there is no I2C driver API to enumerate or delete all the devices.
 +
 +    // The cameraif user C module (MIPI-CSI cameras) holds its SCCB device on
 +    // the board I2C the same way, along with the CSI controller, the ISP and
-+    // the PHY's LDO. When it is in the firmware, it closes the camera here.
++    // the PHY's LDO. When it is in the firmware, it closes the camera here
++    // without waiting for the garbage collector.
 +    if (cameraif_reset != NULL) {
 +        cameraif_reset();
 +    }
