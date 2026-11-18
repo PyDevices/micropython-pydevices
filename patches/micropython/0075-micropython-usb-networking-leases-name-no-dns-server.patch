@@ -1,0 +1,172 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 21:30:00 -0600
+Subject: [PATCH] esp32, shared/netutils/dhcpserver: USB networking leases name
+ no DNS server.
+
+The USB network link's DHCP server named the board as the computer's DNS
+server, and the board serves no DNS. While the link was up, Windows sent
+every name lookup to it as well and took about 12 seconds each; WSL's
+lookups timed out. The lease now carries no DNS server.
+
+On rp2 and the other lwIP ports, the shared DHCP server gets a send_dns
+switch beside send_router, which the USB network driver turns off. On
+esp32, ESP-IDF's CONFIG_LWIP_DHCPS_ADD_DNS made every DHCP server offer its
+own address. It is off now, and the Wi-Fi access point asks for that offer
+itself, so its clients still get the board's address as their DNS server,
+as before.
+---
+  extmod/network_usbd_ncm.c         |  3 +++
+  ports/esp32/boards/sdkconfig.base |  3 +++
+  ports/esp32/modnetwork.h          |  1 +
+  ports/esp32/network_common.c      | 17 +++++++++++++++++
+  ports/esp32/network_usbd_ncm.c    |  4 +++-
+  ports/esp32/network_wlan.c        |  1 +
+  shared/netutils/dhcpserver.c      |  5 ++++-
+  shared/netutils/dhcpserver.h      |  1 +
+  8 files changed, 33 insertions(+), 2 deletions(-)
+
+diff --git a/extmod/network_usbd_ncm.c b/extmod/network_usbd_ncm.c
+index 6082bceff..332c45317 100644
+--- a/extmod/network_usbd_ncm.c
++++ b/extmod/network_usbd_ncm.c
+@@ -207,6 +207,9 @@ static void ncm_init(void) {
+     // Don't advertise a default gateway -- this is a point-to-point USB link
+     // and advertising a router causes the host to route all traffic over USB.
+     ncm_obj.dhcp_server.send_router = false;
++    // Nor a DNS server: the board has none, and a computer that is told to
++    // ask it waits on every name lookup.
++    ncm_obj.dhcp_server.send_dns = false;
+     #endif
+ 
+     // register with network module
+diff --git a/ports/esp32/boards/sdkconfig.base b/ports/esp32/boards/sdkconfig.base
+index 6c2198260..c29023980 100644
+--- a/ports/esp32/boards/sdkconfig.base
++++ b/ports/esp32/boards/sdkconfig.base
+@@ -55,6 +55,9 @@ CONFIG_FREERTOS_ENABLE_STATIC_TASK_CLEAN_UP=n
+ CONFIG_LWIP_PPP_SUPPORT=y
+ CONFIG_LWIP_PPP_PAP_SUPPORT=y
+ CONFIG_LWIP_PPP_CHAP_SUPPORT=y
++# A DHCP server offers DNS only when asked: the access point asks, with its
++# own address; the USB network link doesn't, as the board serves no DNS there.
++CONFIG_LWIP_DHCPS_ADD_DNS=n
+ 
+ # SSL
+ # Use 4kiB output buffer instead of default 16kiB
+diff --git a/ports/esp32/modnetwork.h b/ports/esp32/modnetwork.h
+index a7be34cd8..bebb02c05 100644
+--- a/ports/esp32/modnetwork.h
++++ b/ports/esp32/modnetwork.h
+@@ -87,6 +87,7 @@ MP_DECLARE_CONST_FUN_OBJ_KW(esp_network_config_obj);
+ MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(esp_network_phy_mode_obj);
+ 
+ mp_obj_t esp_ifname(esp_netif_t *netif);
++void esp_ap_offer_own_dns(esp_netif_t *netif);
+ 
+ MP_NORETURN void esp_exceptions_helper(esp_err_t e);
+ 
+diff --git a/ports/esp32/network_common.c b/ports/esp32/network_common.c
+index bd34f1b41..3866fef4b 100644
+--- a/ports/esp32/network_common.c
++++ b/ports/esp32/network_common.c
+@@ -142,6 +142,7 @@ static mp_obj_t esp_ifconfig(size_t n_args, const mp_obj_t *args) {
+                 }
+                 esp_exceptions(esp_netif_set_ip_info(self->netif, &info));
+                 esp_exceptions(esp_netif_set_dns_info(self->netif, ESP_NETIF_DNS_MAIN, &dns_info));
++                esp_ap_offer_own_dns(self->netif);
+                 esp_exceptions(esp_netif_dhcps_start(self->netif));
+             }
+         } else {
+@@ -318,6 +319,7 @@ static mp_obj_t esp_ipconfig(size_t n_args, const mp_obj_t *args, mp_map_t *kwar
+                 esp_exceptions_helper(e);
+             }
+             esp_exceptions(esp_netif_set_ip_info(self->netif, &info));
++            esp_ap_offer_own_dns(self->netif);
+             esp_exceptions(esp_netif_dhcps_start(self->netif));
+         }
+ 
+@@ -326,6 +328,21 @@ static mp_obj_t esp_ipconfig(size_t n_args, const mp_obj_t *args, mp_map_t *kwar
+ }
+ MP_DEFINE_CONST_FUN_OBJ_KW(esp_nic_ipconfig_obj, 1, esp_ipconfig);
+ 
++// The access point's DHCP server names the board as the DNS server, as
++// ESP-IDF's CONFIG_LWIP_DHCPS_ADD_DNS made every DHCP server do. That option
++// is off so the USB network link can lease without one; the access point
++// asks for it here. Call it with the server stopped, after the address is set.
++void esp_ap_offer_own_dns(esp_netif_t *netif) {
++    esp_netif_ip_info_t info;
++    esp_exceptions(esp_netif_get_ip_info(netif, &info));
++    esp_netif_dns_info_t dns = { 0 };
++    dns.ip.type = ESP_IPADDR_TYPE_V4;
++    dns.ip.u_addr.ip4 = info.ip;
++    esp_exceptions(esp_netif_set_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns));
++    uint8_t offer = 1;
++    esp_exceptions(esp_netif_dhcps_option(netif, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &offer, sizeof(offer)));
++}
++
+ mp_obj_t esp_ifname(esp_netif_t *netif) {
+     char ifname[NETIF_NAMESIZE + 1] = {0};
+     mp_obj_t ret = mp_const_none;
+diff --git a/ports/esp32/network_usbd_ncm.c b/ports/esp32/network_usbd_ncm.c
+index 182262b80..3827c67f1 100644
+--- a/ports/esp32/network_usbd_ncm.c
++++ b/ports/esp32/network_usbd_ncm.c
+@@ -235,7 +235,9 @@ static void ncm_netif_create(void) {
+         mp_raise_OSError(MP_ENOMEM);
+     }
+     esp_netif_set_mac(ncm_netif, mac);
+-    // No default gateway for the computer: this link goes nowhere else.
++    // No default gateway for the computer: this link goes nowhere else. No DNS
++    // server either (CONFIG_LWIP_DHCPS_ADD_DNS is off): the board has none,
++    // and a computer that is told to ask it waits on every name lookup.
+     uint8_t no_router = 0;
+     esp_netif_dhcps_stop(ncm_netif);
+     esp_netif_dhcps_option(ncm_netif, ESP_NETIF_OP_SET, ESP_NETIF_ROUTER_SOLICITATION_ADDRESS, &no_router, sizeof(no_router));
+diff --git a/ports/esp32/network_wlan.c b/ports/esp32/network_wlan.c
+index a16b07ea0..ace331de2 100644
+--- a/ports/esp32/network_wlan.c
++++ b/ports/esp32/network_wlan.c
+@@ -233,6 +233,7 @@ void esp_initialise_wifi(void) {
+         wlan_ap_obj.base.type = &esp_network_wlan_type;
+         wlan_ap_obj.if_id = ESP_IF_WIFI_AP;
+         wlan_ap_obj.netif = esp_netif_create_default_wifi_ap();
++        esp_ap_offer_own_dns(wlan_ap_obj.netif);
+         wlan_ap_obj.active = false;
+ 
+         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+diff --git a/shared/netutils/dhcpserver.c b/shared/netutils/dhcpserver.c
+index 2320f37d2..35acec6af 100644
+--- a/shared/netutils/dhcpserver.c
++++ b/shared/netutils/dhcpserver.c
+@@ -290,7 +290,9 @@ static void dhcp_server_process(void *arg, struct udp_pcb *upcb, struct pbuf *p,
+     if (d->send_router) {
+         opt_write_n(&opt, DHCP_OPT_ROUTER, 4, &ip_2_ip4(&d->ip)->addr); // aka gateway; can have multiple addresses
+     }
+-    opt_write_n(&opt, DHCP_OPT_DNS, 4, &ip_2_ip4(&d->ip)->addr);
++    if (d->send_dns) {
++        opt_write_n(&opt, DHCP_OPT_DNS, 4, &ip_2_ip4(&d->ip)->addr);
++    }
+     opt_write_u32(&opt, DHCP_OPT_IP_LEASE_TIME, DEFAULT_LEASE_TIME_S);
+     *opt++ = DHCP_OPT_END;
+     struct netif *netif = ip_current_input_netif();
+@@ -305,6 +307,7 @@ void dhcp_server_init(dhcp_server_t *d, ip_addr_t *ip, ip_addr_t *nm) {
+     ip_addr_copy(d->nm, *nm);
+     memset(d->lease, 0, sizeof(d->lease));
+     d->send_router = true;
++    d->send_dns = true;
+     if (dhcp_socket_new_dgram(&d->udp, d, dhcp_server_process) != 0) {
+         return;
+     }
+diff --git a/shared/netutils/dhcpserver.h b/shared/netutils/dhcpserver.h
+index 24224d6aa..d64790258 100644
+--- a/shared/netutils/dhcpserver.h
++++ b/shared/netutils/dhcpserver.h
+@@ -42,6 +42,7 @@ typedef struct _dhcp_server_t {
+     dhcp_server_lease_t lease[DHCPS_MAX_IP];
+     struct udp_pcb *udp;
+     bool send_router; // advertise server IP as default gateway
++    bool send_dns; // advertise server IP as DNS server
+ } dhcp_server_t;
+ 
+ void dhcp_server_init(dhcp_server_t *d, ip_addr_t *ip, ip_addr_t *nm);

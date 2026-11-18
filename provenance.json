@@ -223,6 +223,9 @@
   },
   "0074-micropython-webassembly-ticks-from-a-monotonic-clock.patch": {
    "sha256": "a85eae00aba8b5d87aeffe391212a9e6b8d9818985c9bb23792404e0fcdf7d6a"
+  },
+  "0075-micropython-usb-networking-leases-name-no-dns-server.patch": {
+   "sha256": "6b7adeebd642b3fb1632e99c15059e8f6587cea50212d918fffc2ed3e9801a8f"
   }
  },
  "tinyusb_patches": {
