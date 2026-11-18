@@ -36,6 +36,7 @@ Tested on: an ESP32-P4 board with an OV5647 camera at 800x800, with Wi-Fi
 through an ESP32-C6.
 """
 
+import network
 import socket
 import time
 
@@ -55,8 +56,6 @@ justify-content:center;height:100vh}img{max-width:100%;max-height:100vh}</style>
 
 
 def connect():
-    import network
-
     import secrets
 
     wlan = network.WLAN(network.STA_IF)
@@ -119,6 +118,12 @@ def stream_to(client, cam, quality=QUALITY):
 def main():
     # Join Wi-Fi with the details in secrets.py, then open the camera.
     ip = connect()
+
+    # Keep the Wi-Fi radio awake. With power saving on, the acknowledgements
+    # coming back can go missing while it dozes, and the stream then stops for
+    # a second or more until TCP sends again.
+    network.WLAN(network.STA_IF).config(pm=network.WLAN.PM_NONE)
+
     cam = board_config.camera
     print("camera %s %dx%d" % ((cam.sensor()[0],) + cam.size()[:2]))
     print("open  http://%s/" % ip)
