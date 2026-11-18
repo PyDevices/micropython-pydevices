@@ -75,6 +75,11 @@ usb.device.get().init(MSCInterface(disk), builtin_driver=True)
 The computer then lists a drive. Don't mount the same block device on the board
 while the computer has it.
 
+A build with the `usbhost` module also carries `usb.core` and the `usb.host`
+classes in the ROMFS, for the USB-A port. They have to be there: MicroPython
+finds a package once, so with `usb.device` in `/rom`, a `usb/` that `mip` or
+omip puts in `/flash/lib` is never looked at and `import usb.core` fails.
+
 `machine.bootloader()` still reaches the DFU bootloader.
 
 `firmware1.bin` holds the radio's firmware for Wi-Fi and for Bluetooth.
