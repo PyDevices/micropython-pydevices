@@ -1,0 +1,19 @@
+# The L2 cache at 256 KB, not ESP-IDF's default 128 KB.
+#
+# The program and the heap live in PSRAM, so everything either core runs or
+# touches comes through this one cache. Draw a megabyte into the framebuffer
+# on the interpreter's core and the audio render's own code and data are
+# pushed out of it; the render then waits on PSRAM to get them back. Nothing
+# preempts it: it holds its core the whole time and simply runs slower.
+#
+# On the Touch-LCD-4B, Synth Station playing with the 720x720 screen redrawn
+# whole every 20 ms: at 128 KB the render's worst block took 143 to 216 % of
+# the time it has, and the speaker ran out of sound in five 60 s runs of six
+# (5 to 8 ms each time). At 256 KB it ran out in none of six, the worst block
+# took 118 to 149 %, and the screen redrew 4.2 times a second, not 3.8.
+#
+# The cache is taken from internal RAM: 131 KB of it, leaving 143 KB free
+# with Home open where there were 276 KB. This variant can pay that. The
+# DEV-KIT image can't (123 KB free with Home open at 128 KB), so it is set
+# here and not for every ESP32-P4.
+CONFIG_CACHE_L2_CACHE_256KB=y
