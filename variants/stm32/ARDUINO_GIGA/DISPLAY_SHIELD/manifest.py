@@ -32,6 +32,27 @@ for _pkg in (
 include("../../../../modules/library.py")
 require("usb-device-msc", library="omnipython-lib")
 
+# The USB host packages, when the build carries usbhost, in the ROMFS for the
+# same reason: a usb package in /rom is found once and hides the usb/ that mip
+# puts in /lib, so `import usb.core` fails on a board whose ROMFS has only
+# usb.device, however the host packages are installed. The set is the one the
+# DEV-KIT freezes; usb.host.msc is the USB-A port's flash drive (`sdcard`).
+_names = [n.strip() for n in os.environ.get("OMNIPYTHON_MODULES", "").split(",")]
+_usbhost = os.path.realpath("../../../../modules/usbhost")
+if any(n in ("all", "usbhost") or os.path.realpath(n) == _usbhost for n in _names if n):
+    for _pkg in (
+        "usb-core",
+        "usb-host-audio",
+        "usb-host-video",
+        "usb-host-net",
+        "usb-host-hid",
+        "usb-host-msc",
+        "usb-host-cdc",
+        "usb-host-mtp",
+        "usb-host-dfu",
+    ):
+        require(_pkg, library="omnipython-lib")
+
 # Built by build_mp.py, none of it is frozen: every Python module above goes
 # to the board's ROMFS partition on its QSPI flash, and internal flash is left
 # to LVGL and the C modules. This writes the list for build_mp.py, which
