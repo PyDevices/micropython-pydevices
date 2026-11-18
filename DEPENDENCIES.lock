@@ -29,7 +29,7 @@ ulab              https://github.com/v923z/micropython-ulab.git       15e9997470
 # sibling checkout is linked there instead) and compiles the port for its
 # interpreter. Move the commit here to move every LVGL build, MicroPython's and
 # CircuitPython's.
-omnipython-lvgl   https://github.com/PyDevices/omnipython-lvgl.git    3e4381e7addded2ac48358a1bbd6c74224711cf0
+omnipython-lvgl   https://github.com/PyDevices/omnipython-lvgl.git    97546833371bd5fa385b9610127b8a2dfc05c753
 
 # omnipython-lib is not a module either: it is the repository of our
 # Python-only packages (omnipython, palettes, pdwidgets, audioinstruments,
