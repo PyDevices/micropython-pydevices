@@ -1465,6 +1465,138 @@ static void audioif_mem_free_hot(void *ptr) {
 }
 #endif
 
+// --- memory a graph renders through ----------------------------------------
+//
+// The buffers, node tables and node state that audiograph reads and writes on
+// every block. On an ESP32-P4 everything in PSRAM comes through one L2 cache,
+// so while the main thread draws a full screen the render waits for its own
+// data to come back: a drum machine, with the largest graphs, ran out of sound.
+// In internal RAM it doesn't wait.
+//
+// Internal RAM is what a cast's encoder needs too, in one piece of about 92 KB.
+// So a graph's blocks don't go straight on the heap, where whatever is
+// allocated next would land after them and split the free space in two once
+// they are gone. They come from slabs placed at the top of the largest free
+// piece, under one another, and everything else keeps growing from the bottom:
+// when the last block of a slab is freed the slab goes back and the piece is
+// whole again.
+//
+// A slab is taken only while the largest free piece keeps the reserve beyond
+// it, counted on that piece and not on the free total, which includes a pool
+// ESP-IDF keeps apart (CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL). Past that, and
+// for a block too large to be worth a slab, PSRAM. While an instrument changes
+// about 20 KB more is free than once it plays again, so a board can settle
+// that far below the reserve.
+#if AUDIOIF_DRV_ESP && defined(AUDIODSP_PORT_MEM_GRAPH_HOOKS) \
+    && CONFIG_IDF_TARGET_ESP32P4 && CONFIG_SPIRAM
+#include "esp_memory_utils.h"
+#include "multi_heap.h"
+#define AUDIOIF_MEM_GRAPH_HOOKS (1)
+#define AUDIOIF_MEM_GRAPH_REGION (MALLOC_CAP_INTERNAL | MALLOC_CAP_DEFAULT)
+#define AUDIOIF_GRAPH_SLAB_BYTES (16 * 1024)
+#define AUDIOIF_GRAPH_SLABS (8)
+#define AUDIOIF_GRAPH_BLOCK_MAX (8 * 1024)
+#define AUDIOIF_GRAPH_RESERVE (36 * 1024)
+// Left free above the first slab, for anything allocating while a slab is placed.
+#define AUDIOIF_GRAPH_HEADROOM (8 * 1024)
+
+// Only touched with the interpreter's lock held: graphs are built and freed
+// from Python and the garbage collector, never from the render.
+static struct {
+    uint8_t *base;
+    multi_heap_handle_t heap;
+    size_t empty;
+} audioif_graph_slab[AUDIOIF_GRAPH_SLABS];
+static size_t audioif_graph_slabs;
+
+// How much internal RAM live graphs hold, for an error that needs to say why
+// there isn't enough (h264enc).
+size_t audioif_graph_internal_bytes(void) {
+    return audioif_graph_slabs * AUDIOIF_GRAPH_SLAB_BYTES;
+}
+
+// A slab at the top of the largest free piece: a filler takes the bottom of the
+// piece for a moment, so the slab lands above it.
+static int audioif_graph_slab_new(void) {
+    int at = -1;
+    for (int i = 0; i < AUDIOIF_GRAPH_SLABS && at < 0; ++i) {
+        if (audioif_graph_slab[i].base == NULL) {
+            at = i;
+        }
+    }
+    const size_t largest = heap_caps_get_largest_free_block(AUDIOIF_MEM_GRAPH_REGION);
+    if (at < 0 || largest < AUDIOIF_GRAPH_SLAB_BYTES + AUDIOIF_GRAPH_RESERVE) {
+        return -1;
+    }
+    const size_t above = audioif_graph_slabs == 0 ? AUDIOIF_GRAPH_HEADROOM : 0;
+    uint8_t *base = NULL;
+    // The allocator rounds a request up to its size class, the filler's by as
+    // much as 4 KB and the slab's by 512 bytes, so what the filler leaves can
+    // come out too small: leave more and try again.
+    for (size_t slack = 2 * 1024; slack <= 8 * 1024 && base == NULL; slack *= 2) {
+        void *filler = heap_caps_malloc(largest - AUDIOIF_GRAPH_SLAB_BYTES - above - slack, AUDIOIF_MEM_GRAPH_REGION);
+        base = heap_caps_malloc(AUDIOIF_GRAPH_SLAB_BYTES, AUDIOIF_MEM_GRAPH_REGION);
+        heap_caps_free(filler);
+        if (base != NULL && !esp_ptr_in_dram(base)) {   // the slow low-power RAM is no use to a render
+            heap_caps_free(base);
+            base = NULL;
+        }
+    }
+    if (base == NULL) {
+        return -1;
+    }
+    multi_heap_handle_t heap = multi_heap_register(base, AUDIOIF_GRAPH_SLAB_BYTES);
+    if (heap == NULL) {
+        heap_caps_free(base);
+        return -1;
+    }
+    audioif_graph_slab[at].base = base;
+    audioif_graph_slab[at].heap = heap;
+    audioif_graph_slab[at].empty = multi_heap_free_size(heap);
+    audioif_graph_slabs += 1;
+    return at;
+}
+
+static void *audioif_mem_alloc_graph(size_t size) {
+    void *ptr = NULL;
+    if (size <= AUDIOIF_GRAPH_BLOCK_MAX) {
+        for (int i = 0; i < AUDIOIF_GRAPH_SLABS && ptr == NULL; ++i) {
+            if (audioif_graph_slab[i].base != NULL) {
+                ptr = multi_heap_malloc(audioif_graph_slab[i].heap, size);
+            }
+        }
+        if (ptr == NULL) {
+            const int at = audioif_graph_slab_new();
+            if (at >= 0) {
+                ptr = multi_heap_malloc(audioif_graph_slab[at].heap, size);
+            }
+        }
+    }
+    if (ptr != NULL) {
+        memset(ptr, 0, size);
+        return ptr;
+    }
+    return heap_caps_calloc_prefer(1, size, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_8BIT);
+}
+
+static void audioif_mem_free_graph(void *ptr) {
+    for (int i = 0; i < AUDIOIF_GRAPH_SLABS; ++i) {
+        uint8_t *base = audioif_graph_slab[i].base;
+        if (base != NULL && (uint8_t *)ptr >= base && (uint8_t *)ptr < base + AUDIOIF_GRAPH_SLAB_BYTES) {
+            multi_heap_free(audioif_graph_slab[i].heap, ptr);
+            if (multi_heap_free_size(audioif_graph_slab[i].heap) == audioif_graph_slab[i].empty) {
+                audioif_graph_slab[i].base = NULL;
+                audioif_graph_slab[i].heap = NULL;
+                audioif_graph_slabs -= 1;
+                heap_caps_free(base);
+            }
+            return;
+        }
+    }
+    heap_caps_free(ptr);
+}
+#endif
+
 // --- the table, and the binding -------------------------------------------
 
 static const audiodsp_port_ops_t audiopump_driver_ops = {
@@ -1499,6 +1631,10 @@ static const audiodsp_port_ops_t audiopump_driver_ops = {
     #if defined(AUDIOIF_MEM_HOT_HOOKS)
     .mem_alloc_hot = audioif_mem_alloc_hot,
     .mem_free_hot = audioif_mem_free_hot,
+    #endif
+    #if defined(AUDIOIF_MEM_GRAPH_HOOKS)
+    .mem_alloc_graph = audioif_mem_alloc_graph,
+    .mem_free_graph = audioif_mem_free_graph,
     #endif
 };
 

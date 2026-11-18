@@ -67,6 +67,9 @@ typedef struct {
     bool yuv_limited;
     bool approx;
 } ppa_mod_srm_t;
+// audioif's count of the internal RAM audio graphs hold, for the error below.
+extern size_t audioif_graph_internal_bytes(void) __attribute__((weak));
+
 extern ppa_mod_client_t *ppa_mod_open(int hw) __attribute__((weak));
 extern void ppa_mod_close(ppa_mod_client_t *c) __attribute__((weak));
 extern const char *ppa_mod_srm(ppa_mod_client_t *c, const ppa_mod_srm_t *op) __attribute__((weak));
@@ -290,12 +293,16 @@ static const char *h264enc_open_pipelined(h264enc_session_t **out, int width, in
         // buffer come from PSRAM. Either pool can be short, free in total but
         // in pieces, so say which one and how big its largest piece is.
         if (herr == ESP_H264_ERR_MEM) {
-            static char msg[112];
+            static char msg[176];
             const size_t need = (size_t)((cw + 15) / 16) * 1152;
             const size_t internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
             if (internal < need) {
-                snprintf(msg, sizeof(msg), "not enough internal RAM in one piece for the encoder (needs %u bytes, largest free piece %u)",
+                const size_t graphs = audioif_graph_internal_bytes != NULL ? audioif_graph_internal_bytes() : 0;
+                int n = snprintf(msg, sizeof(msg), "not enough internal RAM in one piece for the encoder (needs %u bytes, largest free piece %u)",
                     (unsigned)need, (unsigned)internal);
+                if (graphs != 0 && n > 0 && (size_t)n < sizeof(msg)) {
+                    snprintf(msg + n, sizeof(msg) - n, "; audio graphs hold %u bytes of it, deinit() them first", (unsigned)graphs);
+                }
             } else {
                 snprintf(msg, sizeof(msg), "not enough PSRAM in one piece for the encoder (largest free piece %u bytes)",
                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));

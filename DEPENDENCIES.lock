@@ -19,7 +19,7 @@ micropython       https://github.com/micropython/micropython          b70ae1aca6
 # is missing; in a workspace modules/<name> is a link to the sibling checkout
 # and wins. castif is not here: it lives in modules/castif, tracked in this
 # repository.
-audiodsp          https://github.com/PyDevices/audiodsp.git           80e3388a53ace5c3afb2a765030f9969817668f7
+audiodsp          https://github.com/PyDevices/audiodsp.git           015c288600bbb1d58b68486bd24d58c88b0b96d7
 pygraphics        https://github.com/PyDevices/pygraphics.git         5631a56cd55eb8ac1e82a14396bd876ad97c889d
 ulab              https://github.com/v923z/micropython-ulab.git       15e999747079205b2415e71a6aa2840b8f85f9dc
 
