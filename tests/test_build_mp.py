@@ -515,6 +515,31 @@ class ModulesFollowTheLock(unittest.TestCase):
         self.assertTrue(self.dest.is_symlink())
 
 
+class LibrarySiblings(unittest.TestCase):
+    """A workspace build freezes the tags lib-lock.json names unless --library-siblings."""
+
+    def library(self, tmp, siblings):
+        ws = Path(tmp)
+        source = ws / "omnipython"
+        source.mkdir()
+        (source / "lib-lock.json").write_text(json.dumps(
+            {"pinned": {"audioinstruments": {"repository": "PyDevices/audioinstruments", "tag": "v1"}}}))
+        (ws / "audioinstruments" / "lib" / "audioinstruments").mkdir(parents=True)
+        lib = build_mp.Library(ws, siblings)
+        lib.source = source
+        return lib, ws / "audioinstruments"
+
+    def test_the_pinned_tag_wins_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lib, _ = self.library(tmp, False)
+            self.assertEqual(lib.sibling_sources(), [])
+
+    def test_the_option_brings_the_sibling_back(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lib, sibling = self.library(tmp, True)
+            self.assertEqual(lib.sibling_sources(), [("audioinstruments", sibling)])
+
+
 class LibraryPackages(unittest.TestCase):
     """omnipython-lib: packages a build requires from the library tree, not modules/."""
 
