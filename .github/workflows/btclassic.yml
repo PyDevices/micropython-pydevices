@@ -40,6 +40,20 @@ permissions:
   contents: read
 
 jobs:
+  ring:
+    name: The audio ring on the desktop
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: modules/btclassic
+    steps:
+      - uses: actions/checkout@v7
+      - name: A sender's bursts and clock drift through ring.c
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -Iesp-idf/btclassic -Iesp-idf/btclassic/include -o /tmp/test_ring tests/test_ring.c esp-idf/btclassic/ring.c
+          /tmp/test_ring
+
   esp32:
     runs-on: ubuntu-latest
     timeout-minutes: 120

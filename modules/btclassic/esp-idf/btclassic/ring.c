@@ -20,6 +20,27 @@ static inline uint16_t mag(int16_t v) {
     return v < 0 ? (uint16_t)(v == INT16_MIN ? 32767 : -v) : (uint16_t)v;
 }
 
+// The frames kept free above the trim's upper edge. A sender held at the edge
+// rides it for most of each burst, so this leaves room for a 110 ms burst from
+// a clock 0.3% fast, or half the ring's worth from one 0.1% fast. A phone's
+// bursts measured 81 to 110 ms.
+#define BURST_ROOM 4096u
+
+// How full the ring gets before the reader starts dropping frames. A phone can
+// start a stream faster than real time just after playing begins, which leaves
+// the ring high, and its ordinary bursts then rise above that. An edge a quarter
+// of the ring above half leaves them alone, though the clocks agree. A small
+// ring can't spare that: the edge comes in to leave BURST_ROOM free, and no
+// closer to half than an eighth of the ring.
+static uint32_t upper_edge(uint32_t limit) {
+    uint32_t near = limit / 2 + limit / 8;
+    uint32_t edge = limit / 2 + limit / 4;
+    if (limit < edge + BURST_ROOM) {
+        edge = limit > BURST_ROOM ? limit - BURST_ROOM : 0;
+    }
+    return edge > near ? edge : near;
+}
+
 void btc_ring_init(btc_ring_t *r, int16_t *buf, uint32_t capacity, uint8_t channels) {
     memset(r, 0, sizeof(*r));
     r->buf = buf;
@@ -121,7 +142,7 @@ size_t btc_ring_read(btc_ring_t *r, int16_t *dst, size_t frames, uint8_t out_cha
     // away from half full: the sender's clock and ours never quite agree.
     size_t take = frames;
     int adjust = 0;
-    if (avail > target + slack && avail > frames + 1) {
+    if (avail > upper_edge(r->limit) && avail > frames + 1) {
         take = frames + 1;
         adjust = 1;
     } else if (avail < target - slack && frames > 1) {
