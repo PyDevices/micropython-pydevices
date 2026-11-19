@@ -431,7 +431,7 @@ static usbhost_xfer_pipe_t *usbhost_xfer_pipe(usb_device_handle_t dev, uint8_t e
         pipe->ep = ep;
     }
     if (pipe->xfer == NULL) {
-        if (usb_host_transfer_alloc(size, 0, &pipe->xfer) != ESP_OK) {
+        if (usbhost_host_in_transfer_alloc(size, 0, &pipe->xfer) != ESP_OK) {
             *err = -MP_ENOMEM;
             return NULL;
         }
