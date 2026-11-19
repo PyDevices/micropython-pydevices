@@ -37,6 +37,11 @@ static void ref_set(uint8_t *buf, size_t stride, int x, int y, uint32_t color,
     int bpp) {
     if (bpp == 32) {
         ((uint32_t *)(buf + (size_t)y * stride))[x] = color;
+    } else if (bpp == 24) {
+        uint8_t *px = buf + (size_t)y * stride + (size_t)x * 3;
+        px[0] = (uint8_t)color;
+        px[1] = (uint8_t)(color >> 8);
+        px[2] = (uint8_t)(color >> 16);
     } else if (bpp == 16) {
         ((uint16_t *)(buf + (size_t)y * stride))[x] = (uint16_t)color;
     } else if (bpp == 8) {
@@ -86,7 +91,7 @@ static void check(int bpp, size_t stride, int x, int y, int w, int h,
 }
 
 int main(void) {
-    const int depths[] = {1, 2, 4, 8, 16, 32};
+    const int depths[] = {1, 2, 4, 8, 16, 24, 32};
     int cases = 0;
     for (size_t d = 0; d < sizeof(depths) / sizeof(depths[0]); d++) {
         const int bpp = depths[d];

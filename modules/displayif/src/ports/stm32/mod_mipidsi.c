@@ -120,16 +120,17 @@ static void mipidsi_ensure_soft_reset_registered(void) {
     }
 }
 
-/* Bus(*, frequency=500_000_000, num_lanes=2): frequency is the lane bit rate. */
+/* Bus(*, minimum_frequency=500_000_000, num_lanes=2): the lane bit rate is at
+ * least minimum_frequency, and Bus.frequency says what the PLL really makes. */
 static mp_obj_t mipidsi_bus_make(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
-    enum { ARG_frequency, ARG_num_lanes };
+    enum { ARG_minimum_frequency, ARG_num_lanes };
     static const mp_arg_t allowed_args[] = {
-        { MP_QSTR_frequency, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 500000000 } },
+        { MP_QSTR_minimum_frequency, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 500000000 } },
         { MP_QSTR_num_lanes, MP_ARG_KW_ONLY | MP_ARG_INT, { .u_int = 2 } },
     };
     mp_arg_val_t vals[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all_kw_array(n_args, n_kw, args, MP_ARRAY_SIZE(allowed_args), allowed_args, vals);
-    mp_int_t rate = vals[ARG_frequency].u_int;
+    mp_int_t rate = vals[ARG_minimum_frequency].u_int;
     mp_int_t lanes = vals[ARG_num_lanes].u_int;
     if (lanes < 1 || lanes > 2) {
         mp_raise_ValueError(MP_ERROR_TEXT("num_lanes must be 1 or 2"));
@@ -152,7 +153,15 @@ static mp_obj_t mipidsi_bus_make(const mp_obj_type_t *type, size_t n_args, size_
         }
     }
     if (odf > 3) {
-        mp_raise_ValueError(MP_ERROR_TEXT("frequency out of range"));
+        mp_raise_ValueError(MP_ERROR_TEXT("minimum_frequency out of range"));
+    }
+    /* The PLL snaps to a multiple of its input, and the nearest one can be
+     * below the minimum: take the next one up, if the VCO allows it. */
+    if (((uint64_t)in * ndiv >> odf) + 1000 < (uint64_t)rate) {
+        if (ndiv + 1 > 125 || 2 * in * (ndiv + 1) > 1000000000) {
+            mp_raise_ValueError(MP_ERROR_TEXT("minimum_frequency is not reachable by the PLL"));
+        }
+        ndiv++;
     }
 
     mipidsi_host_teardown();
@@ -478,6 +487,20 @@ static void mipidsi_display_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     }
 }
 
+static void mipidsi_bus_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    mipidsi_bus_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (dest[0] != MP_OBJ_NULL) {
+        return;
+    }
+    if (attr == MP_QSTR_frequency) {
+        dest[0] = mp_obj_new_int_from_uint(self->deinited ? 0 : self->lane_bit_rate_hz);
+    } else if (attr == MP_QSTR_num_lanes) {
+        dest[0] = MP_OBJ_NEW_SMALL_INT(self->deinited ? 0 : self->num_lanes);
+    } else {
+        dest[1] = MP_OBJ_SENTINEL; /* continue lookup in locals_dict */
+    }
+}
+
 static const mp_rom_map_elem_t mipidsi_bus_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&mipidsi_bus_deinit_obj) },
 };
@@ -507,6 +530,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     MP_QSTR_Bus,
     MP_TYPE_FLAG_NONE,
     make_new, mipidsi_bus_make,
+    attr, mipidsi_bus_attr,
     locals_dict, &mipidsi_bus_locals_dict
     );
 

@@ -211,12 +211,20 @@ See [soft-reset-and-bring-up.md](../soft-reset-and-bring-up.md#reference-dotcloc
 `mipidsi.Bus` + `mipidsi.Display` for `SOC_MIPI_DSI_SUPPORTED`. Proven on
 Waveshare / Espressif P4 4B touch LCD with LVGL soft-reset re-import.
 
-`Bus(frequency=500_000_000, num_lanes=2, …)` matches CircuitPython defaults
-(`ldo_*` remain displayif extras).
+`Bus(minimum_frequency=500_000_000, num_lanes=2, …)` matches CircuitPython:
+the rate is a floor. The PHY's PLL only makes certain rates and rounds down, so
+the bus asks for the minimum in whole Mbps and steps up by 10 Mbps until the
+rate it made is at least the minimum (within 1 kHz). `bus.frequency` is the
+rate it really runs at, which can be above the minimum, and `bus.num_lanes` is
+the lane count. Both read back on ESP-IDF v5.5.4, where the PHY's real rate is
+in the HAL context this module already reads; on any other ESP-IDF
+`bus.frequency` is the rate that was asked for. `ldo_chan` and `ldo_voltage_mv`
+remain displayif extras, so a program written for CircuitPython, whose board
+picks the LDO, leaves them out.
 
 `Display(bus, init_sequence, *, …)` takes positional `bus` and `init_sequence`
 like CircuitPython. Optional kwargs: `virtual_channel=0` (wired into esp_lcd
-DBI/DPI), `color_depth=16`, and `non_burst=False` / `continuous_clock=False`.
+DBI/DPI), `color_depth=16` or `24`, and `non_burst=False` / `continuous_clock=False`.
 Set both of those to `True` for a panel behind a DSI-to-RGB bridge such as the
 Chipone ICN6211 on Raspberry Pi-style DSI displays: ESP-IDF otherwise sends
 burst-mode video with an idling clock lane, and the bridge shows nothing (a
@@ -227,14 +235,27 @@ by board_config (not `Display`). CircuitPython-only kwargs (`rotation`,
 are not accepted.
 
 Two more optional kwargs suit a DSI-to-HDMI bridge such as the Lontium LT8912B.
-`output_color_depth` (16, 18 or 24; default 16) sets the pixel format on the DSI
-wire only: the framebuffer stays RGB565, and the P4's DSI bridge converts each
-pixel on the way out, so `blit`, `fill_rect` and the buffer protocol are
-unchanged. CircuitPython has no name for this, so it is a displayif extra.
+`color_depth=24` makes the framebuffer RGB888, three bytes a pixel, as in
+CircuitPython, and the same format goes out on the wire. `blit` takes 24-bit
+pixels then, `fill_rect` takes a colour as `0xRRGGBB`, and `display.color_depth`
+reads back. `output_color_depth` (16, 18 or 24) is a displayif extra for a
+board short of memory: with the default `color_depth=16`, the framebuffer stays
+RGB565 and the P4's DSI bridge converts each pixel on the way out, so
+`blit`, `fill_rect` and the buffer protocol are unchanged. It defaults to
+`color_depth`, and a 24-bit framebuffer only goes out as 24.
 `low_power_blanking=False` keeps the lanes in high-speed mode during blanking
-instead of dropping to low power, which some bridges need to lock. Both work on
-ESP-IDF v5.5.4 and v6. The default of each matches the behaviour before they
-existed.
+instead of dropping to low power, which some bridges need to lock, and has the
+same name and default as CircuitPython's. The defaults match the behaviour
+before they existed.
+
+`display.pixel_clock_frequency` reads back the pixel clock the DPI divider
+really gave, in Hz, on ESP-IDF v5.5.4 (the asked-for clock elsewhere). The clock
+reaches ESP-IDF as a fraction of a megahertz, so 74.25 MHz is not rounded down
+to 74.
+
+A Python class can subclass `Display`, as CircuitPython's drivers for DSI
+bridges do: set the bridge up first, then call `super().__init__(...)` to start
+video.
 
 | Topic | Behavior |
 |-------|----------|
