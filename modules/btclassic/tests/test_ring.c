@@ -20,10 +20,11 @@
 #define PACKET 2048u            // frames a packet carries at most
 #define SECONDS 240u
 #define ORDINARY_BURST_MS 81u   // what a phone's bursts usually swing the fill by
-#define LARGEST_BURST_MS 93u    // rounded up to whole reads: the most it was seen to
+#define LARGEST_BURST_MS 110u   // the most they were seen to
 #define PEAK_ABOVE_HALF 1728u   // how far above half full a burst carries the fill
 #define FAST 3000u              // parts per million: far beyond any real clock
 #define FASTEST 3500u           // near the most a frame a block can take out (3906)
+#define FASTEST_BURST_MS 93u    // the burst it leaves room for on the smallest ring
 
 // AudioSink makes 48 frames per ms of buffer_ms whatever the stream's rate.
 static const uint32_t sizes[] = {48 * 250, 48 * 500, 48 * 1000};
@@ -137,11 +138,12 @@ static void test_ordinary_bursts_drop_nothing(void) {
 // burst: an overrun loses a whole packet.
 static void test_a_fast_sender_never_overruns(void) {
     static const uint32_t speeds[] = {FAST, FASTEST};
+    static const uint32_t bursts[] = {LARGEST_BURST_MS, FASTEST_BURST_MS};
     for (size_t i = 0; i < COUNT(sizes); i++) {
         for (size_t j = 0; j < COUNT(rates); j++) {
             for (size_t k = 0; k < COUNT(speeds); k++) {
                 static sim_t s;
-                start(&s, sizes[i], burst_frames(rates[j], LARGEST_BURST_MS), (int32_t)speeds[k]);
+                start(&s, sizes[i], burst_frames(rates[j], bursts[k]), (int32_t)speeds[k]);
                 stream(&s, rates[j], SECONDS);
                 btc_ring_stats_t st = stats(&s);
                 CHECK(st.dropped > 0, "%u frames at %u Hz, +%u ppm: nothing dropped",

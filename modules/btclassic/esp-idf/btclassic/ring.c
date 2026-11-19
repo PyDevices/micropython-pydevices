@@ -21,8 +21,9 @@ static inline uint16_t mag(int16_t v) {
 }
 
 // The frames kept free above the trim's upper edge. A sender held at the edge
-// rides it for most of each burst, so this covers a burst of about 4,800 frames
-// from the fastest clock the trim can hold. A phone's reached about 4,300.
+// rides it for most of each burst, so this leaves room for a 110 ms burst from
+// a clock 0.3% fast, or half the ring's worth from one 0.1% fast. A phone's
+// bursts measured 81 to 110 ms.
 #define BURST_ROOM 4096u
 
 // How full the ring gets before the reader starts dropping frames. A phone can
