@@ -46,6 +46,9 @@
 
 #if defined(CONFIG_SOC_USB_OTG_SUPPORTED) && CONFIG_SOC_USB_OTG_SUPPORTED
 
+#include <assert.h>
+#include <string.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/idf_additions.h"   // xTaskCreatePinnedToCore on IDF 5
@@ -64,6 +67,10 @@
 #include "usbhost_ticks.h"
 #include "esp_timer.h"
 #include "esp_system.h"
+#include "soc/soc_caps.h"
+#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
+#include "esp_cache.h"
+#endif
 
 #if defined(MICROPY_HW_ENABLE_USBDEV) && MICROPY_HW_ENABLE_USBDEV
 #include "tusb.h"
@@ -124,6 +131,33 @@ typedef struct {
 
 static usbhost_host_slot_t usbhost_host_devs[USBHOST_HOST_MAX_DEVS];
 static usb_host_client_handle_t usbhost_host_client;
+
+// On a chip whose internal RAM is behind a cache (the ESP32-P4), a receive
+// buffer must hold no modified cache lines while the controller writes to it.
+// ESP-IDF only invalidates an IN buffer when the transfer completes. A line
+// left modified by the memory's previous owner, or by the allocator's free
+// list, can be evicted first, and then lands on top of what the controller
+// wrote: packets that report complete and hold old memory. It happens on a
+// buffer's first use, since completing invalidates its lines.
+void usbhost_host_in_transfer_clean(usb_transfer_t *x) {
+    #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
+    esp_err_t err = esp_cache_msync(x->data_buffer, x->data_buffer_size,
+        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
+    assert(err == ESP_OK);
+    (void)err;
+    #else
+    (void)x;
+    #endif
+}
+
+esp_err_t usbhost_host_in_transfer_alloc(size_t size, int num_isoc_packets, usb_transfer_t **out) {
+    esp_err_t err = usb_host_transfer_alloc(size, num_isoc_packets, out);
+    if (err == ESP_OK) {
+        memset((*out)->data_buffer, 0, (*out)->data_buffer_size);
+        usbhost_host_in_transfer_clean(*out);
+    }
+    return err;
+}
 
 // The client handle is not safe to drive from two tasks at once. The host
 // task sits in usb_host_client_handle_events(), which runs enumeration --

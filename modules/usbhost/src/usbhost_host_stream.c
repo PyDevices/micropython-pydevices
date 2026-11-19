@@ -233,6 +233,10 @@ static void usbhost_stream_cb(usb_transfer_t *x) {
             // the classic isochronous read bug.
             offset += s->packet;
         }
+        if (s->cfg.downmix) {
+            // The downmix wrote to the buffer the controller gets back.
+            usbhost_host_in_transfer_clean(x);
+        }
         usbhost_stream_arm_in(s, x);
     } else {
         for (int i = 0; i < x->num_isoc_packets; i++) {
@@ -416,7 +420,7 @@ static int usbhost_stream_open_locked(uint32_t dev_id, uint8_t ep, const usbhost
     // with what fits, as long as that's no less than the minimum queue.
     const size_t buf = (size_t)packet * s->pkts;
     for (int i = 0; i < q.num_xfer; i++) {
-        if (usb_host_transfer_alloc(buf, s->pkts, &s->xfer[i]) != ESP_OK) {
+        if (usbhost_host_in_transfer_alloc(buf, s->pkts, &s->xfer[i]) != ESP_OK) {
             s->xfer[i] = NULL;
             break;
         }

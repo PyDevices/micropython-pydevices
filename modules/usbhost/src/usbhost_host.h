@@ -33,6 +33,11 @@ void usbhost_host_lock_resume(int held);
 void usbhost_host_ctrl_abandon(usb_transfer_t *xfer);
 bool usbhost_host_ctrl_reclaim(usb_transfer_t *xfer);
 
+// A transfer the controller may write to: use these rather than
+// usb_host_transfer_alloc() for anything that receives. usbhost_host.c.
+esp_err_t usbhost_host_in_transfer_alloc(size_t size, int num_isoc_packets, usb_transfer_t **out);
+void usbhost_host_in_transfer_clean(usb_transfer_t *x);
+
 // usbhost_host_xfer.c: what the host core and the streams need of it.
 int usbhost_xfer_iso_ep(usb_device_handle_t dev, uint8_t ep, uint16_t *wmax, uint8_t *interval, uint8_t *itf_out);
 void usbhost_xfer_on_dev_gone(usb_device_handle_t dev);

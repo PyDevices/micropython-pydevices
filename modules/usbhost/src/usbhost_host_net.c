@@ -244,7 +244,7 @@ int usbhost_net_start(uint32_t dev_id, uint8_t itf, uint8_t alt, uint8_t ep_in, 
     usbhost_net.mps = mps ? mps : 64;
     usbhost_net.rndis = rndis;
     for (int i = 0; i < NET_RX_XFERS; i++) {
-        if (usb_host_transfer_alloc(NET_RX_BYTES, 0, &usbhost_net.rx[i]) != ESP_OK) {
+        if (usbhost_host_in_transfer_alloc(NET_RX_BYTES, 0, &usbhost_net.rx[i]) != ESP_OK) {
             goto nomem;
         }
     }
