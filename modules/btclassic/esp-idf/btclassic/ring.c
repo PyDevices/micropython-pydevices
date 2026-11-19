@@ -119,9 +119,13 @@ size_t btc_ring_read(btc_ring_t *r, int16_t *dst, size_t frames, uint8_t out_cha
 
     // Take one frame more or less than asked for when the ring has drifted
     // away from half full: the sender's clock and ours never quite agree.
+    // The upper edge sits further out than the lower. A phone can start a
+    // stream faster than real time just after playing begins, which leaves
+    // the ring high; with the edge at slack, its ordinary bursts then cross
+    // it and each read above it drops a frame, though the clocks agree.
     size_t take = frames;
     int adjust = 0;
-    if (avail > target + slack && avail > frames + 1) {
+    if (avail > target + r->limit / 4 && avail > frames + 1) {
         take = frames + 1;
         adjust = 1;
     } else if (avail < target - slack && frames > 1) {
