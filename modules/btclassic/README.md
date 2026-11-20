@@ -164,7 +164,10 @@ and the module builds for it as it does for the classic ESP32, with
 everything in. On a Waveshare ESP32-S31-Touch-LCD-4.3C, `AudioSink` plays
 a Galaxy S21's Spotify through the board's codec, with the title, artist,
 album, duration, position, volume and cover art, and Wi-Fi stays up while
-it plays. The other profiles are in the firmware but haven't been tried on
+it plays, with about 47 KB of internal RAM free, so WebREPL keeps
+answering. For that room, the controller leaves out BLE 5's features, which
+the `bluetooth` backend's BLE 4.2 calls never use, and Bluedroid's
+semaphores and the audio pump's stack live in PSRAM. The other profiles are in the firmware but haven't been tried on
 the S31 yet.
 
 BLE runs beside Classic on the same board. Synth Station takes BLE-MIDI
