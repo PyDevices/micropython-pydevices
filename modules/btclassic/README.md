@@ -256,6 +256,9 @@ both roles, the GATT server and client, and pairing. Where it differs:
 - The client hears notifications from characteristics it discovered (up to
   16 per peer), or whose CCCD it wrote.
 - The device name is one name, shared with Classic.
+- When `active(True)` fails, the OSError names the ESP-IDF call that failed
+  and what it returned, for example `[Errno 5] EIO: BLE start:
+  esp_ble_gatts_app_register: ESP_ERR_INVALID_STATE`.
 
 ## Sending audio
 

@@ -557,8 +557,13 @@ static uint8_t users;
 #define CONTROLLER_MODE ESP_BT_MODE_CLASSIC_BT
 #endif
 
+// The call that stopped the last failed start, and what it returned.
+static const char *failed_call;
+static esp_err_t failed_err;
+
 static int stack_up(void) {
     esp_err_t err = ESP_OK;
+    const char *call = NULL;
     if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE) {
         #if !CONFIG_BTDM_CTRL_MODE_BTDM
         // Classic only: give the BLE half of the controller's memory back.
@@ -566,22 +571,33 @@ static int stack_up(void) {
         esp_bt_controller_mem_release(ESP_BT_MODE_BLE);
         #endif
         esp_bt_controller_config_t cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+        call = "esp_bt_controller_init";
         err = esp_bt_controller_init(&cfg);
     }
     if (err == ESP_OK && esp_bt_controller_get_status() != ESP_BT_CONTROLLER_STATUS_ENABLED) {
+        call = "esp_bt_controller_enable";
         err = esp_bt_controller_enable(CONTROLLER_MODE);
     }
     if (err == ESP_OK && esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_UNINITIALIZED) {
         esp_bluedroid_config_t bcfg = BT_BLUEDROID_INIT_CONFIG_DEFAULT();
+        call = "esp_bluedroid_init_with_cfg";
         err = esp_bluedroid_init_with_cfg(&bcfg);
     }
     if (err == ESP_OK && esp_bluedroid_get_status() != ESP_BLUEDROID_STATUS_ENABLED) {
+        call = "esp_bluedroid_enable";
         err = esp_bluedroid_enable();
     }
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Bluetooth didn't start: %s", esp_err_to_name(err));
+        failed_call = call;
+        failed_err = err;
+        ESP_LOGE(TAG, "Bluetooth didn't start: %s: %s", call, esp_err_to_name(err));
     }
     return btc_err(err);
+}
+
+const char *btc_stack_failure(int *esp_err) {
+    *esp_err = failed_err;
+    return failed_call;
 }
 
 static void stack_down(void) {
