@@ -353,10 +353,13 @@ static void IRAM_ATTR dcfb_scan_copy(dcfb_scan_t *s, uint8_t bb, uint32_t chunk)
         esp_cache_msync(s->bb[bb], s->chunk_bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     }
     // Start pulling the next rows into the cache, as ESP-IDF's own refill does.
+    // The preload call is new in ESP-IDF 6, which every self-fill target uses.
+    #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
     uint32_t next = chunk + 1 < s->chunks ? chunk + 1 : 0;
     cache_hal_preload(CACHE_LL_LEVEL_EXT_MEM, CACHE_TYPE_DATA,
         (uint32_t)(s->fbs[s->cur_fb] + (size_t)next * s->chunk_bytes), s->chunk_bytes,
         CACHE_PRELOAD_ORDER_ASCENDING);
+    #endif
 }
 
 static bool IRAM_ATTR dcfb_on_bounce_empty(esp_lcd_panel_handle_t panel, void *bounce_buf,
