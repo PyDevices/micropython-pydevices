@@ -28,6 +28,11 @@
 #include "esp_hf_client_legacy_api.h"
 #endif
 
+#if BTCLASSIC_DECLINE_CALL_AUDIO
+_Static_assert(sizeof(BTC_HF_POLICY_MARKER) - 1 == ESP_BT_HF_AT_SEND_XAPL_LEN,
+    "Bluedroid only sends XAPL information of this length");
+#endif
+
 static const char *TAG = "btclassic";
 
 #define MAX_RATE 16000              // mSBC; CVSD is 8000
@@ -177,7 +182,9 @@ static void hf_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *para
                 #if BTCLASSIC_DECLINE_CALL_AUDIO
                 // Android's audio policy, through hfp_decline.c: keep calls'
                 // audio on the phone.
-                esp_hf_client_send_xapl(BTC_HF_POLICY_MARKER, 0);
+                if (esp_hf_client_send_xapl(BTC_HF_POLICY_MARKER, 0) != ESP_OK) {
+                    ESP_LOGE(TAG, "call audio: the audio policy was not sent");
+                }
                 #endif
                 esp_hf_client_query_current_operator_name();
                 esp_hf_client_retrieve_subscriber_info();
