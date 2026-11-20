@@ -20,15 +20,18 @@ answer. With a client that stops reading for a few seconds, a print of
 20000 characters with a callback printing meanwhile put the callback's
 frame at offset 12960 of the long frame's payload.
 
-Queue a frame written while another one is being sent, whole, in a small
-buffer (1 KB; more is dropped), and send it after the frame in flight.
-The write that owns the socket must then always finish, or what is queued
-would never go out: an exception raised while it waits (a pending Ctrl-C,
-say) is kept until the frame and the queue are sent, then made pending
-again, so it is raised in the code that was running.
+A write from another thread now waits for the frame in flight to finish.
+A write from a callback run inside that frame's wait can't wait for it,
+so its frame is queued, whole, in a small buffer (1 KB; more is dropped),
+and sent after the frame in flight. The write that owns the socket must
+then always finish, or what is queued would never go out: an exception
+raised while it waits (a pending Ctrl-C, say) is kept until the frame and
+the queue are sent, then made pending again, so it is raised in the code
+that was running. The same goes for an exception raised while another
+thread waits its turn.
 
 diff --git a/extmod/modwebsocket.c b/extmod/modwebsocket.c
-index 48f951e..e36c3a9 100644
+index 48f951e..99ccac4 100644
 --- a/extmod/modwebsocket.c
 +++ b/extmod/modwebsocket.c
 @@ -38,6 +38,10 @@ enum { FRAME_HEADER, FRAME_OPT, PAYLOAD, CONTROL };
@@ -42,17 +45,21 @@ index 48f951e..e36c3a9 100644
  typedef struct _mp_obj_websocket_t {
      mp_obj_base_t base;
      mp_obj_t sock;
-@@ -53,6 +57,9 @@ typedef struct _mp_obj_websocket_t {
+@@ -53,6 +57,13 @@ typedef struct _mp_obj_websocket_t {
      byte ws_flags;
      // Copy of current frame flags
      byte last_flags;
 +    // Whole frames waiting for the blocking write under way to finish.
 +    uint16_t queue_len;
 +    byte *queue;
++    #if MICROPY_PY_THREAD
++    // The thread whose blocking write is under way.
++    void *writer;
++    #endif
  } mp_obj_websocket_t;
  
  static mp_uint_t websocket_write(mp_obj_t self_in, const void *buf, mp_uint_t size, int *errcode);
-@@ -68,6 +75,8 @@ static mp_obj_t websocket_make_new(const mp_obj_type_t *type, size_t n_args, siz
+@@ -68,6 +79,8 @@ static mp_obj_t websocket_make_new(const mp_obj_type_t *type, size_t n_args, siz
      o->mask_pos = 0;
      o->buf_pos = 0;
      o->opts = FRAME_TXT;
@@ -61,7 +68,7 @@ index 48f951e..e36c3a9 100644
      if (n_args > 1 && args[1] == mp_const_true) {
          o->opts |= BLOCKING_WRITE;
      }
-@@ -267,24 +276,93 @@ static mp_uint_t websocket_write(mp_obj_t self_in, const void *buf, mp_uint_t si
+@@ -267,24 +280,116 @@ static mp_uint_t websocket_write(mp_obj_t self_in, const void *buf, mp_uint_t si
  
      return websocket_write_raw(self_in, header, hdr_sz, buf, size, errcode);
  }
@@ -93,10 +100,10 @@ index 48f951e..e36c3a9 100644
 +    return done;
 +}
 +
-+// A frame written while a blocking write is under way: from a callback run
-+// during that write's wait, or from another thread while it has released the
-+// GIL. Sent at once, it would land in the middle of the other frame's payload,
-+// so keep it whole for that write to send after its own frame.
++// A frame written while a blocking write is under way, from a callback run
++// during that write's wait. Sent at once, it would land in the middle of the
++// other frame's payload, so keep it whole for that write to send after its
++// own frame. The callback runs inside that write, so it can't wait for it.
 +static mp_uint_t websocket_queue_frame(mp_obj_websocket_t *self, const byte *header, int hdr_sz, const void *buf, mp_uint_t size) {
 +    if (self->queue == NULL) {
 +        self->queue = m_new_maybe(byte, WEBSOCKET_QUEUE_SIZE);
@@ -124,7 +131,28 @@ index 48f951e..e36c3a9 100644
 +        return *errcode != 0 ? MP_STREAM_ERROR : out_sz;
 +    }
 +
++    mp_obj_t exc = MP_OBJ_NULL;
++
++    #if MICROPY_PY_THREAD
++    // Another thread's frame is going out while that thread has released the
++    // GIL. This thread can wait for it to finish, and must: a frame queued
++    // instead would be dropped if it didn't fit. Callbacks run during the
++    // wait, so keep an exception they raise, as for the write itself below.
++    while ((self->opts & WRITING) && self->writer != mp_thread_get_state()) {
++        nlr_buf_t nlr;
++        if (nlr_push(&nlr) == 0) {
++            mp_event_wait_ms(1);
++            nlr_pop();
++        } else if (exc == MP_OBJ_NULL) {
++            exc = MP_OBJ_FROM_PTR(nlr.ret_val);
++        }
++    }
++    #endif
++
 +    if (self->opts & WRITING) {
++        if (exc != MP_OBJ_NULL) {
++            mp_sched_exception(exc);
++        }
 +        *errcode = 0;
 +        return websocket_queue_frame(self, header, hdr_sz, buf, size);
      }
@@ -132,14 +160,16 @@ index 48f951e..e36c3a9 100644
 -    mp_uint_t out_sz = mp_stream_write_exactly(self->sock, header, hdr_sz, errcode);
 +    websocket_set_blocking(self, true);
 +    self->opts |= WRITING;
++    #if MICROPY_PY_THREAD
++    self->writer = mp_thread_get_state();
++    #endif
 +
-+    mp_obj_t exc = MP_OBJ_NULL;
 +    *errcode = 0;
 +    mp_uint_t out_sz = websocket_send_all(self, header, hdr_sz, errcode, &exc);
      if (*errcode == 0) {
 -        out_sz = mp_stream_write_exactly(self->sock, buf, size, errcode);
 +        out_sz = websocket_send_all(self, buf, size, errcode, &exc);
-+    }
+     }
 +    // Then the frames queued meanwhile, each one whole. More can be queued
 +    // while these go out; they go after them.
 +    while (*errcode == 0 && self->queue_len != 0) {
@@ -147,7 +177,7 @@ index 48f951e..e36c3a9 100644
 +        websocket_send_all(self, self->queue, n, errcode, &exc);
 +        self->queue_len -= n;
 +        memmove(self->queue, self->queue + n, self->queue_len);
-     }
++    }
 +    self->queue_len = 0;
 +
 +    self->opts &= ~WRITING;

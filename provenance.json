@@ -228,7 +228,7 @@
    "sha256": "6b7adeebd642b3fb1632e99c15059e8f6587cea50212d918fffc2ed3e9801a8f"
   },
   "0076-micropython-extmod-websocket-finish-a-frame-before-anything-else-is-sent.patch": {
-   "sha256": "72a4b577873e1932a0318bcef2848e2fb20376a38b245ebfa41bd06c8c0287ea"
+   "sha256": "e214e25b8a1c6116ebc35e2e0f6ddc139b5ad0bb50da5e32a33dd61f2f51365d"
   }
  },
  "tinyusb_patches": {
