@@ -84,7 +84,7 @@ circuitpython     https://github.com/adafruit/circuitpython.git       792011f19a
 # then patches/micropython-s31/. When upstream merges the two pull requests,
 # both lines and that series go, and the S31 builds from the pin like the rest.
 micropython-s31   https://github.com/micropython/micropython          0b9512f475bdd42e2583ae8cfa68aac04063eba2
-esp-idf6          https://github.com/espressif/esp-idf.git            fff9895c82d744c7237be8847347bdd1b07c6643  # tag v6.1
+esp-idf6          https://github.com/espressif/esp-idf.git            051e4c4eb20346e043cdd47bc388fde75ff8af63  # tag v6.1.1
 
 # Downloads: <name> <archive-url> <version>. A build unpacks one into deps/
 # and refuses it if its files say another version.
