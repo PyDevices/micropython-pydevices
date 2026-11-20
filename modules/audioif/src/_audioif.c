@@ -55,6 +55,7 @@
 // firmware once; it is the reason audiopump.driver() exists.
 #if defined(AUDIOIF_DRIVER_ESP32) || defined(ESP_PLATFORM)
 #include "driver/i2s_std.h"
+#include "audioif_i2s_peek.h"
 #include "esp_idf_version.h"
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
 // ESP-IDF 6 numbers an I2S port with a plain int and has no i2s_port_t.
@@ -950,27 +951,37 @@ static volatile uint32_t audiopump_frame_bytes;
 
 // --- the underrun count ------------------------------------------------------
 //
-// Two witnesses, both taken in the DMA's own interrupt, and both events rather
-// than a difference of two running totals. The difference this replaces --
-// "where the wire is" minus "what the pump has fed" -- read the DMA ring's
-// fill level as well as any silence: it moved by a descriptor whenever the
-// pump's write landed, went DOWN as the ring refilled, and kept a start-up
-// offset for the whole performance. On the P4 a clean playback read thousands
-// of bytes and a `gc.collect()` made the number fall (audioif#26). An event
-// count cannot fall and reads zero until something actually goes quiet.
+// `starved()` is the bytes of silence the wire carried inside a performance:
+// after its first audio began, because the audio that belonged there hadn't
+// been written. Two witnesses, both counting events on the wire itself.
 //
-//   The ring runs dry. The driver keeps every buffer the DMA has finished
-//   with in a queue for the writer; it is full only when every buffer but
-//   the one just finished is free and zeroed, so the DMA's next descriptor
-//   carries no audio. The driver reports exactly that moment as
-//   `on_send_q_ovf`, once per descriptor, for as long as nothing is written.
-//   A healthy writer is blocked waiting for that queue, so it never fills.
+//   Holes in the stream. Every buffer of the DMA ring plays once a lap, so
+//   the moment a buffer finishes says where on the wire it plays next: one
+//   lap, less itself, later. The interrupt keeps that for each buffer. After
+//   each write the driver's writer is in a known buffer at a known offset,
+//   so the wire position where the written audio ends is known exactly.
+//   Between two writes that position should move by what was written. Any
+//   more is silence the wire carries between the two: the writer came back
+//   after its buffers had gone out empty, or the driver gave up on a buffer
+//   it had only partly filled (it does, whenever its queue of free buffers
+//   is nearly full). A wire that has run past the written audio and not
+//   been written to since is a hole still growing, and counts too.
+//
+//   This replaced a count of the driver's queue overflowing, which needs
+//   the writer to miss three descriptors in a row. A pump a little late on
+//   every block never does that: on the P4 a synth costing 6.4 ms a 5.33 ms
+//   block lost 100 KB in 3 s and that count read 0 (omnipython-builds#592).
+//   A difference of two running totals, wire minus written, can't do it
+//   either: it reads the start-up latency and the ring's fill level as well
+//   as silence, and fell when the ring refilled (audioif#26). Counting from
+//   where the first audio lands, not from when it was written, is what keeps
+//   the start-up zeros out.
 //
 //   The DMA stops. A flash erase on the ESP32-S3 suspends the cache that the
 //   PSRAM descriptors and audio sit behind, and the DMA itself halts: no
-//   descriptor finishes, nothing overflows, and the first witness sees
-//   nothing (measured on the T-Embed: 1.14 s of audio lost to a 32 kB write
-//   with the DMA never behind the pump). The interval between two finished
+//   descriptor finishes and the wire doesn't move, so it carries no hole
+//   (measured on the T-Embed: 1.14 s of audio lost to a 32 kB write with the
+//   DMA never behind the pump). The interval between two finished
 //   descriptors sees it. One descriptor lasts `audiopump_desc_us`; a gap of
 //   more than twice that is charged, less the one descriptor it should have
 //   been. Twice is far outside interrupt jitter and any clock divider's
@@ -978,14 +989,24 @@ static volatile uint32_t audiopump_frame_bytes;
 //
 // Counting is off until the pump's first write after `play()` or `resume()`:
 // before that, the zeros the channel clocks are the start-up latency or a
-// pause somebody asked for, not starvation.
+// pause somebody asked for, not starvation. Wire positions are 32-bit and
+// wrap; only differences are used, and the interrupt never reads a torn
+// 64-bit value.
+#define AUDIOPUMP_RING_MAX (32)
 static volatile uint32_t audiopump_desc_bytes;     // one descriptor, in bytes
 static volatile uint32_t audiopump_desc_us;        // ... and in microseconds
-static volatile uint32_t audiopump_starved_descs;  // dry descriptors counted
 static volatile uint64_t audiopump_halted_us;      // DMA gaps beyond one descriptor
 static volatile int64_t audiopump_last_sent_us;    // last descriptor finished
 static volatile bool audiopump_starved_live;       // counting now
 static volatile bool audiopump_starved_pending;    // count from the next write
+static volatile uint32_t audiopump_wire;           // bytes the TX DMA has sent
+static uint8_t **audiopump_ring;                   // the driver's TX buffers
+static uint32_t audiopump_ring_n;                  // ... how many
+static uint32_t audiopump_ring_bytes;              // ... bytes in each
+static volatile uint32_t audiopump_ring_done[AUDIOPUMP_RING_MAX]; // wire when each last finished
+static volatile uint32_t audiopump_audio_end;      // wire position the written audio ends at
+static uint64_t audiopump_holes;                   // silence between writes, bytes
+static uint64_t audiopump_starved_said;            // what starved() last returned
 
 // Who holds the open channel (AUDIOPUMP_I2S_HOLD_*), and what it was opened
 // with. A second holder joins only if it asks for the same wire.
@@ -1141,6 +1162,14 @@ static IRAM_ATTR bool audiopump_on_sent(i2s_chan_handle_t handle,
     (void)handle;
     (void)user_ctx;
     audiopump_dma_bytes += event->size;
+    const uint32_t wire = audiopump_wire + (uint32_t)event->size;
+    audiopump_wire = wire;
+    for (uint32_t i = 0; i < audiopump_ring_n; i++) {
+        if (audiopump_ring[i] == (uint8_t *)event->dma_buf) {
+            audiopump_ring_done[i] = wire;
+            break;
+        }
+    }
     // The DMA-stopped witness. Microseconds only: a 64-bit division here
     // would call into libgcc from an interrupt.
     const int64_t now = esp_timer_get_time();
@@ -1152,19 +1181,6 @@ static IRAM_ATTR bool audiopump_on_sent(i2s_chan_handle_t handle,
         if (one > 0 && gap > 2 * one) {
             audiopump_halted_us += (uint64_t)(gap - one);
         }
-    }
-    return false;
-}
-
-// The ring-ran-dry witness: every buffer but the one just finished is free,
-// so the descriptor the DMA starts now carries no audio.
-static IRAM_ATTR bool audiopump_on_send_q_ovf(i2s_chan_handle_t handle,
-    i2s_event_data_t *event, void *user_ctx) {
-    (void)handle;
-    (void)event;
-    (void)user_ctx;
-    if (audiopump_starved_live) {
-        audiopump_starved_descs++;
     }
     return false;
 }
@@ -1235,6 +1251,46 @@ static void audiopump_i2s_close_rx_alone(void) {
     audiopump_i2s_rx_alone = false;
 }
 
+// Where the audio just written ends on the wire: the writer's buffer plays
+// next one lap, less itself, after it last finished.
+static bool audiopump_writer_end(uint32_t *end) {
+    void *buf;
+    uint32_t offset;
+    audioif_i2s_peek_writer(audiopump_i2s_tx, &buf, &offset);
+    for (uint32_t i = 0; i < audiopump_ring_n; i++) {
+        if (audiopump_ring[i] == (uint8_t *)buf) {
+            *end = audiopump_ring_done[i]
+                + (audiopump_ring_n - 1u) * audiopump_ring_bytes + offset;
+            return true;
+        }
+    }
+    return false;
+}
+
+// After a write: the holes witness. On the writer's task.
+static void audiopump_note_write(uint32_t written) {
+    uint32_t end;
+    if (!audiopump_writer_end(&end)) {
+        return;
+    }
+    if (audiopump_starved_pending) {
+        // The first audio of this performance: count from where it starts on
+        // the wire, so the zeros already queued ahead of it are latency.
+        audiopump_starved_pending = false;
+        audiopump_audio_end = end;
+        audiopump_starved_live = true;
+        return;
+    }
+    if (!audiopump_starved_live) {
+        return;
+    }
+    const int32_t gap = (int32_t)(end - audiopump_audio_end) - (int32_t)written;
+    if (gap > 0) {
+        audiopump_holes += (uint64_t)gap;
+    }
+    audiopump_audio_end = end;
+}
+
 static bool audiopump_sink_ready(void) {
     return audiopump_i2s_tx != NULL;
 }
@@ -1249,11 +1305,8 @@ static uint32_t audiopump_sink_write(const uint8_t *buffer, uint32_t length,
         &written, pdMS_TO_TICKS(timeout_ms));
     *timed_out = (err == ESP_ERR_TIMEOUT);
     audiopump_sink_bytes += written;
-    if (written > 0 && audiopump_starved_pending) {
-        // The first audio of this performance is in the ring: from here on,
-        // a descriptor that goes out empty is the pump being late.
-        audiopump_starved_pending = false;
-        audiopump_starved_live = true;
+    if (written > 0) {
+        audiopump_note_write((uint32_t)written);
     }
     return (uint32_t)written;
 }
@@ -1876,7 +1929,6 @@ static uint32_t audiopump_i2s_open_raw(const audiopump_i2s_cfg_t *cfg) {
     if (err == ESP_OK) {
         i2s_event_callbacks_t cbs = {
             .on_sent = audiopump_on_sent,
-            .on_send_q_ovf = audiopump_on_send_q_ovf,
         };
         err = i2s_channel_register_event_callback(audiopump_i2s_tx, &cbs, NULL);
     }
@@ -1902,6 +1954,22 @@ static uint32_t audiopump_i2s_open_raw(const audiopump_i2s_cfg_t *cfg) {
         audiopump_desc_us = (uint32_t)(((uint64_t)chan_config.dma_frame_num
             * 1000000ULL) / (uint32_t)cfg->rate);
         audiopump_last_sent_us = 0;
+        // The ring, and where each buffer first plays: buffer i starts i
+        // buffers from now, as if it had finished one lap earlier.
+        audiopump_ring_n = 0;
+        uint8_t **bufs;
+        uint32_t count;
+        uint32_t bytes;
+        if (audioif_i2s_peek_ring(audiopump_i2s_tx, &bufs, &count, &bytes)
+            && count <= AUDIOPUMP_RING_MAX) {
+            const uint32_t wire = audiopump_wire;
+            for (uint32_t i = 0; i < count; i++) {
+                audiopump_ring_done[i] = wire + (i + 1u) * bytes - count * bytes;
+            }
+            audiopump_ring = bufs;
+            audiopump_ring_bytes = bytes;
+            audiopump_ring_n = count;
+        }
         audiopump_i2s_starved_reset();
         // RX first: it is the half that must not miss the beginning of what
         // TX emits, and enabling it first makes any gap between the two an
@@ -3297,15 +3365,29 @@ uint32_t audiopump_i2s_live_rate(void) {
 // reported as one.
 uint64_t audiopump_i2s_starved(void) {
     #if AUDIOIF_DRV_ESP
-    const uint64_t dry = (uint64_t)audiopump_starved_descs
-        * (uint64_t)audiopump_desc_bytes;
-    uint64_t halted = (audiopump_halted_us * (uint64_t)audiopump_byte_rate)
-        / 1000000ULL;
+    uint64_t holes = audiopump_holes;
+    if (audiopump_starved_live) {
+        // The wire past the written audio, not written to since.
+        const int32_t past = (int32_t)(audiopump_wire - audiopump_audio_end);
+        if (past > 0) {
+            holes += (uint64_t)past;
+        }
+    }
+    const uint64_t halted = (audiopump_halted_us
+        * (uint64_t)audiopump_byte_rate) / 1000000ULL;
+    uint64_t n = holes + halted;
     // Whole frames, like everything else this driver counts in bytes.
     if (audiopump_frame_bytes > 1u) {
-        halted -= halted % audiopump_frame_bytes;
+        n -= n % audiopump_frame_bytes;
     }
-    return dry + halted;
+    // A hole still growing is measured to the last finished descriptor, and
+    // the write that ends it can land up to a descriptor earlier than that:
+    // never report less than before.
+    if (n < audiopump_starved_said) {
+        n = audiopump_starved_said;
+    }
+    audiopump_starved_said = n;
+    return n;
     #else
     return 0;
     #endif
@@ -3317,7 +3399,8 @@ void audiopump_i2s_starved_reset(void) {
     #if AUDIOIF_DRV_ESP
     audiopump_sink_bytes = audiopump_dma_bytes;
     audiopump_starved_live = false;
-    audiopump_starved_descs = 0;
+    audiopump_holes = 0;
+    audiopump_starved_said = 0;
     audiopump_halted_us = 0;
     audiopump_starved_pending = true;
     #endif
@@ -3326,6 +3409,12 @@ void audiopump_i2s_starved_reset(void) {
 // A pause begins: the zeros it clocks were asked for. Keep what was counted.
 void audiopump_i2s_starved_hold(void) {
     #if AUDIOIF_DRV_ESP
+    if (audiopump_starved_live) {
+        const int32_t past = (int32_t)(audiopump_wire - audiopump_audio_end);
+        if (past > 0) {
+            audiopump_holes += (uint64_t)past;
+        }
+    }
     audiopump_starved_pending = false;
     audiopump_starved_live = false;
     #endif
