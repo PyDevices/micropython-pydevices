@@ -52,6 +52,9 @@
 #include "esp_lcd_panel_rgb.h"
 #include "esp_idf_version.h"
 #include "esp_cache.h"
+#include "esp_attr.h"
+#include "hal/cache_hal.h"
+#include "hal/cache_ll.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #endif
@@ -115,6 +118,10 @@ typedef struct _dotclockframebuffer_obj_t {
     bool present_pending;
     uint8_t presented;
     uint32_t present_frames;
+    // The driver fills the bounce buffers itself from its own frame buffers
+    // and checks its place at every vsync (see dcfb_scan_t), instead of
+    // leaving both to ESP-IDF.
+    bool self_fill;
 #endif
 } dotclockframebuffer_obj_t;
 
@@ -122,6 +129,9 @@ typedef struct _dotclockframebuffer_obj_t {
 typedef struct {
     esp_lcd_panel_handle_t panel;
     bool panel_ready;
+    // Frame buffers this driver allocated itself (self-fill scanout); the
+    // panel owns them otherwise.
+    uint8_t *own_fbs[DCFB_NUM_FBS];
 } dcfb_host_t;
 
 static dcfb_host_t s_host;
@@ -164,6 +174,13 @@ static void dcfb_host_teardown(void) {
         esp_lcd_panel_del(s_host.panel);
         s_host.panel = NULL;
         s_host.panel_ready = false;
+    }
+    // After the panel: its interrupts read these until it is deleted.
+    for (size_t i = 0; i < DCFB_NUM_FBS; i++) {
+        if (s_host.own_fbs[i] != NULL) {
+            heap_caps_free(s_host.own_fbs[i]);
+            s_host.own_fbs[i] = NULL;
+        }
     }
 }
 
@@ -269,12 +286,183 @@ static uint32_t dcfb_probe_bounce_rows(uint32_t h_res, uint32_t v_res, uint32_t 
 // Used by refresh() to wait until the newly promoted front is safe to leave.
 static volatile uint32_t s_dcfb_frame_count;
 
+// The scanout's place in the frame, and what stats() reports.
+//
+// With bounce buffers the DMA sends two internal-RAM buffers in turn, forever,
+// and each DMA EOF interrupt refills the one just sent with the next rows of
+// the frame. The LCD controller takes exactly one frame of pixels between two
+// vsyncs, so the buffer it starts each frame on never changes. The refill's
+// idea of which rows come next is software only: if the interrupt is held off
+// for longer than one buffer takes to send, two EOFs arrive as one, one refill
+// is lost, and every later refill lands a buffer's worth of rows off. The
+// picture then stays shifted vertically until something resets the count.
+// ESP-IDF resets it at vsync on the ESP32-S3 only (its restart link); on the
+// other targets nothing does.
+//
+// Self-fill keeps the count here instead: the EOF callback fills the buffer it
+// knows is free with the rows it knows come next, and the vsync callback checks
+// that the count is where a frame boundary puts it. If not, it refills both
+// buffers with the frame's first rows during the vertical blank, so a miss
+// shows for one frame and heals.
+typedef struct {
+    uint8_t *fbs[DCFB_NUM_FBS];
+    uint8_t *bb[2];          // learnt from the first two fills, in order
+    uint32_t chunk_bytes;    // one bounce buffer of frame rows
+    uint32_t chunks;         // bounce buffers per frame
+    uint32_t next_chunk;     // the rows the next refill copies
+    uint8_t next_bb;         // the buffer the next refill writes
+    volatile uint8_t cur_fb; // the frame buffer being sent
+    volatile int8_t pending_fb; // promoted by present(), taken at the frame start
+    bool bb_msync;           // bounce buffers sit behind a cache
+    uint32_t eof_in_frame;
+    int64_t t_vsync;
+    int64_t t_eof;
+    int32_t chunk_us;        // how long one bounce buffer takes to send
+    bool resynced;           // the last vsync refilled both buffers
+    // Counters for stats().
+    uint32_t vsyncs;
+    uint32_t resyncs;        // vsyncs that found the refill out of place
+    uint32_t late_eofs;      // EOFs more than 1.5 buffers after the one before
+    uint32_t stale_eofs;     // a previous frame's EOF that arrived after a resync
+    int32_t max_eof_gap_us;
+    int32_t min_eof_to_vsync_us;
+    // The ESP-IDF-filled path: where ESP-IDF's own frame wrap falls after
+    // vsync. It moves by one buffer's time each time a refill is lost.
+    int32_t phase_us;
+    int32_t phase0_us;
+    uint32_t phase_jumps;
+    uint32_t wraps;
+} dcfb_scan_t;
+
+static dcfb_scan_t s_scan;
+
+static void IRAM_ATTR dcfb_scan_copy(dcfb_scan_t *s, uint8_t bb, uint32_t chunk) {
+    if (chunk == 0) {
+        // A new frame starts: take the buffer present() promoted. The old one
+        // is idle from here, since its last rows are already in a bounce buffer.
+        int8_t pending = s->pending_fb;
+        if (pending >= 0) {
+            s->cur_fb = (uint8_t)pending;
+            s->pending_fb = -1;
+        }
+        s_dcfb_frame_count++;
+    }
+    const uint8_t *src = s->fbs[s->cur_fb] + (size_t)chunk * s->chunk_bytes;
+    memcpy(s->bb[bb], src, s->chunk_bytes);
+    if (s->bb_msync) {
+        esp_cache_msync(s->bb[bb], s->chunk_bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    }
+    // Start pulling the next rows into the cache, as ESP-IDF's own refill does.
+    // The preload call is new in ESP-IDF 6, which every self-fill target uses.
+    #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+    uint32_t next = chunk + 1 < s->chunks ? chunk + 1 : 0;
+    cache_hal_preload(CACHE_LL_LEVEL_EXT_MEM, CACHE_TYPE_DATA,
+        (uint32_t)(s->fbs[s->cur_fb] + (size_t)next * s->chunk_bytes), s->chunk_bytes,
+        CACHE_PRELOAD_ORDER_ASCENDING);
+    #endif
+}
+
+static bool IRAM_ATTR dcfb_on_bounce_empty(esp_lcd_panel_handle_t panel, void *bounce_buf,
+    int pos_px, int len_bytes, void *user_ctx) {
+    (void)panel;
+    (void)pos_px;
+    (void)len_bytes;
+    (void)user_ctx;
+    dcfb_scan_t *s = &s_scan;
+    // ESP-IDF fills both buffers once before it starts the DMA: the first
+    // frame rows into the first buffer it sends, the next rows into the other.
+    if (s->bb[0] == NULL) {
+        s->bb[0] = bounce_buf;
+        dcfb_scan_copy(s, 0, 0);
+        return false;
+    }
+    if (s->bb[1] == NULL) {
+        s->bb[1] = bounce_buf;
+        dcfb_scan_copy(s, 1, 1);
+        s->next_bb = 0;
+        s->next_chunk = 2;
+        return false;
+    }
+    int64_t now = esp_timer_get_time();
+    if (s->resynced && s->eof_in_frame == 0 && now - s->t_vsync < s->chunk_us / 2) {
+        // The vsync interrupt ran first and refilled both buffers; this is the
+        // EOF of the frame that just ended, not one of the new frame's, which
+        // cannot come before a whole buffer has been sent.
+        s->stale_eofs++;
+        return false;
+    }
+    if (s->eof_in_frame > 0) {
+        int32_t gap = (int32_t)(now - s->t_eof);
+        if (gap > s->max_eof_gap_us) {
+            s->max_eof_gap_us = gap;
+        }
+        if (gap > s->chunk_us + s->chunk_us / 2) {
+            s->late_eofs++;
+        }
+    }
+    s->t_eof = now;
+    s->eof_in_frame++;
+    dcfb_scan_copy(s, s->next_bb, s->next_chunk);
+    s->next_bb ^= 1;
+    s->next_chunk = s->next_chunk + 1 < s->chunks ? s->next_chunk + 1 : 0;
+    return false;
+}
+
+static bool IRAM_ATTR dcfb_on_vsync(esp_lcd_panel_handle_t panel,
+    const esp_lcd_rgb_panel_event_data_t *edata, void *user_ctx) {
+    (void)panel;
+    (void)edata;
+    bool self_fill = user_ctx != NULL;
+    dcfb_scan_t *s = &s_scan;
+    int64_t now = esp_timer_get_time();
+    s->vsyncs++;
+    s->resynced = false;
+    if (self_fill && s->bb[1] != NULL) {
+        if (s->eof_in_frame > 0) {
+            int32_t lead = (int32_t)(now - s->t_eof);
+            if (s->min_eof_to_vsync_us == 0 || lead < s->min_eof_to_vsync_us) {
+                s->min_eof_to_vsync_us = lead;
+            }
+        }
+        // At a frame boundary the first buffer is going out with the frame's
+        // first rows, the second holds the rows after them, and the next
+        // refill writes the first buffer with the third.
+        if (s->next_bb != 0 || s->next_chunk != 2) {
+            dcfb_scan_copy(s, 0, 0);
+            dcfb_scan_copy(s, 1, 1);
+            s->next_bb = 0;
+            s->next_chunk = 2;
+            s->resyncs++;
+            s->resynced = true;
+        }
+    }
+    s->eof_in_frame = 0;
+    s->t_vsync = now;
+    return false;
+}
+
 static bool IRAM_ATTR dcfb_on_frame_buf_complete(esp_lcd_panel_handle_t panel,
     const esp_lcd_rgb_panel_event_data_t *edata, void *user_ctx) {
     (void)panel;
     (void)edata;
     (void)user_ctx;
     s_dcfb_frame_count++;
+    dcfb_scan_t *s = &s_scan;
+    if (s->vsyncs > 0) {
+        int32_t phase = (int32_t)(esp_timer_get_time() - s->t_vsync);
+        int32_t moved = phase - s->phase_us;
+        if (moved < 0) {
+            moved = -moved;
+        }
+        if (s->wraps > 30 && moved > s->chunk_us / 2) {
+            s->phase_jumps++;
+        }
+        s->phase_us = phase;
+        if (s->wraps == 30) {
+            s->phase0_us = phase;
+        }
+        s->wraps++;
+    }
     return false;
 }
 
@@ -378,7 +566,9 @@ static void dotclockframebuffer_init_panel(dotclockframebuffer_obj_t *self) {
         #endif
         // Two panel FBs: blit into the back; refresh() promotes and waits for
         // bounce to adopt it so LVGL never paints the live scanout buffer.
-        .num_fbs = DCFB_NUM_FBS,
+        // Self-fill allocates them here instead and fills the bounce buffers
+        // itself.
+        .num_fbs = self->self_fill ? 0 : DCFB_NUM_FBS,
         // PSRAM cannot sustain 16bpp@720x720 DPI alone — bounce through DRAM
         // (ESP-IDF rgb_panel example / Qualia-class panels). Without this the
         // image walks/tears horizontally under load. When bounce is on, do not
@@ -413,7 +603,8 @@ static void dotclockframebuffer_init_panel(dotclockframebuffer_obj_t *self) {
         .flags = {
             // Continuous DMA scanout — required for TTL RGB panels (Qualia).
             .refresh_on_demand = 0,
-            .fb_in_psram = 1,
+            .fb_in_psram = !self->self_fill,
+            .no_fb = self->self_fill,
         },
     };
 
@@ -427,8 +618,44 @@ static void dotclockframebuffer_init_panel(dotclockframebuffer_obj_t *self) {
     memcpy(panel_config.data_gpio_nums, self->data_pins, sizeof(int) * SOC_LCDCAM_RGB_DATA_WIDTH);
     #endif
 
+    size_t fb_bytes = (size_t)2 * h_res * self->height;
+    uint32_t line_px = h_res + self->hsync_pulse_width + self->hsync_back_porch + self->hsync_front_porch;
+    memset(&s_scan, 0, sizeof(s_scan));
+    s_scan.pending_fb = -1;
+    s_scan.chunk_bytes = bounce_rows * h_res * 2;
+    s_scan.chunks = self->height / bounce_rows;
+    s_scan.chunk_us = (int32_t)((uint64_t)bounce_rows * line_px * 1000000u / self->frequency);
+    s_scan.bb_msync = cache_hal_get_cache_line_size(CACHE_LL_LEVEL_INT_MEM, CACHE_TYPE_DATA) > 0;
+    if (self->self_fill) {
+        for (size_t i = 0; i < DCFB_NUM_FBS; i++) {
+            s_host.own_fbs[i] = heap_caps_aligned_calloc(DCFB_CACHE_LINE, 1, fb_bytes,
+                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (s_host.own_fbs[i] == NULL) {
+                dcfb_host_teardown();
+                mp_raise_msg_varg(&mp_type_MemoryError,
+                    MP_ERROR_TEXT("RGB panel needs 2 frame buffers of %u bytes in PSRAM"), (unsigned int)fb_bytes);
+            }
+            s_scan.fbs[i] = s_host.own_fbs[i];
+        }
+    }
+
     esp_lcd_panel_handle_t panel = NULL;
     dotclockframebuffer_raise_esp_err(esp_lcd_new_rgb_panel(&panel_config, &panel));
+    s_host.panel = panel;
+    s_host.panel_ready = true;
+    // Before init: ESP-IDF fills both bounce buffers there, through
+    // on_bounce_empty when the driver fills them itself.
+    esp_lcd_rgb_panel_event_callbacks_t cbs = {
+        .on_vsync = dcfb_on_vsync,
+    };
+    if (self->self_fill) {
+        cbs.on_bounce_empty = dcfb_on_bounce_empty;
+    } else {
+        cbs.on_frame_buf_complete = dcfb_on_frame_buf_complete;
+    }
+    // Any non-NULL context tells the vsync callback the driver fills.
+    dotclockframebuffer_raise_esp_err(esp_lcd_rgb_panel_register_event_callbacks(panel, &cbs,
+        self->self_fill ? (void *)&s_scan : NULL));
     dotclockframebuffer_raise_esp_err(esp_lcd_panel_reset(panel));
     dotclockframebuffer_raise_esp_err(esp_lcd_panel_init(panel));
 
@@ -436,20 +663,19 @@ static void dotclockframebuffer_init_panel(dotclockframebuffer_obj_t *self) {
         dotclockframebuffer_raise_esp_err(esp_lcd_panel_set_gap(panel, self->overscan_left, 0));
     }
 
-    esp_lcd_rgb_panel_event_callbacks_t cbs = {
-        .on_frame_buf_complete = dcfb_on_frame_buf_complete,
-    };
-    dotclockframebuffer_raise_esp_err(esp_lcd_rgb_panel_register_event_callbacks(panel, &cbs, NULL));
-
-    // Kick DMA once (CircuitPython does the same), then use the panel FBs.
-    uint16_t kick = 0;
-    dotclockframebuffer_raise_esp_err(esp_lcd_panel_draw_bitmap(panel, 0, 0, 1, 1, &kick));
-
     void *fb0 = NULL;
     void *fb1 = NULL;
-    dotclockframebuffer_raise_esp_err(esp_lcd_rgb_panel_get_frame_buffer(panel, 2, &fb0, &fb1));
+    if (self->self_fill) {
+        fb0 = s_scan.fbs[0];
+        fb1 = s_scan.fbs[1];
+    } else {
+        // Kick DMA once (CircuitPython does the same), then use the panel FBs.
+        uint16_t kick = 0;
+        dotclockframebuffer_raise_esp_err(esp_lcd_panel_draw_bitmap(panel, 0, 0, 1, 1, &kick));
+        dotclockframebuffer_raise_esp_err(esp_lcd_rgb_panel_get_frame_buffer(panel, 2, &fb0, &fb1));
+    }
     if (fb0 == NULL || fb1 == NULL) {
-        esp_lcd_panel_del(panel);
+        dcfb_host_teardown();
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("RGB panel frame buffer missing"));
     }
 
@@ -476,8 +702,6 @@ static void dotclockframebuffer_init_panel(dotclockframebuffer_obj_t *self) {
 
     self->panel = panel;
     self->panel_ready = true;
-    s_host.panel = panel;
-    s_host.panel_ready = true;
 }
 #endif
 
@@ -487,9 +711,7 @@ static void dotclockframebuffer_deinit_internal(dotclockframebuffer_obj_t *self)
     }
 #if defined(ESP_PLATFORM) && SOC_LCD_RGB_SUPPORTED
     if (s_host.panel_ready && s_host.panel != NULL) {
-        esp_lcd_panel_del(s_host.panel);
-        s_host.panel = NULL;
-        s_host.panel_ready = false;
+        dcfb_host_teardown();
         self->panel = NULL;
         self->panel_ready = false;
         // Panel deletion frees its FB; do not heap_caps_free it.
@@ -627,6 +849,14 @@ static mp_obj_t dotclockframebuffer_make(const mp_obj_type_t *type, size_t n_arg
     self->present_pending = false;
     self->presented = 0;
     self->present_frames = 0;
+    // ESP-IDF puts a lost refill right at vsync on the ESP32-S3 only. The
+    // driver does it on the ESP32-S31, the only other target run so far;
+    // another target joins this list once it has been run on a board.
+    #if CONFIG_IDF_TARGET_ESP32S31
+    self->self_fill = true;
+    #else
+    self->self_fill = false;
+    #endif
 #endif
     self->data_pin_count = 0;
 
@@ -716,8 +946,12 @@ static bool dotclockframebuffer_start_present(dotclockframebuffer_obj_t *self) {
     // frame count is read after the promote, so a wrap that lands between
     // the two can only make the wait one frame longer, never let it end
     // before the scanout has the new buffer.
-    dotclockframebuffer_raise_esp_err(
-        esp_lcd_panel_draw_bitmap(self->panel, 0, 0, self->width, self->height, self->fbs[presented]));
+    if (self->self_fill) {
+        s_scan.pending_fb = (int8_t)presented;
+    } else {
+        dotclockframebuffer_raise_esp_err(
+            esp_lcd_panel_draw_bitmap(self->panel, 0, 0, self->width, self->height, self->fbs[presented]));
+    }
     self->presented = presented;
     self->present_frames = s_dcfb_frame_count;
     self->present_pending = true;
@@ -835,6 +1069,35 @@ static mp_obj_t dotclockframebuffer_fill_rect(size_t n_args, const mp_obj_t *arg
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(dotclockframebuffer_fill_rect_obj, 6, 6, dotclockframebuffer_fill_rect);
 
+/* stats() — the scanout's counters since the panel started, as a dict. */
+static mp_obj_t dotclockframebuffer_stats(mp_obj_t self_in) {
+    dotclockframebuffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    // The names stay outside the ESP_PLATFORM block so the qstr pass sees them.
+    static const qstr names[] = {
+        MP_QSTR_self_fill, MP_QSTR_frames, MP_QSTR_vsyncs, MP_QSTR_chunk_us,
+        MP_QSTR_resyncs, MP_QSTR_late_eofs, MP_QSTR_stale_eofs, MP_QSTR_max_eof_gap_us,
+        MP_QSTR_min_eof_to_vsync_us, MP_QSTR_phase_us, MP_QSTR_phase0_us, MP_QSTR_phase_jumps,
+    };
+    mp_int_t values[MP_ARRAY_SIZE(names)] = {0};
+#if defined(ESP_PLATFORM) && SOC_LCD_RGB_SUPPORTED
+    dcfb_scan_t snap = s_scan;
+    mp_int_t v[] = {
+        self->self_fill, s_dcfb_frame_count, snap.vsyncs, snap.chunk_us,
+        snap.resyncs, snap.late_eofs, snap.stale_eofs, snap.max_eof_gap_us,
+        snap.min_eof_to_vsync_us, snap.phase_us, snap.phase0_us, snap.phase_jumps,
+    };
+    memcpy(values, v, sizeof(values));
+#else
+    (void)self;
+#endif
+    mp_obj_t d = mp_obj_new_dict(MP_ARRAY_SIZE(names));
+    for (size_t i = 0; i < MP_ARRAY_SIZE(names); i++) {
+        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(names[i]), mp_obj_new_int(values[i]));
+    }
+    return d;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(dotclockframebuffer_stats_obj, dotclockframebuffer_stats);
+
 static mp_int_t dotclockframebuffer_get_buffer(mp_obj_t self_in, mp_buffer_info_t *bufinfo, mp_uint_t flags) {
     (void)flags;
     dotclockframebuffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
@@ -929,6 +1192,9 @@ static void dotclockframebuffer_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest
         } else if (attr == MP_QSTR_fill_rect) {
             dest[0] = MP_OBJ_FROM_PTR(&dotclockframebuffer_fill_rect_obj);
             dest[1] = self_in;
+        } else if (attr == MP_QSTR_stats) {
+            dest[0] = MP_OBJ_FROM_PTR(&dotclockframebuffer_stats_obj);
+            dest[1] = self_in;
         } else if (attr == MP_QSTR_deinit) {
             dest[0] = MP_OBJ_FROM_PTR(&dotclockframebuffer_del_obj);
             dest[1] = self_in;
@@ -946,6 +1212,7 @@ static const mp_rom_map_elem_t dotclockframebuffer_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_blit), MP_ROM_PTR(&dotclockframebuffer_blit_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill_rect), MP_ROM_PTR(&dotclockframebuffer_fill_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_framebuffers), MP_ROM_PTR(&dotclockframebuffer_framebuffers_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&dotclockframebuffer_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&dotclockframebuffer_del_obj) },
     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&dotclockframebuffer_del_obj) },
 };
