@@ -1845,6 +1845,12 @@ static uint32_t audiopump_i2s_open_raw(const audiopump_i2s_cfg_t *cfg) {
         },
     };
     std_cfg.clk_cfg.mclk_multiple = audiopump_i2s_mclk_multiple(cfg->mclk_fs);
+    #if CONFIG_IDF_TARGET_ESP32S31
+    // The S31's default I2S clock is its 40 MHz crystal, which no audio rate
+    // divides: the fractional divider then moves each bit clock edge by up to
+    // a crystal cycle, and a codec clocked from BCLK turns that into hiss.
+    std_cfg.clk_cfg.clk_src = I2S_CLK_SRC_APLL;
+    #endif
 
     err = i2s_channel_init_std_mode(audiopump_i2s_tx, &std_cfg);
     if (err == ESP_OK && duplex && !split) {
@@ -2108,6 +2114,12 @@ static void audiopump_i2s_open_rx_only(const audiopump_i2s_cfg_t *cfg) {
         },
     };
     std_cfg.clk_cfg.mclk_multiple = audiopump_i2s_mclk_multiple(cfg->mclk_fs);
+    #if CONFIG_IDF_TARGET_ESP32S31
+    // The S31's default I2S clock is its 40 MHz crystal, which no audio rate
+    // divides: the fractional divider then moves each bit clock edge by up to
+    // a crystal cycle, and a codec clocked from BCLK turns that into hiss.
+    std_cfg.clk_cfg.clk_src = I2S_CLK_SRC_APLL;
+    #endif
     err = i2s_channel_init_std_mode(audiopump_i2s_rx, &std_cfg);
     if (err == ESP_OK) {
         i2s_event_callbacks_t rx_cbs = { .on_recv = audiopump_on_recv };

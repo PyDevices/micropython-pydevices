@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 01:23:40 -0600
+Subject: [PATCH] esp32/machine_i2s: Clock I2S from the APLL on the ESP32-S31.
+
+The S31's default I2S clock source is its 40 MHz crystal, which no audio
+rate divides. The fractional divider then moves each bit clock edge by up
+to a crystal cycle, and a codec that clocks itself from BCLK (the ES8389
+on the Waveshare S31-Touch-LCD-4.3C) plays hiss over everything on about
+two opens in three.
+---
+ ports/esp32/machine_i2s.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/ports/esp32/machine_i2s.c b/ports/esp32/machine_i2s.c
+index 2c02c0b..d3e0a57 100644
+--- a/ports/esp32/machine_i2s.c
++++ b/ports/esp32/machine_i2s.c
+@@ -481,6 +481,11 @@ static void mp_machine_i2s_init_helper(machine_i2s_obj_t *self, mp_arg_val_t *ar
+             },
+         },
+     };
++    #if CONFIG_IDF_TARGET_ESP32S31
++    // The default I2S clock here is the 40 MHz crystal, which no audio rate
++    // divides; the APLL gives an even bit clock.
++    std_cfg.clk_cfg.clk_src = I2S_CLK_SRC_APLL;
++    #endif
+ 
+     if (mode == MICROPY_PY_MACHINE_I2S_CONSTANT_TX) {
+         std_cfg.gpio_cfg.dout = self->sd;
+-- 
+2.43.0
+
