@@ -71,6 +71,12 @@ The same names and arguments as CircuitPython 11, so code moves between the two.
 - **picotts on the ESP32-P4 touch panels.** It already speaks on the ESP32-S3
   T-Embed and the P4 WIFI6 DEV-KIT; the panels with a built-in screen are next.
 
+## ESP32-S31
+
+- **USB device mode on the ESP32-S31.** `machine.USBDevice`, the USB network
+  adapter and USB audio come back to the S31 once the TinyUSB release they need
+  (0.21) builds on ESP-IDF 6; today's S31 firmware leaves them out.
+
 ## Bluetooth Classic
 
 - **btclassic on the ESP32-S31.** Its C already builds for the S31 on ESP-IDF
