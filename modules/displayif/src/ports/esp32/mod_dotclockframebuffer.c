@@ -24,6 +24,7 @@
 #include <stdlib.h>
 
 #include "py/runtime.h"
+#include "py/objtuple.h"
 #include "displayif/build.h"
 #include "py/obj.h"
 #include "py/binary.h"
@@ -93,6 +94,12 @@ typedef struct _dotclockframebuffer_obj_t {
     uint32_t bounce_rows_max;
     uint8_t bits_per_pixel;
     bool deinited;
+    // framebuffers() hands back the same objects on every call, so a program
+    // that asks for the back buffer each frame makes no garbage: one view per
+    // panel buffer, and one tuple per paint order (indexed by the back buffer).
+    mp_obj_t views[DCFB_NUM_FBS];
+    const uint8_t *view_ptrs[DCFB_NUM_FBS];
+    mp_obj_t orders[DCFB_NUM_FBS];
 #if defined(ESP_PLATFORM) && SOC_LCD_RGB_SUPPORTED
     esp_lcd_panel_handle_t panel;
     bool panel_ready;
@@ -724,6 +731,11 @@ static void dotclockframebuffer_deinit_internal(dotclockframebuffer_obj_t *self)
         self->buf = NULL;
         self->buf_owned = false;
     }
+    for (size_t i = 0; i < DCFB_NUM_FBS; i++) {
+        self->views[i] = MP_OBJ_NULL;
+        self->view_ptrs[i] = NULL;
+        self->orders[i] = MP_OBJ_NULL;
+    }
     self->deinited = true;
 }
 
@@ -805,6 +817,11 @@ static mp_obj_t dotclockframebuffer_make(const mp_obj_type_t *type, size_t n_arg
     self->buf_len = (size_t)self->row_stride * self->height;
     self->buf = NULL;
     self->buf_owned = false;
+    for (size_t i = 0; i < DCFB_NUM_FBS; i++) {
+        self->views[i] = MP_OBJ_NULL;
+        self->view_ptrs[i] = NULL;
+        self->orders[i] = MP_OBJ_NULL;
+    }
 
     self->de_pin = displayif_esp32_pin_gpio(vals[ARG_de].u_obj);
     self->vsync_pin = displayif_esp32_pin_gpio(vals[ARG_vsync].u_obj);
@@ -1121,8 +1138,28 @@ static mp_obj_t dotclockframebuffer_del(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(dotclockframebuffer_del_obj, dotclockframebuffer_del);
 
+// The bytearray view of the panel buffer at ptr, made once and kept in slot i.
+static mp_obj_t dotclockframebuffer_view(dotclockframebuffer_obj_t *self, size_t i, uint8_t *ptr) {
+    if (self->views[i] == MP_OBJ_NULL || self->view_ptrs[i] != ptr) {
+        self->views[i] = mp_obj_new_bytearray_by_ref(self->buf_len, ptr);
+        self->view_ptrs[i] = ptr;
+    }
+    return self->views[i];
+}
+
+// The tuple of n views (a, then b) kept in slot i, rebuilt only if they changed.
+static mp_obj_t dotclockframebuffer_order(dotclockframebuffer_obj_t *self, size_t i, size_t n, mp_obj_t a, mp_obj_t b) {
+    mp_obj_tuple_t *t = self->orders[i] == MP_OBJ_NULL ? NULL : MP_OBJ_TO_PTR(self->orders[i]);
+    if (t == NULL || t->len != n || t->items[0] != a || (n > 1 && t->items[1] != b)) {
+        mp_obj_t items[2] = { a, b };
+        self->orders[i] = mp_obj_new_tuple(n, items);
+    }
+    return self->orders[i];
+}
+
 // Panel FB views for GUI direct-paint (LVGL DIRECT, etc.). External refs —
-// do not free; lifetime follows the DotClockFramebuffer object.
+// do not free; lifetime follows the DotClockFramebuffer object. Every call
+// returns the same objects for the same paint order.
 static mp_obj_t dotclockframebuffer_framebuffers(mp_obj_t self_in) {
     dotclockframebuffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
     if (self->deinited) {
@@ -1140,20 +1177,16 @@ static mp_obj_t dotclockframebuffer_framebuffers(mp_obj_t self_in) {
         // frame stale: on the LCD-7 an animated arc's tip stepped back every
         // other frame (2026-10-05).
         uint8_t back = self->draw_index;
-        mp_obj_t items[2] = {
-            mp_obj_new_bytearray_by_ref(self->buf_len, self->fbs[back]),
-            mp_obj_new_bytearray_by_ref(self->buf_len, self->fbs[1 - back]),
-        };
-        return mp_obj_new_tuple(2, items);
+        mp_obj_t a = dotclockframebuffer_view(self, back, self->fbs[back]);
+        mp_obj_t b = dotclockframebuffer_view(self, 1 - back, self->fbs[1 - back]);
+        return dotclockframebuffer_order(self, back, 2, a, b);
     }
 #endif
     if (self->buf == NULL) {
         return mp_const_empty_tuple;
     }
-    mp_obj_t items[1] = {
-        mp_obj_new_bytearray_by_ref(self->buf_len, self->buf),
-    };
-    return mp_obj_new_tuple(1, items);
+    mp_obj_t a = dotclockframebuffer_view(self, 0, self->buf);
+    return dotclockframebuffer_order(self, 0, 1, a, MP_OBJ_NULL);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(dotclockframebuffer_framebuffers_obj, dotclockframebuffer_framebuffers);
 
