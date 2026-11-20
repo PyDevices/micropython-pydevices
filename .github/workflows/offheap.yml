@@ -1,0 +1,67 @@
+# offheap from a bare clone: the unix port's own test, and the windows port
+# cross-built.
+name: offheap
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/offheap/**'
+      - '!modules/offheap/*.md'
+      - '!modules/offheap/examples/**'
+      - 'build_mp.py'
+      - 'scripts/pins.py'
+      - '.github/workflows/offheap.yml'
+  pull_request:
+    paths:
+      - 'modules/offheap/**'
+      - '!modules/offheap/*.md'
+      - '!modules/offheap/examples/**'
+      - 'build_mp.py'
+      - 'scripts/pins.py'
+      - '.github/workflows/offheap.yml'
+  # Everything, weekly: the path filters skip what a change can't reach.
+  schedule:
+    - cron: '50 6 * * 1'
+  workflow_dispatch:
+
+# A new push to a pull request cancels the run it supersedes. A push to main is
+# never cancelled: each one keeps its own record.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the unix port's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev pkg-config
+
+      - name: Build the unix port with offheap and pygraphics
+        run: python3 build_mp.py --port unix --modules offheap,pygraphics
+
+      - name: The API, its errors, freeing, drawing into a Buffer, and collection times
+        run: timeout 300 ./builds/unix/standard/micropython modules/offheap/tests/test_offheap.py
+
+  windows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the MinGW cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 libtool libltdl-dev autoconf automake
+
+      - name: Cross-build the windows port with offheap
+        run: python3 build_mp.py --port windows --modules offheap

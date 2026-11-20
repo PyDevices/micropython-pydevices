@@ -16,6 +16,7 @@ tracked here or linked from a sibling checkout or cloned at the commit in
 | [`h264enc`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/h264enc) | RGB565 frames to H.264 on the ESP32-P4's hardware encoder. |
 | [`jpegio`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/jpegio) | JPEG decode and encode, with CircuitPython's `jpegio` API. |
 | [`mdns`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/mdns) | Find and advertise services on the local network, with CircuitPython's `mdns` API (esp32, rp2, unix, windows). |
+| [`offheap`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/offheap) | Byte buffers outside the garbage-collected heap, so big pixel buffers don't slow every collection (esp32, unix, windows, webassembly). |
 | [`picotts`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/picotts) | Text to speech on the SVOX Pico engine, with the API of Adafruit's `adafruit_picotts`. Opt-in, and it needs PSRAM. |
 | [`pngio`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/pngio) | PNG encode and decode, RGB565 in and out. |
 | [`ppa`](https://github.com/PyDevices/omnipython-builds/tree/main/modules/ppa) | Scale, rotate, convert and fill pixel buffers, on the ESP32-P4's Pixel Processing Accelerator or in portable C elsewhere. |
@@ -56,6 +57,7 @@ it is. "Unix" is CircuitPython's unix port, built and imported in
 | jpegio | yes | ESP32-P4 | Adds only the encoder's C API: CircuitPython has its own `jpegio` decoder. |
 | cameraif | yes (`available()` is False) | ESP32-P4 | |
 | mdns | yes | no, on purpose | CircuitPython's boards have an `mdns` of their own; its unix port has none. |
+| offheap | no | no | MicroPython only for now. |
 | usbhost | yes, as `_usbhost`, with no host engine | ESP32-P4 | The host engine runs on ESP-IDF's USB host library, which from ESP-IDF 6 is Espressif's `usb` component: [`build.py`](https://github.com/PyDevices/omnipython-builds/blob/main/build.py) fetches it at the version `DEPENDENCIES.lock` pins. The P4's boards leave its high-speed controller to us. Tethering is left out until the port has a network. The S3's one controller is CircuitPython's drive and REPL, so it gets the module without the engine. On the RP2040 and i.MX, CircuitPython's own `usb.core` is the host. |
 | audioif | no | no | Links against audiodsp's audio pump and `cp_compat`, which audiodsp's CircuitPython glue doesn't build. It isn't needed there: audioif gives MicroPython the `audiobusio` and `audioi2sin` that CircuitPython boards already have. |
 | ulab | CircuitPython's own | CircuitPython's own | |
