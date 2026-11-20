@@ -38,5 +38,4 @@ and `HIDHost`.
 | AAC | ESP32 | A2DP AAC needs ESP-IDF 6.1; the build uses 5.5.4 |
 | The shortest accepted encryption key | Pico W, Pico 2 W | The controller refuses the command, so `config(min_key_size=)` is ESP32 only |
 | Bluetooth Classic | ESP32-S2, S3, C3, C6, H2, P4 | These chips have no BR/EDR radio. The classic ESP32 and the ESP32-S31 do |
-| BLE beside Classic | ESP32-S31 | A BLE link drops 30 s after it connects ([#584](https://github.com/PyDevices/omnipython-builds/issues/584)) |
 | `btclassic` | Ports other than ESP32 (the classic chip and the S31) and rp2 | It's written against Bluedroid and BTstack, and builds only for those. A unix build runs it on a loopback backend for tests |
