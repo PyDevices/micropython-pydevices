@@ -68,6 +68,10 @@ if(ESP_PLATFORM AND (IDF_TARGET STREQUAL "esp32" OR IDF_TARGET STREQUAL "esp32s3
     # hooks (avrcp_settings.c).
     include(${BTCLASSIC_IDF}/avrcp_settings.cmake)
     btclassic_avrcp_settings(usermod_btclassic ${BTCLASSIC_IDF}/avrcp_settings.c)
+    # Call audio declined on chips whose controller can't carry it
+    # (hfp_decline.cmake has the list).
+    include(${BTCLASSIC_IDF}/hfp_decline.cmake)
+    btclassic_hfp_decline(usermod_btclassic ${BTCLASSIC_IDF}/hfp_decline.c)
     # BLE data leaves empty when assertions are off, on chips whose LE data
     # takes ESP-IDF's standard VHCI driver (vhci_assert.cmake).
     include(${BTCLASSIC_IDF}/vhci_assert.cmake)

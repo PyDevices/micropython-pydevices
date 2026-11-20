@@ -1637,6 +1637,9 @@ static void hf_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             case MP_QSTR_audio:
                 dest[0] = mp_obj_new_bool(st.audio);
                 return;
+            case MP_QSTR_call_audio:
+                dest[0] = mp_obj_new_bool(btc_hf_call_audio());
+                return;
             default:
                 dest[1] = MP_OBJ_SENTINEL;  // methods, from the locals dict
                 return;

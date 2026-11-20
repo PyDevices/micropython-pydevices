@@ -630,6 +630,10 @@ int btc_hf_set_mic_gain(int gain) {
     return BTC_OK;
 }
 
+bool btc_hf_call_audio(void) {
+    return true;
+}
+
 int btc_hf_connect_audio(void) {
     return BTC_ERR_UNSUPPORTED;
 }

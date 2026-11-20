@@ -683,6 +683,12 @@ class HandsFree:
     mic_gain: int | None
     """The microphone's gain the phone asks for, 0 to 15. Setting it tells
     the phone; the board doesn't apply it to what you `write`."""
+    call_audio: bool
+    """This board takes calls' audio. False where the Bluetooth controller
+    can't carry it (the Pico W and Pico 2 W, and the ESP32-S31 for now): the
+    unit still follows calls and answers and hangs them up, and their audio
+    stays on the phone. `audio` then stays False and `connect_audio` raises
+    OSError."""
     audio: bool
     """The call's audio is up: `readinto` returns the phone's voice and
     `write` sends the microphone."""

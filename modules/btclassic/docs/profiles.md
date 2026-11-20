@@ -32,6 +32,7 @@ and `HIDHost`.
 | What | Where | Because |
 |---|---|---|
 | Call audio over HFP | Pico W, Pico 2 W | The CYW43439's Bluetooth firmware accepts the audio link but never completes it ([raspberrypi/pico-sdk#1461](https://github.com/raspberrypi/pico-sdk/issues/1461)), so `HandsFree.audio` stays False |
+| Call audio over HFP | ESP32-S31 | Its Bluetooth controller, closed and shipped with ESP-IDF, faults in about half the calls as the audio link starts on 6.1, and sets none up on 6.1.1. `HandsFree` declines the link, so `call_audio` and `audio` are False and the call's audio stays on the phone |
 | AVRCP browsing | ESP32 | Bluedroid in ESP-IDF 5.5.4 has no browsing commands in its AVRCP API |
 | PAN | ESP32 | Bluedroid in ESP-IDF 5.5.4 has no PAN or BNEP API |
 | Requesting sniff mode | ESP32 | Bluedroid decides when a link sniffs and has no call to ask for it; `sniff()` and `subrate()` raise `OSError` |
