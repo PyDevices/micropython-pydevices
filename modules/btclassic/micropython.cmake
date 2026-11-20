@@ -3,7 +3,8 @@
 # requires ESP-IDF's bt, so the C in esp-idf/btclassic compiles here as
 # user-module source. sdkconfig.esp32 turns Bluedroid on in place of NimBLE
 # (build_mp.py appends it; on a stock build, add it to your board's
-# SDKCONFIG_DEFAULTS). ESP-IDF runs one Bluetooth host, so MicroPython's
+# SDKCONFIG_DEFAULTS; sdkconfig.esp32s31 is the ESP32-S31's, whose dual-mode
+# controller has its own option names). ESP-IDF runs one Bluetooth host, so MicroPython's
 # `bluetooth` (BLE) module moves onto Bluedroid too: src/modbluetooth_bluedroid.c
 # is its backend in NimBLE's place, chosen with MICROPY_BLUETOOTH_BLUEDROID
 # through MICROPY_DEF_BOARD, which the port compiles into every file and its
@@ -21,7 +22,7 @@ if(NOT BTCLASSIC_REVISION)
     set(BTCLASSIC_REVISION "unknown")
 endif()
 
-if(ESP_PLATFORM AND IDF_TARGET STREQUAL "esp32")
+if(ESP_PLATFORM AND (IDF_TARGET STREQUAL "esp32" OR IDF_TARGET STREQUAL "esp32s31"))
     set(BTCLASSIC_IDF ${CMAKE_CURRENT_LIST_DIR}/esp-idf/btclassic)
     add_library(usermod_btclassic INTERFACE)
     target_compile_definitions(usermod_btclassic INTERFACE BTCLASSIC_REVISION=\"${BTCLASSIC_REVISION}\")
