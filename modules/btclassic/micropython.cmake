@@ -68,6 +68,10 @@ if(ESP_PLATFORM AND (IDF_TARGET STREQUAL "esp32" OR IDF_TARGET STREQUAL "esp32s3
     # takes ESP-IDF's standard VHCI driver (vhci_assert.cmake).
     include(${BTCLASSIC_IDF}/vhci_assert.cmake)
     btclassic_vhci_assert()
+    # Bluedroid's semaphores and mutexes go to PSRAM on the ESP32-S31
+    # (osi_psram.cmake).
+    include(${BTCLASSIC_IDF}/osi_psram.cmake)
+    btclassic_osi_psram()
 
     # With audiodsp in the build, AudioSink and HandsFree are also sources the
     # audio pump pulls in C. It's found the way audioif finds it: among the
