@@ -793,8 +793,16 @@ static bool audiopump_thread_start(void (*entry)(void *), void *arg,
         core = (xPortGetCoreID() == 0) ? 1 : 0;
     }
     BaseType_t ok;
+    #if CONFIG_IDF_TARGET_ESP32S31 && CONFIG_SPIRAM
+    // On the ESP32-S31 the stack always goes to PSRAM. Bluetooth Classic
+    // audio leaves too little internal RAM for it, and lwIP then can't send.
+    // A task on a PSRAM stack mustn't touch flash, and the pump never does:
+    // spawn() refuses the sources that read files.
+    audiopump_task_psram = true;
+    #else
     audiopump_task_psram = cfg->psram;
-    if (cfg->psram) {
+    #endif
+    if (audiopump_task_psram) {
         ok = xTaskCreatePinnedToCoreWithCaps(audiopump_task, "audiopump",
             (configSTACK_DEPTH_TYPE)cfg->stack, NULL,
             (UBaseType_t)cfg->prio, &audiopump_task_handle,
