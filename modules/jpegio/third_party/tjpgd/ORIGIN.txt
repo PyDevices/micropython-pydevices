@@ -20,3 +20,11 @@ Changes:
    `unsigned long`, so every mingw cross-build failed with conflicting types.
    The fallback typedefs are kept for the compiler the comment meant, MSVC
    before 2010. -DJD_HAS_STDINT=0/1 overrides the detection.
+
+3. tjpgd.h: jd_prepare and jd_decomp are renamed to jpegio_jd_prepare and
+   jpegio_jd_decomp by two #defines, so tjpgd.c and every file that includes
+   this header use this copy. The ROM linker scripts of the ESP32-C6 and
+   ESP32-S31 assign the plain names to the ROM's older TJpgDec without
+   PROVIDE, which overrides tjpgd.c's definitions: jpegio then called the
+   ROM's decoder with this header's JDEC, read a NULL device in the input
+   function and panicked.
