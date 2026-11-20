@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 22:52:46 -0600
+Subject: [PATCH] esp32/machine_sdcard: build on ESP-IDF 6.
+
+ESP-IDF 6 moved soc/sdmmc_periph.h to hal/sdmmc_periph.h, in the
+esp_hal_sd component, which the SD drivers bring in. The overlay's SD card
+patches read the slot tables it declares, so the port includes it from
+where the running ESP-IDF has it.
+
+ESP-IDF 6's rewritten SD host driver no longer has sdmmc_host_reset(), and
+the overlay's recovery path called it after resetting the DMA engine by
+register. There, recovery deinitialises and initialises the slot alone:
+the host's init resets the controller, its DMA and FIFO itself when the
+slot was its last. On ESP-IDF 5 nothing changes.
+---
+ ports/esp32/machine_sdcard.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/ports/esp32/machine_sdcard.c b/ports/esp32/machine_sdcard.c
+index 3694be731..6ab842bd0 100644
+--- a/ports/esp32/machine_sdcard.c
++++ b/ports/esp32/machine_sdcard.c
+@@ -36,7 +36,12 @@
+ 
+ #if SOC_SDMMC_HOST_SUPPORTED
+ #include "driver/sdmmc_host.h"
++#include "esp_idf_version.h"
++#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
++#include "hal/sdmmc_periph.h"
++#else
+ #include "soc/sdmmc_periph.h"
++#endif
+ #include "driver/gpio.h"
+ #if SOC_SDMMC_IO_POWER_EXTERNAL
+ #include "sd_pwr_ctrl_by_on_chip_ldo.h"
+@@ -642,9 +647,11 @@ static esp_err_t sdcard_transfer_once(sdcard_card_obj_t *self, uint8_t *buf, siz
+ }
+ 
+ #if SOC_SDMMC_HOST_SUPPORTED
++#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
+ // Not in ESP-IDF's public headers: resets the SDMMC controller, its DMA and
+ // its FIFO.
+ esp_err_t sdmmc_host_reset(void);
++#endif
+ 
+ // Send one command to the card. ESP-IDF holds the host's request lock for the
+ // whole exchange, so a second slot on the same controller isn't disturbed.
+@@ -689,8 +696,14 @@ static esp_err_t sdcard_stop(sdcard_card_obj_t *self) {
+ // slot on the same controller keeps its settings, but the reset happens
+ // outside ESP-IDF's request lock and so can cut short a transfer on that slot.
+ static esp_err_t sdcard_recover(sdcard_card_obj_t *self) {
++    #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
+     SDMMC.bmod.sw_reset = 1; // the DMA engine
+     esp_err_t err = sdmmc_host_reset();
++    #else
++    // ESP-IDF 6's SD host driver keeps its reset to itself; its init below
++    // resets the controller, DMA and FIFO when this was its last slot.
++    esp_err_t err = ESP_OK;
++    #endif
+     if (err == ESP_OK) {
+         err = self->host.deinit_p(self->host.slot);
+     }

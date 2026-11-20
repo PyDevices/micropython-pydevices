@@ -14,6 +14,7 @@ caught instead of silently built.
 
     patches/apply_patches.py [MICROPYTHON_DIR]
     patches/apply_patches.py [MICROPYTHON_DIR] --check
+    patches/apply_patches.py [MICROPYTHON_DIR] --s31 [--check]
 
 MICROPYTHON_DIR defaults to micropython/ in this repository. --check applies
 the same series to a throwaway copy of the tag and leaves the checkout alone;
@@ -21,6 +22,11 @@ CI runs it with no modules present, so it checks the overlay alone.
 
 Every patch applies to the whole tree, whichever port you build: a prepared
 tree serves every port and every module set.
+
+The ESP32-S31 is the exception. Upstream builds it only on ESP-IDF 6, from
+open pull requests, so its build has a tree of its own, micropython-s31/:
+the same pin and series, then patches/micropython-s31/ on top. --s31 prepares
+or checks that series too. No other build applies it.
 
 patches/micropython-lib/ holds fixes micropython-lib has made since the
 commit MicroPython's lib/micropython-lib submodule points at. They go onto
@@ -47,6 +53,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 import pins  # noqa: E402
 OVERLAY = REPO / "patches" / "micropython"
+S31_OVERLAY = REPO / "patches" / "micropython-s31"
 LIB_OVERLAY = REPO / "patches" / "micropython-lib"
 LIB = Path("lib") / "micropython-lib"
 TUSB_OVERLAY = REPO / "patches" / "lib-tinyusb"
@@ -76,6 +83,11 @@ def series():
         for module in sorted(MODULES.iterdir()):
             patches += sorted((module / "patches").glob("*.patch"))
     return patches
+
+
+def s31_series():
+    """The ESP32-S31's patches, which go after series() in its own tree."""
+    return sorted(S31_OVERLAY.glob("*.patch"))
 
 
 def lib_series():
@@ -233,12 +245,13 @@ def prepare(mp, upstream, patches, refresh=False):
 
 
 def main(argv):
-    args = [a for a in argv if a != "--check"]
-    mp = Path(args[0]) if args else REPO / "micropython"
+    args = [a for a in argv if a not in ("--check", "--s31")]
+    s31 = "--s31" in argv
+    mp = Path(args[0]) if args else REPO / ("micropython-s31" if s31 else "micropython")
     if not (mp / ".git").exists():
         sys.exit(f"not a git checkout: {mp}")
     upstream = pins.get(pins.MICROPYTHON, REPO).ref
-    patches = series()
+    patches = series() + (s31_series() if s31 else [])
     if "--check" in argv:
         check(mp, upstream, patches)
     else:

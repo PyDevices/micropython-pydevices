@@ -17,6 +17,14 @@ it doesn't recognise go straight to make.
     ./build_mp.py --interpreter circuitpython --port raspberrypi \\
         --board adafruit_feather_rp2040 --modules pygraphics
 
+    ./build_mp.py --port esp32 --board ESP32_GENERIC_S31 --variant LCD_4_3C \\
+        --flash 16MB --modules all
+
+The ESP32-S31 builds on ESP-IDF 6.1 from a tree of its own, micropython-s31/:
+the micropython pin with every patch the other builds get, then
+patches/micropython-s31/ (upstream's support for the chip, still in open pull
+requests). Name its board with --board: the walk-through doesn't offer it.
+
 --interpreter circuitpython builds CircuitPython-compatible firmware instead:
 CircuitPython at its DEPENDENCIES.lock pin, our C modules compiled in through its
 USER_C_MODULES. Ports and boards are then CircuitPython's own.
@@ -61,6 +69,10 @@ OUT_DIR = Path(os.environ.get("OUT_DIR", REPO / "builds")).resolve()
 VARIANTS_DIR = Path(os.environ.get("VARIANTS_DIR", REPO / "variants")).resolve()
 MODULES_DIR = Path(os.environ.get("MODULES_DIR", REPO / "modules")).absolute()
 MP = REPO / "micropython"
+# The ESP32-S31's tree and toolchain: see the S31 lines of DEPENDENCIES.lock.
+# Only a build for one of these boards switches to them.
+S31_BOARDS = ("ESP32_GENERIC_S31",)
+MP_S31 = REPO / "micropython-s31"
 DEPS = REPO / "deps"
 JOBS = os.environ.get("JOBS", str(os.cpu_count() or 4))
 
@@ -192,7 +204,13 @@ def clone_at(url, ref, dest, recursive=False, commit=None):
 def ensure_micropython(ws):
     if MP.exists():
         return
-    if ws:
+    if MP == MP_S31:
+        # Its own clone, in a workspace too: the sibling checkout is every
+        # other build's, and preparing this one rewrites the tree.
+        mp = pin(pins.MICROPYTHON)
+        clone_at(mp.url, mp.ref, MP)
+        fetch_history(MP)
+    elif ws:
         link(MP, ws / "micropython")
     else:
         mp = pin(pins.MICROPYTHON)
@@ -474,9 +492,13 @@ def uses_library(module_dirs, manifest):
     return any(f.is_file() and LIBRARY in f.read_text() for f in files)
 
 
+# ESP-IDF, and the 6.1 the ESP32-S31 builds on.
+ESP_IDFS = ("esp-idf", "esp-idf6")
+
+
 def dep_version(name, path):
     """The version a toolchain checkout actually is, read the way it records it."""
-    if name == "esp-idf":
+    if name in ESP_IDFS:
         # ESP-IDF's own record of its version, which needs no git tags.
         f = path / "tools" / "cmake" / "version.cmake"
         nums = dict(re.findall(r"set\(IDF_VERSION_(MAJOR|MINOR|PATCH) (\d+)\)", f.read_text())) if f.exists() else {}
@@ -513,7 +535,7 @@ def ensure_dep(name, ws):
     if not (dest.exists() or dest.is_symlink()):
         if ws and (ws / name).is_dir():
             link(dest, ws / name)
-        elif name == "esp-idf":
+        elif name in ESP_IDFS:
             clone_at(url, version, dest, recursive=True, commit=p.ref)
             run([BASH, "-c", f"cd {dest} && ./install.sh all"])
         elif name == "emsdk":
@@ -543,7 +565,8 @@ def ensure_dep(name, ws):
                     z.extractall(Path(tmp) / name)
                 shutil.move(str(Path(tmp) / name), str(dest))
     have = dep_version(name, dest.resolve())
-    if have != version:
+    # ESP-IDF tags its first release of a minor version v6.1, and records it as 6.1.0.
+    if have != version and not (name in ESP_IDFS and have == version + ".0"):
         die(f"deps/{name} is {have or 'unreadable'}, but {pins.LOCK} wants {version}")
     return dest.resolve()
 
@@ -904,7 +927,8 @@ def esp32_clocks(sdk):
 # CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ choice for that target, which matches the
 # datasheets. esp32_cpu_rated() covers the exceptions.
 ESP32_CPU_RATED = {"esp32": 240, "esp32s2": 240, "esp32s3": 240, "esp32c2": 120, "esp32c3": 160,
-                   "esp32c5": 240, "esp32c6": 160, "esp32c61": 160, "esp32h2": 96, "esp32p4": 400}
+                   "esp32c5": 240, "esp32c6": 160, "esp32c61": 160, "esp32h2": 96, "esp32p4": 400,
+                   "esp32s31": 320}
 
 
 def esp32_cpu_rated(sdk):
@@ -2238,6 +2262,7 @@ recognise go to make (-j4, V=1). The guide: docs/newcomers.md."""
 
 
 def main():
+    global MP
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], allow_abbrev=False,
                                  formatter_class=argparse.RawDescriptionHelpFormatter, epilog=EXAMPLES)
     ap.add_argument("--interpreter", choices=("micropython", "circuitpython"), default="micropython",
@@ -2268,6 +2293,11 @@ def main():
     ws = workspace()
     if args.interpreter == "circuitpython":
         return build_circuitpython(args, make_extra, ws)
+    s31 = args.board in S31_BOARDS
+    if s31:
+        if args.port not in (None, "esp32"):
+            die(f"{args.board} is an esp32 board")
+        MP = MP_S31
     ensure_micropython(ws)
     ensure_modules(ws)
     mp = MP.resolve()
@@ -2295,7 +2325,8 @@ def main():
                 except OSError:
                     pass
     upstream = pin(pins.MICROPYTHON).ref
-    apply_patches.prepare(mp, upstream, apply_patches.series(), refresh=True)
+    apply_patches.prepare(mp, upstream, apply_patches.series() + (apply_patches.s31_series() if s31 else []),
+                          refresh=True)
     version = micropython_version(mp, upstream)
 
     port = args.port or choose("Port:", ports())
@@ -2428,7 +2459,7 @@ def main():
         make.append(f"VARIANT={variant}")
 
     if port == "esp32":
-        idf = ensure_dep("esp-idf", ws)
+        idf = ensure_dep("esp-idf6" if s31 else "esp-idf", ws)
         prefix = f'. "{idf}/export.sh" >/dev/null && '
     elif port == "webassembly":
         emsdk = ensure_dep("emsdk", ws)

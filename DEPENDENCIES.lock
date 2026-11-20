@@ -75,6 +75,17 @@ espressif__esp_hosted https://github.com/espressif/esp-hosted-mcu.git 627d5d9046
 # moved to ESP-IDF 6.1.
 circuitpython     https://github.com/adafruit/circuitpython.git       792011f19a7f95274d14c8114d9957d5fde2bc7f  # tag 11.0.0-alpha.3
 
+# The ESP32-S31. Upstream supports it only in open pull requests, on ESP-IDF
+# 6.1, so an S31 build (--board ESP32_GENERIC_S31) is the one build that uses
+# these two lines, and no other build reads them. micropython-s31 is the head
+# of micropython/micropython#19726 (which carries #19725, ESP-IDF 6): the
+# commit patches/micropython-s31/ was cut from. The build doesn't fetch it:
+# the S31's tree is the micropython pin above with every patch the others get,
+# then patches/micropython-s31/. When upstream merges the two pull requests,
+# both lines and that series go, and the S31 builds from the pin like the rest.
+micropython-s31   https://github.com/micropython/micropython          0b9512f475bdd42e2583ae8cfa68aac04063eba2
+esp-idf6          https://github.com/espressif/esp-idf.git            fff9895c82d744c7237be8847347bdd1b07c6643  # tag v6.1
+
 # Downloads: <name> <archive-url> <version>. A build unpacks one into deps/
 # and refuses it if its files say another version.
 SDL2              https://github.com/libsdl-org/SDL/releases/download/release-2.30.10/SDL2-devel-2.30.10-mingw.tar.gz  2.30.10

@@ -13,6 +13,8 @@ top. Add `--modules` to any of these:
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-4B | `--port esp32 --board ESP32_GENERIC_P4 --variant PRE_REV3_C6_WIFI --flash 32MB`; its released images now keep a 23,488 KB filesystem at 0x910000, 3,136 KB smaller than before, so copy your files off before you first flash one; they carry `--modules all,vision,tflite`, which needs a 9 MB app slot |
 | Espressif ESP32-P4X-EYE | `--port esp32 --board ESP32_GENERIC_P4 --variant P4X_EYE --flash 16MB`; the camera, the H.264 encoder and the detectors come with `--modules all,vision,tflite`, which is the image every release carries |
 | Another ESP32-P4 board, chip revision 3 or later, with an ESP32-C6 for Wi-Fi | `--port esp32 --board ESP32_GENERIC_P4 --variant C6_WIFI --flash 16MB` |
+| Waveshare ESP32-S31-Touch-LCD-4.3C | `--port esp32 --board ESP32_GENERIC_S31 --variant LCD_4_3C --flash 16MB`; [built on ESP-IDF 6.1](#the-esp32-s31), with no USB device yet |
+| Waveshare ESP32-S31-Zero | `--port esp32 --board ESP32_GENERIC_S31 --variant ZERO --flash 32MB`; [built on ESP-IDF 6.1](#the-esp32-s31), REPL on its USB-C through the chip's USB Serial/JTAG |
 | Waveshare ESP32-S3-Touch-LCD-7 | `--port esp32 --board ESP32_GENERIC_S3 --variant LCD_7 --flash 8MB` |
 | Waveshare ESP32-S3-Touch-LCD-4.3 | `--port esp32 --board ESP32_GENERIC_S3 --variant LCD_4_3 --flash 8MB` |
 | LilyGO T-Embed S3 | `--port esp32 --board ESP32_GENERIC_S3 --variant T_EMBED --flash 16MB` |
@@ -29,7 +31,8 @@ top. Add `--modules` to any of these:
 | Arduino GIGA R1 WiFi with the GIGA Display Shield | `--port stm32 --board ARDUINO_GIGA --variant DISPLAY_SHIELD --modules displayif,lvgl` ([three images to flash](../guides/flash-a-board.md#stm32-arduino-giga-r1-wifi)) |
 
 Every ESP32 board here runs its CPU at the chip's rated clock (240 MHz on an
-ESP32 or S3; 400 on a P4 of revision 3 or later, 360 before that), and its
+ESP32 or S3; 400 on a P4 of revision 3 or later, 360 before that; 320 on an
+S31), and its
 flash and PSRAM at the fastest clock its chips are rated for: 80 MHz or more,
 except the flash of a P4 image for revisions before 3, which ESP-IDF holds to
 40 MHz. [Add a board variant](../guides/add-a-board-variant.md#an-esp32-board)
@@ -54,6 +57,21 @@ network.
 
 For a board that isn't listed, see [Build for a board](../guides/build-for-a-board.md#a-board-that-isnt-in-the-table).
 
+## The ESP32-S31
+
+The S31 builds on ESP-IDF 6.1, while every other ESP32 board stays on the
+ESP-IDF in [`DEPENDENCIES.lock`](https://github.com/PyDevices/omnipython-builds/blob/main/DEPENDENCIES.lock).
+MicroPython's support for the chip is still an open pull request upstream, so
+`build_mp.py` builds an S31 in its own tree, `micropython-s31/`: the same
+MicroPython commit as every other board, our patches, and then the upstream
+pull request's changes from
+[`patches/micropython-s31/`](https://github.com/PyDevices/omnipython-builds/tree/main/patches/micropython-s31).
+It fetches ESP-IDF 6.1 itself on the first S31 build.
+
+`--modules all` builds whole on the S31, with one thing missing: `machine.USBDevice`
+and the USB network and audio devices need a newer TinyUSB than ESP-IDF 6.1's
+S31 support carries, so the USB device is off on every S31 build for now.
+
 ## Variants
 
 Our variants, in [`variants/`](https://github.com/PyDevices/omnipython-builds/tree/main/variants).
@@ -68,6 +86,7 @@ Our variants, in [`variants/`](https://github.com/PyDevices/omnipython-builds/tr
 | esp32 | `ESP32_GENERIC` `AUDIO_KIT` | The ESP32 Audio Kit: upstream's PSRAM variant with flash and PSRAM at 80 MHz, which keeps Bluetooth call audio whole while a program is busy, and the CPU at 240 MHz, which lets a 48 kHz synth run with its reverb. A 128 KB ROMFS partition [runs your own compiled packages from flash](../guides/run-packages-from-romfs.md). |
 | esp32 | `ESP32_GENERIC_S3` `NO_PSRAM` | An S3 with no PSRAM: upstream's generic build without its PSRAM settings, TLS in internal RAM, and the caches and Wi-Fi buffers at sizes internal RAM can spare. |
 | esp32 | `ESP32_GENERIC_S3` `LCD_4_3`, `LCD_7`, `T_EMBED` | The S3 boards in the table above. |
+| esp32 | `ESP32_GENERIC_S31` `LCD_4_3C`, `ZERO` | The S31 boards in the table above. `ZERO` puts the REPL on the chip's USB Serial/JTAG and reads 32 MB of flash. |
 | esp32 | `ESP32_GENERIC_P4` `WIFI6_DEV_KIT`, `WIFI6_DEV_KIT_H2` | The P4 DEV-KIT, with the USB device on the two different connectors in the table above. The Pico-sized ESP32-P4-WIFI6 has the same C6 wiring, and `WIFI6_DEV_KIT_H2` puts its USB device on header pins 19 and 20. |
 | esp32 | `ESP32_GENERIC_P4` `P4X_EYE` | The ESP32-P4X-EYE: `C6_WIFI` with ESP-Hosted on the pins its C6 uses, the USB device on the port marked "USB 2.0" and the REPL on "Debug", and a 9 MB app slot for the camera and vision modules. |
 | esp32 | `ESP32_GENERIC` `QTPY_PICO` | The QT Py ESP32 Pico: upstream's PSRAM variant with flash and PSRAM at 80 MHz, which keeps Bluetooth audio from falling behind, and the CPU at 240 MHz. |

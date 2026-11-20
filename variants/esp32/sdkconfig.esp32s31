@@ -1,0 +1,15 @@
+# Every ESP32-S31 build.
+
+# PSRAM on. Upstream's generic S31 board sets the octal PSRAM mode but never
+# turns PSRAM itself on, so a module with 16 MB of it booted with none. A
+# module without PSRAM still boots.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+
+# mbedTLS allocates from PSRAM, as on the S3s: TLS contexts and certificate
+# chains otherwise take the internal RAM that task stacks and DMA buffers need.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# A 1 ms tick, as on the S3s: at the port's 100 Hz every wait under 10 ms
+# rounds up to a whole tick, which an RGB panel's refresh waits on each frame.
+CONFIG_FREERTOS_HZ=1000

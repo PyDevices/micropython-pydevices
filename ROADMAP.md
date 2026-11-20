@@ -74,7 +74,7 @@ The same names and arguments as CircuitPython 11, so code moves between the two.
 ## Bluetooth Classic
 
 - **btclassic on the ESP32-S31.** Its C already builds for the S31 on ESP-IDF
-  6.1; the module follows once MicroPython builds for the chip.
+  6.1, and so does this firmware; the module's build for the chip is next.
 
 ## Bluetooth LE Audio
 

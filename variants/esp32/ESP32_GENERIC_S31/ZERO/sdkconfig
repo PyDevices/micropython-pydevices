@@ -1,0 +1,5 @@
+# The Zero's 32 MB GD25Q256E. Without this the build assumes the generic
+# board's 16 MB, and the filesystem partition, which runs to the end of the
+# flash, isn't made.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=n
+CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y

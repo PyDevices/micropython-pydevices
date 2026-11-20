@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 23:21:06 -0600
+Subject: [PATCH] esp32: define ESP_PLATFORM for user C modules.
+
+The IDF defines ESP_PLATFORM for its own components but not for the copy
+of each user C module compiled into the executable. On ESP-IDF 6 that
+copy is the one linked, so a module testing ESP_PLATFORM got its non-ESP
+fallback.
+---
+ ports/esp32/esp32_common.cmake | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/ports/esp32/esp32_common.cmake b/ports/esp32/esp32_common.cmake
+index c0af21213..7a5b2bd45 100644
+--- a/ports/esp32/esp32_common.cmake
++++ b/ports/esp32/esp32_common.cmake
+@@ -331,6 +331,11 @@ target_compile_options(${MICROPY_TARGET} PUBLIC
+ idf_build_get_property(idf_compile_options COMPILE_OPTIONS)
+ target_compile_options(usermod INTERFACE ${idf_compile_options})
+ 
++# The IDF defines ESP_PLATFORM for its own components but not for the copy of
++# each user C module compiled into the executable, so a module that tests
++# ESP_PLATFORM could link its non-ESP fallback.
++target_compile_definitions(usermod INTERFACE ESP_PLATFORM=1)
++
+ # Additional include directories needed for private NimBLE headers.
+ target_include_directories(${MICROPY_TARGET} PUBLIC
+     ${IDF_PATH}/components/bt/host/nimble/nimble

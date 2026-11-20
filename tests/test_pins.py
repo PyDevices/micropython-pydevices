@@ -45,10 +45,11 @@ class Parse(unittest.TestCase):
             pins.parse("mod https://x/a.git %s\nmod https://x/b.git %s\n" % (C, C))
 
     def test_groups(self):
-        got = pins.parse("micropython u %s\nomnipython-lvgl u %s\nesp-idf u %s\naudiodsp u %s\n" % (C, C, C, C))
+        got = pins.parse("micropython u %s\nomnipython-lvgl u %s\nesp-idf u %s\naudiodsp u %s\nesp-idf6 u %s\n"
+                         % (C, C, C, C, C))
         self.assertEqual({p.name: p.group for p in got.values()},
                          {"micropython": "micropython", "omnipython-lvgl": "sources",
-                          "esp-idf": "toolchains", "audiodsp": "modules"})
+                          "esp-idf": "toolchains", "audiodsp": "modules", "esp-idf6": "s31"})
 
 
 class TheFile(unittest.TestCase):
@@ -63,6 +64,13 @@ class TheFile(unittest.TestCase):
     def test_every_toolchain_and_source_is_pinned(self):
         for name in pins.TOOLCHAINS + pins.SOURCES:
             self.assertIn(name, self.lock)
+
+    def test_the_s31_pins_are_their_own_group(self):
+        # An S31 line in another group would reach every build: a module is
+        # fetched by every build, and a toolchain moves the cache key.
+        for name in pins.S31:
+            self.assertEqual(self.lock[name].group, "s31", name)
+        self.assertTrue(self.lock["esp-idf6"].tag)
 
     def test_the_toolchains_fetched_by_tag_name_their_tag(self):
         for name in ("esp-idf", "emsdk", "espressif__tinyusb", "circuitpython"):

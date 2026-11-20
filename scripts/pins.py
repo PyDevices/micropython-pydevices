@@ -34,6 +34,10 @@ LOCK = "DEPENDENCIES.lock"
 MICROPYTHON = "micropython"
 # Sources a build reads that are not one module directory each.
 SOURCES = ("omnipython-lvgl", "omnipython-lib", "esp-vision")
+# The ESP32-S31's own pins: upstream builds it only on ESP-IDF 6, from open pull
+# requests. Kept apart so that no other build, and no cache keyed on another
+# group, can reach them.
+S31 = ("micropython-s31", "esp-idf6")
 # Toolchains and components, fetched into deps/ only by the builds that use them.
 TOOLCHAINS = ("esp-idf", "emsdk", "SDL2", "espressif__tinyusb", "espressif__esp_hosted",
               "circuitpython", "esp_cam_sensor", "esp_sccb_intf", "cmake_utilities", "esp_h264", "usb")
@@ -60,6 +64,8 @@ class Pin(NamedTuple):
             return "sources"
         if self.name in TOOLCHAINS:
             return "toolchains"
+        if self.name in S31:
+            return "s31"
         return "modules"
 
 
@@ -101,7 +107,7 @@ def get(name, repo=REPO):
 
 
 def group(name, repo=REPO):
-    """The pins of one group, in file order: micropython, sources, modules or toolchains."""
+    """The pins of one group, in file order: micropython, sources, modules, toolchains or s31."""
     return [p for p in read(repo).values() if p.group == name]
 
 

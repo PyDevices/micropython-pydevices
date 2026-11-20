@@ -1,0 +1,1912 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: cumin <13809292481@163.com>
+Date: Wed, 30 Sep 2026 17:24:10 +0800
+Subject: [PATCH 1/2] esp32: build against ESP-IDF v6 (micropython#19725).
+
+The ESP-IDF v6 compatibility commits of micropython/micropython#19725, as
+they stand in #19726 at 0b9512f475bd (19e685eca..8634a282a), squashed and
+rebased onto the micropython pin with the PyDevices overlay applied. Only
+the ESP32-S31 build carries this patch.
+
+Left out: the CI workflow, tools/ci.sh and the component lockfiles of the
+other chips, which no S31 build reads. The tinyusb entry of
+ports/esp32/main/idf_component.yml keeps the overlay's TinyUSB 0.21 here;
+the next patch moves it, as upstream's does. The P4 cameraif components
+stay in the manifest.
+---
+ extmod/berkeley-db/berkeley_db_config_port.h  |  15 +
+ extmod/modcryptolib.c                         |   8 +
+ extmod/modhashlib.c                           | 121 ++++-
+ extmod/modnetwork.c                           |   2 +-
+ extmod/modtls_mbedtls.c                       |  41 +-
+ ports/esp32/CMakeLists.txt                    |  12 +
+ ports/esp32/README.md                         |   5 +-
+ ports/esp32/adc.h                             |   7 +
+ .../boards/ESP32_GENERIC/manifest_d2wd.py     |  11 +
+ .../ESP32_GENERIC/mpconfigvariant_D2WD.cmake  |   6 +
+ .../esp32/boards/ESP32_GENERIC/sdkconfig.d2wd |  15 +
+ ports/esp32/esp32_common.cmake                |  37 +-
+ ports/esp32/esp32_pcnt.c                      | 465 +++++++++++++-----
+ ports/esp32/machine_i2s.c                     |  14 +-
+ ports/esp32/machine_pwm.c                     |  15 +-
+ ports/esp32/machine_rtc.c                     |   6 +-
+ ports/esp32/machine_sdcard.c                  |   6 +-
+ ports/esp32/machine_timer.c                   |   8 +
+ ports/esp32/machine_touchpad.c                |   5 +
+ ports/esp32/main.c                            |  14 +-
+ ports/esp32/main/idf_component.yml            |  30 +-
+ ports/esp32/modespnow.c                       |  41 ++
+ ports/esp32/modmachine.c                      |  10 +-
+ ports/esp32/modnetwork.h                      |  30 ++
+ ports/esp32/modnetwork_globals.h              |   6 +
+ ports/esp32/network_lan.c                     |  43 +-
+ ports/esp32/network_wlan.c                    |  12 +-
+ ports/esp32/network_wlan_csi.c                |   5 +-
+ ports/esp32/uart.c                            |   5 +
+ 29 files changed, 847 insertions(+), 148 deletions(-)
+ create mode 100644 ports/esp32/boards/ESP32_GENERIC/manifest_d2wd.py
+
+diff --git a/extmod/berkeley-db/berkeley_db_config_port.h b/extmod/berkeley-db/berkeley_db_config_port.h
+index 749beb537..735fa0a15 100644
+--- a/extmod/berkeley-db/berkeley_db_config_port.h
++++ b/extmod/berkeley-db/berkeley_db_config_port.h
+@@ -5,6 +5,21 @@
+ #define abort abort_
+ #define virt_fd_t void *
+ 
++// berkeley-db 1.xx uses the legacy sys/cdefs.h macros (__P, __BEGIN_DECLS,
++// __END_DECLS) which some toolchains no longer provide (eg the newlib used
++// by ESP-IDF v6). db.h includes this file (as "berkeley-db/config.h") after
++// <sys/cdefs.h> and before its first use of these macros, so provide them
++// here when missing. Toolchains that do define them are unaffected.
++#ifndef __BEGIN_DECLS
++#define __BEGIN_DECLS
++#endif
++#ifndef __END_DECLS
++#define __END_DECLS
++#endif
++#ifndef __P
++#define __P(protos) protos
++#endif
++
+ #ifdef MICROPY_BERKELEY_DB_DEFPSIZE
+ #define DEFPSIZE MICROPY_BERKELEY_DB_DEFPSIZE
+ #endif
+diff --git a/extmod/modcryptolib.c b/extmod/modcryptolib.c
+index bf72f4f46..3491a053a 100644
+--- a/extmod/modcryptolib.c
++++ b/extmod/modcryptolib.c
+@@ -61,7 +61,15 @@ struct ctr_params {
+ #endif
+ 
+ #if MICROPY_SSL_MBEDTLS
++#include "mbedtls/version.h"
++#if MBEDTLS_VERSION_MAJOR >= 4
++// mbedtls 4.x: the legacy AES API moved under the tf-psa-crypto
++// builtin driver tree. The port CMakeLists adds that include path; the header
++// is then available at mbedtls/private/aes.h.
++#include "mbedtls/private/aes.h"
++#else
+ #include <mbedtls/aes.h>
++#endif
+ 
+ // we can't run mbedtls AES key schedule until we know whether we're used for encrypt or decrypt.
+ // therefore, we store the key & keysize and on the first call to encrypt/decrypt we override them
+diff --git a/extmod/modhashlib.c b/extmod/modhashlib.c
+index b3e7285f1..3bbbe9e0e 100644
+--- a/extmod/modhashlib.c
++++ b/extmod/modhashlib.c
+@@ -38,7 +38,13 @@
+ #if MICROPY_PY_HASHLIB_SHA256
+ 
+ #if MICROPY_SSL_MBEDTLS
++#include "mbedtls/version.h"
++#if MBEDTLS_VERSION_MAJOR >= 4
++// mbedtls 4.x: legacy hash API removed, use PSA Crypto.
++#include "psa/crypto.h"
++#else
+ #include "mbedtls/sha256.h"
++#endif
+ #else
+ #include "lib/crypto-algorithms/sha256.h"
+ #endif
+@@ -52,9 +58,14 @@
+ #endif
+ 
+ #if MICROPY_SSL_MBEDTLS
++#include "mbedtls/version.h"
++#if MBEDTLS_VERSION_MAJOR >= 4
++#include "psa/crypto.h"
++#else
+ #include "mbedtls/md5.h"
+ #include "mbedtls/sha1.h"
+ #endif
++#endif
+ 
+ #endif
+ 
+@@ -70,7 +81,94 @@ static void hashlib_ensure_not_final(mp_obj_hash_t *self) {
+     }
+ }
+ 
++#if MICROPY_SSL_MBEDTLS && MBEDTLS_VERSION_MAJOR >= 4
++
++// Shared PSA Crypto implementation for mbedtls 4.x. All hash types use these
++// functions; the algorithm is derived from the object's type.
++
++static const mp_obj_type_t hashlib_sha256_type;
++#if MICROPY_PY_HASHLIB_SHA1
++static const mp_obj_type_t hashlib_sha1_type;
++#endif
++#if MICROPY_PY_HASHLIB_MD5
++static const mp_obj_type_t hashlib_md5_type;
++#endif
++
++// Return the PSA algorithm of a hash type.
++static psa_algorithm_t hashlib_psa_alg_of_type(const mp_obj_type_t *type) {
++    #if MICROPY_PY_HASHLIB_SHA1
++    if (type == &hashlib_sha1_type) {
++        return PSA_ALG_SHA_1;
++    }
++    #endif
++    #if MICROPY_PY_HASHLIB_MD5
++    if (type == &hashlib_md5_type) {
++        return PSA_ALG_MD5;
++    }
++    #endif
++    return PSA_ALG_SHA_256;
++}
++
++static void hashlib_psa_setup(mp_obj_hash_t *o, psa_algorithm_t alg) {
++    // Idempotent per the PSA spec, and required before any hash operation
++    // (hashlib may be used before any TLS context initialised PSA).
++    psa_crypto_init();
++    psa_hash_operation_t *op = (psa_hash_operation_t *)&o->state;
++    *op = psa_hash_operation_init();
++    if (psa_hash_setup(op, alg) != PSA_SUCCESS) {
++        mp_raise_ValueError(MP_ERROR_TEXT("hash setup failed"));
++    }
++}
++
++static mp_obj_t hashlib_psa_update(mp_obj_t self_in, mp_obj_t arg) {
++    mp_obj_hash_t *self = MP_OBJ_TO_PTR(self_in);
++    hashlib_ensure_not_final(self);
++    mp_buffer_info_t bufinfo;
++    mp_get_buffer_raise(arg, &bufinfo, MP_BUFFER_READ);
++    psa_hash_operation_t *op = (psa_hash_operation_t *)&self->state;
++    if (psa_hash_update(op, bufinfo.buf, bufinfo.len) != PSA_SUCCESS) {
++        mp_raise_ValueError(MP_ERROR_TEXT("hash update failed"));
++    }
++    return mp_const_none;
++}
++
++static mp_obj_t hashlib_psa_digest(mp_obj_t self_in) {
++    mp_obj_hash_t *self = MP_OBJ_TO_PTR(self_in);
++    hashlib_ensure_not_final(self);
++    self->final = true;
++    psa_algorithm_t alg = hashlib_psa_alg_of_type(self->base.type);
++    psa_hash_operation_t *op = (psa_hash_operation_t *)&self->state;
++    vstr_t vstr;
++    vstr_init_len(&vstr, PSA_HASH_LENGTH(alg));
++    size_t hash_len;
++    if (psa_hash_finish(op, (uint8_t *)vstr.buf, vstr.len, &hash_len) != PSA_SUCCESS) {
++        mp_raise_ValueError(MP_ERROR_TEXT("hash finish failed"));
++    }
++    return mp_obj_new_bytes_from_vstr(&vstr);
++}
++
++static mp_obj_t hashlib_psa_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
++    mp_arg_check_num(n_args, n_kw, 0, 1, false);
++    mp_obj_hash_t *o = mp_obj_malloc_var(mp_obj_hash_t, state, char, sizeof(psa_hash_operation_t), type);
++    o->final = false;
++    hashlib_psa_setup(o, hashlib_psa_alg_of_type(type));
++    if (n_args == 1) {
++        hashlib_psa_update(MP_OBJ_FROM_PTR(o), args[0]);
++    }
++    return MP_OBJ_FROM_PTR(o);
++}
++#endif
++
+ #if MICROPY_PY_HASHLIB_SHA256
++
++#if MICROPY_SSL_MBEDTLS && MBEDTLS_VERSION_MAJOR >= 4
++// With PSA Crypto (mbedtls 4.x) all hash types share the generic
++// hashlib_psa_* implementations above; the algorithm is derived from the
++// object's type.
++#define hashlib_sha256_make_new hashlib_psa_make_new
++#define hashlib_sha256_update   hashlib_psa_update
++#define hashlib_sha256_digest   hashlib_psa_digest
++#else
+ static mp_obj_t hashlib_sha256_update(mp_obj_t self_in, mp_obj_t arg);
+ 
+ #if MICROPY_SSL_MBEDTLS
+@@ -140,6 +238,7 @@ static mp_obj_t hashlib_sha256_digest(mp_obj_t self_in) {
+     return mp_obj_new_bytes_from_vstr(&vstr);
+ }
+ #endif
++#endif // !MICROPY_SSL_MBEDTLS || MBEDTLS_VERSION_MAJOR < 4
+ 
+ static MP_DEFINE_CONST_FUN_OBJ_2(hashlib_sha256_update_obj, hashlib_sha256_update);
+ static MP_DEFINE_CONST_FUN_OBJ_1(hashlib_sha256_digest_obj, hashlib_sha256_digest);
+@@ -161,6 +260,12 @@ static MP_DEFINE_CONST_OBJ_TYPE(
+ #endif
+ 
+ #if MICROPY_PY_HASHLIB_SHA1
++
++#if MICROPY_SSL_MBEDTLS && MBEDTLS_VERSION_MAJOR >= 4
++#define hashlib_sha1_make_new hashlib_psa_make_new
++#define hashlib_sha1_update   hashlib_psa_update
++#define hashlib_sha1_digest   hashlib_psa_digest
++#else
+ static mp_obj_t hashlib_sha1_update(mp_obj_t self_in, mp_obj_t arg);
+ 
+ #if MICROPY_SSL_AXTLS
+@@ -195,7 +300,7 @@ static mp_obj_t hashlib_sha1_digest(mp_obj_t self_in) {
+ }
+ #endif
+ 
+-#if MICROPY_SSL_MBEDTLS
++#if MICROPY_SSL_MBEDTLS && MBEDTLS_VERSION_MAJOR < 4
+ 
+ static mp_obj_t hashlib_sha1_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+     mp_arg_check_num(n_args, n_kw, 0, 1, false);
+@@ -228,7 +333,8 @@ static mp_obj_t hashlib_sha1_digest(mp_obj_t self_in) {
+     mbedtls_sha1_free((mbedtls_sha1_context *)self->state);
+     return mp_obj_new_bytes_from_vstr(&vstr);
+ }
+-#endif
++#endif // MICROPY_SSL_MBEDTLS && MBEDTLS_VERSION_MAJOR < 4
++#endif // !MICROPY_SSL_MBEDTLS || MBEDTLS_VERSION_MAJOR < 4
+ 
+ static MP_DEFINE_CONST_FUN_OBJ_2(hashlib_sha1_update_obj, hashlib_sha1_update);
+ static MP_DEFINE_CONST_FUN_OBJ_1(hashlib_sha1_digest_obj, hashlib_sha1_digest);
+@@ -249,6 +355,12 @@ static MP_DEFINE_CONST_OBJ_TYPE(
+ #endif
+ 
+ #if MICROPY_PY_HASHLIB_MD5
++
++#if MICROPY_SSL_MBEDTLS && MBEDTLS_VERSION_MAJOR >= 4
++#define hashlib_md5_make_new hashlib_psa_make_new
++#define hashlib_md5_update   hashlib_psa_update
++#define hashlib_md5_digest   hashlib_psa_digest
++#else
+ static mp_obj_t hashlib_md5_update(mp_obj_t self_in, mp_obj_t arg);
+ 
+ #if MICROPY_SSL_AXTLS
+@@ -283,7 +395,7 @@ static mp_obj_t hashlib_md5_digest(mp_obj_t self_in) {
+ }
+ #endif // MICROPY_SSL_AXTLS
+ 
+-#if MICROPY_SSL_MBEDTLS
++#if MICROPY_SSL_MBEDTLS && MBEDTLS_VERSION_MAJOR < 4
+ 
+ static mp_obj_t hashlib_md5_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+     mp_arg_check_num(n_args, n_kw, 0, 1, false);
+@@ -316,7 +428,8 @@ static mp_obj_t hashlib_md5_digest(mp_obj_t self_in) {
+     mbedtls_md5_free((mbedtls_md5_context *)self->state);
+     return mp_obj_new_bytes_from_vstr(&vstr);
+ }
+-#endif // MICROPY_SSL_MBEDTLS
++#endif // MICROPY_SSL_MBEDTLS && MBEDTLS_VERSION_MAJOR < 4
++#endif // !MICROPY_SSL_MBEDTLS || MBEDTLS_VERSION_MAJOR < 4
+ 
+ static MP_DEFINE_CONST_FUN_OBJ_2(hashlib_md5_update_obj, hashlib_md5_update);
+ static MP_DEFINE_CONST_FUN_OBJ_1(hashlib_md5_digest_obj, hashlib_md5_digest);
+diff --git a/extmod/modnetwork.c b/extmod/modnetwork.c
+index 952632c8b..f5277b01f 100644
+--- a/extmod/modnetwork.c
++++ b/extmod/modnetwork.c
+@@ -68,7 +68,7 @@ extern const struct _mp_obj_type_t mod_network_nic_type_ncm;
+ ///
+ /// This module provides network drivers and routing configuration.
+ 
+-char mod_network_country_code[2] = "XX";
++char mod_network_country_code[2] = {'X', 'X'};
+ 
+ #ifndef MICROPY_PY_NETWORK_HOSTNAME_DEFAULT
+ #error "MICROPY_PY_NETWORK_HOSTNAME_DEFAULT must be set in mpconfigport.h or mpconfigboard.h"
+diff --git a/extmod/modtls_mbedtls.c b/extmod/modtls_mbedtls.c
+index e87d6a7d2..61fbaa8bd 100644
+--- a/extmod/modtls_mbedtls.c
++++ b/extmod/modtls_mbedtls.c
+@@ -42,12 +42,25 @@
+ #include "extmod/vfs.h"
+ 
+ // mbedtls_time_t
++// Include version.h first so MBEDTLS_VERSION_MAJOR is available for the
++// conditional RNG includes below (works for mbedtls 2.x, 3.x and 4.x).
++#include "mbedtls/version.h"
++
++#if MBEDTLS_VERSION_MAJOR < 4
++// mbedtls 3.x and below: explicit entropy/ctr_drbg contexts
++// are required for the RNG fed into ssl_config_defaults / ctr_drbg_seed.
++#include "mbedtls/entropy.h"
++#include "mbedtls/ctr_drbg.h"
++#else
++// mbedtls 4.x: RNG is provided internally by PSA Crypto, so
++// entropy/ctr_drbg are gone. psa_crypto_init() (called below) sets it up.
++#include "psa/crypto.h"
++#endif
++
+ #include "mbedtls/platform.h"
+ #include "mbedtls/ssl.h"
+ #include "mbedtls/x509_crt.h"
+ #include "mbedtls/pk.h"
+-#include "mbedtls/entropy.h"
+-#include "mbedtls/ctr_drbg.h"
+ #ifdef MBEDTLS_SSL_PROTO_DTLS
+ #include "mbedtls/timing.h"
+ #endif
+@@ -80,8 +93,10 @@
+ // This corresponds to an SSLContext object.
+ typedef struct _mp_obj_ssl_context_t {
+     mp_obj_base_t base;
++    #if MBEDTLS_VERSION_MAJOR < 4
+     mbedtls_entropy_context entropy;
+     mbedtls_ctr_drbg_context ctr_drbg;
++    #endif
+     mbedtls_ssl_config conf;
+     mbedtls_x509_crt cacert;
+     mbedtls_x509_crt cert;
+@@ -353,8 +368,10 @@ static mp_obj_t ssl_context_make_new(const mp_obj_type_t *type_in, size_t n_args
+ 
+     // Initialise mbedTLS state.
+     mbedtls_ssl_config_init(&self->conf);
++    #if MBEDTLS_VERSION_MAJOR < 4
+     mbedtls_entropy_init(&self->entropy);
+     mbedtls_ctr_drbg_init(&self->ctr_drbg);
++    #endif
+     mbedtls_x509_crt_init(&self->cacert);
+     mbedtls_x509_crt_init(&self->cert);
+     mbedtls_pk_init(&self->pkey);
+@@ -380,6 +397,12 @@ static mp_obj_t ssl_context_make_new(const mp_obj_type_t *type_in, size_t n_args
+     psa_crypto_init();
+     #endif
+ 
++    #if MBEDTLS_VERSION_MAJOR >= 4
++    // mbedtls 4.x: PSA Crypto owns the RNG, ssl_config_defaults pulls from it
++    // internally -- no entropy/ctr_drbg seeding required.
++    int ret = mbedtls_ssl_config_defaults(&self->conf, endpoint,
++        transport, MBEDTLS_SSL_PRESET_DEFAULT);
++    #else
+     const byte seed[] = "mpy";
+     int ret = mbedtls_ctr_drbg_seed(&self->ctr_drbg, mbedtls_entropy_func, &self->entropy, seed, sizeof(seed));
+     if (ret != 0) {
+@@ -388,6 +411,7 @@ static mp_obj_t ssl_context_make_new(const mp_obj_type_t *type_in, size_t n_args
+ 
+     ret = mbedtls_ssl_config_defaults(&self->conf, endpoint,
+         transport, MBEDTLS_SSL_PRESET_DEFAULT);
++    #endif
+     if (ret != 0) {
+         mbedtls_raise_error(ret);
+     }
+@@ -399,7 +423,9 @@ static mp_obj_t ssl_context_make_new(const mp_obj_type_t *type_in, size_t n_args
+     }
+     mbedtls_ssl_conf_authmode(&self->conf, self->authmode);
+     mbedtls_ssl_conf_verify(&self->conf, &ssl_sock_cert_verify, self);
++    #if MBEDTLS_VERSION_MAJOR < 4
+     mbedtls_ssl_conf_rng(&self->conf, mbedtls_ctr_drbg_random, &self->ctr_drbg);
++    #endif
+     #ifdef MBEDTLS_DEBUG_C
+     mbedtls_ssl_conf_dbg(&self->conf, mbedtls_debug, NULL);
+     #endif
+@@ -408,7 +434,11 @@ static mp_obj_t ssl_context_make_new(const mp_obj_type_t *type_in, size_t n_args
+     self->is_dtls_server = (protocol == MP_PROTOCOL_DTLS_SERVER);
+     if (self->is_dtls_server) {
+         mbedtls_ssl_cookie_init(&self->cookie_ctx);
++        #if MBEDTLS_VERSION_MAJOR >= 4
++        ret = mbedtls_ssl_cookie_setup(&self->cookie_ctx);
++        #else
+         ret = mbedtls_ssl_cookie_setup(&self->cookie_ctx, mbedtls_ctr_drbg_random, &self->ctr_drbg);
++        #endif
+         if (ret != 0) {
+             mbedtls_raise_error(ret);
+         }
+@@ -490,8 +520,10 @@ static mp_obj_t ssl_context___del__(mp_obj_t self_in) {
+     mbedtls_pk_free(&self->pkey);
+     mbedtls_x509_crt_free(&self->cert);
+     mbedtls_x509_crt_free(&self->cacert);
++    #if MBEDTLS_VERSION_MAJOR < 4
+     mbedtls_ctr_drbg_free(&self->ctr_drbg);
+     mbedtls_entropy_free(&self->entropy);
++    #endif
+     mbedtls_ssl_config_free(&self->conf);
+     #ifdef MBEDTLS_SSL_DTLS_HELLO_VERIFY
+     if (self->is_dtls_server) {
+@@ -548,7 +580,12 @@ static MP_DEFINE_CONST_FUN_OBJ_2(ssl_context_set_ciphers_obj, ssl_context_set_ci
+ static void ssl_context_load_key(mp_obj_ssl_context_t *self, mp_obj_t key_obj, mp_obj_t cert_obj) {
+     size_t key_len;
+     const unsigned char *key = asn1_get_data(key_obj, &key_len);
++    #if MBEDTLS_VERSION_MAJOR >= 4
++    // mbedtls 4.x: RNG parameters removed, PSA Crypto handles blinding.
++    int ret = mbedtls_pk_parse_key(&self->pkey, key, key_len, NULL, 0);
++    #else
+     int ret = mbedtls_pk_parse_key(&self->pkey, key, key_len, NULL, 0, mbedtls_ctr_drbg_random, &self->ctr_drbg);
++    #endif
+     if (ret != 0) {
+         mbedtls_raise_error(MBEDTLS_ERR_PK_BAD_INPUT_DATA); // use general error for all key errors
+     }
+diff --git a/ports/esp32/CMakeLists.txt b/ports/esp32/CMakeLists.txt
+index c739368c5..1377a468d 100644
+--- a/ports/esp32/CMakeLists.txt
++++ b/ports/esp32/CMakeLists.txt
+@@ -69,6 +69,18 @@ idf_build_set_property(DEPENDENCIES_LOCK ${LOCKFILE_PATH})
+ # Define the project.
+ project(micropython)
+ 
++# mbedtls 4 (ESP-IDF v6+) moved the legacy symmetric-crypto headers (eg
++# mbedtls/aes.h) into the tf-psa-crypto builtin driver include tree. The
++# extmod crypto/hash modules still use the legacy API surface, so add that
++# include path when it exists. On mbedtls 3 (ESP-IDF v5) this is a no-op.
++idf_component_get_property(mbedtls_dir mbedtls COMPONENT_DIR)
++set(mbedtls_builtin_inc "${mbedtls_dir}/mbedtls/tf-psa-crypto/drivers/builtin/include")
++if(EXISTS "${mbedtls_builtin_inc}/mbedtls/private/aes.h")
++    idf_component_get_property(mbedtls_lib mbedtls COMPONENT_LIB)
++    target_include_directories(${mbedtls_lib} INTERFACE ${mbedtls_builtin_inc})
++    message(STATUS "mbedtls 4.x detected: added private symmetric crypto include path")
++endif()
++
+ # Check for lockfile changes and either warn or error depending on build type
+ message("Checking lockfile contents...")
+ execute_process(COMMAND git diff --exit-code ${LOCKFILE_PATH} WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+diff --git a/ports/esp32/README.md b/ports/esp32/README.md
+index 43ed6d14b..ba94700e7 100644
+--- a/ports/esp32/README.md
++++ b/ports/esp32/README.md
+@@ -53,7 +53,10 @@ build environment and toolchains needed to build the firmware.
+ 
+ The ESP-IDF changes quickly and MicroPython only supports certain versions. The
+ current recommended version of ESP-IDF for MicroPython is v5.5.5. MicroPython
+-also supports v5.3, v5.4, v5.4.1, v5.4.2, v5.5.1, v5.5.2 and v5.5.4.
++also supports v5.3, v5.4, v5.4.1, v5.4.2, v5.5.1, v5.5.2, v5.5.4, and v6.1
++(ESP-IDF v6 is tested with v6.1; the committed lockfiles in the `lockfiles/`
++subdirectory pin the 5.x component versions, and are only enforced on the
++newest 5.x release).
+ 
+ <!-- Important: If updating the above, please also update:
+      * IDF_OLDEST_VER & IDF_NEWEST_VER in .github/workflows/port_esp32.yml
+diff --git a/ports/esp32/adc.h b/ports/esp32/adc.h
+index ebf7fcc21..2ee6459a2 100644
+--- a/ports/esp32/adc.h
++++ b/ports/esp32/adc.h
+@@ -31,6 +31,13 @@
+ #include "py/runtime.h"
+ #include "esp_adc/adc_oneshot.h"
+ #include "esp_adc/adc_cali_scheme.h"
++#include "esp_idf_version.h"
++
++// IDF v6 renamed ADC_ATTEN_DB_11 to ADC_ATTEN_DB_12 (the actual max
++// attenuation is 12 dB). Alias it so the code below keeps using the old name.
++#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
++#define ADC_ATTEN_DB_11 ADC_ATTEN_DB_12
++#endif
+ 
+ #define ADC_ATTEN_COUNT SOC_ADC_ATTEN_NUM
+ #define ADC_ATTEN_MIN ADC_ATTEN_DB_0
+diff --git a/ports/esp32/boards/ESP32_GENERIC/manifest_d2wd.py b/ports/esp32/boards/ESP32_GENERIC/manifest_d2wd.py
+new file mode 100644
+index 000000000..e4b945afe
+--- /dev/null
++++ b/ports/esp32/boards/ESP32_GENERIC/manifest_d2wd.py
+@@ -0,0 +1,11 @@
++# D2WD variant manifest: asyncio and the hardware libs only. The packages
++# dropped relative to boards/manifest.py (umqtt, aioespnow, upysh and the
++# networking bundle) install from micropython-lib via mip when needed.
++freeze("$(PORT_DIR)/modules")
++include("$(MPY_DIR)/extmod/asyncio")
++
++# Require some micropython-lib modules.
++require("dht")
++require("ds18x20")
++require("neopixel")
++require("onewire")
+diff --git a/ports/esp32/boards/ESP32_GENERIC/mpconfigvariant_D2WD.cmake b/ports/esp32/boards/ESP32_GENERIC/mpconfigvariant_D2WD.cmake
+index 8bb6b494b..defc614d1 100644
+--- a/ports/esp32/boards/ESP32_GENERIC/mpconfigvariant_D2WD.cmake
++++ b/ports/esp32/boards/ESP32_GENERIC/mpconfigvariant_D2WD.cmake
+@@ -3,6 +3,12 @@ list(APPEND SDKCONFIG_DEFAULTS
+     boards/ESP32_GENERIC/sdkconfig.d2wd
+ )
+ 
++# The 2MiB D2WD build has no room for the full frozen set alongside BLE under
++# IDF v6. The slim manifest keeps asyncio and the hardware libs; everything
++# dropped here (umqtt, aioespnow, upysh and the networking bundle) installs
++# from micropython-lib via mip when needed.
++set(MICROPY_FROZEN_MANIFEST ${MICROPY_BOARD_DIR}/manifest_d2wd.py)
++
+ list(APPEND MICROPY_DEF_BOARD
+     MICROPY_HW_MCU_NAME="ESP32-D2WD"
+     # Disable some options to reduce firmware size.
+diff --git a/ports/esp32/boards/ESP32_GENERIC/sdkconfig.d2wd b/ports/esp32/boards/ESP32_GENERIC/sdkconfig.d2wd
+index 017a6c772..ad5423ccd 100644
+--- a/ports/esp32/boards/ESP32_GENERIC/sdkconfig.d2wd
++++ b/ports/esp32/boards/ESP32_GENERIC/sdkconfig.d2wd
+@@ -1,3 +1,18 @@
+ # Setting specific to d2wd
+ CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+ CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
++
++# D2WD only has 2MiB of embedded flash. Disable niche stacks so BLE still fits
++# in the factory partition under IDF v6 (there is not enough space for both):
++# DTLS (CoAP-style UDP security), lwIP PPP (cellular modems) and the mbedTLS
++# PSK key exchanges all serve much smaller audiences than BLE on this part.
++# These overrides only apply to the D2WD variant; other boards are unaffected.
++CONFIG_MBEDTLS_SSL_PROTO_DTLS=n
++CONFIG_LWIP_PPP_SUPPORT=n
++CONFIG_LWIP_PPP_PAP_SUPPORT=n
++CONFIG_LWIP_PPP_CHAP_SUPPORT=n
++CONFIG_MBEDTLS_PSK_MODES=n
++CONFIG_MBEDTLS_KEY_EXCHANGE_PSK=n
++CONFIG_MBEDTLS_KEY_EXCHANGE_DHE_PSK=n
++CONFIG_MBEDTLS_KEY_EXCHANGE_ECDHE_PSK=n
++CONFIG_MBEDTLS_KEY_EXCHANGE_RSA_PSK=n
+diff --git a/ports/esp32/esp32_common.cmake b/ports/esp32/esp32_common.cmake
+index baa037c3e..574e1f2c1 100644
+--- a/ports/esp32/esp32_common.cmake
++++ b/ports/esp32/esp32_common.cmake
+@@ -70,11 +70,17 @@ list(APPEND MICROPY_SOURCE_LIB
+     ${MICROPY_DIR}/lib/littlefs/lfs1_util.c
+     ${MICROPY_DIR}/lib/littlefs/lfs2.c
+     ${MICROPY_DIR}/lib/littlefs/lfs2_util.c
+-    ${MICROPY_DIR}/lib/mbedtls_errors/esp32_mbedtls_errors.c
+     ${MICROPY_DIR}/lib/oofatfs/ff.c
+     ${MICROPY_DIR}/lib/oofatfs/ffunicode.c
+ )
+ 
++# esp32_mbedtls_errors.c maps the mbedtls-3 era high error-code table that was
++# removed in mbedtls 4 (ESP-IDF v6+). Only build it on 5.x.
++if($ENV{IDF_VERSION} VERSION_LESS "6.0")
++    list(APPEND MICROPY_SOURCE_LIB
++        ${MICROPY_DIR}/lib/mbedtls_errors/esp32_mbedtls_errors.c)
++endif()
++
+ list(APPEND MICROPY_SOURCE_DRIVERS
+     ${MICROPY_DIR}/drivers/bus/softspi.c
+     ${MICROPY_DIR}/drivers/dht/dht.c
+@@ -191,16 +197,41 @@ list(APPEND IDF_COMPONENTS
+     log
+     lwip
+     mbedtls
+-    newlib
+     nvs_flash
+     sdmmc
+     soc
+     spi_flash
+     ulp
+-    usb
+     vfs
+ )
+ 
++# newlib and usb components were removed from ESP-IDF in v6.0, but are still
++# needed (listed explicitly here) when building against 5.x.
++if($ENV{IDF_VERSION} VERSION_LESS "6.0")
++    list(APPEND IDF_COMPONENTS
++        newlib
++        usb)
++endif()
++
++# Components added in ESP-IDF v6.0. The legacy `driver` meta-component became
++# an empty shim in v6, so every esp_driver_* component whose headers the port
++# includes directly must be listed explicitly.
++if($ENV{IDF_VERSION} VERSION_GREATER_EQUAL "6.0")
++    list(APPEND IDF_COMPONENTS
++        esp_hal_timg
++        esp_driver_dac
++        esp_driver_gpio
++        esp_driver_i2c
++        esp_driver_ledc
++        esp_driver_pcnt
++        esp_driver_rmt
++        esp_driver_sdmmc
++        esp_driver_sdspi
++        esp_driver_spi
++        esp_driver_tsens
++        esp_driver_uart)
++endif()
++
+ if($ENV{IDF_VERSION} VERSION_GREATER_EQUAL "5.4")
+     list(APPEND IDF_COMPONENTS
+         esp_driver_touch_sens)
+diff --git a/ports/esp32/esp32_pcnt.c b/ports/esp32/esp32_pcnt.c
+index 36d43ab45..5808e7188 100644
+--- a/ports/esp32/esp32_pcnt.c
++++ b/ports/esp32/esp32_pcnt.c
+@@ -22,6 +22,22 @@
+  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  * THE SOFTWARE.
++ *
++ * ESP32 PCNT pulse counter. This driver uses the newer IDF "pulse_cnt" driver API
++ * internally, but the Python API is based on the legacy driver/pcnt.h driver which was
++ * removed in ESP-IDF v6.
++ *
++ * Mapping from the legacy five-event model:
++ *   - PCNT_EVT_ZERO    -> watch point at 0 (dedicated zero-cross event)
++ *   - PCNT_EVT_THRES_0 -> watch point at threshold0 (threshold event slot 0)
++ *   - PCNT_EVT_THRES_1 -> watch point at threshold1 (threshold event slot 1)
++ *   - PCNT_EVT_L_LIM   -> watch point at the unit low limit  (= minimum)
++ *   - PCNT_EVT_H_LIM   -> watch point at the unit high limit (= maximum)
++ * The unit limits must be set to minimum/maximum for the low/high-limit
++ * watch points to land on their dedicated hardware event slots, so the unit
++ * is rebuilt if minimum/maximum change. The `id` passed to PCNT() is a
++ * Python-level identity only; the driver allocates hardware units from a
++ * pool.
+  */
+ 
+ 
+@@ -34,21 +50,74 @@
+ #include "shared/runtime/mpirq.h"
+ 
+ #include "modesp32.h"
+-#include "driver/pcnt.h"
++#include "driver/pulse_cnt.h"
+ 
+ #if !MICROPY_ENABLE_FINALISER
+ #error "esp32.PCNT requires MICROPY_ENABLE_FINALISER."
+ #endif
+ 
++// Event flag bits, matching the values of the removed legacy PCNT_EVT_* enum
++// (which were also the values exposed to Python as esp32.PCNT.IRK_*).
++#define PCNT_EVT_ZERO    (1 << 0)
++#define PCNT_EVT_THRES_0 (1 << 1)
++#define PCNT_EVT_THRES_1 (1 << 2)
++#define PCNT_EVT_L_LIM   (1 << 3)
++#define PCNT_EVT_H_LIM   (1 << 4)
++
++// The soc_caps.h names for the PCNT unit and channel counts moved around
++// between IDF versions: v5 defines SOC_PCNT_UNITS_PER_GROUP and
++// SOC_PCNT_CHANNELS_PER_UNIT, v6.0/6.1 define PCNT_LL_UNITS_PER_INST and
++// PCNT_LL_CHANS_PER_UNIT in hal/pcnt_ll.h, and v6.2 renamed the soc_caps.h
++// macros again to _SOC_CAPS_PCNT_UNITS_PER_INST/_SOC_CAPS_PCNT_CHANS_PER_UNIT.
++// Alias to the v5 names, used to validate the user-supplied unit id and
++// channel argument.
++#ifndef SOC_PCNT_UNITS_PER_GROUP
++#ifdef _SOC_CAPS_PCNT_UNITS_PER_INST
++#define SOC_PCNT_UNITS_PER_GROUP _SOC_CAPS_PCNT_UNITS_PER_INST
++#else
++#include "hal/pcnt_ll.h"
++#define SOC_PCNT_UNITS_PER_GROUP PCNT_LL_GET(UNITS_PER_INST)
++#endif
++#endif
++
++#ifndef SOC_PCNT_CHANNELS_PER_UNIT
++#ifdef _SOC_CAPS_PCNT_CHANS_PER_UNIT
++#define SOC_PCNT_CHANNELS_PER_UNIT _SOC_CAPS_PCNT_CHANS_PER_UNIT
++#else
++#define SOC_PCNT_CHANNELS_PER_UNIT PCNT_LL_GET(CHANS_PER_UNIT)
++#endif
++#endif
++
++#define PCNT_PIN_NOT_USED (-1)
++#define PCNT_THRESHOLD_UNSET (INT_MIN)
++
+ typedef struct _esp32_pcnt_irq_obj_t {
+     mp_irq_obj_t base;
+     uint32_t flags;
+     uint32_t trigger;
+ } esp32_pcnt_irq_obj_t;
+ 
++// Remembered per-channel configuration so a unit can be rebuilt (with new
++// limits) while keeping the channel setup.
++typedef struct _esp32_pcnt_chan_state_t {
++    int edge_gpio;
++    int level_gpio;
++    int pos_act;   // pcnt_channel_edge_action_t, -1 if never set
++    int neg_act;
++    int high_act;  // pcnt_channel_level_action_t, -1 if never set
++    int low_act;
++} esp32_pcnt_chan_state_t;
++
+ typedef struct _esp32_pcnt_obj_t {
+     mp_obj_base_t base;
+-    pcnt_unit_t unit;
++    int id;
++    pcnt_unit_handle_t unit;
++    pcnt_channel_handle_t channels[2];
++    esp32_pcnt_chan_state_t chan_state[2];
++    int low_limit;   // unit low limit (= minimum)
++    int high_limit;  // unit high limit (= maximum)
++    int threshold[2];
++    bool enabled;
+     esp32_pcnt_irq_obj_t *irq;
+     struct _esp32_pcnt_obj_t *next;
+ } esp32_pcnt_obj_t;
+@@ -56,10 +125,6 @@ typedef struct _esp32_pcnt_obj_t {
+ // Linked list of PCNT units.
+ MP_REGISTER_ROOT_POINTER(struct _esp32_pcnt_obj_t *esp32_pcnt_obj_head);
+ 
+-// Once off installation of the PCNT ISR service (using the default service).
+-// Persists across soft reset.
+-static bool pcnt_isr_service_installed = false;
+-
+ static mp_obj_t esp32_pcnt_deinit(mp_obj_t self_in);
+ 
+ void esp32_pcnt_deinit_all(void) {
+@@ -70,6 +135,155 @@ void esp32_pcnt_deinit_all(void) {
+     }
+ }
+ 
++static bool IRAM_ATTR esp32_pcnt_event_callback(pcnt_unit_handle_t unit, const pcnt_watch_event_data_t *edata, void *user_ctx) {
++    esp32_pcnt_obj_t *self = (esp32_pcnt_obj_t *)user_ctx;
++    if (!self->irq || self->irq->base.handler == mp_const_none) {
++        return false;
++    }
++    // Map the watch point value that fired back onto the Python-visible
++    // event flag bits.
++    uint32_t flag = 0;
++    int value = edata->watch_point_value;
++    if (value == 0) {
++        flag = PCNT_EVT_ZERO;
++    }
++    if (self->threshold[0] != PCNT_THRESHOLD_UNSET && value == self->threshold[0]) {
++        flag |= PCNT_EVT_THRES_0;
++    }
++    if (self->threshold[1] != PCNT_THRESHOLD_UNSET && value == self->threshold[1]) {
++        flag |= PCNT_EVT_THRES_1;
++    }
++    if (self->low_limit != -32768 && value == self->low_limit) {
++        flag |= PCNT_EVT_L_LIM;
++    }
++    if (self->high_limit != 32767 && value == self->high_limit) {
++        flag |= PCNT_EVT_H_LIM;
++    }
++    if (flag) {
++        mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
++        self->irq->flags |= flag;
++        MICROPY_END_ATOMIC_SECTION(atomic_state);
++        mp_irq_handler(&self->irq->base);
++    }
++    return false;
++}
++
++// Add or remove watch points so that exactly the events in `trigger` are
++// armed (mirrors the legacy pcnt_event_enable/disable semantics).
++static void esp32_pcnt_set_watch_points(esp32_pcnt_obj_t *self, uint32_t trigger) {
++    // Remove all five possible watch points first (ESP_ERR_INVALID_STATE is
++    // returned for ones that were not added; ignore it).
++    pcnt_unit_remove_watch_point(self->unit, 0);
++    if (self->threshold[0] != PCNT_THRESHOLD_UNSET) {
++        pcnt_unit_remove_watch_point(self->unit, self->threshold[0]);
++    }
++    if (self->threshold[1] != PCNT_THRESHOLD_UNSET) {
++        pcnt_unit_remove_watch_point(self->unit, self->threshold[1]);
++    }
++    if (self->low_limit != -32768) {
++        pcnt_unit_remove_watch_point(self->unit, self->low_limit);
++    }
++    if (self->high_limit != 32767) {
++        pcnt_unit_remove_watch_point(self->unit, self->high_limit);
++    }
++
++    if (trigger & PCNT_EVT_ZERO) {
++        check_esp_err(pcnt_unit_add_watch_point(self->unit, 0));
++    }
++    if ((trigger & PCNT_EVT_THRES_0) && self->threshold[0] != PCNT_THRESHOLD_UNSET) {
++        check_esp_err(pcnt_unit_add_watch_point(self->unit, self->threshold[0]));
++    }
++    if ((trigger & PCNT_EVT_THRES_1) && self->threshold[1] != PCNT_THRESHOLD_UNSET) {
++        check_esp_err(pcnt_unit_add_watch_point(self->unit, self->threshold[1]));
++    }
++    if ((trigger & PCNT_EVT_L_LIM) && self->low_limit != -32768) {
++        check_esp_err(pcnt_unit_add_watch_point(self->unit, self->low_limit));
++    }
++    if ((trigger & PCNT_EVT_H_LIM) && self->high_limit != 32767) {
++        check_esp_err(pcnt_unit_add_watch_point(self->unit, self->high_limit));
++    }
++}
++
++// Tear down the hardware unit and channels (keeps the remembered state so
++// esp32_pcnt_ensure_unit can rebuild).
++static void esp32_pcnt_teardown_unit(esp32_pcnt_obj_t *self) {
++    if (self->unit == NULL) {
++        return;
++    }
++    for (int i = 0; i < 2; ++i) {
++        if (self->channels[i] != NULL) {
++            pcnt_del_channel(self->channels[i]);
++            self->channels[i] = NULL;
++        }
++    }
++    if (self->enabled) {
++        pcnt_unit_stop(self->unit);
++        pcnt_unit_disable(self->unit);
++        self->enabled = false;
++    }
++    pcnt_del_unit(self->unit);
++    self->unit = NULL;
++}
++
++// (Re)create the hardware unit (and any previously-configured channels),
++// re-arm watch points for the active IRQ trigger, and restore the enabled
++// state.
++static void esp32_pcnt_ensure_unit(esp32_pcnt_obj_t *self) {
++    if (self->unit != NULL) {
++        return;
++    }
++    bool was_enabled = self->enabled;
++    pcnt_unit_config_t unit_config = {
++        .low_limit = self->low_limit,
++        .high_limit = self->high_limit,
++    };
++    check_esp_err(pcnt_new_unit(&unit_config, &self->unit));
++
++    pcnt_event_callbacks_t cbs = {
++        .on_reach = esp32_pcnt_event_callback,
++    };
++    check_esp_err(pcnt_unit_register_event_callbacks(self->unit, &cbs, self));
++
++    for (int i = 0; i < 2; ++i) {
++        esp32_pcnt_chan_state_t *cs = &self->chan_state[i];
++        if (cs->edge_gpio == PCNT_PIN_NOT_USED && cs->level_gpio == PCNT_PIN_NOT_USED) {
++            continue;
++        }
++        pcnt_chan_config_t chan_config = {
++            .edge_gpio_num = cs->edge_gpio,
++            .level_gpio_num = cs->level_gpio,
++        };
++        check_esp_err(pcnt_new_channel(self->unit, &chan_config, &self->channels[i]));
++        if (cs->pos_act >= 0) {
++            check_esp_err(pcnt_channel_set_edge_action(self->channels[i],
++                (pcnt_channel_edge_action_t)cs->pos_act, (pcnt_channel_edge_action_t)cs->neg_act));
++        }
++        if (cs->high_act >= 0) {
++            check_esp_err(pcnt_channel_set_level_action(self->channels[i],
++                (pcnt_channel_level_action_t)cs->high_act, (pcnt_channel_level_action_t)cs->low_act));
++        }
++    }
++
++    if (self->irq && self->irq->trigger) {
++        esp32_pcnt_set_watch_points(self, self->irq->trigger);
++    }
++
++    if (was_enabled) {
++        check_esp_err(pcnt_unit_enable(self->unit));
++    }
++}
++
++// Rebuild the unit if the requested limits differ from the current ones (the
++// low/high-limit watch points only exist when they equal the unit limits).
++static void esp32_pcnt_apply_limits(esp32_pcnt_obj_t *self, int minimum, int maximum) {
++    if (minimum != self->low_limit || maximum != self->high_limit) {
++        esp32_pcnt_teardown_unit(self);
++        self->low_limit = minimum;
++        self->high_limit = maximum;
++        esp32_pcnt_ensure_unit(self);
++    }
++}
++
+ static void esp32_pcnt_init_helper(esp32_pcnt_obj_t *self, size_t n_pos_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+     enum {
+         ARG_channel,
+@@ -112,7 +326,7 @@ static void esp32_pcnt_init_helper(esp32_pcnt_obj_t *self, size_t n_pos_args, co
+     // The pin/mode_pin, rising, falling, mode_low, mode_high args all apply
+     // to the channel (defaults to channel zero).
+     mp_uint_t channel = args[ARG_channel].u_int;
+-    if (channel >= PCNT_CHANNEL_MAX) {
++    if (channel >= SOC_PCNT_CHANNELS_PER_UNIT) {
+         mp_raise_ValueError(MP_ERROR_TEXT("channel"));
+     }
+ 
+@@ -133,30 +347,61 @@ static void esp32_pcnt_init_helper(esp32_pcnt_obj_t *self, size_t n_pos_args, co
+             mode_pin = mp_hal_get_pin_obj(args[ARG_mode_pin].u_obj);
+         }
+ 
+-        pcnt_set_pin(self->unit, channel, pin, mode_pin);
++        // A pin change rebuilds the channel.
++        esp32_pcnt_chan_state_t *cs = &self->chan_state[channel];
++        if (cs->edge_gpio != (int)pin || cs->level_gpio != (int)mode_pin) {
++            if (self->channels[channel] != NULL) {
++                pcnt_del_channel(self->channels[channel]);
++                self->channels[channel] = NULL;
++            }
++            cs->edge_gpio = pin;
++            cs->level_gpio = mode_pin;
++            if (pin != PCNT_PIN_NOT_USED || mode_pin != PCNT_PIN_NOT_USED) {
++                pcnt_chan_config_t chan_config = {
++                    .edge_gpio_num = cs->edge_gpio,
++                    .level_gpio_num = cs->level_gpio,
++                };
++                check_esp_err(pcnt_new_channel(self->unit, &chan_config, &self->channels[channel]));
++            }
++        }
+     }
+ 
+     if (
+         args[ARG_rising].u_obj != MP_OBJ_NULL || args[ARG_falling].u_obj != MP_OBJ_NULL ||
+         args[ARG_mode_low].u_obj != MP_OBJ_NULL || args[ARG_mode_high].u_obj != MP_OBJ_NULL
+         ) {
+-        mp_uint_t rising = args[ARG_rising].u_obj == MP_OBJ_NULL ? PCNT_COUNT_DIS : mp_obj_get_int(args[ARG_rising].u_obj);
+-        mp_uint_t falling = args[ARG_falling].u_obj == MP_OBJ_NULL ? PCNT_COUNT_DIS : mp_obj_get_int(args[ARG_falling].u_obj);
+-        mp_uint_t mode_low = args[ARG_mode_low].u_obj == MP_OBJ_NULL ? PCNT_MODE_KEEP : mp_obj_get_int(args[ARG_mode_low].u_obj);
+-        mp_uint_t mode_high = args[ARG_mode_high].u_obj == MP_OBJ_NULL ? PCNT_MODE_KEEP : mp_obj_get_int(args[ARG_mode_high].u_obj);
+-        if (rising >= PCNT_COUNT_MAX) {
++        // The numeric values of the legacy PCNT_COUNT_*/PCNT_MODE_* constants
++        // (exposed to Python) match the new pcnt_channel_*_action_t enums.
++        // Negative inputs become large values when assigned to the mp_uint_t
++        // variables, so only an upper-bound check is needed.
++        mp_uint_t rising = args[ARG_rising].u_obj == MP_OBJ_NULL ? PCNT_CHANNEL_EDGE_ACTION_HOLD : mp_obj_get_int(args[ARG_rising].u_obj);
++        mp_uint_t falling = args[ARG_falling].u_obj == MP_OBJ_NULL ? PCNT_CHANNEL_EDGE_ACTION_HOLD : mp_obj_get_int(args[ARG_falling].u_obj);
++        mp_uint_t mode_low = args[ARG_mode_low].u_obj == MP_OBJ_NULL ? PCNT_CHANNEL_LEVEL_ACTION_KEEP : mp_obj_get_int(args[ARG_mode_low].u_obj);
++        mp_uint_t mode_high = args[ARG_mode_high].u_obj == MP_OBJ_NULL ? PCNT_CHANNEL_LEVEL_ACTION_KEEP : mp_obj_get_int(args[ARG_mode_high].u_obj);
++        if (rising > PCNT_CHANNEL_EDGE_ACTION_DECREASE) {
+             mp_raise_ValueError(MP_ERROR_TEXT("rising"));
+         }
+-        if (falling >= PCNT_COUNT_MAX) {
++        if (falling > PCNT_CHANNEL_EDGE_ACTION_DECREASE) {
+             mp_raise_ValueError(MP_ERROR_TEXT("falling"));
+         }
+-        if (mode_low >= PCNT_MODE_MAX) {
++        if (mode_low > PCNT_CHANNEL_LEVEL_ACTION_HOLD) {
+             mp_raise_ValueError(MP_ERROR_TEXT("mode_low"));
+         }
+-        if (mode_high >= PCNT_MODE_MAX) {
++        if (mode_high > PCNT_CHANNEL_LEVEL_ACTION_HOLD) {
+             mp_raise_ValueError(MP_ERROR_TEXT("mode_high"));
+         }
+-        pcnt_set_mode(self->unit, channel, rising, falling, mode_high, mode_low);
++        if (self->channels[channel] == NULL) {
++            mp_raise_ValueError(MP_ERROR_TEXT("channel not initialised"));
++        }
++        check_esp_err(pcnt_channel_set_edge_action(self->channels[channel],
++            (pcnt_channel_edge_action_t)rising, (pcnt_channel_edge_action_t)falling));
++        check_esp_err(pcnt_channel_set_level_action(self->channels[channel],
++            (pcnt_channel_level_action_t)mode_high, (pcnt_channel_level_action_t)mode_low));
++        esp32_pcnt_chan_state_t *cs = &self->chan_state[channel];
++        cs->pos_act = rising;
++        cs->neg_act = falling;
++        cs->high_act = mode_high;
++        cs->low_act = mode_low;
+     }
+ 
+     // The rest of the arguments apply to the whole unit.
+@@ -166,11 +411,15 @@ static void esp32_pcnt_init_helper(esp32_pcnt_obj_t *self, size_t n_pos_args, co
+         if (filter > 1023) {
+             mp_raise_ValueError(MP_ERROR_TEXT("filter"));
+         }
++        // The legacy API took the filter width in APB clock cycles (80MHz),
++        // the new API takes nanoseconds.
+         if (filter) {
+-            check_esp_err(pcnt_set_filter_value(self->unit, filter));
+-            check_esp_err(pcnt_filter_enable(self->unit));
++            pcnt_glitch_filter_config_t filter_config = {
++                .max_glitch_ns = filter * 25 / 2,
++            };
++            check_esp_err(pcnt_unit_set_glitch_filter(self->unit, &filter_config));
+         } else {
+-            check_esp_err(pcnt_filter_disable(self->unit));
++            check_esp_err(pcnt_unit_set_glitch_filter(self->unit, &(pcnt_glitch_filter_config_t) {0}));
+         }
+     }
+ 
+@@ -183,58 +432,67 @@ static void esp32_pcnt_init_helper(esp32_pcnt_obj_t *self, size_t n_pos_args, co
+         clear = true;
+     }
+ 
++    // minimum/maximum set the unit limits; changing them rebuilds the unit.
++    // Note: the new driver requires low_limit < 0 < high_limit, so unlike the
++    // legacy API a minimum of 0 is not accepted.
++    mp_int_t minimum = self->low_limit;
++    mp_int_t maximum = self->high_limit;
++    bool limits_changed = false;
+     if (args[ARG_min].u_obj != MP_OBJ_NULL) {
+-        mp_int_t minimum = mp_obj_get_int(args[ARG_min].u_obj);
+-        if (minimum < -32768 || minimum > 0) {
++        minimum = mp_obj_get_int(args[ARG_min].u_obj);
++        if (minimum < -32768 || minimum >= 0) {
+             mp_raise_ValueError(MP_ERROR_TEXT("minimum"));
+         }
+-        check_esp_err(pcnt_set_event_value(self->unit, PCNT_EVT_L_LIM, minimum));
+-        clear = true;
++        limits_changed = true;
+     }
+-
+     if (args[ARG_max].u_obj != MP_OBJ_NULL) {
+-        mp_int_t maximum = mp_obj_get_int(args[ARG_max].u_obj);
+-        if (maximum < 0 || maximum > 32767) {
++        maximum = mp_obj_get_int(args[ARG_max].u_obj);
++        if (maximum <= 0 || maximum > 32767) {
+             mp_raise_ValueError(MP_ERROR_TEXT("maximum"));
+         }
+-        check_esp_err(pcnt_set_event_value(self->unit, PCNT_EVT_H_LIM, maximum));
+-        clear = true;
++        limits_changed = true;
++    }
++    if (limits_changed) {
++        esp32_pcnt_apply_limits(self, minimum, maximum);
+     }
+ 
+     if (args[ARG_threshold0].u_obj != MP_OBJ_NULL) {
+         mp_int_t threshold0 = mp_obj_get_int(args[ARG_threshold0].u_obj);
+-        if (threshold0 < -32768 || threshold0 > 32767) {
++        if (threshold0 < self->low_limit || threshold0 > self->high_limit) {
+             mp_raise_ValueError(MP_ERROR_TEXT("threshold0"));
+         }
+-        check_esp_err(pcnt_set_event_value(self->unit, PCNT_EVT_THRES_0, threshold0));
++        self->threshold[0] = threshold0;
+         clear = true;
+     }
+ 
+     if (args[ARG_threshold1].u_obj != MP_OBJ_NULL) {
+         mp_int_t threshold1 = mp_obj_get_int(args[ARG_threshold1].u_obj);
+-        if (threshold1 < -32768 || threshold1 > 32767) {
++        if (threshold1 < self->low_limit || threshold1 > self->high_limit) {
+             mp_raise_ValueError(MP_ERROR_TEXT("threshold1"));
+         }
+-        check_esp_err(pcnt_set_event_value(self->unit, PCNT_EVT_THRES_1, threshold1));
++        self->threshold[1] = threshold1;
+         clear = true;
+     }
+ 
++    // Re-arm the watch points if the trigger is active (threshold values or
++    // limits may have changed).
++    if (self->irq && self->irq->trigger) {
++        esp32_pcnt_set_watch_points(self, self->irq->trigger);
++    }
++
+     if (clear) {
+-        check_esp_err(pcnt_counter_clear(self->unit));
++        check_esp_err(pcnt_unit_clear_count(self->unit));
+     }
+ }
+ 
+-// Disable any events, and remove the ISR handler for this unit.
++// Disable any events, and remove the IRQ handler for this unit.
+ static void esp32_pcnt_disable_events_for_unit(esp32_pcnt_obj_t *self) {
+     if (!self->irq) {
+         return;
+     }
+ 
+-    // Disable all possible events and remove the ISR.
+-    for (pcnt_evt_type_t evt_type = PCNT_EVT_THRES_1; evt_type <= PCNT_EVT_ZERO; evt_type <<= 1) {
+-        check_esp_err(pcnt_event_disable(self->unit, evt_type));
+-    }
+-    check_esp_err(pcnt_isr_handler_remove(self->unit));
++    // Remove all watch points and the callback.
++    esp32_pcnt_set_watch_points(self, 0);
+ 
+     // Clear IRQ object state.
+     self->irq->base.handler = mp_const_none;
+@@ -246,15 +504,15 @@ static mp_obj_t esp32_pcnt_make_new(const mp_obj_type_t *type, size_t n_pos_args
+         mp_raise_TypeError(MP_ERROR_TEXT("id"));
+     }
+ 
+-    pcnt_unit_t unit = mp_obj_get_int(args[0]);
+-    if (unit < 0 || unit >= PCNT_UNIT_MAX) {
++    int id = mp_obj_get_int(args[0]);
++    if (id < 0 || id >= SOC_PCNT_UNITS_PER_GROUP) {
+         mp_raise_ValueError(MP_ERROR_TEXT("invalid id"));
+     }
+ 
+     // Try and find an existing instance for this unit.
+     esp32_pcnt_obj_t *self = MP_STATE_PORT(esp32_pcnt_obj_head);
+     while (self) {
+-        if (self->unit == unit) {
++        if (self->id == id) {
+             break;
+         }
+         self = self->next;
+@@ -264,38 +522,48 @@ static mp_obj_t esp32_pcnt_make_new(const mp_obj_type_t *type, size_t n_pos_args
+         // Unused unit, create a new esp32_pcnt_obj_t instance and put it at
+         // the head of the list.
+         self = mp_obj_malloc(esp32_pcnt_obj_t, &esp32_pcnt_type);
+-        self->unit = unit;
++        self->id = id;
++        self->unit = NULL;
++        self->channels[0] = NULL;
++        self->channels[1] = NULL;
++        for (int i = 0; i < 2; ++i) {
++            self->chan_state[i].edge_gpio = PCNT_PIN_NOT_USED;
++            self->chan_state[i].level_gpio = PCNT_PIN_NOT_USED;
++            self->chan_state[i].pos_act = -1;
++            self->chan_state[i].neg_act = -1;
++            self->chan_state[i].high_act = -1;
++            self->chan_state[i].low_act = -1;
++        }
++        self->low_limit = -32768;
++        self->high_limit = 32767;
++        self->threshold[0] = PCNT_THRESHOLD_UNSET;
++        self->threshold[1] = PCNT_THRESHOLD_UNSET;
++        self->enabled = false;
+         self->irq = NULL;
+         self->next = MP_STATE_PORT(esp32_pcnt_obj_head);
+         MP_STATE_PORT(esp32_pcnt_obj_head) = self;
+-
+-        // Ensure the unit is in a known (deactivated) state.
+-        esp32_pcnt_deinit(MP_OBJ_FROM_PTR(self));
+     }
+ 
++    // Ensure the unit is in a known (deactivated) state, then apply the
++    // requested configuration.
++    esp32_pcnt_deinit(MP_OBJ_FROM_PTR(self));
++    esp32_pcnt_ensure_unit(self);
++
+     mp_map_t kw_args;
+     mp_map_init_fixed_table(&kw_args, n_kw_args, args + n_pos_args);
+     esp32_pcnt_init_helper(self, 0, args + n_pos_args, &kw_args);
+ 
+-    // Ensure the global PCNT ISR service is installed.
+-    if (!pcnt_isr_service_installed) {
+-        check_esp_err(pcnt_isr_service_install(ESP_INTR_FLAG_IRAM));
+-        pcnt_isr_service_installed = true;
+-    }
+-
+-    // And enable for this unit.
+-    check_esp_err(pcnt_intr_enable(self->unit));
+-
+     return MP_OBJ_FROM_PTR(self);
+ }
+ 
+ static void esp32_pcnt_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
+     esp32_pcnt_obj_t *self = MP_OBJ_TO_PTR(self_in);
+-    mp_printf(print, "PCNT(%u)", self->unit);
++    mp_printf(print, "PCNT(%u)", self->id);
+ }
+ 
+ static mp_obj_t esp32_pcnt_init(size_t n_pos_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+     esp32_pcnt_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
++    esp32_pcnt_ensure_unit(self);
+     esp32_pcnt_init_helper(self, n_pos_args - 1, pos_args + 1, kw_args);
+     return mp_const_none;
+ }
+@@ -307,29 +575,8 @@ static mp_obj_t esp32_pcnt_deinit(mp_obj_t self_in) {
+     // Remove IRQ and events.
+     esp32_pcnt_disable_events_for_unit(self);
+ 
+-    // Deactivate both channels.
+-    pcnt_config_t channel_config = {
+-        .unit = self->unit,
+-        .pulse_gpio_num = PCNT_PIN_NOT_USED,
+-        .pos_mode = PCNT_COUNT_DIS,
+-        .neg_mode = PCNT_COUNT_DIS,
+-        .ctrl_gpio_num = PCNT_PIN_NOT_USED,
+-        .lctrl_mode = PCNT_MODE_KEEP,
+-        .hctrl_mode = PCNT_MODE_KEEP,
+-        .counter_l_lim = 0,
+-        .counter_h_lim = 0,
+-    };
+-    for (pcnt_channel_t channel = 0; channel <= 1; ++channel) {
+-        channel_config.channel = channel;
+-        check_esp_err(pcnt_unit_config(&channel_config));
+-    }
+-
+-    // Disable filters & thresholds, pause & clear.
+-    check_esp_err(pcnt_filter_disable(self->unit));
+-    check_esp_err(pcnt_set_event_value(self->unit, PCNT_EVT_THRES_0, 0));
+-    check_esp_err(pcnt_set_event_value(self->unit, PCNT_EVT_THRES_1, 0));
+-    check_esp_err(pcnt_counter_pause(self->unit));
+-    check_esp_err(pcnt_counter_clear(self->unit));
++    // Tear down the unit and channels, pause & clear.
++    esp32_pcnt_teardown_unit(self);
+ 
+     return mp_const_none;
+ }
+@@ -349,9 +596,9 @@ static mp_obj_t esp32_pcnt_value(size_t n_args, const mp_obj_t *pos_args) {
+     // This loop ensures that the caller's state (as inferred from IRQs, e.g.
+     // under/overflow) corresponds to the returned value, by synchronously
+     // flushing all pending IRQs.
+-    int16_t value;
++    int count = 0;
+     while (true) {
+-        check_esp_err(pcnt_get_counter_value(self->unit, &value));
++        check_esp_err(pcnt_unit_get_count(self->unit, &count));
+         if (self->irq && self->irq->flags && self->irq->base.handler != mp_const_none) {
+             // The handler must call irq.flags() to clear self->irq->base.flags,
+             // otherwise this will be an infinite loop.
+@@ -364,23 +611,17 @@ static mp_obj_t esp32_pcnt_value(size_t n_args, const mp_obj_t *pos_args) {
+     if (n_args == 2) {
+         // Value was given, and we've already checked it was zero, so clear
+         // the counter.
+-        check_esp_err(pcnt_counter_clear(self->unit));
++        check_esp_err(pcnt_unit_clear_count(self->unit));
+     }
+ 
+-    return MP_OBJ_NEW_SMALL_INT(value);
++    return MP_OBJ_NEW_SMALL_INT(count);
+ }
+ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(esp32_pcnt_value_obj, 1, 2, esp32_pcnt_value);
+ 
+ static mp_uint_t esp32_pcnt_irq_trigger(mp_obj_t self_in, mp_uint_t new_trigger) {
+     esp32_pcnt_obj_t *self = MP_OBJ_TO_PTR(self_in);
+     self->irq->trigger = new_trigger;
+-    for (pcnt_evt_type_t evt_type = PCNT_EVT_THRES_1; evt_type <= PCNT_EVT_ZERO; evt_type <<= 1) {
+-        if (new_trigger & evt_type) {
+-            pcnt_event_enable(self->unit, evt_type);
+-        } else {
+-            pcnt_event_disable(self->unit, evt_type);
+-        }
+-    }
++    esp32_pcnt_set_watch_points(self, new_trigger);
+     return 0;
+ }
+ 
+@@ -404,17 +645,6 @@ static const mp_irq_methods_t esp32_pcnt_irq_methods = {
+     .info = esp32_pcnt_irq_info,
+ };
+ 
+-static IRAM_ATTR void esp32_pcnt_intr_handler(void *arg) {
+-    esp32_pcnt_obj_t *self = (esp32_pcnt_obj_t *)arg;
+-    pcnt_unit_t unit = self->unit;
+-    uint32_t status;
+-    pcnt_get_event_status(unit, &status);
+-    mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
+-    self->irq->flags |= status;
+-    MICROPY_END_ATOMIC_SECTION(atomic_state);
+-    mp_irq_handler(&self->irq->base);
+-}
+-
+ static mp_obj_t esp32_pcnt_irq(size_t n_pos_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+     enum { ARG_handler, ARG_trigger };
+     static const mp_arg_t allowed_args[] = {
+@@ -426,6 +656,9 @@ static mp_obj_t esp32_pcnt_irq(size_t n_pos_args, const mp_obj_t *pos_args, mp_m
+     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+     mp_arg_parse_all(n_pos_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+ 
++    // Re-create the hardware unit if it was torn down by a previous deinit.
++    esp32_pcnt_ensure_unit(self);
++
+     if (!self->irq) {
+         // Create IRQ object if necessary. This instance persists across a
+         // de-init.
+@@ -443,17 +676,16 @@ static mp_obj_t esp32_pcnt_irq(size_t n_pos_args, const mp_obj_t *pos_args, mp_m
+         mp_obj_t handler = args[ARG_handler].u_obj;
+         mp_uint_t trigger = args[ARG_trigger].u_int;
+ 
+-        if (trigger < PCNT_EVT_THRES_1 || trigger >= (PCNT_EVT_ZERO << 1)) {
++        if (trigger < PCNT_EVT_ZERO || trigger >= (PCNT_EVT_H_LIM << 1)) {
+             mp_raise_ValueError(MP_ERROR_TEXT("trigger"));
+         }
+ 
+         if (handler != mp_const_none) {
+             self->irq->base.handler = handler;
+             self->irq->trigger = trigger;
+-            pcnt_isr_handler_add(self->unit, esp32_pcnt_intr_handler, (void *)self);
+             esp32_pcnt_irq_trigger(MP_OBJ_FROM_PTR(self), trigger);
+         } else {
+-            // Remove the ISR, disable all events, clear the IRQ object state.
++            // Remove the handler, disable all events, clear the IRQ object state.
+             esp32_pcnt_disable_events_for_unit(self);
+         }
+     }
+@@ -464,14 +696,18 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(esp32_pcnt_irq_obj, 1, esp32_pcnt_irq);
+ 
+ static mp_obj_t esp32_pcnt_start(mp_obj_t self_in) {
+     esp32_pcnt_obj_t *self = MP_OBJ_TO_PTR(self_in);
+-    check_esp_err(pcnt_counter_resume(self->unit));
++    if (!self->enabled) {
++        check_esp_err(pcnt_unit_enable(self->unit));
++        self->enabled = true;
++    }
++    check_esp_err(pcnt_unit_start(self->unit));
+     return mp_const_none;
+ }
+ static MP_DEFINE_CONST_FUN_OBJ_1(esp32_pcnt_start_obj, esp32_pcnt_start);
+ 
+ static mp_obj_t esp32_pcnt_stop(mp_obj_t self_in) {
+     esp32_pcnt_obj_t *self = MP_OBJ_TO_PTR(self_in);
+-    check_esp_err(pcnt_counter_pause(self->unit));
++    check_esp_err(pcnt_unit_stop(self->unit));
+     return mp_const_none;
+ }
+ static MP_DEFINE_CONST_FUN_OBJ_1(esp32_pcnt_stop_obj, esp32_pcnt_stop);
+@@ -486,13 +722,14 @@ static const mp_rom_map_elem_t esp32_pcnt_locals_dict_table[] = {
+     { MP_ROM_QSTR(MP_QSTR_deinit),          MP_ROM_PTR(&esp32_pcnt_deinit_obj) },
+     { MP_ROM_QSTR(MP_QSTR___del__),         MP_ROM_PTR(&esp32_pcnt_deinit_obj) },
+ 
+-    // Constants
+-    { MP_ROM_QSTR(MP_QSTR_IGNORE),          MP_ROM_INT(PCNT_COUNT_DIS) },
+-    { MP_ROM_QSTR(MP_QSTR_INCREMENT),       MP_ROM_INT(PCNT_COUNT_INC) },
+-    { MP_ROM_QSTR(MP_QSTR_DECREMENT),       MP_ROM_INT(PCNT_COUNT_DEC) },
+-    { MP_ROM_QSTR(MP_QSTR_NORMAL),          MP_ROM_INT(PCNT_MODE_KEEP) },
+-    { MP_ROM_QSTR(MP_QSTR_REVERSE),         MP_ROM_INT(PCNT_MODE_REVERSE) },
+-    { MP_ROM_QSTR(MP_QSTR_HOLD),            MP_ROM_INT(PCNT_MODE_DISABLE) },
++    // Constants (numeric values match the legacy API, and are identical in
++    // the new pcnt_channel_*_action_t enums).
++    { MP_ROM_QSTR(MP_QSTR_IGNORE),          MP_ROM_INT(PCNT_CHANNEL_EDGE_ACTION_HOLD) },
++    { MP_ROM_QSTR(MP_QSTR_INCREMENT),       MP_ROM_INT(PCNT_CHANNEL_EDGE_ACTION_INCREASE) },
++    { MP_ROM_QSTR(MP_QSTR_DECREMENT),       MP_ROM_INT(PCNT_CHANNEL_EDGE_ACTION_DECREASE) },
++    { MP_ROM_QSTR(MP_QSTR_NORMAL),          MP_ROM_INT(PCNT_CHANNEL_LEVEL_ACTION_KEEP) },
++    { MP_ROM_QSTR(MP_QSTR_REVERSE),         MP_ROM_INT(PCNT_CHANNEL_LEVEL_ACTION_INVERSE) },
++    { MP_ROM_QSTR(MP_QSTR_HOLD),            MP_ROM_INT(PCNT_CHANNEL_LEVEL_ACTION_HOLD) },
+     { MP_ROM_QSTR(MP_QSTR_IRQ_ZERO),        MP_ROM_INT(PCNT_EVT_ZERO) },
+     { MP_ROM_QSTR(MP_QSTR_IRQ_THRESHOLD0),  MP_ROM_INT(PCNT_EVT_THRES_0) },
+     { MP_ROM_QSTR(MP_QSTR_IRQ_THRESHOLD1),  MP_ROM_INT(PCNT_EVT_THRES_1) },
+diff --git a/ports/esp32/machine_i2s.c b/ports/esp32/machine_i2s.c
+index 80903e488..2c02c0b8e 100644
+--- a/ports/esp32/machine_i2s.c
++++ b/ports/esp32/machine_i2s.c
+@@ -52,6 +52,14 @@
+ // The size of 240 bytes is an engineering optimum that balances transfer performance with an acceptable use of heap space
+ #define SIZEOF_TRANSFORM_BUFFER_IN_BYTES (240)
+ 
++// SOC_I2S_NUM was removed from soc_caps.h in IDF v6 (and I2S_NUM_AUTO is now
++// -1, so it can no longer be used as a loop/validity bound). Fall back to the
++// I2S controller count from the I2S LL driver.
++#ifndef SOC_I2S_NUM
++#include "hal/i2s_periph.h"
++#define SOC_I2S_NUM I2S_LL_GET(INST_NUM)
++#endif
++
+ typedef enum {
+     I2S_TX_TRANSFER,
+     I2S_RX_TRANSFER,
+@@ -72,7 +80,7 @@ typedef enum {
+ 
+ typedef struct _machine_i2s_obj_t {
+     mp_obj_base_t base;
+-    i2s_port_t i2s_id;
++    int i2s_id;
+     i2s_chan_handle_t i2s_chan_handle;
+     mp_hal_pin_obj_t sck;
+     mp_hal_pin_obj_t ws;
+@@ -110,7 +118,7 @@ static const int8_t i2s_frame_map[NUM_I2S_USER_FORMATS][I2S_RX_FRAME_SIZE_IN_BYT
+ };
+ 
+ void machine_i2s_init0() {
+-    for (i2s_port_t p = 0; p < I2S_NUM_AUTO; p++) {
++    for (int p = 0; p < SOC_I2S_NUM; p++) {
+         MP_STATE_PORT(machine_i2s_obj)[p] = NULL;
+     }
+ }
+@@ -488,7 +496,7 @@ static void mp_machine_i2s_init_helper(machine_i2s_obj_t *self, mp_arg_val_t *ar
+ }
+ 
+ static machine_i2s_obj_t *mp_machine_i2s_make_new_instance(mp_int_t i2s_id) {
+-    if (i2s_id < 0 || i2s_id >= I2S_NUM_AUTO) {
++    if (i2s_id < 0 || i2s_id >= SOC_I2S_NUM) {
+         mp_raise_ValueError(MP_ERROR_TEXT("invalid id"));
+     }
+ 
+diff --git a/ports/esp32/machine_pwm.c b/ports/esp32/machine_pwm.c
+index 7cb84640e..ecd8ebf2d 100644
+--- a/ports/esp32/machine_pwm.c
++++ b/ports/esp32/machine_pwm.c
+@@ -35,7 +35,12 @@
+ #include "py/mphal.h"
+ #include "esp_err.h"
+ #include "driver/ledc.h"
++#include "esp_idf_version.h"
++#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
++#include "hal/ledc_periph.h"
++#else
+ #include "soc/ledc_periph.h"
++#endif
+ #include "soc/gpio_sig_map.h"
+ #include "esp_clk_tree.h"
+ #include "py/mpprint.h"
+@@ -224,7 +229,15 @@ static void reconfigure_pin(machine_pwm_obj_t *self) {
+     // This allows to read the pin level.
+     gpio_set_direction(self->pin, GPIO_MODE_INPUT_OUTPUT);
+     #endif
+-    esp_rom_gpio_connect_out_signal(self->pin, ledc_periph_signal[self->mode].sig_out0_idx + self->channel, self->output_invert, 0);
++    #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 1, 0)
++    // IDF v6.1 restructured ledc_periph_signal: the per-channel signal index
++    // is now looked up through speed_mode[] and sig_out_idx[]. (6.0 keeps the
++    // old sig_out0_idx form.)
++    int ledc_sig_out = ledc_periph_signal[0].speed_mode[self->mode].sig_out_idx[self->channel];
++    #else
++    int ledc_sig_out = ledc_periph_signal[self->mode].sig_out0_idx + self->channel;
++    #endif
++    esp_rom_gpio_connect_out_signal(self->pin, ledc_sig_out, self->output_invert, 0);
+ }
+ 
+ static void apply_duty(machine_pwm_obj_t *self) {
+diff --git a/ports/esp32/machine_rtc.c b/ports/esp32/machine_rtc.c
+index f78086cf0..744a40ab8 100644
+--- a/ports/esp32/machine_rtc.c
++++ b/ports/esp32/machine_rtc.c
+@@ -58,10 +58,14 @@ typedef struct _machine_rtc_obj_t {
+ */
+ // A board can enable MICROPY_HW_RTC_MEM_INIT_ALWAYS to always clear out RTC memory on boot.
+ // Defaults to RTC_NOINIT_ATTR so the user memory survives WDT resets and the like.
++// Chips without RTC slow memory (eg ESP32-C2) static-assert on RTC_NOINIT_ATTR from
++// IDF v6, so fall back to DRAM there (user memory then does not survive resets).
+ #if MICROPY_HW_RTC_MEM_INIT_ALWAYS
+ #define _USER_MEM_ATTR RTC_DATA_ATTR
+-#else
++#elif SOC_RTC_MEM_SUPPORTED
+ #define _USER_MEM_ATTR RTC_NOINIT_ATTR
++#else
++#define _USER_MEM_ATTR DRAM_ATTR
+ #endif
+ 
+ // Optionally compile user memory functionality if the size of memory is greater than 0
+diff --git a/ports/esp32/machine_sdcard.c b/ports/esp32/machine_sdcard.c
+index 5cb2f0a0a..3694be731 100644
+--- a/ports/esp32/machine_sdcard.c
++++ b/ports/esp32/machine_sdcard.c
+@@ -156,12 +156,8 @@ static const sdspi_device_config_t spi_dev_defaults[NUM_SD_SPI_BUS] = {
+     #if NUM_SD_SPI_BUS > 1
+     {
+         // Primary SPI SD bus (slot 2): CS is board-configurable via
+-        // machine_sdcard.h; host_id stays chip-specific.
+-        #if CONFIG_IDF_TARGET_ESP32
+-        .host_id = VSPI_HOST,
+-        #else
++        // machine_sdcard.h.
+         .host_id = SPI3_HOST,
+-        #endif
+         .gpio_cs = MICROPY_HW_SDCARD_SPI_CS,
+         .gpio_cd = SDSPI_SLOT_NO_CD,
+         .gpio_wp = SDSPI_SLOT_NO_WP,
+diff --git a/ports/esp32/machine_timer.c b/ports/esp32/machine_timer.c
+index a6ff4b961..289329e3a 100644
+--- a/ports/esp32/machine_timer.c
++++ b/ports/esp32/machine_timer.c
+@@ -42,6 +42,14 @@
+ #error "machine.Timer requires MICROPY_ENABLE_FINALISER."
+ #endif
+ 
++// SOC_TIMER_GROUP_TOTAL_TIMERS was removed from soc_caps.h in IDF v6. Fall
++// back to the number of timer groups times the GPTimers per group, from the
++// timer LL driver.
++#ifndef SOC_TIMER_GROUP_TOTAL_TIMERS
++#include "hal/timer_periph.h"
++#define SOC_TIMER_GROUP_TOTAL_TIMERS (TIMG_LL_GET(INST_NUM) * TIMG_LL_GET(GPTIMERS_PER_INST))
++#endif
++
+ #define TIMER_CLK_SRC GPTIMER_CLK_SRC_DEFAULT
+ #define TIMER_DIVIDER  8
+ 
+diff --git a/ports/esp32/machine_touchpad.c b/ports/esp32/machine_touchpad.c
+index 61a3bcf83..6a442d110 100644
+--- a/ports/esp32/machine_touchpad.c
++++ b/ports/esp32/machine_touchpad.c
+@@ -37,7 +37,12 @@
+ #include "driver/touch_sensor.h"
+ #elif SOC_TOUCH_SENSOR_VERSION == 3 // At present, it can only be used on ESP32P4.
+ #include "driver/touch_sens.h"
++#include "esp_idf_version.h"
++#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
++#include "hal/touch_sensor_channel.h"
++#else
+ #include "soc/touch_sensor_channel.h"
++#endif
+ #else
+ #error "Unknown touch hardware version"
+ #endif
+diff --git a/ports/esp32/main.c b/ports/esp32/main.c
+index 050832ba4..68bcf2b9a 100644
+--- a/ports/esp32/main.c
++++ b/ports/esp32/main.c
+@@ -63,7 +63,9 @@
+ #include "usb_serial_jtag.h"
+ #include "modesp32.h"
+ #include "modmachine.h"
++#if MICROPY_PY_NETWORK
+ #include "modnetwork.h"
++#endif
+ #if MICROPY_PY_NETWORK_WLAN_CSI
+ #include "network_wlan_csi.h"
+ #endif
+@@ -279,9 +281,11 @@ void boardctrl_startup(void) {
+         nvs_flash_init();
+     }
+ 
+-    // Query the physical size of the SPI flash and store it in the size
+-    // variable of the global, default SPI flash handle.
+-    esp_flash_get_physical_size(NULL, &esp_flash_default_chip->size);
++    // Query the physical size of the SPI flash. esp_flash_t became opaque in
++    // IDF v6, so keep the size in a local rather than writing it into the
++    // (opaque) default chip handle.
++    uint32_t flash_size = 0;
++    esp_flash_get_physical_size(NULL, &flash_size);
+ 
+     // If there is no filesystem partition (no "vfs" or "ffat"), add a "vfs" partition
+     // that extends from the end of the application partition up to the end of flash.
+@@ -300,8 +304,8 @@ void boardctrl_startup(void) {
+ 
+         // If we found the application partition and there is some space between the end of
+         // that and the end of flash, create a "vfs" partition taking up all of that space.
+-        if (offset > 0 && esp_flash_default_chip->size > offset) {
+-            size_t size = esp_flash_default_chip->size - offset;
++        if (offset > 0 && flash_size > offset) {
++            size_t size = flash_size - offset;
+             esp_partition_register_external(esp_flash_default_chip, offset, size, "vfs", ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_FAT, NULL);
+         }
+     }
+diff --git a/ports/esp32/main/idf_component.yml b/ports/esp32/main/idf_component.yml
+index 62a729371..baa8e92d0 100644
+--- a/ports/esp32/main/idf_component.yml
++++ b/ports/esp32/main/idf_component.yml
+@@ -13,14 +13,17 @@ dependencies:
+     # CDC port, which is why this is the tag and not the registry's 0.21.0~2.
+     git: https://github.com/micropython/tinyusb-espressif.git
+     version: v0.21.0.1-micropython1
++  # esp_hosted / esp_wifi_remote: pinned to the versions that build against
++  # both IDF v5.x and v6.x (older 0.15.x / 2.7.x don't build against IDF v6,
++  # the wifi_remote sources for v6.1 are only in 1.6.0+).
+   espressif/esp_hosted:
++    version: "2.12.8"
+     rules:
+       - if: "target == esp32p4"
+-    version: "2.7.0"
+   espressif/esp_wifi_remote:
++    version: "1.6.0"
+     rules:
+       - if: "target == esp32p4"
+-    version: "0.15.2"
+   # cameraif: the MIPI-CSI sensor drivers. ESP-IDF ships the CSI *controller*
+   # (esp_driver_cam) but no sensor drivers; the OV5647 on the P4 panel's CSI
+   # port comes from here. P4 only -- no other supported target has a CSI
+@@ -44,5 +47,28 @@ dependencies:
+     version: "~1.0.0"
+     rules:
+       - if: "target == esp32"
++  # Ethernet PHY drivers that moved out of ESP-IDF core in v6.0. Every
++  # registry version of these requires idf >= 6.0, so gate on idf_version to
++  # keep the 5.x lockfiles resolving without them.
++  espressif/ip101:
++    version: "~1.0.0"
++    rules:
++      - if: "idf_version >= 6.0 && target in [esp32, esp32p4]"
++  espressif/lan87xx:
++    version: "~1.0.0"
++    rules:
++      - if: "idf_version >= 6.0 && target in [esp32, esp32p4]"
++  espressif/rtl8201:
++    version: "~1.0.0"
++    rules:
++      - if: "idf_version >= 6.0 && target in [esp32, esp32p4]"
++  espressif/dp83848:
++    version: "~1.0.0"
++    rules:
++      - if: "idf_version >= 6.0 && target in [esp32, esp32p4]"
++  espressif/ksz80xx:
++    version: "~1.0.0"
++    rules:
++      - if: "idf_version >= 6.0 && target in [esp32, esp32p4]"
+   idf:
+     version: ">=5.3.0"
+diff --git a/ports/esp32/modespnow.c b/ports/esp32/modespnow.c
+index 7d8794eb9..c24ded92f 100644
+--- a/ports/esp32/modespnow.c
++++ b/ports/esp32/modespnow.c
+@@ -130,6 +130,16 @@ typedef struct _esp_espnow_obj_t {
+     size_t peer_count;              // Cache the # of peers for send(sync=True)
+     mp_obj_t recv_cb;               // Callback when a packet is received
+     mp_obj_t recv_cb_arg;           // Argument passed to callback
++    #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
++    // ESP-NOW PHY rate for transmissions, set via ESPNow.config(rate=...).
++    // -1 means "not configured" and no per-peer rate is applied. On IDF 6+
++    // the rate can only be set per-peer (esp_now_set_peer_rate_config), so it
++    // is remembered here and applied to existing peers in config() and to
++    // each newly added peer in add_peer(). On IDF 5 the legacy global
++    // esp_wifi_config_espnow_rate() is used instead and this field does not
++    // exist.
++    mp_int_t default_rate;          // Default: -1 (unconfigured)
++    #endif
+     #if MICROPY_PY_ESPNOW_RSSI
+     mp_obj_t peers_table;           // A dictionary of discovered peers
+     #endif // MICROPY_PY_ESPNOW_RSSI
+@@ -177,6 +187,9 @@ static mp_obj_t espnow_make_new(const mp_obj_type_t *type, size_t n_args,
+     self->recv_timeout_ms = DEFAULT_RECV_TIMEOUT_MS;
+     self->recv_buffer = NULL;       // Buffer is allocated in espnow_init()
+     self->recv_cb = mp_const_none;
++    #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
++    self->default_rate = -1;
++    #endif
+     #if MICROPY_PY_ESPNOW_RSSI
+     self->peers_table = mp_obj_new_dict(0);
+     // Prevent user code modifying the dict
+@@ -282,6 +295,20 @@ static mp_obj_t espnow_config(size_t n_args, const mp_obj_t *pos_args, mp_map_t
+         self->recv_timeout_ms = args[ARG_timeout_ms].u_int;
+     }
+     if (args[ARG_rate].u_int >= 0) {
++        #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
++        // IDF 6 removed the global esp_wifi_config_espnow_rate(); the rate is
++        // now configured per-peer. Remember it and apply to existing peers.
++        self->default_rate = args[ARG_rate].u_int;
++        esp_now_peer_info_t peer = {0};
++        bool from_head = true;
++        while (esp_now_fetch_peer(from_head, &peer) == ESP_OK) {
++            from_head = false;
++            esp_now_rate_config_t rate_config = {
++                .rate = self->default_rate,
++            };
++            check_esp_err(esp_now_set_peer_rate_config(peer.peer_addr, &rate_config));
++        }
++        #else
+         wifi_mode_t mode = get_wifi_mode();
+         if (mode == WIFI_MODE_STA || mode == WIFI_MODE_APSTA) {
+             check_esp_err(esp_wifi_config_espnow_rate(ESP_IF_WIFI_STA, args[ARG_rate].u_int));
+@@ -289,6 +316,7 @@ static mp_obj_t espnow_config(size_t n_args, const mp_obj_t *pos_args, mp_map_t
+         if (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA) {
+             check_esp_err(esp_wifi_config_espnow_rate(ESP_IF_WIFI_AP, args[ARG_rate].u_int));
+         }
++        #endif
+     }
+     if (args[ARG_get].u_obj == MP_OBJ_NULL) {
+         return mp_const_none;
+@@ -696,6 +724,19 @@ static mp_obj_t espnow_add_peer(size_t n_args, const mp_obj_t *args, mp_map_t *k
+     _update_peer_info(&peer, n_args - 2, args + 2, kw_args);
+ 
+     check_esp_err(esp_now_add_peer(&peer));
++
++    #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
++    // Apply the configured default rate (if any) to the new peer, mirroring
++    // the IDF 5 global-rate behaviour.
++    esp_espnow_obj_t *self = _get_singleton_initialised();
++    if (self->default_rate >= 0) {
++        esp_now_rate_config_t rate_config = {
++            .rate = self->default_rate,
++        };
++        check_esp_err(esp_now_set_peer_rate_config(peer.peer_addr, &rate_config));
++    }
++    #endif
++
+     _update_peer_count();
+ 
+     return mp_const_none;
+diff --git a/ports/esp32/modmachine.c b/ports/esp32/modmachine.c
+index 4da59a11f..e93431aed 100644
+--- a/ports/esp32/modmachine.c
++++ b/ports/esp32/modmachine.c
+@@ -34,12 +34,20 @@
+ #include "freertos/task.h"
+ #include "esp_mac.h"
+ #include "esp_sleep.h"
++#include "esp_idf_version.h"
+ #include "esp_pm.h"
+ 
+ #include "py/objtuple.h"
+ #include "modmachine.h"
+ #include "machine_rtc.h"
+ 
++// IDF v6 renamed esp_deep_sleep_enable_gpio_wakeup() (same args).
++#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
++#define GPIO_WAKEUP_FUNC esp_sleep_enable_gpio_wakeup_on_hp_periph_powerdown
++#else
++#define GPIO_WAKEUP_FUNC esp_deep_sleep_enable_gpio_wakeup
++#endif
++
+ #if SOC_TOUCH_SENSOR_SUPPORTED
+ #define MICROPY_PY_MACHINE_TOUCH_PAD_ENTRY { MP_ROM_QSTR(MP_QSTR_TouchPad), MP_ROM_PTR(&machine_touchpad_type) },
+ #else
+@@ -200,7 +208,7 @@ static void machine_sleep_helper(wake_type_t wake_type, size_t n_args, const mp_
+ 
+         if (MACHINE_WAKE_DEEPSLEEP == wake_type) {
+             #if SOC_GPIO_SUPPORT_DEEPSLEEP_WAKEUP
+-            if (ESP_OK != esp_deep_sleep_enable_gpio_wakeup(
++            if (ESP_OK != GPIO_WAKEUP_FUNC(
+                 machine_rtc_config.gpio_pins,
+                 machine_rtc_config.gpio_level ? ESP_GPIO_WAKEUP_GPIO_HIGH : ESP_GPIO_WAKEUP_GPIO_LOW)) {
+                 mp_raise_ValueError(MP_ERROR_TEXT("wake-up pin not supported"));
+diff --git a/ports/esp32/modnetwork.h b/ports/esp32/modnetwork.h
+index bebb02c05..0392f6c89 100644
+--- a/ports/esp32/modnetwork.h
++++ b/ports/esp32/modnetwork.h
+@@ -26,9 +26,21 @@
+ #ifndef MICROPY_INCLUDED_ESP32_MODNETWORK_H
+ #define MICROPY_INCLUDED_ESP32_MODNETWORK_H
+ 
++#include "esp_idf_version.h"
+ #include "esp_wifi_types.h"
+ #include "esp_netif.h"
+ 
++// esp_interface_t and the ESP_IF_* constants were removed from esp_wifi in
++// IDF v6. Recreate them from the wifi_interface_t values (which is what the
++// enum aliased to). ESP_IF_ETH just needs a value distinct from the WIFI_IF_*
++// ones, and WIFI_IF_MAX is conveniently outside that range.
++#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
++typedef int esp_interface_t;
++#define ESP_IF_WIFI_STA ((esp_interface_t)WIFI_IF_STA)
++#define ESP_IF_WIFI_AP  ((esp_interface_t)WIFI_IF_AP)
++#define ESP_IF_ETH      ((esp_interface_t)WIFI_IF_MAX)
++#endif
++
+ // lan867x component requires Original ESP32
+ #if CONFIG_IDF_TARGET_ESP32
+ #define PHY_LAN867X_ENABLED (1)
+@@ -36,6 +48,24 @@
+ #define PHY_LAN867X_ENABLED (0)
+ #endif
+ 
++// Drivers for the other internal-MAC PHYs (LAN87xx, IP101, RTL8201, DP83848,
++// KSZ80xx) are declared centrally in esp_eth_phy.h on IDF v5, and moved to
++// the component registry on IDF v6 (see main/idf_component.yml, which pulls
++// them in for exactly these two EMAC-capable targets).
++#if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32P4
++#define PHY_LAN87XX_ENABLED (1)
++#define PHY_IP101_ENABLED (1)
++#define PHY_RTL8201_ENABLED (1)
++#define PHY_DP83848_ENABLED (1)
++#define PHY_KSZ80XX_ENABLED (1)
++#else
++#define PHY_LAN87XX_ENABLED (0)
++#define PHY_IP101_ENABLED (0)
++#define PHY_RTL8201_ENABLED (0)
++#define PHY_DP83848_ENABLED (0)
++#define PHY_KSZ80XX_ENABLED (0)
++#endif
++
+ // PHY_GENERIC support requires newer IDF version
+ #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 0)
+ #define PHY_GENERIC_ENABLED (1)
+diff --git a/ports/esp32/modnetwork_globals.h b/ports/esp32/modnetwork_globals.h
+index 77eb95ba3..1da2b0040 100644
+--- a/ports/esp32/modnetwork_globals.h
++++ b/ports/esp32/modnetwork_globals.h
+@@ -34,8 +34,14 @@
+ { MP_ROM_QSTR(MP_QSTR_AUTH_WAPI_PSK), MP_ROM_INT(WIFI_AUTH_WAPI_PSK) },
+ { MP_ROM_QSTR(MP_QSTR_AUTH_OWE), MP_ROM_INT(WIFI_AUTH_OWE) },
+ { MP_ROM_QSTR(MP_QSTR_AUTH_WPA3_ENT_192), MP_ROM_INT(WIFI_AUTH_WPA3_ENT_192) },
++// WIFI_AUTH_WPA3_EXT_PSK(_MIXED_MODE) were removed in IDF v6 (replaced by
++// placeholder enum values).
++#ifdef WIFI_AUTH_WPA3_EXT_PSK
+ { MP_ROM_QSTR(MP_QSTR_AUTH_WPA3_EXT_PSK), MP_ROM_INT(WIFI_AUTH_WPA3_EXT_PSK) },
++#endif
++#ifdef WIFI_AUTH_WPA3_EXT_PSK_MIXED_MODE
+ { MP_ROM_QSTR(MP_QSTR_AUTH_WPA3_EXT_PSK_MIXED_MODE), MP_ROM_INT(WIFI_AUTH_WPA3_EXT_PSK_MIXED_MODE) },
++#endif
+ { MP_ROM_QSTR(MP_QSTR_AUTH_MAX), MP_ROM_INT(WIFI_AUTH_MAX) },
+ #endif
+ 
+diff --git a/ports/esp32/network_lan.c b/ports/esp32/network_lan.c
+index 336802cb9..c4fa1e19e 100644
+--- a/ports/esp32/network_lan.c
++++ b/ports/esp32/network_lan.c
+@@ -34,6 +34,7 @@
+ 
+ #include "esp_eth.h"
+ #include "esp_eth_mac.h"
++#include "esp_idf_version.h"
+ #include "esp_mac.h"
+ #include "esp_event.h"
+ #include "esp_log.h"
+@@ -61,6 +62,27 @@ static bool mdns_initialised = false;
+ #include "esp_eth_phy_lan867x.h"
+ #endif
+ 
++#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
++// IDF v6 moved the internal-MAC PHY drivers out of esp_eth into component
++// registry packages (see main/idf_component.yml). On v5 these headers do not
++// exist separately -- esp_eth_phy.h (via esp_eth.h above) declares them all.
++#if PHY_LAN87XX_ENABLED
++#include "esp_eth_phy_lan87xx.h"
++#endif
++#if PHY_IP101_ENABLED
++#include "esp_eth_phy_ip101.h"
++#endif
++#if PHY_RTL8201_ENABLED
++#include "esp_eth_phy_rtl8201.h"
++#endif
++#if PHY_DP83848_ENABLED
++#include "esp_eth_phy_dp83848.h"
++#endif
++#if PHY_KSZ80XX_ENABLED
++#include "esp_eth_phy_ksz80xx.h"
++#endif
++#endif
++
+ typedef struct _lan_if_obj_t {
+     base_if_obj_t base;
+     bool initialized;
+@@ -291,23 +313,33 @@ static mp_obj_t get_lan(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_ar
+ 
+     switch (args[ARG_phy_type].u_int) {
+         #if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32P4
++        #if PHY_LAN87XX_ENABLED
+         case PHY_LAN8710:
+         case PHY_LAN8720:
+             self->phy = esp_eth_phy_new_lan87xx(&phy_config);
+             break;
++        #endif
++        #if PHY_IP101_ENABLED
+         case PHY_IP101:
+             self->phy = esp_eth_phy_new_ip101(&phy_config);
+             break;
++        #endif
++        #if PHY_RTL8201_ENABLED
+         case PHY_RTL8201:
+             self->phy = esp_eth_phy_new_rtl8201(&phy_config);
+             break;
++        #endif
++        #if PHY_DP83848_ENABLED
+         case PHY_DP83848:
+             self->phy = esp_eth_phy_new_dp83848(&phy_config);
+             break;
++        #endif
++        #if PHY_KSZ80XX_ENABLED
+         case PHY_KSZ8041:
+         case PHY_KSZ8081:
+             self->phy = esp_eth_phy_new_ksz80xx(&phy_config);
+             break;
++        #endif
+         #if PHY_LAN867X_ENABLED
+         case PHY_LAN8670:
+             self->phy = esp_eth_phy_new_lan867x(&phy_config);
+@@ -365,8 +397,13 @@ static mp_obj_t get_lan(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_ar
+         if (self->mdc_pin == -1 || self->mdio_pin == -1) {
+             mp_raise_ValueError(MP_ERROR_TEXT("mdc and mdio must be specified"));
+         }
++        #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
++        esp32_config.smi_gpio.mdc_num = self->mdc_pin;
++        esp32_config.smi_gpio.mdio_num = self->mdio_pin;
++        #else
+         esp32_config.smi_mdc_gpio_num = self->mdc_pin;
+         esp32_config.smi_mdio_gpio_num = self->mdio_pin;
++        #endif
+ 
+         #if CONFIG_IDF_TARGET_ESP32P4
+         if (self->crs_dv_pin != -1) {
+@@ -392,12 +429,12 @@ static mp_obj_t get_lan(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_ar
+                 mp_raise_ValueError(MP_ERROR_TEXT("clk_in must be specified if clk_out is specified"));
+             }
+             esp32_config.clock_config.rmii.clock_mode = EMAC_CLK_OUT;
+-            esp32_config.clock_config.rmii.clock_gpio = (emac_rmii_clock_gpio_t)self->clk_out_pin;
++            esp32_config.clock_config.rmii.clock_gpio = self->clk_out_pin;
+             esp32_config.clock_config_out_in.rmii.clock_mode = EMAC_CLK_EXT_IN;
+-            esp32_config.clock_config_out_in.rmii.clock_gpio = (emac_rmii_clock_gpio_t)self->clk_in_pin;
++            esp32_config.clock_config_out_in.rmii.clock_gpio = self->clk_in_pin;
+         } else if (self->clk_in_pin != -1) {
+             esp32_config.clock_config.rmii.clock_mode = EMAC_CLK_EXT_IN;
+-            esp32_config.clock_config.rmii.clock_gpio = (emac_rmii_clock_gpio_t)self->clk_in_pin;
++            esp32_config.clock_config.rmii.clock_gpio = self->clk_in_pin;
+         }
+         #endif
+ 
+diff --git a/ports/esp32/network_wlan.c b/ports/esp32/network_wlan.c
+index ace331de2..62f110dc1 100644
+--- a/ports/esp32/network_wlan.c
++++ b/ports/esp32/network_wlan.c
+@@ -811,8 +811,14 @@ static const mp_rom_map_elem_t wlan_if_locals_dict_table[] = {
+     { MP_ROM_QSTR(MP_QSTR_SEC_WAPI), MP_ROM_INT(WIFI_AUTH_WAPI_PSK) },
+     { MP_ROM_QSTR(MP_QSTR_SEC_OWE), MP_ROM_INT(WIFI_AUTH_OWE) },
+     { MP_ROM_QSTR(MP_QSTR_SEC_WPA3_ENT_192), MP_ROM_INT(WIFI_AUTH_WPA3_ENT_192) },
++    // WIFI_AUTH_WPA3_EXT_PSK(_MIXED_MODE) were removed in IDF v6 (replaced by
++    // placeholder enum values).
++    #ifdef WIFI_AUTH_WPA3_EXT_PSK
+     { MP_ROM_QSTR(MP_QSTR_SEC_WPA3_EXT_PSK), MP_ROM_INT(WIFI_AUTH_WPA3_EXT_PSK) },
++    #endif
++    #ifdef WIFI_AUTH_WPA3_EXT_PSK_MIXED_MODE
+     { MP_ROM_QSTR(MP_QSTR_SEC_WPA3_EXT_PSK_MIXED_MODE), MP_ROM_INT(WIFI_AUTH_WPA3_EXT_PSK_MIXED_MODE) },
++    #endif
+     { MP_ROM_QSTR(MP_QSTR_SEC_DPP), MP_ROM_INT(WIFI_AUTH_DPP) },
+     #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 0)
+     { MP_ROM_QSTR(MP_QSTR_SEC_WPA3_ENT), MP_ROM_INT(WIFI_AUTH_WPA3_ENTERPRISE) },
+@@ -839,7 +845,11 @@ static const mp_rom_map_elem_t wlan_if_locals_dict_table[] = {
+ };
+ static MP_DEFINE_CONST_DICT(wlan_if_locals_dict, wlan_if_locals_dict_table);
+ 
+-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 3)
++#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
++// IDF v6 removed WIFI_AUTH_WPA3_EXT_PSK(_MIXED_MODE) (their slots became
++// DUMMY placeholders, preserving values) and added WIFI_AUTH_WPA_ENTERPRISE.
++_Static_assert(WIFI_AUTH_MAX == 18, "Synchronize WIFI_AUTH_XXX constants with the ESP-IDF. Look at esp-idf/components/esp_wifi/include/esp_wifi_types_generic.h");
++#elif ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 3)
+ _Static_assert(WIFI_AUTH_MAX == 17, "Synchronize WIFI_AUTH_XXX constants with the ESP-IDF. Look at esp-idf/components/esp_wifi/include/esp_wifi_types_generic.h");
+ #elif ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 0)
+ _Static_assert(WIFI_AUTH_MAX == 16, "Synchronize WIFI_AUTH_XXX constants with the ESP-IDF. Look at esp-idf/components/esp_wifi/include/esp_wifi_types_generic.h");
+diff --git a/ports/esp32/network_wlan_csi.c b/ports/esp32/network_wlan_csi.c
+index 8e94495f6..a19c34fd1 100644
+--- a/ports/esp32/network_wlan_csi.c
++++ b/ports/esp32/network_wlan_csi.c
+@@ -40,7 +40,10 @@
+ #include <stdint.h>
+ #include <string.h>
+ 
+-#if CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32C5
++// Chips with Wi-Fi 6 (HE) support report the CSI rx_ctrl in the extended v2
++// format. Use the soc capability macro rather than listing targets, so new
++// chips (eg ESP32-S31) are covered automatically.
++#if CONFIG_SOC_WIFI_HE_SUPPORT
+ #define WIFI_CSI_RXCTRL_V2 (1)
+ #else
+ #define WIFI_CSI_RXCTRL_V2 (0)
+diff --git a/ports/esp32/uart.c b/ports/esp32/uart.c
+index 6e00fa3aa..5ba7a6669 100644
+--- a/ports/esp32/uart.c
++++ b/ports/esp32/uart.c
+@@ -36,7 +36,12 @@
+ #include <stdio.h>
+ #include "driver/uart.h" // For uart_get_sclk_freq()
+ #include "hal/uart_hal.h"
++#include "esp_idf_version.h"
++#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
++#include "hal/uart_periph.h"
++#else
+ #include "soc/uart_periph.h"
++#endif
+ 
+ static void uart_irq_handler(void *arg);
+ 
