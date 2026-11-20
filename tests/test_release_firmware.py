@@ -106,20 +106,20 @@ def fake_set(root, pico2=False):
 
 
 class Table(unittest.TestCase):
-    def test_sixteen_cells_by_default_and_the_pico2_only_when_asked(self):
-        self.assertEqual(len(rf.matrix(False)["include"]), 16)
+    def test_seventeen_cells_by_default_and_the_pico2_only_when_asked(self):
+        self.assertEqual(len(rf.matrix(False)["include"]), 17)
         ids = [c["id"] for c in rf.matrix(True)["include"]]
-        self.assertEqual(len(ids), 18)
+        self.assertEqual(len(ids), 19)
         self.assertIn("mp-pico2", ids)
         self.assertIn("mp-pico-plus2-w", ids)
         self.assertNotIn("mp-pico2", [c["id"] for c in rf.matrix(False)["include"]])
         self.assertNotIn("mp-pico-plus2-w", [c["id"] for c in rf.matrix(False)["include"]])
         self.assertEqual(len(set(ids)), len(ids))
 
-    def test_ten_micropython_and_six_circuitpython(self):
+    def test_ten_micropython_and_seven_circuitpython(self):
         rows = rf.wanted(False)
         self.assertEqual(sum(c["interpreter"] == "micropython" for c in rows), 10)
-        self.assertEqual(sum(c["interpreter"] == "circuitpython" for c in rows), 6)
+        self.assertEqual(sum(c["interpreter"] == "circuitpython" for c in rows), 7)
 
     def test_the_generic_s3_cells_fit_the_boards_they_name(self):
         by = {c["id"]: c for c in rf.CELLS}
@@ -244,7 +244,7 @@ class Assemble(unittest.TestCase):
 
     def test_a_good_set_assembles(self):
         doc = self.run_assemble()
-        self.assertEqual(len(doc["builds"]), 16)
+        self.assertEqual(len(doc["builds"]), 17)
         self.assertTrue((self.out / "firmware.json").is_file())
         names = {f["name"] for b in doc["builds"] for f in b["files"]}
         for name in names:

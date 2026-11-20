@@ -12,6 +12,10 @@ CIRCUITPY_CREATOR_ID = 0x00000000
 CIRCUITPY_CREATION_ID = 0x00000000
 
 CIRCUITPY_USB_DEVICE = 0
+# The OTG USB-C reaches the high-speed controller. Left at the full-speed one,
+# CircuitPython keeps GPIO26 and GPIO27 for its PHY, and here they are the
+# panel's backlight and reset.
+CIRCUITPY_USB_DEVICE_INSTANCE = HIGH_SPEED_INSTANCE
 CIRCUITPY_ESP_USB_SERIAL_JTAG = 0
 
 IDF_TARGET = esp32p4

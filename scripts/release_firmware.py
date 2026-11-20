@@ -143,6 +143,12 @@ CELLS = [
          board="waveshare_esp32p4_wifi6_dev_kit", variant=None, flash="16MB",
          modules="audiodsp,audioinstruments,audioeffects,pygraphics,pngio,tsmux,ppa,jpegio,cameraif,castif,h264enc,usbhost,omnipython,palettes,lvgl",
          chip="esp32p4", offset=0, kind="espressif", deps="cp-esp"),
+    # A P4 before chip revision 3, as for mp-p4-panel: the revision 3 image faults in its bootloader
+    # there. The board's own definition uses the first 16 MB of its 32 MB flash.
+    dict(id="cp-p4-panel", label="ESP32-P4-WIFI6-Touch-LCD-4B (P4 before revision 3)", interpreter="circuitpython",
+         port="espressif", board="waveshare_esp32p4_wifi6_touch_lcd_4b", variant=None, flash="16MB",
+         modules="audiodsp,audioinstruments,audioeffects,pygraphics,pngio,tsmux,ppa,jpegio,cameraif,castif,h264enc,usbhost,omnipython,palettes,lvgl",
+         chip="esp32p4", offset=0, kind="espressif", deps="cp-esp"),
     dict(id="cp-s3-lcd7", label="ESP32-S3-Touch-LCD-7", interpreter="circuitpython", port="espressif",
          board="waveshare_esp32s3_touch_lcd_7", variant=None, flash="8MB",
          modules="audiodsp,audioinstruments,audioeffects,pygraphics,pngio,tsmux,omnipython,palettes,lvgl",
