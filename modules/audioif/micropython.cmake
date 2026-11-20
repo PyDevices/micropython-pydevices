@@ -65,13 +65,18 @@ target_sources(usermod_audiopump INTERFACE
     ${AUDIOPUMP_MOD_DIR}/src/audiobusio_pdmin.c
     ${AUDIOPUMP_MOD_DIR}/src/audioi2sin.c
     ${AUDIOPUMP_MOD_DIR}/src/audioif_cache_sync.c
+    ${AUDIOPUMP_MOD_DIR}/src/audioif_i2s_peek.c
 )
 
 # A small cache sync must not wait for a large one: see audioif_cache_sync.c.
 target_link_options(usermod_audiopump INTERFACE "-Wl,--wrap=esp_cache_msync")
 
+# The second is the I2S driver's own folder, for its private header, which
+# only audioif_i2s_peek.c includes: the underrun count needs to know where the
+# driver's writer is (see that file).
 target_include_directories(usermod_audiopump INTERFACE
     ${AUDIOPUMP_AUDIODSP_DIR}/src
+    ${IDF_PATH}/components/esp_driver_i2s
 )
 
 # The IDF does NOT hand ESP_PLATFORM to user C modules -- it is a CMake
