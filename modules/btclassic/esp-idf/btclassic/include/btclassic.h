@@ -94,6 +94,8 @@ void btc_radio_stop(void);
 // first, and go down with the last to stop.
 int btc_stack_ble_start(void);
 void btc_stack_ble_stop(void);
+// After a start that failed: the ESP-IDF call that failed, and its esp_err_t.
+const char *btc_stack_failure(int *esp_err);
 bool btc_radio_active(void);
 
 int btc_radio_set_name(const char *name);       // up to 248 bytes of UTF-8

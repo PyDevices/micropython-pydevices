@@ -22,6 +22,7 @@
 // number for the GATT server and the GATT client on one link, so one handle
 // serves both roles as it does upstream.
 
+#include <stdio.h>
 #include <string.h>
 
 #include "py/runtime.h"
@@ -81,6 +82,8 @@ static struct {
     esp_gatt_if_t gattc_if;
     volatile int8_t reg;        // 0 waiting, 1 done, -1 failed: for each wait below
     volatile int8_t creg;
+    volatile int reg_status;    // the GATT status each REG_EVT brought
+    volatile int creg_status;
     volatile int8_t open;
     volatile int8_t scan_param;
     volatile int8_t scan_start;
@@ -431,6 +434,7 @@ static void gatts_cb(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble
         case ESP_GATTS_REG_EVT:
             if (param->reg.app_id == APP_ID) {
                 b.gatts_if = gatts_if;
+                b.reg_status = param->reg.status;
                 b.reg = param->reg.status == ESP_GATT_OK ? 1 : -1;
             }
             return;
@@ -542,6 +546,7 @@ static void gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble
     if (event == ESP_GATTC_REG_EVT) {
         if (param->reg.app_id == APP_ID) {
             b.gattc_if = gattc_if;
+            b.creg_status = param->reg.status;
             b.creg = param->reg.status == ESP_GATT_OK ? 1 : -1;
         }
         return;
@@ -659,37 +664,63 @@ static void connect_timeout(void *arg) {
 static void security_apply(void);
 #endif
 
-static int timers_make(void) {
+static esp_err_t timers_make(void) {
+    esp_err_t e = ESP_OK;
     #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
     if (!b.scan_timer) {
         const esp_timer_create_args_t a = {.callback = scan_timeout, .name = "ble_scan"};
-        if (esp_timer_create(&a, &b.scan_timer) != ESP_OK) {
-            return MP_ENOMEM;
-        }
+        e = esp_timer_create(&a, &b.scan_timer);
     }
-    if (!b.conn_timer) {
+    if (e == ESP_OK && !b.conn_timer) {
         const esp_timer_create_args_t a = {.callback = connect_timeout, .name = "ble_conn"};
-        if (esp_timer_create(&a, &b.conn_timer) != ESP_OK) {
-            return MP_ENOMEM;
-        }
+        e = esp_timer_create(&a, &b.conn_timer);
     }
     #endif
-    return 0;
+    return e;
+}
+
+// A start that fails raises OSError(errno, "BLE start: <call>: <why>"), so
+// the error names the step that failed. Called with everything undone.
+static MP_NORETURN void start_failed(int err, const char *call, const char *why) {
+    char text[112];
+    snprintf(text, sizeof(text), "BLE start: %s: %s", call, why);
+    mp_obj_t args[2] = {MP_OBJ_NEW_SMALL_INT(err), mp_obj_new_str(text, strlen(text))};
+    nlr_raise(mp_obj_new_exception_args(&mp_type_OSError, 2, args));
+}
+
+// Register a GATT app and wait for its REG_EVT. On failure, says why in `why`.
+static int app_register(esp_err_t (*reg)(uint16_t), volatile int8_t *flag, volatile int *status,
+    char *why, size_t size) {
+    *flag = 0;
+    esp_err_t e = reg(APP_ID);
+    if (e != ESP_OK) {
+        snprintf(why, size, "%s", esp_err_to_name(e));
+        return MP_EIO;
+    }
+    int err = wait_for(flag);
+    if (err == MP_ETIMEDOUT) {
+        snprintf(why, size, "no REG_EVT in %d ms", WAIT_MS);
+    } else if (err) {
+        snprintf(why, size, "GATT status 0x%02x", *status);
+    }
+    return err;
 }
 
 int mp_bluetooth_init(void) {
     if (b.active) {
         return 0;
     }
-    int err = timers_make();
-    if (err) {
-        return err;
+    esp_err_t e = timers_make();
+    if (e != ESP_OK) {
+        start_failed(MP_ENOMEM, "esp_timer_create", esp_err_to_name(e));
     }
     MP_STATE_PORT(bluetooth_bluedroid_root_pointers) = m_new0(mp_bluetooth_bluedroid_root_pointers_t, 1);
     mp_bluetooth_gatts_db_create(&MP_STATE_PORT(bluetooth_bluedroid_root_pointers)->gatts_db);
     if (btc_stack_ble_start() != BTC_OK) {
         MP_STATE_PORT(bluetooth_bluedroid_root_pointers) = NULL;
-        return MP_EIO;
+        int stack_err;
+        const char *call = btc_stack_failure(&stack_err);
+        start_failed(MP_EIO, call ? call : "btc_stack_ble_start", esp_err_to_name(stack_err));
     }
     memset(b.conn, 0, sizeof(b.conn));
     b.n_services = 0;
@@ -698,15 +729,16 @@ int mp_bluetooth_init(void) {
     b.connecting = false;
     esp_ble_gap_register_callback(gap_cb);
     esp_ble_gatts_register_callback(gatts_cb);
-    b.reg = 0;
     b.gatts_if = ESP_GATT_IF_NONE;
-    err = esp_ble_gatts_app_register(APP_ID) == ESP_OK ? wait_for(&b.reg) : MP_EIO;
+    char why[48];
+    const char *call = "esp_ble_gatts_app_register";
+    int err = app_register(esp_ble_gatts_app_register, &b.reg, &b.reg_status, why, sizeof(why));
     #if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
     if (!err) {
         esp_ble_gattc_register_callback(gattc_cb);
-        b.creg = 0;
         b.gattc_if = ESP_GATT_IF_NONE;
-        err = esp_ble_gattc_app_register(APP_ID) == ESP_OK ? wait_for(&b.creg) : MP_EIO;
+        call = "esp_ble_gattc_app_register";
+        err = app_register(esp_ble_gattc_app_register, &b.creg, &b.creg_status, why, sizeof(why));
         if (err && b.gatts_if != ESP_GATT_IF_NONE) {
             esp_ble_gatts_app_unregister(b.gatts_if);
         }
@@ -715,7 +747,7 @@ int mp_bluetooth_init(void) {
     if (err) {
         btc_stack_ble_stop();
         MP_STATE_PORT(bluetooth_bluedroid_root_pointers) = NULL;
-        return err;
+        start_failed(err, call, why);
     }
     esp_ble_gatt_set_local_mtu(b.mtu);
     if (b.name_len) {
