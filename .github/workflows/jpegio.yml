@@ -94,16 +94,18 @@ jobs:
 
       - name: One TJpgDec in the firmware, and it is jpegio's
         # LVGL's own tjpgd.o compiles empty (LV_USE_TJPGD 0 in omnipython-lvgl),
-        # so exactly one object defines jd_prepare, and jpegio's two objects
-        # call into it.
+        # so exactly one object defines the decoder, and jpegio's two objects
+        # call into it. tjpgd.h gives it jpegio's own names, so a chip whose
+        # ROM linker script binds jd_prepare and jd_decomp can't take it over.
         working-directory: builds/unix/standard
         run: |
-          find . -name '*.o' -exec nm -A {} + 2>/dev/null | grep ' T jd_prepare$' > jd.txt
+          find . -name '*.o' -exec nm -A {} + 2>/dev/null | grep ' T jpegio_jd_prepare$' > jd.txt
           cat jd.txt
           test "$(wc -l < jd.txt)" = 1
           grep -q '^./jpegio/third_party/tjpgd/tjpgd.o:' jd.txt
-          nm jpegio/src/jpegio.o | grep -q ' U jd_prepare$'
-          nm jpegio/src/lvgl_decoder.o | grep -q ' U jd_decomp$'
+          nm jpegio/src/jpegio.o | grep -q ' U jpegio_jd_prepare$'
+          nm jpegio/src/lvgl_decoder.o | grep -q ' U jpegio_jd_decomp$'
+          ! nm jpegio/src/jpegio.o jpegio/src/lvgl_decoder.o | grep -E ' U jd_(prepare|decomp)$'
 
       - name: The golden corpus, unchanged beside LVGL
         run: ./builds/unix/standard/micropython modules/jpegio/tests/test_jpegio.py

@@ -11,6 +11,16 @@ extern "C" {
 #include "tjpgdcnf.h"
 #include <string.h>
 
+/* Deviation from ChaN R0.03 (see ORIGIN.txt): the two entry points get names
+/  of their own. Some ESP32 ROMs carry an older TJpgDec, and their linker
+/  scripts set jd_prepare and jd_decomp outright rather than through PROVIDE
+/  (the ESP32-C6 and ESP32-S31 do), which beats the definitions in tjpgd.c.
+/  Calls then reach the ROM's decoder, whose JDEC is laid out differently, so
+/  it hands the input function a JDEC with a NULL device and the board panics
+/  on the first JPEG it opens. */
+#define jd_prepare jpegio_jd_prepare
+#define jd_decomp jpegio_jd_decomp
+
 /* Deviation from ChaN R0.03 (see ORIGIN.txt): upstream selects the
 /  fallback typedefs with `#if defined(_WIN32)`, while its own comment says the
 /  test is meant to be "a compiler without stdint.h". mingw is both at once --
