@@ -10,6 +10,13 @@ CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 # chains otherwise take the internal RAM that task stacks and DMA buffers need.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
+# Wi-Fi and lwIP buffers from PSRAM, as on the S3s. They could only use
+# internal RAM, and with Bluetooth Classic audio playing on the Waveshare
+# 4.3C its largest free block fell to 456 bytes: lwIP couldn't allocate a
+# segment for even one byte, so a WebREPL session stopped sending partway
+# through an answer while the board still ACKed what it was sent.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
 # A 1 ms tick, as on the S3s: at the port's 100 Hz every wait under 10 ms
 # rounds up to a whole tick, which an RGB panel's refresh waits on each frame.
 CONFIG_FREERTOS_HZ=1000
