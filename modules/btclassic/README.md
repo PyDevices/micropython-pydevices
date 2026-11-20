@@ -141,8 +141,9 @@ stays clean with Wi-Fi up, even under a steady download, though Wi-Fi gets
 only a small share of the air while it plays. If you hear gaps, or for calls,
 turn Wi-Fi off, as the examples do.
 
-On ESP32, it's the classic ESP32: the chip in that family with Bluetooth
-Classic and MicroPython support. The Pico W and Pico 2 W are covered below.
+On ESP32, it's the classic ESP32 and the ESP32-S31, the two chips in that
+family with Bluetooth Classic. The Pico W and Pico 2 W are covered below,
+and so is the S31, where BLE doesn't work yet.
 The module is opt-in (`--modules btclassic`, or `--modules all,btclassic`)
 because it turns ESP-IDF's Bluedroid on in place of NimBLE. ESP-IDF runs one
 Bluetooth host, so MicroPython's `bluetooth` (BLE) module runs on Bluedroid
@@ -155,6 +156,26 @@ Writing a whole `firmware.bin` at 0x1000 rewrites that partition, so every
 device has to pair again (forget the board on the phone first). To update a
 board whose partition table hasn't changed, write only the app,
 `micropython.bin`, at 0x10000: pairings and files stay.
+
+## On the ESP32-S31
+
+The S31 builds on ESP-IDF 6.1 (`--board ESP32_GENERIC_S31 --modules all,btclassic`),
+and the module builds for it as it does for the classic ESP32, with
+everything in. On a Waveshare ESP32-S31-Touch-LCD-4.3C, `AudioSink` plays
+a Galaxy S21's Spotify through the board's codec, with the title, artist,
+album, duration, position, volume and cover art, and Wi-Fi stays up while
+it plays. The other profiles are in the firmware but haven't been tried on
+the S31 yet.
+
+BLE doesn't hold a connection on this firmware: a central connects, and the
+link drops 30 s later without finishing service discovery
+([#584](https://github.com/PyDevices/omnipython-builds/issues/584)). A
+program that needs BLE on the S31, BLE-MIDI for one, needs a firmware
+without btclassic for now.
+
+The image is larger than the S31's default app partition, so the build grows
+it, and the filesystem after it moves: copy your files off before you flash
+it, and back afterwards.
 
 ## On the Pico W and Pico 2 W
 

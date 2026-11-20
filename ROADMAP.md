@@ -77,11 +77,6 @@ The same names and arguments as CircuitPython 11, so code moves between the two.
   adapter and USB audio come back to the S31 once the TinyUSB release they need
   (0.21) builds on ESP-IDF 6; today's S31 firmware leaves them out.
 
-## Bluetooth Classic
-
-- **btclassic on the ESP32-S31.** Its C already builds for the S31 on ESP-IDF
-  6.1, and so does this firmware; the module's build for the chip is next.
-
 ## Bluetooth LE Audio
 
 - **A board as an LE Audio speaker or source,** for a computer, phone or
