@@ -17,3 +17,8 @@
 // The touch controller, the ES8311 codec and the camera's SCCB.
 #define DEFAULT_I2C_BUS_SCL         (&pin_GPIO8)
 #define DEFAULT_I2C_BUS_SDA         (&pin_GPIO7)
+
+// The board's USB-C beside the UART one reaches the high-speed OTG controller,
+// instance 1. Left at instance 0, CircuitPython keeps GPIO26 and GPIO27 for the
+// full-speed PHY, and they are the panel's backlight and reset here.
+#define CIRCUITPY_USB_DEVICE_INSTANCE 1
