@@ -34,10 +34,15 @@ def raises(exc, fn, *args):
     return None
 
 
+# The fastest of three: the first collection after garbage also sweeps it.
 def collect_ms():
-    t = time.ticks_us()
-    gc.collect()
-    return time.ticks_diff(time.ticks_us(), t) / 1000
+    best = None
+    for _ in range(3):
+        t = time.ticks_us()
+        gc.collect()
+        ms = time.ticks_diff(time.ticks_us(), t) / 1000
+        best = ms if best is None or ms < best else best
+    return best
 
 
 gc.collect()
@@ -109,27 +114,28 @@ check("nothing left", offheap.mem_alloc() == base, offheap.mem_alloc() - base)
 # pointer; the Buffers are a few words each. Filled with a word that looks like
 # a heap address, the bytearrays also make the collector chase it.
 FRAME = 800 * 480 * 2
-gc.collect()
-empty_ms = collect_ms()
 probe = bytearray(64)
-word = id(probe).to_bytes(4 if sys.maxsize < 1 << 32 else 8, "little")
+# id() is signed, and negative for an address in the top half (PSRAM on ESP32).
+size = 4 if sys.maxsize < 1 << 32 else 8
+word = (id(probe) & ((1 << (8 * size)) - 1)).to_bytes(size, "little")
 array_ms = None
 try:
-    arrays = [bytearray(word * (FRAME // len(word))) for _ in range(3)]
+    arrays = [bytearray(word * (FRAME // size)) for _ in range(3)]
     array_ms = collect_ms()
 except MemoryError:
     print("SKIP bytearray timing: the heap is too small for three frames")
 arrays = None
-gc.collect()
 buffers = [offheap.Buffer(FRAME) for _ in range(3)]
 for b in buffers:
-    memoryview(b)[:] = word * (FRAME // len(word))
+    memoryview(b)[:] = word * (FRAME // size)
 buffer_ms = collect_ms()
-print("gc.collect(): %.1f ms empty, %s ms with three bytearray frames, %.1f ms with three Buffers"
-      % (empty_ms, "-" if array_ms is None else "%.1f" % array_ms, buffer_ms))
-check("Buffers barely slow a collection", buffer_ms < empty_ms + 5, "%.1f vs %.1f ms" % (buffer_ms, empty_ms))
 for b in buffers:
     b.deinit()
+# The same heap with the Buffers gone: anything they cost a collection shows here.
+freed_ms = collect_ms()
+print("gc.collect(): %s ms with three bytearray frames, %.1f ms with three Buffers, %.1f ms with none"
+      % ("-" if array_ms is None else "%.1f" % array_ms, buffer_ms, freed_ms))
+check("Buffers barely slow a collection", buffer_ms < freed_ms + 5, "%.1f vs %.1f ms" % (buffer_ms, freed_ms))
 check("all freed", offheap.mem_alloc() == base, offheap.mem_alloc() - base)
 
 print("%d failure%s" % (failures, "" if failures == 1 else "s"))
