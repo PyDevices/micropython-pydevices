@@ -1,0 +1,167 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 00:00:00 -0500
+Subject: [PATCH] extmod/modwebsocket: Finish a frame before another is sent.
+
+A websocket made with blocking writes (WebREPL makes one) sends a frame as
+a header and then its payload. When the socket has no room to send, the
+esp32 port waits for room, and runs scheduled callbacks while it waits. A
+callback that prints writes to the same websocket through os.dupterm, and
+its frame went out in the middle of the payload of the frame still being
+sent. The client can't find its place in the stream after that: it reads
+payload bytes as a frame header and waits for a frame that never comes, so
+the session goes silent and even Ctrl-C's answer never shows. Another
+thread printing while the waiting write has released the GIL can do the
+same.
+
+On an ESP32-S31 playing Bluetooth Classic audio, the send buffer fills
+often, and a WebREPL session went silent this way partway through a long
+answer. With a client that stops reading for a few seconds, a print of
+20000 characters with a callback printing meanwhile put the callback's
+frame at offset 12960 of the long frame's payload.
+
+Queue a frame written while another one is being sent, whole, in a small
+buffer (1 KB; more is dropped), and send it after the frame in flight.
+The write that owns the socket must then always finish, or what is queued
+would never go out: an exception raised while it waits (a pending Ctrl-C,
+say) is kept until the frame and the queue are sent, then made pending
+again, so it is raised in the code that was running.
+
+diff --git a/extmod/modwebsocket.c b/extmod/modwebsocket.c
+index 48f951e..e36c3a9 100644
+--- a/extmod/modwebsocket.c
++++ b/extmod/modwebsocket.c
+@@ -38,6 +38,10 @@ enum { FRAME_HEADER, FRAME_OPT, PAYLOAD, CONTROL };
+ 
+ enum { BLOCKING_WRITE = 0x80, WRITING = 0x40 };
+ 
++// Room for frames written while a blocking write is under way (see
++// websocket_write_raw). More than that is dropped.
++#define WEBSOCKET_QUEUE_SIZE (1024)
++
+ typedef struct _mp_obj_websocket_t {
+     mp_obj_base_t base;
+     mp_obj_t sock;
+@@ -53,6 +57,9 @@ typedef struct _mp_obj_websocket_t {
+     byte ws_flags;
+     // Copy of current frame flags
+     byte last_flags;
++    // Whole frames waiting for the blocking write under way to finish.
++    uint16_t queue_len;
++    byte *queue;
+ } mp_obj_websocket_t;
+ 
+ static mp_uint_t websocket_write(mp_obj_t self_in, const void *buf, mp_uint_t size, int *errcode);
+@@ -68,6 +75,8 @@ static mp_obj_t websocket_make_new(const mp_obj_type_t *type, size_t n_args, siz
+     o->mask_pos = 0;
+     o->buf_pos = 0;
+     o->opts = FRAME_TXT;
++    o->queue_len = 0;
++    o->queue = NULL;
+     if (n_args > 1 && args[1] == mp_const_true) {
+         o->opts |= BLOCKING_WRITE;
+     }
+@@ -267,24 +276,93 @@ static mp_uint_t websocket_write(mp_obj_t self_in, const void *buf, mp_uint_t si
+ 
+     return websocket_write_raw(self_in, header, hdr_sz, buf, size, errcode);
+ }
++// Send all of buf on the socket, which is in blocking mode. While it waits for
++// room to send, the socket can run scheduled callbacks and raise a pending
++// exception (a Ctrl-C that a callback has just read from this very stream).
++// The frame must still be finished: once the peer has its header, any other
++// byte in place of the rest of its payload loses the peer its place in the
++// stream for good. So keep the first exception in *exc and carry on.
++static mp_uint_t websocket_send_all(mp_obj_websocket_t *self, const byte *buf, mp_uint_t size, int *errcode, mp_obj_t *exc) {
++    const mp_stream_p_t *stream_p = mp_get_stream(self->sock);
++    volatile mp_uint_t done = 0;
++    while (done < size) {
++        nlr_buf_t nlr;
++        if (nlr_push(&nlr) == 0) {
++            mp_uint_t out_sz = stream_p->write(self->sock, buf + done, size - done, errcode);
++            nlr_pop();
++            if (out_sz == MP_STREAM_ERROR) {
++                return MP_STREAM_ERROR;
++            }
++            if (out_sz == 0) {
++                break;
++            }
++            done += out_sz;
++        } else if (*exc == MP_OBJ_NULL) {
++            *exc = MP_OBJ_FROM_PTR(nlr.ret_val);
++        }
++    }
++    return done;
++}
++
++// A frame written while a blocking write is under way: from a callback run
++// during that write's wait, or from another thread while it has released the
++// GIL. Sent at once, it would land in the middle of the other frame's payload,
++// so keep it whole for that write to send after its own frame.
++static mp_uint_t websocket_queue_frame(mp_obj_websocket_t *self, const byte *header, int hdr_sz, const void *buf, mp_uint_t size) {
++    if (self->queue == NULL) {
++        self->queue = m_new_maybe(byte, WEBSOCKET_QUEUE_SIZE);
++    }
++    if (self->queue != NULL && self->queue_len + hdr_sz + size <= WEBSOCKET_QUEUE_SIZE) {
++        memcpy(self->queue + self->queue_len, header, hdr_sz);
++        memcpy(self->queue + self->queue_len + hdr_sz, buf, size);
++        self->queue_len += hdr_sz + size;
++    }
++    return size;
++}
++
+ static mp_uint_t websocket_write_raw(mp_obj_t self_in, const byte *header, int hdr_sz, const void *buf, mp_uint_t size, int *errcode) {
+     mp_obj_websocket_t *self = MP_OBJ_TO_PTR(self_in);
+ 
+-    byte writing = self->opts & WRITING;
+-    if (self->opts & BLOCKING_WRITE) {
+-        websocket_set_blocking(self, true);
+-        self->opts |= WRITING;
++    if (!(self->opts & BLOCKING_WRITE)) {
++        mp_uint_t out_sz = mp_stream_write_exactly(self->sock, header, hdr_sz, errcode);
++        if (*errcode == 0) {
++            out_sz = mp_stream_write_exactly(self->sock, buf, size, errcode);
++        }
++        return *errcode != 0 ? MP_STREAM_ERROR : out_sz;
++    }
++
++    if (self->opts & WRITING) {
++        *errcode = 0;
++        return websocket_queue_frame(self, header, hdr_sz, buf, size);
+     }
+ 
+-    mp_uint_t out_sz = mp_stream_write_exactly(self->sock, header, hdr_sz, errcode);
++    websocket_set_blocking(self, true);
++    self->opts |= WRITING;
++
++    mp_obj_t exc = MP_OBJ_NULL;
++    *errcode = 0;
++    mp_uint_t out_sz = websocket_send_all(self, header, hdr_sz, errcode, &exc);
+     if (*errcode == 0) {
+-        out_sz = mp_stream_write_exactly(self->sock, buf, size, errcode);
++        out_sz = websocket_send_all(self, buf, size, errcode, &exc);
++    }
++    // Then the frames queued meanwhile, each one whole. More can be queued
++    // while these go out; they go after them.
++    while (*errcode == 0 && self->queue_len != 0) {
++        mp_uint_t n = self->queue_len;
++        websocket_send_all(self, self->queue, n, errcode, &exc);
++        self->queue_len -= n;
++        memmove(self->queue, self->queue + n, self->queue_len);
+     }
++    self->queue_len = 0;
++
++    self->opts &= ~WRITING;
++    websocket_set_blocking(self, false);
+ 
+-    if (self->opts & BLOCKING_WRITE) {
+-        // A write nested in another one leaves the socket blocking for it.
+-        self->opts = (self->opts & ~WRITING) | writing;
+-        websocket_set_blocking(self, writing != 0);
++    // The exception raised during the write is still meant for the code that
++    // was running: raise it there, not out of this write, where os.dupterm
++    // would take it as the stream failing and close the session.
++    if (exc != MP_OBJ_NULL) {
++        mp_sched_exception(exc);
+     }
+ 
+     if (*errcode != 0) {
