@@ -471,8 +471,11 @@ void btc_sink_status(btc_sink_status_t *out) {
     }
     out->position_ms = pos;
     out->battery = s.battery;
+    out->repeat = s.repeat;
+    out->shuffle = s.shuffle;
     out->avrcp_features = s.avrcp_features;
     out->avrcp_tg_flags = s.avrcp_tg_flags;
+    out->avrcp_events = s.peer_events;
     out->cover_art = s.cover_connected;
 
     out->rssi_delta = s.connected ? s.rssi_delta : BTC_UNKNOWN;

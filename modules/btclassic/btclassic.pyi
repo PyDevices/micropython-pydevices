@@ -76,6 +76,9 @@ details changed."""
 COVER: int
 """`AudioSink.changes` bit: a new cover image arrived, or the track has
 none."""
+SETTINGS: int
+"""`AudioSink.changes` bit: the sender's repeat or shuffle changed, or it
+stopped saying."""
 PHONE: int
 """`HandsFree.changes` bit: the phone's battery, signal, carrier, gains or
 other hands-free state changed. `AudioGateway.changes` bit: the headset
@@ -501,6 +504,14 @@ class AudioSink:
     """The sender's address, or None with none connected."""
     peer_name: str
     """The sender's device name, or "" before it is known."""
+    repeat: str | None
+    """The sender's repeat: "off", "single", "all" or "group", or None
+    when it doesn't say (its player has no repeat, or the sender doesn't
+    report player settings). Change it with `setting`; `SETTINGS` says when
+    it moved, from here or on the sender."""
+    shuffle: str | None
+    """The sender's shuffle: "off", "all" or "group", or None when it
+    doesn't say. Like `repeat`."""
 
     def __init__(self, bt: Bluetooth, *, buffer_ms: int | None = None, reconnect: bool = True) -> None: ...
     def readinto(self, buf: bytearray | memoryview) -> int:
@@ -557,13 +568,15 @@ class AudioSink:
             state: 0 presses the key, 1 releases it, 2 does both.
         """
     def setting(self, name: str, value: str) -> None:
-        """Ask the sender to change a player setting. Many senders ignore
-        these, and AVRCP has no way to read them back.
+        """Ask the sender to change a player setting. A sender that reports
+        its settings shows the result in `repeat` and `shuffle` a moment
+        later; others may ignore the request.
 
         Args:
             name: "equalizer", "repeat", "shuffle" or "scan".
-            value: "off" or "on" for the equalizer; "off", "single" or "all"
-                for repeat; "off", "all" or "group" for shuffle and scan.
+            value: "off" or "on" for the equalizer; "off", "single", "all"
+                or "group" for repeat; "off", "all" or "group" for shuffle
+                and scan.
 
         Raises:
             ValueError: an unknown name, or a value that name doesn't take.
@@ -583,7 +596,9 @@ class AudioSink:
             bitpool_max: the stream as configured. delay_ms: the delay
             reported to the sender, which it may use to move video to match.
             avrcp_features and avrcp_target_flags: the sender's AVRCP
-            feature bits. cover_art: the cover art channel is open.
+            feature bits. avrcp_events: the AVRCP notifications the sender
+            offers, bit n set for event n (0x08 is its player settings).
+            cover_art: the cover art channel is open.
             battery: the sender's battery as AVRCP reports it ("normal",
             "warning", "critical", "external" or "full"), or None.
         """

@@ -968,6 +968,17 @@ static const char *play_status_name(int v) {
     }
 }
 
+// The player's repeat and shuffle, as AVRCP numbers them from 1.
+static const char *repeat_name(int v) {
+    static const char *const names[] = { "off", "single", "all", "group" };
+    return v >= 1 && v <= (int)MP_ARRAY_SIZE(names) ? names[v - 1] : NULL;
+}
+
+static const char *shuffle_name(int v) {
+    static const char *const names[] = { "off", "all", "group" };
+    return v >= 1 && v <= (int)MP_ARRAY_SIZE(names) ? names[v - 1] : NULL;
+}
+
 static const char *battery_name(int v) {
     static const char *const names[] = { "normal", "warning", "critical", "external", "full" };
     return v >= 0 && v < (int)MP_ARRAY_SIZE(names) ? names[v] : NULL;
@@ -1121,8 +1132,8 @@ static mp_obj_t sink_key(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sink_key_obj, 2, 3, sink_key);
 
-// setting(name, value): the sender's player settings. Senders often ignore
-// these; AVRCP gives no way to read them back.
+// setting(name, value): the sender's player settings. A sender that reports
+// them shows the result in `repeat` and `shuffle`; others may ignore these.
 static mp_obj_t sink_setting(mp_obj_t self_in, mp_obj_t name_in, mp_obj_t value_in) {
     sink_check();
     qstr name = mp_obj_str_get_qstr(name_in);
@@ -1135,7 +1146,7 @@ static mp_obj_t sink_setting(mp_obj_t self_in, mp_obj_t name_in, mp_obj_t value_
             break;
         case MP_QSTR_repeat:
             attr = 2;
-            v = value == MP_QSTR_off ? 1 : value == MP_QSTR_single ? 2 : value == MP_QSTR_all ? 3 : 0;
+            v = value == MP_QSTR_off ? 1 : value == MP_QSTR_single ? 2 : value == MP_QSTR_all ? 3 : value == MP_QSTR_group ? 4 : 0;
             break;
         case MP_QSTR_shuffle:
         case MP_QSTR_scan:
@@ -1146,7 +1157,7 @@ static mp_obj_t sink_setting(mp_obj_t self_in, mp_obj_t name_in, mp_obj_t value_
             mp_raise_ValueError(MP_ERROR_TEXT("setting is equalizer, repeat, shuffle or scan"));
     }
     if (v == 0) {
-        mp_raise_ValueError(MP_ERROR_TEXT("equalizer: off/on; repeat: off/single/all; shuffle, scan: off/all/group"));
+        mp_raise_ValueError(MP_ERROR_TEXT("equalizer: off/on; repeat: off/single/all/group; shuffle, scan: off/all/group"));
     }
     return done(btc_sink_set_player(attr, v));
 }
@@ -1161,7 +1172,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(sink_refresh_obj, sink_refresh);
 static mp_obj_t sink_link(mp_obj_t self_in) {
     btc_sink_status_t st;
     btc_sink_status(&st);
-    mp_obj_t d = mp_obj_new_dict(17);
+    mp_obj_t d = mp_obj_new_dict(18);
     store(d, MP_QSTR_address, addr_obj(st.connected, st.peer));
     store(d, MP_QSTR_name, sink_text(BTC_SINK_PEER_NAME));
     store(d, MP_QSTR_rssi_delta, st.connected && st.rssi_delta != BTC_UNKNOWN ? mp_obj_new_int(st.rssi_delta) : mp_const_none);
@@ -1177,6 +1188,7 @@ static mp_obj_t sink_link(mp_obj_t self_in) {
     store(d, MP_QSTR_delay_ms, MP_OBJ_NEW_SMALL_INT(st.delay_ms));
     store(d, MP_QSTR_avrcp_features, mp_obj_new_int_from_uint(st.avrcp_features));
     store(d, MP_QSTR_avrcp_target_flags, MP_OBJ_NEW_SMALL_INT(st.avrcp_tg_flags));
+    store(d, MP_QSTR_avrcp_events, MP_OBJ_NEW_SMALL_INT(st.avrcp_events));
     store(d, MP_QSTR_cover_art, mp_obj_new_bool(st.cover_art));
     store(d, MP_QSTR_battery, maybe_str(battery_name(st.battery)));
     return d;
@@ -1302,6 +1314,12 @@ static void sink_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
                 return;
             case MP_QSTR_peer_name:
                 dest[0] = sink_text(BTC_SINK_PEER_NAME);
+                return;
+            case MP_QSTR_repeat:
+                dest[0] = maybe_str(repeat_name(st.repeat));
+                return;
+            case MP_QSTR_shuffle:
+                dest[0] = maybe_str(shuffle_name(st.shuffle));
                 return;
             default:
                 dest[1] = MP_OBJ_SENTINEL;  // methods, from the locals dict
@@ -1775,6 +1793,7 @@ static const mp_rom_map_elem_t btclassic_module_table[] = {
     { MP_ROM_QSTR(MP_QSTR_POSITION), MP_ROM_INT(BTC_CHANGED_POSITION) },
     { MP_ROM_QSTR(MP_QSTR_PEER), MP_ROM_INT(BTC_CHANGED_PEER) },
     { MP_ROM_QSTR(MP_QSTR_COVER), MP_ROM_INT(BTC_CHANGED_COVER) },
+    { MP_ROM_QSTR(MP_QSTR_SETTINGS), MP_ROM_INT(BTC_CHANGED_SETTINGS) },
     { MP_ROM_QSTR(MP_QSTR_PHONE), MP_ROM_INT(BTC_CHANGED_PHONE) },
     { MP_ROM_QSTR(MP_QSTR_CALL), MP_ROM_INT(BTC_CHANGED_CALL) },
     { MP_ROM_QSTR(MP_QSTR_AUDIO), MP_ROM_INT(BTC_CHANGED_AUDIO) },

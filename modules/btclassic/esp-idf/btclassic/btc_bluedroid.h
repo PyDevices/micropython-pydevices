@@ -125,6 +125,7 @@ typedef struct {
     int64_t pos_ms;             // last reported position
     int64_t pos_at_us;          // when it was reported
     int battery;
+    int repeat, shuffle;        // player settings, AVRCP's values; BTC_UNKNOWN unsaid
     uint32_t avrcp_features;
     uint16_t avrcp_tg_flags;
 
