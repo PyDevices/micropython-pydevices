@@ -64,6 +64,10 @@ if(ESP_PLATFORM AND (IDF_TARGET STREQUAL "esp32" OR IDF_TARGET STREQUAL "esp32s3
     # dispatched into freed memory (a2dp_guard.c).
     include(${BTCLASSIC_IDF}/a2dp_guard.cmake)
     btclassic_a2dp_guard(usermod_btclassic ${BTCLASSIC_IDF}/a2dp_guard.c)
+    # BLE data leaves empty when assertions are off, on chips whose LE data
+    # takes ESP-IDF's standard VHCI driver (vhci_assert.cmake).
+    include(${BTCLASSIC_IDF}/vhci_assert.cmake)
+    btclassic_vhci_assert()
 
     # With audiodsp in the build, AudioSink and HandsFree are also sources the
     # audio pump pulls in C. It's found the way audioif finds it: among the

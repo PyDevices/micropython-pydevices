@@ -143,7 +143,7 @@ turn Wi-Fi off, as the examples do.
 
 On ESP32, it's the classic ESP32 and the ESP32-S31, the two chips in that
 family with Bluetooth Classic. The Pico W and Pico 2 W are covered below,
-and so is the S31, where BLE doesn't work yet.
+and so is the S31.
 The module is opt-in (`--modules btclassic`, or `--modules all,btclassic`)
 because it turns ESP-IDF's Bluedroid on in place of NimBLE. ESP-IDF runs one
 Bluetooth host, so MicroPython's `bluetooth` (BLE) module runs on Bluedroid
@@ -167,11 +167,11 @@ album, duration, position, volume and cover art, and Wi-Fi stays up while
 it plays. The other profiles are in the firmware but haven't been tried on
 the S31 yet.
 
-BLE doesn't hold a connection on this firmware: a central connects, and the
-link drops 30 s later without finishing service discovery
-([#584](https://github.com/PyDevices/omnipython-builds/issues/584)). A
-program that needs BLE on the S31, BLE-MIDI for one, needs a firmware
-without btclassic for now.
+BLE runs beside Classic on the same board. Synth Station takes BLE-MIDI
+from a Windows PC with no pairing, and the link holds; a note's round trip
+to the app and back has a median of 136 ms. A firmware built before
+[#584](https://github.com/PyDevices/omnipython-builds/issues/584) was fixed
+drops every BLE link 30 s after it connects: flash a newer one.
 
 The image is larger than the S31's default app partition, so the build grows
 it, and the filesystem after it moves: copy your files off before you flash
