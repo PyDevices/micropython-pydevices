@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Barnett <127794626+bdbarnett@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 22:39:58 -0600
+Subject: [PATCH 3/4] esp32/boards/ESP32_GENERIC_S31: USB device off; a board
+ built on it chooses its USB and REPL.
+
+The generic board turns on the native USB device. The overlay's USB device
+code (the streaming endpoints, USB networking) is written for TinyUSB 0.21,
+and the S31 builds the component registry's TinyUSB 0.19.0~3, the one that
+supports the chip, so it is off here until our TinyUSB supports the S31.
+The REPL stays on the UART.
+
+A board whose USB-C connector is wired to USB Serial/JTAG, such as the
+Waveshare ESP32-S31-Zero, needs that on, and its header is included before
+this one. Each setting is now defined here only if the board hasn't.
+---
+ ports/esp32/boards/ESP32_GENERIC_S31/mpconfigboard.h | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/ports/esp32/boards/ESP32_GENERIC_S31/mpconfigboard.h b/ports/esp32/boards/ESP32_GENERIC_S31/mpconfigboard.h
+index 09f8adb2d..dbaf08b5f 100644
+--- a/ports/esp32/boards/ESP32_GENERIC_S31/mpconfigboard.h
++++ b/ports/esp32/boards/ESP32_GENERIC_S31/mpconfigboard.h
+@@ -4,10 +4,20 @@
+ #endif
+ #define MICROPY_HW_MCU_NAME                 "ESP32-S31"
+ 
+-#define MICROPY_HW_ENABLE_USBDEV              (1)
++#ifndef MICROPY_HW_ENABLE_USBDEV
++// Off: the overlay's USB device code needs TinyUSB 0.21, and the S31 builds
++// the component registry's TinyUSB 0.19, the one that supports the chip.
++#define MICROPY_HW_ENABLE_USBDEV              (0)
++#endif
++#ifndef MICROPY_HW_USB_CDC_DTR_RTS_BOOTLOADER
+ #define MICROPY_HW_USB_CDC_DTR_RTS_BOOTLOADER (0)
++#endif
++#ifndef MICROPY_HW_ESP_USB_SERIAL_JTAG
+ #define MICROPY_HW_ESP_USB_SERIAL_JTAG        (0)
++#endif
++#ifndef MICROPY_HW_ENABLE_UART_REPL
+ #define MICROPY_HW_ENABLE_UART_REPL           (1)
++#endif
+ 
+ #define MICROPY_HW_I2C0_SCL                   (1)
+ #define MICROPY_HW_I2C0_SDA                   (0)

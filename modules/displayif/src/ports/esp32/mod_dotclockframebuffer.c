@@ -50,6 +50,7 @@
 #if SOC_LCD_RGB_SUPPORTED
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_rgb.h"
+#include "esp_idf_version.h"
 #include "esp_cache.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -367,7 +368,14 @@ static void dotclockframebuffer_init_panel(dotclockframebuffer_obj_t *self) {
     esp_lcd_rgb_panel_config_t panel_config = {
         .clk_src = LCD_CLK_SRC_DEFAULT,
         .data_width = 16,
+        #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+        // ESP-IDF 6 names the frame buffer's and the panel's pixel formats
+        // in place of a bit count.
+        .in_color_format = LCD_COLOR_FMT_RGB565,
+        .out_color_format = LCD_COLOR_FMT_RGB565,
+        #else
         .bits_per_pixel = 16,
+        #endif
         // Two panel FBs: blit into the back; refresh() promotes and waits for
         // bounce to adopt it so LVGL never paints the live scanout buffer.
         .num_fbs = DCFB_NUM_FBS,
@@ -409,7 +417,15 @@ static void dotclockframebuffer_init_panel(dotclockframebuffer_obj_t *self) {
         },
     };
 
+    #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+    // ESP-IDF 6 sizes the pin list for its widest bus; the 16 lines used
+    // here come first, and the rest stay unused.
+    for (size_t i = 0; i < ESP_LCD_RGB_BUS_WIDTH_MAX; i++) {
+        panel_config.data_gpio_nums[i] = (i < 16 && i < DCFB_MAX_DATA_PINS) ? self->data_pins[i] : -1;
+    }
+    #else
     memcpy(panel_config.data_gpio_nums, self->data_pins, sizeof(int) * SOC_LCDCAM_RGB_DATA_WIDTH);
+    #endif
 
     esp_lcd_panel_handle_t panel = NULL;
     dotclockframebuffer_raise_esp_err(esp_lcd_new_rgb_panel(&panel_config, &panel));

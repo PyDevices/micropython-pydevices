@@ -55,6 +55,11 @@
 // firmware once; it is the reason audiopump.driver() exists.
 #if defined(AUDIOIF_DRIVER_ESP32) || defined(ESP_PLATFORM)
 #include "driver/i2s_std.h"
+#include "esp_idf_version.h"
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+// ESP-IDF 6 numbers an I2S port with a plain int and has no i2s_port_t.
+typedef int i2s_port_t;
+#endif
 #include "driver/gpio.h"
 #include "soc/soc_caps.h"
 #if SOC_I2S_SUPPORTS_PDM_RX

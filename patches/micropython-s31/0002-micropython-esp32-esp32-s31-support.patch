@@ -1,0 +1,547 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: cumin <13809292481@163.com>
+Date: Thu, 22 Oct 2026 10:04:29 +0800
+Subject: [PATCH 2/2] esp32: add ESP32-S31 support (micropython#19726).
+
+The ESP32-S31 commits of micropython/micropython#19726 at 0b9512f475bd
+(8634a282a..0b9512f47), squashed and rebased onto the previous patch: the
+ESP32_GENERIC_S31 board, the S31 pin, ADC, touch and LDO tables, its
+partition table and its component lockfile.
+
+Two changes from upstream's. TinyUSB is the component registry's 0.19.0~3,
+as upstream's, which builds for the S31; MicroPython's 0.21 tag doesn't.
+And ports/esp32/usb.c gives only the S31 the UTMI PHY: upstream's also
+moves the P4 to it, where the overlay's patch 0032 keeps a P4 device on the
+full-speed PHY.
+---
+ ports/esp32/adc.c                             |  3 +
+ .../esp32/boards/ESP32_GENERIC_S31/board.json | 23 +++++++
+ ports/esp32/boards/ESP32_GENERIC_S31/board.md |  6 ++
+ .../ESP32_GENERIC_S31/mpconfigboard.cmake     |  6 ++
+ .../boards/ESP32_GENERIC_S31/mpconfigboard.h  | 13 ++++
+ ports/esp32/boards/make-pins.py               |  4 +-
+ .../mpconfigboard_esp32s31_common.cmake       |  9 +++
+ ports/esp32/boards/sdkconfig.s31              | 19 ++++++
+ ports/esp32/esp32_common.cmake                |  4 +-
+ ports/esp32/esp32_ldo.c                       |  6 +-
+ .../lockfiles/dependencies.lock.esp32s31      | 38 ++++++++++++
+ ports/esp32/machine_adc.c                     | 17 ++++++
+ ports/esp32/machine_pin.h                     | 61 +++++++++++++++++++
+ ports/esp32/machine_touchpad.c                | 15 +++++
+ ports/esp32/main/idf_component.yml            | 16 +++--
+ ports/esp32/mpconfigport.h                    | 17 ++++--
+ ports/esp32/partitions-16MiBplus.csv          | 10 +++
+ ports/esp32/uart.c                            |  2 +-
+ ports/esp32/usb.c                             | 13 +++-
+ 19 files changed, 261 insertions(+), 21 deletions(-)
+ create mode 100644 ports/esp32/boards/ESP32_GENERIC_S31/board.json
+ create mode 100644 ports/esp32/boards/ESP32_GENERIC_S31/board.md
+ create mode 100644 ports/esp32/boards/ESP32_GENERIC_S31/mpconfigboard.cmake
+ create mode 100644 ports/esp32/boards/ESP32_GENERIC_S31/mpconfigboard.h
+ create mode 100644 ports/esp32/boards/mpconfigboard_esp32s31_common.cmake
+ create mode 100644 ports/esp32/boards/sdkconfig.s31
+ create mode 100644 ports/esp32/lockfiles/dependencies.lock.esp32s31
+ create mode 100644 ports/esp32/partitions-16MiBplus.csv
+
+diff --git a/ports/esp32/adc.c b/ports/esp32/adc.c
+index e717673f6..9bd397a9c 100644
+--- a/ports/esp32/adc.c
++++ b/ports/esp32/adc.c
+@@ -85,6 +85,9 @@ static esp_err_t ensure_adc_calibration(machine_adc_block_obj_t *self, adc_atten
+         .bitwidth = self->bitwidth,
+     };
+     ret = adc_cali_create_scheme_curve_fitting(&cali_config, &self->calib[atten]);
++    #elif CONFIG_IDF_TARGET_ESP32S31
++    // ESP32-S31 currently has no ADC calibration scheme in ESP-IDF.
++    mp_raise_NotImplementedError(MP_ERROR_TEXT("ADC calibration not supported on this SoC"));
+     #else
+     adc_cali_line_fitting_config_t cali_config = {
+         .unit_id = self->unit_id,
+diff --git a/ports/esp32/boards/ESP32_GENERIC_S31/board.json b/ports/esp32/boards/ESP32_GENERIC_S31/board.json
+new file mode 100644
+index 000000000..342fb5077
+--- /dev/null
++++ b/ports/esp32/boards/ESP32_GENERIC_S31/board.json
+@@ -0,0 +1,23 @@
++{
++    "deploy": [
++        "../deploy.md"
++    ],
++    "deploy_options": {
++        "flash_offset": "0"
++    },
++    "docs": "",
++    "features": [
++        "BLE",
++        "External Flash",
++        "External RAM",
++        "WiFi"
++    ],
++    "images": [
++        "generic_s31.jpg"
++    ],
++    "mcu": "esp32s31",
++    "product": "ESP32-S31",
++    "thumbnail": "",
++    "url": "https://www.espressif.com/en/products/modules",
++    "vendor": "Espressif"
++}
+diff --git a/ports/esp32/boards/ESP32_GENERIC_S31/board.md b/ports/esp32/boards/ESP32_GENERIC_S31/board.md
+new file mode 100644
+index 000000000..463bfd6b7
+--- /dev/null
++++ b/ports/esp32/boards/ESP32_GENERIC_S31/board.md
+@@ -0,0 +1,6 @@
++The following firmware is applicable to any ESP32-S31 based module or
++board, such as the ESP32-S31-WROOM-1 modules.
++
++The default configuration assumes a module with 16 MiB of external SPI
++flash and octal PSRAM, and enables native USB (TinyUSB CDC/MSC), the
++UART REPL, BLE, and Wi-Fi (including Wi-Fi CSI).
+diff --git a/ports/esp32/boards/ESP32_GENERIC_S31/mpconfigboard.cmake b/ports/esp32/boards/ESP32_GENERIC_S31/mpconfigboard.cmake
+new file mode 100644
+index 000000000..1f6f84c40
+--- /dev/null
++++ b/ports/esp32/boards/ESP32_GENERIC_S31/mpconfigboard.cmake
+@@ -0,0 +1,6 @@
++include(boards/mpconfigboard_esp32s31_common.cmake)
++
++list(APPEND SDKCONFIG_DEFAULTS
++    boards/sdkconfig.flash_qio_80m
++    boards/sdkconfig.csi
++)
+diff --git a/ports/esp32/boards/ESP32_GENERIC_S31/mpconfigboard.h b/ports/esp32/boards/ESP32_GENERIC_S31/mpconfigboard.h
+new file mode 100644
+index 000000000..09f8adb2d
+--- /dev/null
++++ b/ports/esp32/boards/ESP32_GENERIC_S31/mpconfigboard.h
+@@ -0,0 +1,13 @@
++#ifndef MICROPY_HW_BOARD_NAME
++// Can be set by mpconfigboard.cmake.
++#define MICROPY_HW_BOARD_NAME               "Generic ESP32S31 module"
++#endif
++#define MICROPY_HW_MCU_NAME                 "ESP32-S31"
++
++#define MICROPY_HW_ENABLE_USBDEV              (1)
++#define MICROPY_HW_USB_CDC_DTR_RTS_BOOTLOADER (0)
++#define MICROPY_HW_ESP_USB_SERIAL_JTAG        (0)
++#define MICROPY_HW_ENABLE_UART_REPL           (1)
++
++#define MICROPY_HW_I2C0_SCL                   (1)
++#define MICROPY_HW_I2C0_SDA                   (0)
+diff --git a/ports/esp32/boards/make-pins.py b/ports/esp32/boards/make-pins.py
+index c7375e67d..5b8e8e7f8 100755
+--- a/ports/esp32/boards/make-pins.py
++++ b/ports/esp32/boards/make-pins.py
+@@ -7,8 +7,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../tools"))
+ import boardgen
+ 
+ 
+-# Pins start at zero, and the highest pin index on any ESP32* chip is 54.
+-NUM_GPIOS = 55
++# Pins start at zero, and the highest pin index on any supported ESP32* chip is 61.
++NUM_GPIOS = 62
+ 
+ 
+ class Esp32Pin(boardgen.Pin):
+diff --git a/ports/esp32/boards/mpconfigboard_esp32s31_common.cmake b/ports/esp32/boards/mpconfigboard_esp32s31_common.cmake
+new file mode 100644
+index 000000000..395217a25
+--- /dev/null
++++ b/ports/esp32/boards/mpconfigboard_esp32s31_common.cmake
+@@ -0,0 +1,9 @@
++set(IDF_TARGET esp32s31)
++
++set(SDKCONFIG_DEFAULTS
++    boards/sdkconfig.base
++    boards/sdkconfig.riscv
++    boards/sdkconfig.s31
++    boards/sdkconfig.ble
++    boards/sdkconfig.spiram_oct
++)
+diff --git a/ports/esp32/boards/sdkconfig.s31 b/ports/esp32/boards/sdkconfig.s31
+new file mode 100644
+index 000000000..0b7887796
+--- /dev/null
++++ b/ports/esp32/boards/sdkconfig.s31
+@@ -0,0 +1,19 @@
++# ESP32-S31 specific configuration.
++
++# For cmake build: the reference ESP32-S31 modules (eg WROOM-1-N16R16V)
++# carry 16 MiB of flash; the "plus" partition table auto-extends the vfs
++# partition to the end of flash.
++CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
++CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-16MiBplus.csv"
++
++# Dual core: check the idle task on both cores (mirrors sdkconfig.base's
++# CPU0 setting).
++CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
++
++# Using the SPI flash implementation in ROM saves about 10KB of binary size
++# (and some static RAM).
++CONFIG_SPI_FLASH_ROM_IMPL=y
++
++# 802.15.4 not currently supported in MicroPython, disabling saves
++# a little compile time (no difference in binary).
++CONFIG_IEEE802154_ENABLED=n
+diff --git a/ports/esp32/esp32_common.cmake b/ports/esp32/esp32_common.cmake
+index 574e1f2c1..c0af21213 100644
+--- a/ports/esp32/esp32_common.cmake
++++ b/ports/esp32/esp32_common.cmake
+@@ -23,7 +23,7 @@ if(CONFIG_IDF_TARGET_ARCH_RISCV)
+ endif()
+ 
+ if(NOT DEFINED MICROPY_PY_TINYUSB)
+-    if(CONFIG_IDF_TARGET_ESP32S2 OR CONFIG_IDF_TARGET_ESP32S3 OR CONFIG_IDF_TARGET_ESP32P4)
++    if(CONFIG_IDF_TARGET_ESP32S2 OR CONFIG_IDF_TARGET_ESP32S3 OR CONFIG_IDF_TARGET_ESP32P4 OR CONFIG_IDF_TARGET_ESP32S31)
+         set(MICROPY_PY_TINYUSB ON)
+     endif()
+ endif()
+@@ -298,7 +298,7 @@ set(MICROPY_TARGET ${COMPONENT_TARGET})
+ if(CONFIG_IDF_TARGET_ARCH_XTENSA)
+     set(MICROPY_CROSS_FLAGS -march=xtensawin)
+ elseif(CONFIG_IDF_TARGET_ARCH_RISCV)
+-    if (CONFIG_IDF_TARGET_ESP32P4)
++    if (CONFIG_IDF_TARGET_ESP32P4 OR CONFIG_IDF_TARGET_ESP32S31)
+         set(MICROPY_CROSS_FLAGS "-march=rv32imc -march-flags=zcmp")
+     else()
+         set(MICROPY_CROSS_FLAGS -march=rv32imc)
+diff --git a/ports/esp32/esp32_ldo.c b/ports/esp32/esp32_ldo.c
+index 4f5f9fd27..711d8ad3b 100644
+--- a/ports/esp32/esp32_ldo.c
++++ b/ports/esp32/esp32_ldo.c
+@@ -34,8 +34,10 @@
+ 
+ #include "esp_ldo_regulator.h"
+ 
+-// ESP-IDF doesn't yet contain a macro for the number of LDO channels available
+-#if CONFIG_IDF_TARGET_ESP32P4
++// ESP-IDF doesn't always contain a macro for the number of LDO channels available
++#ifdef SOC_GP_LDO_NUM_UNITS
++#define LDO_CHANNELS SOC_GP_LDO_NUM_UNITS
++#elif CONFIG_IDF_TARGET_ESP32P4
+ #define LDO_CHANNELS 4
+ #else
+ #error "Please add this chip's LDO driver support"
+diff --git a/ports/esp32/lockfiles/dependencies.lock.esp32s31 b/ports/esp32/lockfiles/dependencies.lock.esp32s31
+new file mode 100644
+index 000000000..6a72efb20
+--- /dev/null
++++ b/ports/esp32/lockfiles/dependencies.lock.esp32s31
+@@ -0,0 +1,38 @@
++dependencies:
++  espressif/mdns:
++    component_hash: 31117d76cae83a6d83ffd7f035f6fdae5bd05b914fc30b641afeb208b84de19a
++    dependencies:
++    - name: idf
++      require: private
++      version: '>=5.0'
++    source:
++      registry_url: https://components.espressif.com/
++      type: service
++    version: 1.3.2
++  espressif/tinyusb:
++    component_hash: a40b7f67df6ac254a4afd96c6401cc56f2059ae747d6d7e66b568bca53ad0edc
++    dependencies:
++    - name: idf
++      require: private
++      version: '>=5.0'
++    source:
++      registry_url: https://components.espressif.com/
++      type: service
++    targets:
++    - esp32s2
++    - esp32s3
++    - esp32p4
++    - esp32h4
++    - esp32s31
++    version: 0.19.0~3
++  idf:
++    source:
++      type: idf
++    version: 6.1.0
++direct_dependencies:
++- espressif/mdns
++- espressif/tinyusb
++- idf
++manifest_hash: 1f0eb530b5ec30ab4ae1450ff30abd7d759bfcb4ff4a9429a27e16450d686742
++target: esp32s31
++version: 3.0.0
+diff --git a/ports/esp32/machine_adc.c b/ports/esp32/machine_adc.c
+index a14adef3d..7376cbbcb 100644
+--- a/ports/esp32/machine_adc.c
++++ b/ports/esp32/machine_adc.c
+@@ -157,6 +157,23 @@ static const machine_adc_obj_t madc_obj[] = {
+     {{&machine_adc_type}, ADCBLOCK2, ADC_CHANNEL_3, GPIO_NUM_52},
+     {{&machine_adc_type}, ADCBLOCK2, ADC_CHANNEL_4, GPIO_NUM_53},
+     {{&machine_adc_type}, ADCBLOCK2, ADC_CHANNEL_5, GPIO_NUM_54},
++    #elif CONFIG_IDF_TARGET_ESP32S31
++    {{&machine_adc_type}, ADCBLOCK1, ADC_CHANNEL_0, GPIO_NUM_42},
++    {{&machine_adc_type}, ADCBLOCK1, ADC_CHANNEL_1, GPIO_NUM_43},
++    {{&machine_adc_type}, ADCBLOCK1, ADC_CHANNEL_2, GPIO_NUM_44},
++    {{&machine_adc_type}, ADCBLOCK1, ADC_CHANNEL_3, GPIO_NUM_45},
++    {{&machine_adc_type}, ADCBLOCK1, ADC_CHANNEL_4, GPIO_NUM_46},
++    {{&machine_adc_type}, ADCBLOCK1, ADC_CHANNEL_5, GPIO_NUM_47},
++    {{&machine_adc_type}, ADCBLOCK1, ADC_CHANNEL_6, GPIO_NUM_48},
++    {{&machine_adc_type}, ADCBLOCK1, ADC_CHANNEL_7, GPIO_NUM_49},
++    {{&machine_adc_type}, ADCBLOCK2, ADC_CHANNEL_0, GPIO_NUM_50},
++    {{&machine_adc_type}, ADCBLOCK2, ADC_CHANNEL_1, GPIO_NUM_51},
++    {{&machine_adc_type}, ADCBLOCK2, ADC_CHANNEL_2, GPIO_NUM_52},
++    {{&machine_adc_type}, ADCBLOCK2, ADC_CHANNEL_3, GPIO_NUM_53},
++    {{&machine_adc_type}, ADCBLOCK2, ADC_CHANNEL_4, GPIO_NUM_54},
++    {{&machine_adc_type}, ADCBLOCK2, ADC_CHANNEL_5, GPIO_NUM_55},
++    {{&machine_adc_type}, ADCBLOCK2, ADC_CHANNEL_6, GPIO_NUM_56},
++    {{&machine_adc_type}, ADCBLOCK2, ADC_CHANNEL_7, GPIO_NUM_57},
+     #endif
+ };
+ 
+diff --git a/ports/esp32/machine_pin.h b/ports/esp32/machine_pin.h
+index 380100060..45aefe543 100644
+--- a/ports/esp32/machine_pin.h
++++ b/ports/esp32/machine_pin.h
+@@ -249,6 +249,67 @@
+ #define MICROPY_HW_ENABLE_GPIO47 (1)
+ #define MICROPY_HW_ENABLE_GPIO48 (1)
+ #endif
++#elif CONFIG_IDF_TARGET_ESP32S31
++#define MICROPY_HW_ENABLE_GPIO0 (1)
++#define MICROPY_HW_ENABLE_GPIO1 (1)
++#define MICROPY_HW_ENABLE_GPIO2 (1)
++#define MICROPY_HW_ENABLE_GPIO3 (1)
++#define MICROPY_HW_ENABLE_GPIO4 (1)
++#define MICROPY_HW_ENABLE_GPIO5 (1)
++#define MICROPY_HW_ENABLE_GPIO6 (1)
++#define MICROPY_HW_ENABLE_GPIO7 (1)
++#define MICROPY_HW_ENABLE_GPIO8 (1)
++#define MICROPY_HW_ENABLE_GPIO9 (1)
++#define MICROPY_HW_ENABLE_GPIO10 (1)
++#define MICROPY_HW_ENABLE_GPIO11 (1)
++#define MICROPY_HW_ENABLE_GPIO12 (1)
++#define MICROPY_HW_ENABLE_GPIO13 (1)
++#define MICROPY_HW_ENABLE_GPIO14 (1)
++#define MICROPY_HW_ENABLE_GPIO15 (1)
++#define MICROPY_HW_ENABLE_GPIO16 (1)
++#define MICROPY_HW_ENABLE_GPIO17 (1)
++#define MICROPY_HW_ENABLE_GPIO18 (1)
++#define MICROPY_HW_ENABLE_GPIO19 (1)
++#define MICROPY_HW_ENABLE_GPIO20 (1)
++#define MICROPY_HW_ENABLE_GPIO21 (1)
++#define MICROPY_HW_ENABLE_GPIO22 (1)
++#define MICROPY_HW_ENABLE_GPIO23 (1)
++#define MICROPY_HW_ENABLE_GPIO24 (1)
++#define MICROPY_HW_ENABLE_GPIO25 (1)
++#define MICROPY_HW_ENABLE_GPIO26 (1)
++#define MICROPY_HW_ENABLE_GPIO27 (1)
++#define MICROPY_HW_ENABLE_GPIO28 (1)
++#define MICROPY_HW_ENABLE_GPIO30 (1)
++#define MICROPY_HW_ENABLE_GPIO31 (1)
++#define MICROPY_HW_ENABLE_GPIO32 (1)
++#define MICROPY_HW_ENABLE_GPIO33 (1)
++#define MICROPY_HW_ENABLE_GPIO34 (1)
++#define MICROPY_HW_ENABLE_GPIO35 (1)
++#define MICROPY_HW_ENABLE_GPIO36 (1)
++#define MICROPY_HW_ENABLE_GPIO37 (1)
++#define MICROPY_HW_ENABLE_GPIO38 (1)
++#define MICROPY_HW_ENABLE_GPIO39 (1)
++#define MICROPY_HW_ENABLE_GPIO40 (1)
++#define MICROPY_HW_ENABLE_GPIO42 (1)
++#define MICROPY_HW_ENABLE_GPIO43 (1)
++#define MICROPY_HW_ENABLE_GPIO44 (1)
++#define MICROPY_HW_ENABLE_GPIO45 (1)
++#define MICROPY_HW_ENABLE_GPIO46 (1)
++#define MICROPY_HW_ENABLE_GPIO47 (1)
++#define MICROPY_HW_ENABLE_GPIO48 (1)
++#define MICROPY_HW_ENABLE_GPIO49 (1)
++#define MICROPY_HW_ENABLE_GPIO50 (1)
++#define MICROPY_HW_ENABLE_GPIO51 (1)
++#define MICROPY_HW_ENABLE_GPIO52 (1)
++#define MICROPY_HW_ENABLE_GPIO53 (1)
++#define MICROPY_HW_ENABLE_GPIO54 (1)
++#define MICROPY_HW_ENABLE_GPIO55 (1)
++#define MICROPY_HW_ENABLE_GPIO56 (1)
++#define MICROPY_HW_ENABLE_GPIO57 (1)
++#define MICROPY_HW_ENABLE_GPIO58 (1)
++#define MICROPY_HW_ENABLE_GPIO59 (1)
++#define MICROPY_HW_ENABLE_GPIO60 (1)
++#define MICROPY_HW_ENABLE_GPIO61 (1)
+ #elif CONFIG_IDF_TARGET_ESP32P4
+ #define MICROPY_HW_ENABLE_GPIO0 (1)
+ #define MICROPY_HW_ENABLE_GPIO1 (1)
+diff --git a/ports/esp32/machine_touchpad.c b/ports/esp32/machine_touchpad.c
+index 6a442d110..2ad41964f 100644
+--- a/ports/esp32/machine_touchpad.c
++++ b/ports/esp32/machine_touchpad.c
+@@ -89,6 +89,21 @@ static const mtp_obj_t touchpad_obj[] = {
+     {{&machine_touchpad_type}, GPIO_NUM_12, TOUCH_PAD_NUM12},
+     {{&machine_touchpad_type}, GPIO_NUM_13, TOUCH_PAD_NUM13},
+     {{&machine_touchpad_type}, GPIO_NUM_14, TOUCH_PAD_NUM14},
++    #elif CONFIG_IDF_TARGET_ESP32S31
++    {{&machine_touchpad_type}, GPIO_NUM_6, TOUCH_PAD_GPIO6_CHANNEL},
++    {{&machine_touchpad_type}, GPIO_NUM_7, TOUCH_PAD_GPIO7_CHANNEL},
++    {{&machine_touchpad_type}, GPIO_NUM_8, TOUCH_PAD_GPIO8_CHANNEL},
++    {{&machine_touchpad_type}, GPIO_NUM_9, TOUCH_PAD_GPIO9_CHANNEL},
++    {{&machine_touchpad_type}, GPIO_NUM_10, TOUCH_PAD_GPIO10_CHANNEL},
++    {{&machine_touchpad_type}, GPIO_NUM_11, TOUCH_PAD_GPIO11_CHANNEL},
++    {{&machine_touchpad_type}, GPIO_NUM_12, TOUCH_PAD_GPIO12_CHANNEL},
++    {{&machine_touchpad_type}, GPIO_NUM_13, TOUCH_PAD_GPIO13_CHANNEL},
++    {{&machine_touchpad_type}, GPIO_NUM_14, TOUCH_PAD_GPIO14_CHANNEL},
++    {{&machine_touchpad_type}, GPIO_NUM_15, TOUCH_PAD_GPIO15_CHANNEL},
++    {{&machine_touchpad_type}, GPIO_NUM_16, TOUCH_PAD_GPIO16_CHANNEL},
++    {{&machine_touchpad_type}, GPIO_NUM_17, TOUCH_PAD_GPIO17_CHANNEL},
++    {{&machine_touchpad_type}, GPIO_NUM_18, TOUCH_PAD_GPIO18_CHANNEL},
++    {{&machine_touchpad_type}, GPIO_NUM_19, TOUCH_PAD_GPIO19_CHANNEL},
+     #elif CONFIG_IDF_TARGET_ESP32P4
+     {{&machine_touchpad_type}, GPIO_NUM_2, TOUCH_PAD_GPIO2_CHANNEL},
+     {{&machine_touchpad_type}, GPIO_NUM_3, TOUCH_PAD_GPIO3_CHANNEL},
+diff --git a/ports/esp32/main/idf_component.yml b/ports/esp32/main/idf_component.yml
+index baa8e92d0..a903022db 100644
+--- a/ports/esp32/main/idf_component.yml
++++ b/ports/esp32/main/idf_component.yml
+@@ -4,15 +4,13 @@ dependencies:
+   espressif/mdns: "~1.3.0"
+   espressif/tinyusb:
+     rules:
+-      - if: "target in [esp32s2, esp32s3, esp32p4]"
+-    # TinyUSB 0.21, MicroPython's own tag: espressif/tinyusb 0.21.0~1 plus
+-    # the cdcd_open fix (hathach/tinyusb#3808). It carries the OUT-endpoint
+-    # ZLP fix (#3293) the cherrypick/dwc2_zlp_fix branch was holding, and it
+-    # re-arms the audio class's isochronous OUT endpoint in the ISR, not in
+-    # tud_task(). Without #3808 an ESP32-S3 resets when the host opens the
+-    # CDC port, which is why this is the tag and not the registry's 0.21.0~2.
+-    git: https://github.com/micropython/tinyusb-espressif.git
+-    version: v0.21.0.1-micropython1
++      - if: "target in [esp32s2, esp32s3, esp32p4, esp32s31]"
++    # The previous temporary workaround fork
++    # (micropython/tinyusb-espressif, cherrypick/dwc2_zlp_fix) does not
++    # support esp32s31, and a manifest cannot select different sources per
++    # target, so use the registry component which carries the DWC2 OUT EP
++    # ZLP fix (hathach/tinyusb#3293) as well.
++    version: "0.19.0~3"
+   # esp_hosted / esp_wifi_remote: pinned to the versions that build against
+   # both IDF v5.x and v6.x (older 0.15.x / 2.7.x don't build against IDF v6,
+   # the wifi_remote sources for v6.1 are only in 1.6.0+).
+diff --git a/ports/esp32/mpconfigport.h b/ports/esp32/mpconfigport.h
+index 1243955a2..2f0f61e35 100644
+--- a/ports/esp32/mpconfigport.h
++++ b/ports/esp32/mpconfigport.h
+@@ -44,7 +44,7 @@
+ #define MICROPY_EMIT_RV32                   (0)
+ #else
+ #define MICROPY_EMIT_RV32                   (1)
+-#if CONFIG_IDF_TARGET_ESP32P4
++#if CONFIG_IDF_TARGET_ESP32P4 || CONFIG_IDF_TARGET_ESP32S31
+ #define MICROPY_EMIT_RV32_ZCMP              (1)
+ #endif
+ #endif
+@@ -233,6 +233,8 @@
+ #define MICROPY_PY_NETWORK_HOSTNAME_DEFAULT "mpy-esp32h2"
+ #elif CONFIG_IDF_TARGET_ESP32P4
+ #define MICROPY_PY_NETWORK_HOSTNAME_DEFAULT "mpy-esp32p4"
++#elif CONFIG_IDF_TARGET_ESP32S31
++#define MICROPY_PY_NETWORK_HOSTNAME_DEFAULT "mpy-esp32s31"
+ #endif
+ #endif
+ #define MICROPY_PY_NETWORK_INCLUDEFILE      "ports/esp32/modnetwork.h"
+@@ -287,7 +289,9 @@
+ 
+ #if MICROPY_HW_ENABLE_USBDEV
+ #define MICROPY_SCHEDULER_STATIC_NODES        (1)
++#ifndef MICROPY_HW_USB_CDC_DTR_RTS_BOOTLOADER
+ #define MICROPY_HW_USB_CDC_DTR_RTS_BOOTLOADER (1)
++#endif
+ 
+ #ifndef MICROPY_HW_USB_VID
+ #define USB_ESPRESSIF_VID 0x303A
+@@ -331,16 +335,21 @@
+ #define MICROPY_HW_USB_PRODUCT_FS_STRING "Espressif Device"
+ #endif
+ 
+-#if CONFIG_IDF_TARGET_ESP32P4
+-// By default, ESP32-P4 uses the HS USB PHY (RHPORT1) for TinyUSB
+-// and configures the full speed USB port as USB Serial/JTAG device
++#if CONFIG_IDF_TARGET_ESP32P4 || CONFIG_IDF_TARGET_ESP32S31
++// By default, ESP32-P4 uses the HS USB PHY on RHPORT1 for TinyUSB (the full
++// speed USB port runs as a USB Serial/JTAG device). ESP32-S31 is HS-only with
++// the USB PHY on RHPORT0.
+ #ifndef MICROPY_HW_USB_HS
+ #define MICROPY_HW_USB_HS 1
+ #endif // MICROPY_HW_USB_HS
+ #if MICROPY_HW_USB_HS && !defined(CFG_TUSB_RHPORT0_MODE) && !defined(CFG_TUSB_RHPORT1_MODE)
++#if CONFIG_IDF_TARGET_ESP32S31
++#define CFG_TUSB_RHPORT0_MODE   (OPT_MODE_DEVICE | OPT_MODE_HIGH_SPEED)
++#else
+ #define CFG_TUSB_RHPORT1_MODE   (OPT_MODE_DEVICE | OPT_MODE_HIGH_SPEED)
+ #endif
+ #endif
++#endif // MICROPY_HW_USB_HS target block
+ 
+ // The highest IN endpoint number with a transmit FIFO: the P4's high-speed
+ // controller has them up to 7, the S2/S3's and the P4's full-speed one up to 4.
+diff --git a/ports/esp32/partitions-16MiBplus.csv b/ports/esp32/partitions-16MiBplus.csv
+new file mode 100644
+index 000000000..aff245621
+--- /dev/null
++++ b/ports/esp32/partitions-16MiBplus.csv
+@@ -0,0 +1,10 @@
++# This partition table is for devices with 16MiB or more of flash.
++# The first ~2.2MiB is used for bootloader, nvs, phy_init and firmware.
++# The remaining flash is for the user filesystem(s).
++
++# Notes: the offset of the partition table itself is set in
++# $IDF_PATH/components/partition_table/Kconfig.projbuild.
++# Name,   Type, SubType, Offset,  Size, Flags
++nvs,      data, nvs,     0x9000,  0x6000,
++phy_init, data, phy,     0xf000,  0x1000,
++factory,  app,  factory, 0x10000, 0x230000,
+diff --git a/ports/esp32/uart.c b/ports/esp32/uart.c
+index 5ba7a6669..0121ddcb3 100644
+--- a/ports/esp32/uart.c
++++ b/ports/esp32/uart.c
+@@ -45,7 +45,7 @@
+ 
+ static void uart_irq_handler(void *arg);
+ 
+-#if CONFIG_IDF_TARGET_ESP32P4
++#if CONFIG_IDF_TARGET_ESP32P4 || CONFIG_IDF_TARGET_ESP32S31
+ static uint8_t __DECLARE_RCC_ATOMIC_ENV __attribute__ ((unused));
+ #endif
+ 
+diff --git a/ports/esp32/usb.c b/ports/esp32/usb.c
+index fbc8fd1b3..ea964288d 100644
+--- a/ports/esp32/usb.c
++++ b/ports/esp32/usb.c
+@@ -26,6 +26,8 @@
+ 
+ #include "py/runtime.h"
+ #include "py/mphal.h"
++#include "py/mpprint.h"
++#include "esp_err.h"
+ #include "usb.h"
+ 
+ #if MICROPY_HW_ENABLE_USBDEV
+@@ -45,7 +47,13 @@ void usb_phy_init(void) {
+     static const usb_phy_config_t phy_conf = {
+         .controller = USB_PHY_CTRL_OTG,
+         .otg_mode = USB_OTG_MODE_DEVICE,
++        // The S31's OTG controller is the high-speed one, on the internal
++        // UTMI PHY; other targets use the integrated full-speed PHY.
++        #if CONFIG_IDF_TARGET_ESP32S31
++        .target = USB_PHY_TARGET_UTMI,
++        #else
+         .target = USB_PHY_TARGET_INT,
++        #endif
+         #if CONFIG_IDF_TARGET_ESP32P4 && !MICROPY_HW_USB_HS
+         // The device runs on the full-speed controller. Without a speed, IDF
+         // hands a P4 device the high-speed (UTMI) PHY instead of this one.
+@@ -54,7 +62,10 @@ void usb_phy_init(void) {
+     };
+ 
+     // Init ESP USB Phy
+-    usb_new_phy(&phy_conf, &phy_hdl);
++    esp_err_t ret = usb_new_phy(&phy_conf, &phy_hdl);
++    if (ret != ESP_OK) {
++        mp_printf(&mp_plat_print, "USB PHY init failed: %s\n", esp_err_to_name(ret));
++    }
+ }
+ 
+ #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4
