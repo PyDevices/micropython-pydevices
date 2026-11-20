@@ -167,8 +167,8 @@ album, duration, position, volume and cover art, and Wi-Fi stays up while
 it plays, with about 47 KB of internal RAM free, so WebREPL keeps
 answering. For that room, the controller leaves out BLE 5's features, which
 the `bluetooth` backend's BLE 4.2 calls never use, and Bluedroid's
-semaphores and the audio pump's stack live in PSRAM. The other profiles are in the firmware but haven't been tried on
-the S31 yet.
+semaphores and the audio pump's stack live in PSRAM. The other profiles
+are in the firmware but haven't been tried on the S31 yet.
 
 BLE runs beside Classic on the same board. Synth Station takes BLE-MIDI
 from a Windows PC with no pairing, and the link holds; a note's round trip
