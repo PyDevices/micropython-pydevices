@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PyDevices <pydevices@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 05:45:00 -0600
+Subject: [PATCH] esp32: commit native code to executable RAM on the ESP32-S31.
+
+A target whose IRAM/DRAM split is off (SOC_CPU_IDRAM_SPLIT_USING_PMP
+without CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT) skips MP_PLAT_COMMIT_EXEC,
+because all its internal RAM can run code. On the ESP32-S31 the GC heap is
+in PSRAM, and the CPU can't fetch instructions from there: calling a
+@micropython.native or @micropython.viper function raised an instruction
+access fault at the function's address in PSRAM. Copy the code into
+MALLOC_CAP_EXEC memory there, as on targets with the split.
+---
+ ports/esp32/mpconfigport.h | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/ports/esp32/mpconfigport.h b/ports/esp32/mpconfigport.h
+--- a/ports/esp32/mpconfigport.h
++++ b/ports/esp32/mpconfigport.h
+@@ -382,8 +382,10 @@
+ // type definitions for the specific machine
+ 
+ #define MICROPY_MAKE_POINTER_CALLABLE(p) ((void *)((mp_uint_t)(p)))
+-#if SOC_CPU_IDRAM_SPLIT_USING_PMP && !CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT
++#if SOC_CPU_IDRAM_SPLIT_USING_PMP && !CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT && !CONFIG_IDF_TARGET_ESP32S31
+ // On targets with this configuration all RAM is executable so no need for a custom commit function.
++// The ESP32-S31 is left out: its GC heap is in PSRAM, which it can't fetch
++// instructions from, so native code is copied to internal RAM there.
+ #else
+ void *esp_native_code_commit(void *, size_t, void *);
+ #define MP_PLAT_COMMIT_EXEC(buf, len, reloc) esp_native_code_commit(buf, len, reloc)
