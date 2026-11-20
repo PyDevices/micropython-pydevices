@@ -390,6 +390,7 @@ void btc_sink_status(btc_sink_status_t *out) {
     out->volume = sink.volume;
     out->play_status = sink.streaming ? BTC_PLAY_PLAYING : BTC_PLAY_STOPPED;
     out->track_number = out->track_count = out->battery = BTC_UNKNOWN;
+    out->repeat = out->shuffle = BTC_UNKNOWN;
     out->duration_ms = out->position_ms = BTC_UNKNOWN;
     out->channels = 2;
 }

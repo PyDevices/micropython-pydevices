@@ -670,6 +670,8 @@ int btc_sink_start(size_t ring_frames, bool reconnect) {
     st.volume = 100;
     st.play_status = BTC_UNKNOWN;
     st.battery = BTC_UNKNOWN;
+    st.repeat = BTC_UNKNOWN;
+    st.shuffle = BTC_UNKNOWN;
     clear_track();
     changed = 0;
     a2dp_con = HCI_CON_HANDLE_INVALID;

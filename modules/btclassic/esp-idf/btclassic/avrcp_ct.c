@@ -15,6 +15,7 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 
+#include "avrcp_settings.h"
 #include "btc_bluedroid.h"
 
 #define COVER_MAX (256 * 1024)      // a thumbnail is a few tens of KB
@@ -223,6 +224,8 @@ void btc_avrcp_reset(void) {
     s.peer_events = 0;
     s.play_status = BTC_UNKNOWN;
     s.battery = BTC_UNKNOWN;
+    s.repeat = BTC_UNKNOWN;
+    s.shuffle = BTC_UNKNOWN;
     s.avrcp_features = 0;
     s.avrcp_tg_flags = 0;
     s.cover_connected = false;
@@ -261,7 +264,7 @@ static void avrc_ct_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_t *par
             } else {
                 btc_avrcp_reset();
                 cover_clear();
-                mark(BTC_CHANGED_TRACK | BTC_CHANGED_PLAYING | BTC_CHANGED_PEER);
+                mark(BTC_CHANGED_TRACK | BTC_CHANGED_PLAYING | BTC_CHANGED_PEER | BTC_CHANGED_SETTINGS);
             }
             break;
         case ESP_AVRC_CT_REMOTE_FEATURES_EVT:
@@ -286,6 +289,7 @@ static void avrc_ct_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_t *par
             register_notification(ESP_AVRC_RN_BATTERY_STATUS_CHANGE);
             register_notification(ESP_AVRC_RN_TRACK_REACHED_END);
             register_notification(ESP_AVRC_RN_TRACK_REACHED_START);
+            register_notification(ESP_AVRC_RN_APP_SETTING_CHANGE);
             request_metadata();
             esp_avrc_ct_send_get_play_status_cmd(next_tl());
             break;
@@ -409,6 +413,34 @@ static void avrc_ct_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_t *par
         #endif
         default:
             break;
+    }
+}
+
+// Repeat and shuffle, from notification 0x08 (avrcp_settings.c). The
+// INTERIM reply lists every setting the player has; a setting it leaves out
+// is one the player doesn't have. Each CHANGED reply ends the registration,
+// so it is registered again, and its INTERIM reply brings the full set.
+void btc_avrcp_settings(const uint8_t *pairs, int count, bool complete) {
+    BTC_LOCK();
+    int repeat = complete ? BTC_UNKNOWN : s.repeat;
+    int shuffle = complete ? BTC_UNKNOWN : s.shuffle;
+    for (int i = 0; i < count; i++) {
+        uint8_t attr = pairs[2 * i], value = pairs[2 * i + 1];
+        if (attr == ESP_AVRC_PS_REPEAT_MODE) {
+            repeat = value;
+        } else if (attr == ESP_AVRC_PS_SHUFFLE_MODE) {
+            shuffle = value;
+        }
+    }
+    bool changed = repeat != s.repeat || shuffle != s.shuffle;
+    s.repeat = repeat;
+    s.shuffle = shuffle;
+    BTC_UNLOCK();
+    if (changed) {
+        mark(BTC_CHANGED_SETTINGS);
+    }
+    if (!complete) {
+        register_notification(ESP_AVRC_RN_APP_SETTING_CHANGE);
     }
 }
 

@@ -51,7 +51,7 @@ per profile that takes it.
 | Object | What it does |
 |---|---|
 | `Bluetooth()` | The radio. `active()` turns it on and off; `config()` reads and sets `name`, `discoverable`, `connectable`, `pin`, `mac`, the channels it hops on, the shortest encryption key it accepts and what a search sees; `paired()` and `unpair()` manage pairings; `inquiry()` finds devices, `services()` asks one what it offers, `rssi()` reads a link's signal, `tune()` sets its packet types and poll interval, and `sniff()` puts an idle link to sleep on the Pico W. |
-| `AudioSink(bt)` | Receives audio (A2DP sink) and talks to the sender's player (AVRCP): `readinto()`, the track, `cover`, `position`, `play()`, `next()`, `seek()`, the `volume` shared with the sender's slider, and more. |
+| `AudioSink(bt)` | Receives audio (A2DP sink) and talks to the sender's player (AVRCP): `readinto()`, the track, `cover`, `position`, `play()`, `next()`, `seek()`, the `volume` shared with the sender's slider, its `repeat` and `shuffle`, and more. |
 | `HandsFree(bt)` | Follows a phone (HFP hands-free): `battery`, `signal`, `operator`, the `call` and its `caller`, `answer()`, `hangup()`, `dial()`, and the call's audio through its own `readinto()` and `write()`. |
 | `AudioSource(bt)` | Sends audio to headphones, a speaker or a car stereo (A2DP source) and acts as their remote's target (AVRCP): `write()`, the receiver's keys through `key()`, the `volume`, and the `track()` and `status` its display shows. `Bluetooth.inquiry()` and `found()` find the receiver. |
 | `Serial(bt)` | A serial port (SPP), as a stream like `machine.UART`: a computer gets a Bluetooth COM port to the board, or `connect()` calls another device's port. |
@@ -87,6 +87,16 @@ board is its audio device, and for a voice or video chat app. While
 (at `HandsFree.sample_rate`, 8 or 16 kHz) and send your microphone with
 `HandsFree.write()`. The type stub, [`btclassic.pyi`](btclassic.pyi), has
 every property and method.
+
+`AudioSink.repeat` and `AudioSink.shuffle` follow the sender's player:
+"off", "single", "all" or "group" for repeat, "off", "all" or "group" for
+shuffle, and None while the sender doesn't report them. When either moves,
+`changes()` carries `btclassic.SETTINGS`. `setting("repeat", "all")` and
+`setting("shuffle", "off")` change them on the phone. On a Samsung Galaxy
+S21 (Android 14) with Spotify, a change on either side reached the other
+within three seconds. Spotify turns both off in its radio and autoplay
+queues, and refuses a change there. These need the ESP32 or ESP32-S31 on
+ESP-IDF 5.5 or 6.1; the Pico W reads None.
 
 ## Let the audio pump play it
 

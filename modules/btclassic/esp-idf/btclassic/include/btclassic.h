@@ -67,6 +67,7 @@ extern "C" {
 #define BTC_CHANGED_PUSH       (1u << 23)   // opp: a send or pull finished, or an object arrived
 #define BTC_CHANGED_PASSKEY    (1u << 24)   // radio: pairing wants a passkey shown, typed or checked
 #define BTC_CHANGED_L2CAP      (1u << 25)   // l2cap: bytes arrived
+#define BTC_CHANGED_SETTINGS   (1u << 26)   // sink: the sender's repeat or shuffle
 
 typedef uint8_t btc_addr_t[6];  // most significant byte first
 
@@ -277,8 +278,11 @@ typedef struct {
     int64_t duration_ms;    // the track's length
     int64_t position_ms;    // where playback is now (moves on while playing)
     int battery;            // the sender's AVRCP battery state, 0..4
+    int repeat;             // the player's repeat, AVRCP's value: 1 off, 2 single, 3 all, 4 group
+    int shuffle;            // and shuffle: 1 off, 2 all, 3 group
     uint32_t avrcp_features;    // the sender's AVRCP feature mask
     uint16_t avrcp_tg_flags;    // and its target feature flags
+    uint16_t avrcp_events;      // the notifications it offers, bit n for event n
     bool cover_art;         // the cover art channel is open
 
     // The link.

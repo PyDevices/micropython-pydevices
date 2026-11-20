@@ -64,6 +64,10 @@ if(ESP_PLATFORM AND (IDF_TARGET STREQUAL "esp32" OR IDF_TARGET STREQUAL "esp32s3
     # dispatched into freed memory (a2dp_guard.c).
     include(${BTCLASSIC_IDF}/a2dp_guard.cmake)
     btclassic_a2dp_guard(usermod_btclassic ${BTCLASSIC_IDF}/a2dp_guard.c)
+    # The sender's repeat and shuffle, read back through two more link-time
+    # hooks (avrcp_settings.c).
+    include(${BTCLASSIC_IDF}/avrcp_settings.cmake)
+    btclassic_avrcp_settings(usermod_btclassic ${BTCLASSIC_IDF}/avrcp_settings.c)
     # BLE data leaves empty when assertions are off, on chips whose LE data
     # takes ESP-IDF's standard VHCI driver (vhci_assert.cmake).
     include(${BTCLASSIC_IDF}/vhci_assert.cmake)
