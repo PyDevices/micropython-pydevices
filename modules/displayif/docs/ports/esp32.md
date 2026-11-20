@@ -189,12 +189,12 @@ Behavioral contract (proven on Qualia S3 + TL040HDS20):
 
 | Topic | Behavior |
 |-------|----------|
-| Scanout | Continuous DMA (`refresh_on_demand=0`); panel-owned FBs on the ESP32-S3, driver-owned on other targets |
+| Scanout | Continuous DMA (`refresh_on_demand=0`); driver-owned FBs on the ESP32-S31, panel-owned on other targets |
 | `refresh()` | Double-buffered: promote the back buffer, wait for the scanout to take it (up to a frame), then paint the other buffer. Single buffer: cache writeback only |
 | `present()` / `wait()` | `refresh()` in two halves: `present()` promotes and returns at once, `wait()` returns once the scanout has the new buffer. A GUI that renders straight into `framebuffers()` (LVGL DIRECT) calls `wait()` before it paints again, and gets the frame period back instead of blocking in every present. `blit`, `fill_rect`, `framebuffers` and `refresh` finish a pending flip themselves |
 | Large panels | Bounce buffers `bounce_rows * h_res` px each (`bounce_rows=`, 4..20, default 20; stepped down if internal DMA RAM will not hold two) + dirty-row msync |
-| Lost refills | A bounce refill held off for longer than one buffer takes to send is lost, and the picture would stay shifted down by that many rows. On the ESP32-S3, ESP-IDF restarts the scanout at the next vsync. On other targets the driver fills the bounce buffers from its own two frame buffers, checks its place at every vsync, and refills both during the vertical blank when it is off, so a lost refill shows for one frame |
-| `stats()` | Counters since the panel started, as a dict: `vsyncs`, `frames`, `chunk_us` (one bounce buffer's send time), `resyncs` (vsyncs that put a lost refill right), `late_eofs`, `stale_eofs`, `max_eof_gap_us`, `min_eof_to_vsync_us`. On the ESP32-S3, `phase_us - phase0_us` divided by `chunk_us` is how many bounce buffers the picture is shifted by, and `phase_jumps` counts its moves |
+| Lost refills | A bounce refill held off for longer than one buffer takes to send is lost, and the picture would stay shifted down by that many rows. On the ESP32-S3, ESP-IDF restarts the scanout at the next vsync. On the ESP32-S31 the driver fills the bounce buffers from its own two frame buffers, checks its place at every vsync, and refills both during the vertical blank when it is off, so a lost refill shows for one frame. Other targets (the ESP32-P4) keep ESP-IDF's path, which does not put a lost refill right |
+| `stats()` | Counters since the panel started, as a dict: `vsyncs`, `frames`, `chunk_us` (one bounce buffer's send time), `resyncs` (vsyncs that put a lost refill right), `late_eofs`, `stale_eofs`, `max_eof_gap_us`, `min_eof_to_vsync_us`. On the ESP-IDF path, `phase_us - phase0_us` divided by `chunk_us` is how many bounce buffers the picture is shifted by, and `phase_jumps` counts its moves |
 | Buffer protocol | typecode `'B'` (MP has no `memoryview.cast`) |
 | Fast paths | Native `blit` / `fill_rect` (expose via custom `attr`) |
 | Lifecycle | Idempotent `deinit` / `__del__` / ctor + soft-reset teardown |

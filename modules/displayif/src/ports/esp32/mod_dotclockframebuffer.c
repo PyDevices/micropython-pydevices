@@ -846,12 +846,13 @@ static mp_obj_t dotclockframebuffer_make(const mp_obj_type_t *type, size_t n_arg
     self->present_pending = false;
     self->presented = 0;
     self->present_frames = 0;
-    // ESP-IDF puts a lost refill right at vsync on the ESP32-S3 only; the
-    // driver does it everywhere else.
-    #if CONFIG_IDF_TARGET_ESP32S3
-    self->self_fill = false;
-    #else
+    // ESP-IDF puts a lost refill right at vsync on the ESP32-S3 only. The
+    // driver does it on the ESP32-S31, the only other target run so far;
+    // another target joins this list once it has been run on a board.
+    #if CONFIG_IDF_TARGET_ESP32S31
     self->self_fill = true;
+    #else
+    self->self_fill = false;
     #endif
 #endif
     self->data_pin_count = 0;
