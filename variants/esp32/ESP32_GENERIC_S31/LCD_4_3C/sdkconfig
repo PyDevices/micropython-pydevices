@@ -1,0 +1,10 @@
+# Waveshare ESP32-S31-Touch-LCD-4.3C: flash auto-suspend. Without it a flash
+# erase turns the cache off and stops both cores until it finishes: a 4 KB
+# file write cost Bluetooth audio about 15 ms of silence, and a slow erase
+# 1.4 s. With it the cores run through the erase and playback loses nothing.
+# IDF supports it only on particular flash chips ("READ DOCS FIRST",
+# components/spi_flash/Kconfig), so it's a board setting, not a chip one.
+# This board's flash is XMC (JEDEC 0x46 0x4018), the XM25xxD series IDF
+# lists as one that suspends.
+CONFIG_SPI_FLASH_AUTO_SUSPEND=y
+CONFIG_SPI_FLASH_AUTO_CHECK_SUSPEND_STATUS=y
