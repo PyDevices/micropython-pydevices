@@ -72,6 +72,12 @@ It fetches ESP-IDF 6.1 itself on the first S31 build.
 and the USB network and audio devices need a newer TinyUSB than ESP-IDF 6.1's
 S31 support carries, so the USB device is off on every S31 build for now.
 
+`machine.ADC` works on GPIO42-57, the only pins with an ADC on the S31.
+The input range is 0 to 2 V, the only one the chip has, so the only
+attenuation is `ADC.ATTN_0DB`. `read()` and `read_u16()` give 0 at 0 V and
+full scale from 2 V up. `read_uv()` comes from the converter's nominal
+scale, because ESP-IDF 6.1 has no ADC calibration for the S31.
+
 ## Variants
 
 Our variants, in [`variants/`](https://github.com/PyDevices/omnipython-builds/tree/main/variants).

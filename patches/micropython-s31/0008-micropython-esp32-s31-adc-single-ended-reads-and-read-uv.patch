@@ -1,0 +1,202 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PyDevices <pydevices@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 03:30:00 -0600
+Subject: [PATCH] esp32: single-ended ADC readings and read_uv() on the ESP32-S31.
+
+ESP-IDF 6.1 reads each ESP32-S31 ADC pad single-ended, as a code from 0
+to 4393 that spans -2 V to +2 V. The pads are the P and N inputs of
+differential pairs (GPIO42 is ADC1_CH0_N, GPIO43 ADC1_CH0_P, and so on),
+and an N pad's code runs the other way. machine.ADC returned that code as
+a 12-bit reading, so a pad at 0 V read mid-scale, an N pad read 0 when
+pulled up, and read_u16() reached 70289.
+
+The channel was never configured either: the S31 accepts only its one
+attenuation (0 dB) and the converter's own width, and the error from
+adc_oneshot_config_channel() was dropped. That error is now raised.
+
+On the S31, read() and read_u16() now give the pad's voltage from 0 to
+2 V scaled to 12 and 16 bits, and read_uv() gives it in microvolts from
+the nominal line in ESP-IDF's ADC documentation, as ESP-IDF 6.1 has no
+calibration scheme for the S31. The attenuation constants other than
+ATTN_0DB are gone from the S31's ADC class, since it has one input range.
+An ESP-IDF that calibrates the S31 changes what adc_oneshot_read()
+returns, so building against one stops with an error here.
+---
+ ports/esp32/adc.c         | 65 +++++++++++++++++++++++++++++++++++++++++++----
+ ports/esp32/adc.h         |  5 ++++
+ ports/esp32/machine_adc.c | 15 ++++++++---
+ 3 files changed, 76 insertions(+), 9 deletions(-)
+
+diff --git a/ports/esp32/adc.c b/ports/esp32/adc.c
+index 9bd397a9c..a8dd35be0 100644
+--- a/ports/esp32/adc.c
++++ b/ports/esp32/adc.c
+@@ -31,8 +31,43 @@
+ #include "esp_adc/adc_oneshot.h"
+ #include "esp_adc/adc_cali_scheme.h"
+ 
++#if CONFIG_IDF_TARGET_ESP32S31
++
++#if ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED || ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
++// ESP-IDF releases after 6.1 calibrate the S31's ADC, and adc_oneshot_read()
++// then returns the comparator bit vector rather than the code used below.
++#error "this ESP-IDF has ADC calibration for the ESP32-S31: convert through adc_cali_chan_raw_to_voltage()"
++#endif
++
++// ESP-IDF 6.1 reads each ESP32-S31 ADC pad single-ended and gives a code from
++// 0 to 4393 for -2 V to +2 V. The pads are the P and N inputs of differential
++// pairs: odd channels are P, even channels are N, and an N pad's code runs the
++// other way. ESP-IDF 6.1 has no calibration scheme for the S31, so this is the
++// nominal line from its ADC documentation.
++#define S31_ADC_CODE_MAX (4393)
++#define S31_ADC_SPAN_UV (4000000)
++#define S31_ADC_FULL_SCALE_UV (S31_ADC_SPAN_UV / 2)
++
++static mp_int_t s31_single_ended_uv(adc_channel_t channel_id, int raw) {
++    int64_t uv = (int64_t)raw * S31_ADC_SPAN_UV / S31_ADC_CODE_MAX - S31_ADC_FULL_SCALE_UV;
++    if ((channel_id & 1) == 0) {
++        uv = -uv;
++    }
++    // A pad can't go below ground, and the converter saturates above 2 V.
++    if (uv < 0) {
++        uv = 0;
++    } else if (uv > S31_ADC_FULL_SCALE_UV) {
++        uv = S31_ADC_FULL_SCALE_UV;
++    }
++    return (mp_int_t)uv;
++}
++
++#else
++
+ static esp_err_t ensure_adc_calibration(machine_adc_block_obj_t *self, adc_atten_t atten);
+ 
++#endif
++
+ void adc_is_init_guard(machine_adc_block_obj_t *self) {
+     if (!self->handle) {
+         mp_raise_OSError(MP_EPERM);
+@@ -44,13 +79,18 @@ esp_err_t apply_self_adc_channel_atten(const machine_adc_obj_t *self, uint8_t at
+ 
+     adc_oneshot_chan_cfg_t config = {
+         .atten = atten,
++        #if CONFIG_IDF_TARGET_ESP32S31
++        // The converter's output width is fixed; read() scales it to bitwidth.
++        .bitwidth = ADC_BITWIDTH_DEFAULT,
++        #else
+         .bitwidth = self->block->bitwidth,
++        #endif
+     };
+     esp_err_t ret = adc_oneshot_config_channel(self->block->handle, self->channel_id, &config);
+     return ret;
+ }
+ 
+-mp_int_t madcblock_read_helper(machine_adc_block_obj_t *self, adc_channel_t channel_id) {
++static int madcblock_read_raw(machine_adc_block_obj_t *self, adc_channel_t channel_id) {
+     adc_is_init_guard(self);
+ 
+     int reading = 0;
+@@ -58,19 +98,36 @@ mp_int_t madcblock_read_helper(machine_adc_block_obj_t *self, adc_channel_t chan
+     return reading;
+ }
+ 
++mp_int_t madcblock_read_helper(machine_adc_block_obj_t *self, adc_channel_t channel_id) {
++    int raw = madcblock_read_raw(self, channel_id);
++    #if CONFIG_IDF_TARGET_ESP32S31
++    // Scale the single-ended reading so that full scale is the block's width.
++    int64_t max = (1 << self->bitwidth) - 1;
++    return (mp_int_t)((s31_single_ended_uv(channel_id, raw) * max + S31_ADC_FULL_SCALE_UV / 2) / S31_ADC_FULL_SCALE_UV);
++    #else
++    return raw;
++    #endif
++}
++
+ /*
+ During testing, it turned out that the function `adc_cali_raw_to_voltage` does not account for the lower resolution,
+ instead it expects the full resolution value as an argument, hence the scaling applied here
+ */
+ mp_int_t madcblock_read_uv_helper(machine_adc_block_obj_t *self, adc_channel_t channel_id, adc_atten_t atten) {
+-    int raw = madcblock_read_helper(self, channel_id);
++    int raw = madcblock_read_raw(self, channel_id);
++    #if CONFIG_IDF_TARGET_ESP32S31
++    (void)atten;
++    return s31_single_ended_uv(channel_id, raw);
++    #else
+     int uv = 0;
+ 
+     check_esp_err(ensure_adc_calibration(self, atten));
+     check_esp_err(adc_cali_raw_to_voltage(self->calib[atten], (raw << (ADC_WIDTH_MAX - self->bitwidth)), &uv));
+     return (mp_int_t)uv * 1000;
++    #endif
+ }
+ 
++#if !CONFIG_IDF_TARGET_ESP32S31
+ static esp_err_t ensure_adc_calibration(machine_adc_block_obj_t *self, adc_atten_t atten) {
+     if (self->calib[atten] != NULL) {
+         return ESP_OK;
+@@ -85,9 +142,6 @@ static esp_err_t ensure_adc_calibration(machine_adc_block_obj_t *self, adc_atten
+         .bitwidth = self->bitwidth,
+     };
+     ret = adc_cali_create_scheme_curve_fitting(&cali_config, &self->calib[atten]);
+-    #elif CONFIG_IDF_TARGET_ESP32S31
+-    // ESP32-S31 currently has no ADC calibration scheme in ESP-IDF.
+-    mp_raise_NotImplementedError(MP_ERROR_TEXT("ADC calibration not supported on this SoC"));
+     #else
+     adc_cali_line_fitting_config_t cali_config = {
+         .unit_id = self->unit_id,
+@@ -99,3 +153,4 @@ static esp_err_t ensure_adc_calibration(machine_adc_block_obj_t *self, adc_atten
+ 
+     return ret;
+ }
++#endif
+diff --git a/ports/esp32/adc.h b/ports/esp32/adc.h
+index 2ee6459a2..86157a25a 100644
+--- a/ports/esp32/adc.h
++++ b/ports/esp32/adc.h
+@@ -41,7 +41,12 @@
+ 
+ #define ADC_ATTEN_COUNT SOC_ADC_ATTEN_NUM
+ #define ADC_ATTEN_MIN ADC_ATTEN_DB_0
++#if CONFIG_IDF_TARGET_ESP32S31
++// The ESP32-S31's SAR ADC has a single input range, which ESP-IDF calls 0 dB.
++#define ADC_ATTEN_MAX ADC_ATTEN_DB_0
++#else
+ #define ADC_ATTEN_MAX ADC_ATTEN_DB_11
++#endif
+ 
+ /*
+ https://github.com/espressif/esp-idf/issues/13128
+diff --git a/ports/esp32/machine_adc.c b/ports/esp32/machine_adc.c
+index 7376cbbcb..2d502e386 100644
+--- a/ports/esp32/machine_adc.c
++++ b/ports/esp32/machine_adc.c
+@@ -58,11 +58,18 @@
+ #define MICROPY_PY_MACHINE_ADC_CLASS_CONSTANTS_WIDTH_13
+ #endif
+ 
+-#define MICROPY_PY_MACHINE_ADC_CLASS_CONSTANTS \
+-    { MP_ROM_QSTR(MP_QSTR_ATTN_0DB), MP_ROM_INT(ADC_ATTEN_DB_0) }, \
++#if !CONFIG_IDF_TARGET_ESP32S31
++#define MICROPY_PY_MACHINE_ADC_CLASS_CONSTANTS_ATTN_2_5_6_11 \
+     { MP_ROM_QSTR(MP_QSTR_ATTN_2_5DB), MP_ROM_INT(ADC_ATTEN_DB_2_5) }, \
+     { MP_ROM_QSTR(MP_QSTR_ATTN_6DB), MP_ROM_INT(ADC_ATTEN_DB_6) }, \
+-    { MP_ROM_QSTR(MP_QSTR_ATTN_11DB), MP_ROM_INT(ADC_ATTEN_DB_11) }, \
++    { MP_ROM_QSTR(MP_QSTR_ATTN_11DB), MP_ROM_INT(ADC_ATTEN_DB_11) },
++#else
++#define MICROPY_PY_MACHINE_ADC_CLASS_CONSTANTS_ATTN_2_5_6_11
++#endif
++
++#define MICROPY_PY_MACHINE_ADC_CLASS_CONSTANTS \
++    { MP_ROM_QSTR(MP_QSTR_ATTN_0DB), MP_ROM_INT(ADC_ATTEN_DB_0) }, \
++    MICROPY_PY_MACHINE_ADC_CLASS_CONSTANTS_ATTN_2_5_6_11 \
+     MICROPY_PY_MACHINE_ADC_CLASS_CONSTANTS_WIDTH_9_10_11 \
+     MICROPY_PY_MACHINE_ADC_CLASS_CONSTANTS_WIDTH_12 \
+     MICROPY_PY_MACHINE_ADC_CLASS_CONSTANTS_WIDTH_13 \
+@@ -217,7 +224,7 @@ void madc_init_helper(const machine_adc_obj_t *self, size_t n_pos_args, const mp
+     mp_int_t atten = args[ARG_atten].u_int;
+     mp_machine_adc_atten_set_helper(self, atten != -1 ? atten : ADC_ATTEN_MAX);
+     mp_machine_adc_block_width_set_helper(self->block, ADC_WIDTH_MAX);
+-    apply_self_adc_channel_atten(self, mp_machine_adc_atten_get_helper(self));
++    check_esp_err(apply_self_adc_channel_atten(self, mp_machine_adc_atten_get_helper(self)));
+ 
+ }
+ 
