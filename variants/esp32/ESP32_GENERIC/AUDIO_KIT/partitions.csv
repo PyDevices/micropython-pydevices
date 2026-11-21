@@ -1,12 +1,16 @@
 # Ai-Thinker ESP32-Audio-Kit, 4 MB flash. A 3.8 MB app slot: Bluetooth Classic
 # with every profile, LVGL, the audio stack and the frozen app libraries take
-# most of the chip. Then 32 KB of ROMFS for compiled packages, which run from
+# most of the chip. Then 24 KB of ROMFS for compiled packages, which run from
 # flash without loading into RAM (docs/guides/run-packages-from-romfs.md): the
-# kit's drivers fit with room to spare. The 96 KB filesystem after it holds
-# boot.py, main.py, the app, settings and data.
+# kit's drivers take 9 KB of it. The 96 KB filesystem after it holds boot.py,
+# main.py, the app, settings and data.
+#
+# The app slot grows into the ROMFS, never the filesystem, so the filesystem
+# stays at 0x3E8000 and keeps its files when a new table is written. App
+# partitions need only 4 KB alignment here (no secure boot).
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x6000,
 phy_init, data, phy,     0xf000,   0x1000,
-factory,  app,  factory, 0x10000,  0x3D0000,
-romfs,    data, 0x8f,    0x3E0000, 0x8000,
+factory,  app,  factory, 0x10000,  0x3D2000,
+romfs,    data, 0x8f,    0x3E2000, 0x6000,
 vfs,      data, fat,     0x3E8000, 0x18000,

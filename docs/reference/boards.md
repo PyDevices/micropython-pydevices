@@ -83,7 +83,7 @@ Our variants, in [`variants/`](https://github.com/PyDevices/omnipython-builds/tr
 | windows | `omnipython` | The same as unix `omnipython`, with the Windows display and audio backends (`displaydev.windisplay`, `audiodev.win_audio`). |
 | windows | `vst3-engine` | The same as unix `vst3-engine`. |
 | webassembly | `omnipython` | The browser runtime, with the `wasmbridge` module and a Fetch-backed `requests`. |
-| esp32 | `ESP32_GENERIC` `AUDIO_KIT` | The ESP32 Audio Kit: upstream's PSRAM variant with flash and PSRAM at 80 MHz, which keeps Bluetooth call audio whole while a program is busy, and the CPU at 240 MHz, which lets a 48 kHz synth run with its reverb. A 128 KB ROMFS partition [runs your own compiled packages from flash](../guides/run-packages-from-romfs.md). |
+| esp32 | `ESP32_GENERIC` `AUDIO_KIT` | The ESP32 Audio Kit: upstream's PSRAM variant with flash and PSRAM at 80 MHz, which keeps Bluetooth call audio whole while a program is busy, and the CPU at 240 MHz, which lets a 48 kHz synth run with its reverb. A 24 KB ROMFS partition [runs your own compiled packages from flash](../guides/run-packages-from-romfs.md). |
 | esp32 | `ESP32_GENERIC_S3` `NO_PSRAM` | An S3 with no PSRAM: upstream's generic build without its PSRAM settings, TLS in internal RAM, and the caches and Wi-Fi buffers at sizes internal RAM can spare. |
 | esp32 | `ESP32_GENERIC_S3` `LCD_4_3`, `LCD_7`, `T_EMBED` | The S3 boards in the table above. |
 | esp32 | `ESP32_GENERIC_S31` `LCD_4_3C`, `ZERO` | The S31 boards in the table above. `ZERO` puts the REPL on the chip's USB Serial/JTAG and reads 32 MB of flash. |
