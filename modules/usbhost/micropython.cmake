@@ -1,4 +1,4 @@
-# MicroPython CMake glue for usbhost (ESP32-S2/S3/P4; see the guard below).
+# MicroPython CMake glue for usbhost (ESP32-S2/S3/P4/S31; see the guard below).
 # For Make-based ports (unix, windows), see micropython.mk in this dir.
 #
 # Point USER_C_MODULES at this repo (or this file) directly, e.g.:
@@ -10,7 +10,9 @@ set(USBHOST_MOD_DIR ${CMAKE_CURRENT_LIST_DIR})
 set(USBHOST_SRC_DIR ${USBHOST_MOD_DIR}/src)
 
 # On the ESP32 this host is ESP-IDF's usb_host library, which needs a USB OTG
-# controller: ESP32-S2, S3, and P4. (The Arduino GIGA R1's TinyUSB host is wired
+# controller (SOC_USB_OTG_SUPPORTED): ESP32-S2, S3, P4 and S31. From ESP-IDF 6
+# the library is the component registry's espressif/usb, which the port's
+# component manifest names. (The Arduino GIGA R1's TinyUSB host is wired
 # up by micropython.mk.) The device-side streaming hooks below sit on TinyUSB,
 # which is present on the same parts. That is the line MicroPython draws with
 # MICROPY_PY_TINYUSB (ports/esp32/esp32_common.cmake).
@@ -26,9 +28,9 @@ set(USBHOST_SRC_DIR ${USBHOST_MOD_DIR}/src)
 # idf_component_get_property() below is a hard CMake error for a component that
 # does not exist, so the `if(usbhost_tusb_lib)` test never gets to run. Skipping
 # the module leaves the rest of the firmware buildable.
-if(NOT (ESP_PLATFORM AND (CONFIG_IDF_TARGET_ESP32S2 OR CONFIG_IDF_TARGET_ESP32S3 OR CONFIG_IDF_TARGET_ESP32P4)))
+if(NOT (ESP_PLATFORM AND CONFIG_SOC_USB_OTG_SUPPORTED))
     message(STATUS
-        "usbhost: skipped -- builds only on the ESP32-S2, S3, and P4. The firmware "
+        "usbhost: skipped -- builds only on the ESP32-S2, S3, P4 and S31. The firmware "
         "builds without the _usbhost module.")
     return()
 endif()

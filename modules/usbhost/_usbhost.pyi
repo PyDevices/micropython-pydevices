@@ -36,7 +36,8 @@ def host_start(classes: Iterable[str], *, full_speed: bool = False) -> set[str]:
             are left out, and so are unknown ones. Takes effect when the host
             starts, not on a running host.
         full_speed: Hold the root port to full speed, so full- and low-speed
-            devices work behind a hub on the ESP32-P4's high-speed host.
+            devices work behind a hub on a high-speed host (the ESP32-P4's
+            and the ESP32-S31's).
 
     Returns:
         The set of classes actually started.

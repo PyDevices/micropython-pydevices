@@ -5,6 +5,7 @@
 """scripts/pins.py: DEPENDENCIES.lock, read the one way every script and workflow reads it."""
 
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -80,6 +81,15 @@ class TheFile(unittest.TestCase):
         sys.path.insert(0, str(HERE))
         import build_mp
         self.assertLessEqual(build_mp.CP_ESP_IDF_COMPONENT_DEPS, set(pins.TOOLCHAINS))
+
+    def test_the_s31_asks_for_the_usb_host_library_this_file_pins(self):
+        # CircuitPython's build fetches the usb line's archive; the S31's
+        # MicroPython build gets the component from its manifest, which a
+        # patch writes. One version for both.
+        patch = next((HERE / "patches" / "micropython-s31").glob("*-usb-host-library.patch")).read_text()
+        got = re.search(r'^\+  espressif/usb:\n\+    version: "([^"]+)"', patch, re.M)
+        self.assertTrue(got, "the S31's manifest patch names no espressif/usb version")
+        self.assertEqual(got.group(1), self.lock["usb"].ref)
 
     def test_the_command_line(self):
         def run(*a):

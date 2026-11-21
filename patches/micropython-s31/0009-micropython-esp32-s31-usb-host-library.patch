@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PyDevices <pydevices@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 03:02:23 -0600
+Subject: [PATCH] esp32: the USB host library on the ESP32-S31.
+
+ESP-IDF 6 moved the USB host library (usb_host) out of ESP-IDF and into
+the component registry as espressif/usb, so a user C module that hosts
+USB devices finds no usb/usb_host.h on the ESP32-S31. The port's component
+manifest now names espressif/usb 1.6.1 for the S31: 1.4.0 added the chip,
+1.6.0 lets its controller's DMA reach PSRAM, and 1.6.1 fixes asserts when
+a device or a hub is unplugged during a transfer. Nothing links it unless
+a module uses it.
+---
+ ports/esp32/main/idf_component.yml | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/ports/esp32/main/idf_component.yml b/ports/esp32/main/idf_component.yml
+index a903022..091fe37 100644
+--- a/ports/esp32/main/idf_component.yml
++++ b/ports/esp32/main/idf_component.yml
+@@ -11,6 +11,14 @@ dependencies:
+     # target, so use the registry component which carries the DWC2 OUT EP
+     # ZLP fix (hathach/tinyusb#3293) as well.
+     version: "0.19.0~3"
++  # The USB host library, for a user C module that drives USB devices. From
++  # ESP-IDF 6 it is this component and no longer part of ESP-IDF itself.
++  # 1.6.0 is the first to take the ESP32-S31's DMA from PSRAM; 1.6.1 fixes
++  # asserts on a device or hub unplugged mid-transfer.
++  espressif/usb:
++    version: "1.6.1"
++    rules:
++      - if: "target == esp32s31"
+   # esp_hosted / esp_wifi_remote: pinned to the versions that build against
+   # both IDF v5.x and v6.x (older 0.15.x / 2.7.x don't build against IDF v6,
+   # the wifi_remote sources for v6.1 are only in 1.6.0+).
+-- 
+2.43.0
+

@@ -5,8 +5,8 @@ host port and the transfers and isochronous streams that `usb.core` and the
 `usb.host.*` packages are built on. You don't import it yourself. You use the
 packages, and they use it.
 
-It builds on the ESP32-S2, S3 and P4, the parts with a USB OTG controller, on
-ESP-IDF's USB host library. Its CMake glue skips every other part, so a
+It builds on the ESP32-S2, S3, P4 and S31, the parts with a USB OTG
+controller, on ESP-IDF's USB host library. Its CMake glue skips every other part, so a
 firmware for those still builds, without the host.
 
 On the Arduino GIGA R1 it runs on TinyUSB's host, on the USB-A port at full
