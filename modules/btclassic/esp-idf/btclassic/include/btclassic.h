@@ -406,6 +406,10 @@ int btc_hf_dtmf(char digit);
 int btc_hf_voice_recognition(bool on);
 int btc_hf_set_speaker_gain(int gain);      // 0..15, told to the phone
 int btc_hf_set_mic_gain(int gain);
+// Whether this unit takes a call's audio at all. False where the chip's
+// controller can't carry it: calls still reach the program, and their audio
+// stays on the phone. connect_audio() then fails as unsupported.
+bool btc_hf_call_audio(void);
 // Bluedroid's audio gateway has global functions of these four names, so
 // the hands-free unit's link under other symbols. Code keeps these names.
 #define btc_hf_connect_audio btclassic_hf_connect_audio

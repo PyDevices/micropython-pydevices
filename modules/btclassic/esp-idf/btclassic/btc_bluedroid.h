@@ -30,6 +30,12 @@
 #define BTC_CALL_AUDIO 0
 #endif
 
+// Set by hfp_decline.cmake on a chip whose controller can't carry a call's
+// audio: the hands-free unit then leaves every call's audio on the phone.
+#ifndef BTCLASSIC_DECLINE_CALL_AUDIO
+#define BTCLASSIC_DECLINE_CALL_AUDIO 0
+#endif
+
 #if CONFIG_BT_HFP_AG_ENABLE
 #define BTC_AG 1
 #else

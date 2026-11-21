@@ -19,12 +19,18 @@
 #include "esp_log.h"
 
 #include "btc_bluedroid.h"
+#include "hfp_decline.h"
 
 #if BTC_HFP
 
 #include "esp_hf_client_api.h"
 #if BTC_CALL_AUDIO
 #include "esp_hf_client_legacy_api.h"
+#endif
+
+#if BTCLASSIC_DECLINE_CALL_AUDIO
+_Static_assert(sizeof(BTC_HF_POLICY_MARKER) - 1 == ESP_BT_HF_AT_SEND_XAPL_LEN,
+    "Bluedroid only sends XAPL information of this length");
 #endif
 
 static const char *TAG = "btclassic";
@@ -173,6 +179,13 @@ static void hf_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *para
                 h.connected = true;
                 memcpy(h.peer, param->conn_stat.remote_bda, sizeof(btc_addr_t));
                 BTC_UNLOCK();
+                #if BTCLASSIC_DECLINE_CALL_AUDIO
+                // Android's audio policy, through hfp_decline.c: keep calls'
+                // audio on the phone.
+                if (esp_hf_client_send_xapl(BTC_HF_POLICY_MARKER, 0) != ESP_OK) {
+                    ESP_LOGE(TAG, "call audio: the audio policy was not sent");
+                }
+                #endif
                 esp_hf_client_query_current_operator_name();
                 esp_hf_client_retrieve_subscriber_info();
                 esp_hf_client_query_current_calls();
@@ -185,7 +198,7 @@ static void hf_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *para
             }
             break;
         case ESP_HF_CLIENT_AUDIO_STATE_EVT:
-            #if BTC_CALL_AUDIO
+            #if BTC_CALL_AUDIO && !BTCLASSIC_DECLINE_CALL_AUDIO
             if (param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED) {
                 audio_start(8000);      // CVSD
             } else if (param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC) {
@@ -195,6 +208,7 @@ static void hf_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *para
             }
             #else
             // No call audio in this build: hand the call back to the phone.
+            // A declining build turns the link down before it gets here.
             if (param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED
                 || param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC) {
                 esp_hf_client_disconnect_audio(param->audio_stat.remote_bda);
@@ -513,7 +527,14 @@ int btc_hf_set_mic_gain(int gain) {
     return set_gain(ESP_HF_VOLUME_CONTROL_TARGET_MIC, &h.mic_gain, gain);
 }
 
+bool btc_hf_call_audio(void) {
+    return BTC_CALL_AUDIO && !BTCLASSIC_DECLINE_CALL_AUDIO;
+}
+
 int btc_hf_connect_audio(void) {
+    if (!btc_hf_call_audio()) {
+        return BTC_ERR_UNSUPPORTED;
+    }
     int err = ready();
     return err ? err : btc_err(esp_hf_client_connect_audio(h.peer));
 }
@@ -606,6 +627,9 @@ int btc_hf_set_speaker_gain(int gain) {
 int btc_hf_set_mic_gain(int gain) {
     (void)gain;
     return BTC_ERR_UNSUPPORTED;
+}
+bool btc_hf_call_audio(void) {
+    return false;
 }
 int btc_hf_connect_audio(void) {
     return BTC_ERR_UNSUPPORTED;

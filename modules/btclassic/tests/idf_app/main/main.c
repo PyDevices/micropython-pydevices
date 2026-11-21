@@ -66,6 +66,7 @@ void app_main(void) {
     btc_hf_voice_recognition(false);
     btc_hf_set_speaker_gain(10);
     btc_hf_set_mic_gain(10);
+    btc_hf_call_audio();
     btc_hf_connect_audio();
     btc_hf_disconnect_audio();
     btc_hf_connect(NULL);

@@ -180,6 +180,14 @@ the `bluetooth` backend's BLE 4.2 calls never use, and Bluedroid's
 semaphores and the audio pump's stack live in PSRAM. The other profiles
 are in the firmware but haven't been tried on the S31 yet.
 
+Calls on the S31 are control only for now. Its Bluetooth controller, which
+ships closed with ESP-IDF, can't yet be trusted to set up a call's audio
+link, so `HandsFree` asks the phone to keep calls' audio and turns down any
+audio link it offers. The call's state, the caller, answer and hang-up, and
+the phone's battery and signal all work. `HandsFree.call_audio` is False,
+`audio` stays False and `connect_audio()` raises OSError. Android 14 and later
+take the request; a phone that doesn't has its audio link turned down.
+
 BLE runs beside Classic on the same board. Synth Station takes BLE-MIDI
 from a Windows PC with no pairing, and the link holds; a note's round trip
 to the app and back has a median of 136 ms. A firmware built before
