@@ -55,8 +55,9 @@ drive = Drive(usb.core.find(custom_match=Drive.match))
 vfs.mount(vfs.VfsFat(drive), "/usb")
 ```
 
-What the host can and can't do yet, keyboards behind a hub on the P4, and
-why events are drained rather than called back:
+What the host can and can't do yet, keyboards behind a hub on the P4 and
+S31, the S31's host header, and why events are drained rather than called
+back:
 [docs/host.md](docs/host.md).
 
 ## Building

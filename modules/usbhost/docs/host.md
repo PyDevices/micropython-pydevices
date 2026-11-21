@@ -18,16 +18,17 @@ An endpoint bigger than the split takes is refused with `OSError` E2BIG,
 and the host prints the split's limits;
 concurrent sessions are bounded by a
 *channel budget*, not by class -- the ESP32-S3 has eight host channels
-(`OTG_NUM_HOST_CHAN`), a bulk pair costs two and an interrupt IN costs
+(`OTG_NUM_HOST_CHAN`), the ESP32-P4 and S31 have sixteen, a bulk pair costs two and an interrupt IN costs
 one, and every device including a hub costs one for its control pipe.
 On the bench that means HID pairs with either MSC or MIDI, while MSC and
 MIDI together do not fit. Note the class filter does *not* buy room: it
 declines interfaces, not devices, and every enumerated device keeps its
 control pipe either way -- so a hub costs two channels before carrying
 anything. Host mode is proven at full speed on the ESP32-S3, and at high
-speed on the ESP32-P4 with a webcam on a port that supplies 5 V; behind a hub
-the P4 reaches full-speed devices when you start the host with
-`full_speed=True` (see [below](#keyboards-and-midi-controllers-behind-a-hub-on-the-esp32-p4)). MSC now mounts as a filesystem, read-write
+speed on the ESP32-P4 with a webcam on a port that supplies 5 V and on the
+[ESP32-S31](#the-esp32-s31) behind a hub; behind a hub the P4 and S31 reach
+full-speed devices when you start the host with
+`full_speed=True` (see [below](#keyboards-and-midi-controllers-behind-a-hub-on-the-esp32-p4-and-s31)). MSC now mounts as a filesystem, read-write
 ([`examples/usb_host_msc_simpletest.py`](../examples/usb_host_msc_simpletest.py) is the shortest, and [`examples/usb_drive_mount.py`](../examples/usb_drive_mount.py) lists a hosted stick; [`usb_drive_log.py`](../examples/usb_drive_log.py)
 appends sensor lines to one and reads them back after a remount;
 [`usb_drive_read.py`](../examples/usb_drive_read.py) reads a file end to end and checks its SHA-256), with
@@ -68,9 +69,9 @@ A camera's larger alternate settings promise two or three transactions a microfr
 
 A slow stream from a webcam is usually the camera. Most lengthen the exposure in a dim room and send fewer frames than the mode says (a C920e asked for 30 a second gave 22 at 640x480, with every microframe polled and no errors). `Camera.hold_frame_rate()` turns that off.
 
-## Keyboards and MIDI controllers behind a hub on the ESP32-P4
+## Keyboards and MIDI controllers behind a hub on the ESP32-P4 and S31
 
-The P4's host port is high speed. Plug a keyboard, a mouse or a MIDI
+The P4's and the S31's host ports are high speed. Plug a keyboard, a mouse or a MIDI
 controller into it directly and it works. Put it behind a hub and it won't
 enumerate, because a high-speed hub talks to a slower device through a
 transaction translator, which the ESP-IDF host doesn't support. The console
@@ -94,31 +95,67 @@ the ESP32-S2 and S3 the port is full speed already, and the option changes
 nothing. Under the hood it sets the controller's `HCFG.FSLSSupp` bit before
 the port is powered.
 
-### Pick the speed once per power-up on the WIFI6 DEV-KIT
+### Change speed across a reset on the WIFI6 DEV-KIT
 
 On the Waveshare ESP32-P4-WIFI6-DEV-KIT, don't change `full_speed` between
-starts. The onboard hub (a CH334F) runs from the board's 3.3 V rail, its
-power pins aren't wired to the chip, and the sockets' 5 V is always on, so
-nothing the P4 does can take power away from it. `host_stop()` and
+two starts in one run. The onboard hub (a CH334F) runs from the board's 3.3 V
+rail, its power pins aren't wired to the chip, and the sockets' 5 V is always
+on, so nothing the P4 does can take power away from it. `host_stop()` and
 `host_port_cycle()` only clear the controller's port-power bit, which stops
-the P4 driving the bus; they don't reset the hub, and neither does
-`machine.reset()`. A hub that enumerated at high speed and then finds the
-host back at full speed (or the other way round, which is untested) can end
-up answering nothing at either speed, and only removing the board's power
-brings it back
+the P4 driving the bus; they don't reset the hub. Once, a host that ran at
+high speed, stopped and started again with `full_speed=True` left the hub
+answering nothing at either speed, and neither `machine.reset()` nor
+`host_port_cycle()` brought it back; removing the board's power did
 ([#121](https://github.com/PyDevices/omnipython-builds/issues/121)).
 
-So `usb.core.start()` refuses that change on this board. It raises
-`USBError` before it touches the host, so the host that is running keeps
-running, and the message says what to do: start with the speed you used, or
-unplug the board's USB power and start again. Stopping and starting at the
-same speed works, and so does changing `classes`. The check remembers the
-speed for as long as the interpreter runs, so a soft reset forgets it while
-the hub doesn't: choose `full_speed=True` if a keyboard or MIDI controller
-will sit behind the hub, and use the same value in every script you run
-between power-ups. If H3 sends the host straight to the lower socket the hub
+A hard reset between the two speeds is a different sequence, and it works:
+after a high-speed run and a hard reset, the hub, a drive and a MIDI
+controller enumerated at full speed again. The other direction, full speed and then
+high speed in one run, is untested.
+
+So `usb.core.start()` refuses a change of speed within one run on this
+board. It raises `USBError` before it touches the host, so the host that is
+running keeps running, and the message says what to do. Stopping and starting
+at the same speed works, and so does changing `classes`. The check remembers
+the speed for as long as the interpreter runs, so a soft reset forgets it.
+Choose `full_speed=True` if a keyboard or MIDI controller will sit behind the
+hub, and reset the board before you start at the other speed. If H3 sends the host straight to the lower socket the hub
 isn't in the path, and `usb.core.start(full_speed=..., force=True)` skips the
 check.
+
+## The ESP32-S31
+
+The S31's USB OTG controller is high speed on a UTMI PHY, like the P4's, with
+sixteen host channels and 896 lines of FIFO, so it gets the P4's larger FIFO
+split and `full_speed=True`. On ESP-IDF 6 the host library comes from the
+component registry as `espressif/usb`, which the S31's build pins.
+
+On the Waveshare ESP32-S31-Touch-LCD-4.3C the host port is the 4-pin header
+J3: GND, D+, D- and the board's 5 V, through 2.2 Ω series resistors. Its
+USB-C is the serial console only. Wire J3 to a USB-A socket or a hub's
+upstream cable; a powered hub keeps the devices' current off the board's 5 V.
+
+Behind a powered four-port hub on J3, at full speed (`full_speed=True`):
+
+- a flash drive mounted, took a 1 MiB file and read it back with a matching
+  SHA-256, at about 610 KB/s write and 690 KB/s read;
+- a Logitech C920e streamed 640x480 MJPEG at about 15 frames a second;
+- a USB MIDI keyboard's note-on and note-off messages arrived as its keys
+  were played;
+- another board's CDC serial console answered a REPL round trip.
+
+At high speed the hub, the drive, the camera and the CDC board enumerated at
+high speed, and the keyboard was refused, as a full-speed device behind a
+high-speed hub is (see [above](#keyboards-and-midi-controllers-behind-a-hub-on-the-esp32-p4-and-s31)).
+The drive ran at about 1.2 MB/s write and 7 MB/s read, and the C920e streamed
+640x480 MJPEG at 13.7 frames a second and 1280x720 at 12.6. The hub on J3
+changed speed both ways between starts, and the WIFI6 DEV-KIT's check
+doesn't apply to the S31.
+
+The S31's firmware has no `machine.USBDevice`, so `usb.host.audio` and
+`usb.host.video` take their stream ring from `_usbhost.Ring`, which is
+`USBDevice.Ring` itself on a firmware that has one. A USB sound card hasn't
+been run on the S31.
 
 ## Host and device at once on the ESP32-P4
 
