@@ -6,10 +6,11 @@ into RAM, so a program that only just fits from `/lib` has room to spare, and
 you don't build any firmware: you compile your `.py` files on your computer and
 write them to the partition.
 
-The ESP32 Audio Kit's firmware (`ESP32_GENERIC` `AUDIO_KIT`) has a 32 KB ROMFS
+The ESP32 Audio Kit's firmware (`ESP32_GENERIC` `AUDIO_KIT`) has a 24 KB ROMFS
 partition: its firmware fills the rest of the 4 MB, so that is room for the
-kit's own drivers and about 20 KB of yours. Flashing that table moves the
-kit's filesystem, so copy your files off first and put them back after.
+kit's own drivers and about 14 KB of yours. A kit flashed with an older table
+(a 32 KB ROMFS at 0x3E0000) keeps its filesystem when you write the new table
+with the app, but the ROMFS moves: deploy your folder again after.
 
 On the Arduino GIGA R1 the firmware's own Python lives in ROMFS, so
 your files go in beside it ([flash a board](flash-a-board.md#stm32-arduino-giga-r1-wifi)).
