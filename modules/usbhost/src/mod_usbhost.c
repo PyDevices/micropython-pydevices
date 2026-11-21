@@ -447,8 +447,9 @@ static MP_DEFINE_CONST_FUN_OBJ_3(usbhost_host_poll_obj, usbhost_host_poll_py);
 
 // Isochronous host streams (usbhost_host_stream.c): an endpoint's packets moved
 // to or from a ring in C, for usb.host.audio and usb.host.video. The ring is
-// a machine.USBDevice.Ring, the same one a device-side stream uses, or, for
-// a capture stream, an audiodsp audiopump.Ring the pump plays from.
+// a _usbhost.Ring (machine.USBDevice.Ring itself, where the firmware has
+// one), or, for a capture stream, an audiodsp audiopump.Ring the pump plays
+// from.
 #if USBHOST_HAVE_STREAM
 #include "usbhost_host_stream.h"
 
@@ -473,6 +474,171 @@ static void usbhost_stream_release_owners(void) {
 static uint32_t usbhost_ring_put(void *r, const uint8_t *src, uint32_t n) {
     return mp_usbd_ring_put(r, src, n) ? n : 0;
 }
+#define USBHOST_RING_TYPE (mp_usbd_ring_type)
+#else
+// _usbhost.Ring, for a firmware without machine.USBDevice (the ESP32-S31's,
+// for now): the same ring, with the same Python surface (any, readinto,
+// write, stats) and the same C surface a stream uses. With USBDevice in the
+// firmware, _usbhost.Ring is USBDevice.Ring itself. One producer and one
+// consumer: the host's stream task puts, the interpreter reads.
+typedef struct {
+    mp_obj_base_t base;
+    uint8_t *buf;
+    uint32_t mask;              // size - 1; size is a power of two
+    volatile uint32_t head;     // free-running: the producer's count
+    volatile uint32_t tail;     // free-running: the consumer's count
+    volatile uint32_t overflows;    // writes refused for want of room
+    volatile uint32_t underflows;   // reads that found less than asked
+} usbhost_ring_obj_t;
+
+static uint32_t usbhost_ring_used(void *ring) {
+    usbhost_ring_obj_t *r = ring;
+    return r->head - r->tail;
+}
+
+static uint32_t usbhost_ring_size(void *ring) {
+    return ((usbhost_ring_obj_t *)ring)->mask + 1;
+}
+
+// n bytes in, all or nothing: n, or 0 and an overflow counted.
+static uint32_t usbhost_ring_put(void *ring, const uint8_t *src, uint32_t n) {
+    usbhost_ring_obj_t *r = ring;
+    uint32_t size = r->mask + 1;
+    if (size - usbhost_ring_used(r) < n) {
+        r->overflows++;
+        return 0;
+    }
+    uint32_t at = r->head & r->mask;
+    uint32_t first = n < size - at ? n : size - at;
+    memcpy(r->buf + at, src, first);
+    memcpy(r->buf, src + first, n - first);
+    __sync_synchronize();
+    r->head += n;
+    return n;
+}
+
+// Up to n bytes out; the count.
+static uint32_t usbhost_ring_get(void *ring, uint8_t *dst, uint32_t n) {
+    usbhost_ring_obj_t *r = ring;
+    uint32_t avail = usbhost_ring_used(r);
+    if (avail < n) {
+        r->underflows++;
+        n = avail;
+    }
+    uint32_t size = r->mask + 1;
+    uint32_t at = r->tail & r->mask;
+    uint32_t first = n < size - at ? n : size - at;
+    memcpy(dst, r->buf + at, first);
+    memcpy(dst + first, r->buf, n - first);
+    __sync_synchronize();
+    r->tail += n;
+    return n;
+}
+
+// A record built in pieces: staged past the producer's position, published
+// whole by commit(), so the reader only ever sees whole frames.
+static bool usbhost_ring_stage(void *ring, uint32_t offset, const uint8_t *src, uint32_t n) {
+    usbhost_ring_obj_t *r = ring;
+    uint32_t size = r->mask + 1;
+    uint32_t room = size - usbhost_ring_used(r);
+    if (offset > room || n > room - offset) {
+        return false;
+    }
+    uint32_t at = (r->head + offset) & r->mask;
+    uint32_t first = n < size - at ? n : size - at;
+    memcpy(r->buf + at, src, first);
+    memcpy(r->buf, src + first, n - first);
+    return true;
+}
+
+static void usbhost_ring_commit(void *ring, uint32_t n) {
+    usbhost_ring_obj_t *r = ring;
+    __sync_synchronize();
+    r->head += n;
+}
+
+static void usbhost_ring_overflow(void *ring) {
+    ((usbhost_ring_obj_t *)ring)->overflows++;
+}
+
+// Ring(nbytes): rounded up to a power of two.
+static mp_obj_t usbhost_ring_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+    mp_arg_check_num(n_args, n_kw, 1, 1, false);
+    mp_int_t want = mp_obj_get_int(args[0]);
+    if (want < 2 || want > (1 << 24)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("ring size"));
+    }
+    uint32_t size = 2;
+    while (size < (uint32_t)want) {
+        size <<= 1;
+    }
+    usbhost_ring_obj_t *self = mp_obj_malloc(usbhost_ring_obj_t, type);
+    self->buf = m_new(uint8_t, size);
+    self->mask = size - 1;
+    self->head = self->tail = self->overflows = self->underflows = 0;
+    return MP_OBJ_FROM_PTR(self);
+}
+
+// ring.any(): bytes waiting.
+static mp_obj_t usbhost_ring_any(mp_obj_t self_in) {
+    return mp_obj_new_int_from_uint(usbhost_ring_used(MP_OBJ_TO_PTR(self_in)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(usbhost_ring_any_obj, usbhost_ring_any);
+
+// ring.readinto(buf[, nbytes]): bytes taken (0 when empty, never blocks).
+static mp_obj_t usbhost_ring_readinto(size_t n_args, const mp_obj_t *args) {
+    usbhost_ring_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(args[1], &bi, MP_BUFFER_WRITE);
+    uint32_t n = bi.len;
+    if (n_args > 2) {
+        mp_int_t lim = mp_obj_get_int(args[2]);
+        if (lim >= 0 && (uint32_t)lim < n) {
+            n = lim;
+        }
+    }
+    uint32_t avail = usbhost_ring_used(self);
+    return mp_obj_new_int_from_uint(usbhost_ring_get(self, bi.buf, n < avail ? n : avail));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbhost_ring_readinto_obj, 2, 3, usbhost_ring_readinto);
+
+// ring.write(buf): bytes taken, all of buf or none (0 when it won't fit).
+static mp_obj_t usbhost_ring_write(mp_obj_t self_in, mp_obj_t buf_in) {
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(buf_in, &bi, MP_BUFFER_READ);
+    return mp_obj_new_int_from_uint(usbhost_ring_put(MP_OBJ_TO_PTR(self_in), bi.buf, bi.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(usbhost_ring_write_obj, usbhost_ring_write);
+
+// ring.stats(): (size, waiting, overflows, underflows).
+static mp_obj_t usbhost_ring_stats(mp_obj_t self_in) {
+    usbhost_ring_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    mp_obj_t items[4] = {
+        mp_obj_new_int_from_uint(self->mask + 1),
+        mp_obj_new_int_from_uint(usbhost_ring_used(self)),
+        mp_obj_new_int_from_uint(self->overflows),
+        mp_obj_new_int_from_uint(self->underflows),
+    };
+    return mp_obj_new_tuple(4, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(usbhost_ring_stats_obj, usbhost_ring_stats);
+
+static const mp_rom_map_elem_t usbhost_ring_locals_dict_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_any), MP_ROM_PTR(&usbhost_ring_any_obj) },
+    { MP_ROM_QSTR(MP_QSTR_readinto), MP_ROM_PTR(&usbhost_ring_readinto_obj) },
+    { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&usbhost_ring_write_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&usbhost_ring_stats_obj) },
+};
+static MP_DEFINE_CONST_DICT(usbhost_ring_locals_dict, usbhost_ring_locals_dict_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    usbhost_ring_type,
+    MP_QSTR_Ring,
+    MP_TYPE_FLAG_NONE,
+    make_new, usbhost_ring_make_new,
+    locals_dict, &usbhost_ring_locals_dict
+    );
+#define USBHOST_RING_TYPE (usbhost_ring_type)
 #endif
 #endif
 
@@ -530,6 +696,16 @@ static mp_obj_t usbhost_host_stream_py(size_t n_args, const mp_obj_t *pos_args, 
         };
         known = true;
     }
+    #else
+    if (mp_obj_is_type(ring, &usbhost_ring_type)) {
+        cfg.ring = (usbhost_stream_ring_t) {
+            .ctx = ptr, .put = usbhost_ring_put, .get = usbhost_ring_get,
+            .used = usbhost_ring_used, .size = usbhost_ring_size,
+            .stage = usbhost_ring_stage, .commit = usbhost_ring_commit,
+            .overflow = usbhost_ring_overflow,
+        };
+        known = true;
+    }
     #endif
     #if defined(AUDIOPUMP_RING_HAS_SINK_WRITE)
     if (mp_obj_is_type(ring, &audiopump_ring_type)) {
@@ -541,7 +717,7 @@ static mp_obj_t usbhost_host_stream_py(size_t n_args, const mp_obj_t *pos_args, 
     }
     #endif
     if (!known) {
-        mp_raise_TypeError(MP_ERROR_TEXT("ring must be a machine.USBDevice.Ring or an audiopump.Ring"));
+        mp_raise_TypeError(MP_ERROR_TEXT("ring must be a _usbhost.Ring or an audiopump.Ring"));
     }
     int slot = usbhost_stream_open(dev_id, ep, &cfg);
     if (slot < 0) {
@@ -727,6 +903,9 @@ static const mp_rom_map_elem_t usbhost_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_host_xfer), MP_ROM_PTR(&usbhost_host_xfer_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_poll), MP_ROM_PTR(&usbhost_host_poll_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_stream), MP_ROM_PTR(&usbhost_host_stream_obj) },
+    #if USBHOST_HAVE_STREAM
+    { MP_ROM_QSTR(MP_QSTR_Ring), MP_ROM_PTR(&USBHOST_RING_TYPE) },
+    #endif
     { MP_ROM_QSTR(MP_QSTR_host_stream_stats), MP_ROM_PTR(&usbhost_host_stream_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_stream_write), MP_ROM_PTR(&usbhost_host_stream_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_stream_space), MP_ROM_PTR(&usbhost_host_stream_space_obj) },
