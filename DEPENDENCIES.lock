@@ -102,6 +102,9 @@ cmake_utilities   https://components-file.espressif.com/components/espressif/cma
 # MicroPython's build for.
 esp_h264          https://components-file.espressif.com/components/espressif/esp_h264/1.4.1/espressif__esp_h264-v1.4.1.zip              1.4.1
 # usb, ESP-IDF's USB host library, for usbhost on CircuitPython's espressif
-# port: from ESP-IDF 6 it is this registry component, not part of ESP-IDF.
-# The name is the component's, which ESP-IDF takes from its directory.
-usb               https://components-file.espressif.com/components/espressif/usb/1.6.0/espressif__usb-v1.6.0.zip                      1.6.0
+# port and on the ESP32-S31: from ESP-IDF 6 it is this registry component,
+# not part of ESP-IDF. CircuitPython's build fetches this archive; the S31's
+# component manifest names the same version (patches/micropython-s31/0009),
+# and tests/test_pins.py checks the two agree. The name is the component's,
+# which ESP-IDF takes from its directory.
+usb               https://components-file.espressif.com/components/espressif/usb/1.6.1/espressif__usb-v1.6.1.zip                      1.6.1

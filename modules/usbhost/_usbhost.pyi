@@ -27,6 +27,29 @@ tag, or the nearest one and the commit. "unknown" when the build had no git."""
 # "full" or "high", or None.
 _Device = tuple[int, int, int, str | None, str | None, set[str], str | None]
 
+class Ring:
+    """A byte ring an isochronous stream moves packets into or out of.
+
+    One producer and one consumer: the host's stream on one side, the
+    program on the other. On a firmware with `machine.USBDevice` this is
+    `machine.USBDevice.Ring` itself.
+    """
+
+    def __init__(self, nbytes: int) -> None:
+        """A ring of at least `nbytes`, rounded up to a power of two."""
+
+    def any(self) -> int:
+        """Bytes waiting."""
+
+    def readinto(self, buf: bytearray | memoryview, nbytes: int = -1) -> int:
+        """Take up to `nbytes` (all of `buf` by default); 0 when empty, never blocks."""
+
+    def write(self, buf: bytes | bytearray | memoryview) -> int:
+        """Put all of `buf`, or none of it when it won't fit; the bytes taken."""
+
+    def stats(self) -> tuple[int, int, int, int]:
+        """(size, waiting, overflows, underflows)."""
+
 def host_start(classes: Iterable[str], *, full_speed: bool = False) -> set[str]:
     """Start the USB host, or leave a running one running.
 
@@ -36,7 +59,8 @@ def host_start(classes: Iterable[str], *, full_speed: bool = False) -> set[str]:
             are left out, and so are unknown ones. Takes effect when the host
             starts, not on a running host.
         full_speed: Hold the root port to full speed, so full- and low-speed
-            devices work behind a hub on the ESP32-P4's high-speed host.
+            devices work behind a hub on a high-speed host (the ESP32-P4's
+            and the ESP32-S31's).
 
     Returns:
         The set of classes actually started.
@@ -169,8 +193,8 @@ def host_stream(
         dev: The device.
         ep: The endpoint address; an IN endpoint fills the ring, an OUT
             endpoint drains it.
-        ring: A `machine.USBDevice.Ring`, or for a capture stream an
-            `audiopump.Ring`. None stops the stream.
+        ring: A `Ring`, or for a capture stream an `audiopump.Ring`. None
+            stops the stream.
         packet: The packet size in bytes.
         rate: The sample rate, to pace a PCM OUT stream.
         frame: The bytes in one frame of PCM, to pace a PCM OUT stream.

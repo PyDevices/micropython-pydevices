@@ -56,9 +56,33 @@
 #include "esp_intr_alloc.h"
 #include "esp_cpu.h"
 #include "usb/usb_host.h"
-#if defined(CONFIG_IDF_TARGET_ESP32P4)
+#include "esp_idf_version.h"
+#include "soc/soc_caps.h"
+
+// A host controller on a UTMI PHY runs at high speed: the P4's and the
+// S31's. Each has four times the S2/S3's FIFO, and each can be held to full
+// speed for a hub with full-speed devices on it (host_start's full_speed).
+// The S2 and S3 are full speed only.
+#if defined(SOC_USB_UTMI_PHY_NUM) && SOC_USB_UTMI_PHY_NUM > 0
+#define USBHOST_HOST_HIGH_SPEED (1)
+#include "hal/usb_dwc_hal.h"
 #include "hal/usb_dwc_ll.h"
+#else
+#define USBHOST_HOST_HIGH_SPEED (0)
 #endif
+
+// How the controller is held to full speed. From ESP-IDF 6 the host library
+// is the component registry's espressif/usb, which from 1.6.0 does it when
+// usb_host_config_t.fsls_only is set, given a USB HAL that takes the setting
+// (USB_DWC_HAL_INIT_HAS_CONFIG; ESP-IDF 6.1's doesn't, and the install then
+// fails with ESP_ERR_NOT_SUPPORTED). Otherwise this file sets the
+// controller's HCFG.FSLSSupp bit itself.
+#if USBHOST_HOST_HIGH_SPEED && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0) && defined(USB_DWC_HAL_INIT_HAS_CONFIG)
+#define USBHOST_HOST_FSLS_BY_LIBRARY (1)
+#else
+#define USBHOST_HOST_FSLS_BY_LIBRARY (0)
+#endif
+#define USBHOST_HOST_FSLS_BY_REGISTER (USBHOST_HOST_HIGH_SPEED && !USBHOST_HOST_FSLS_BY_LIBRARY)
 
 #include "shared/usbhost_ringbuf.h"
 #include "usbhost_classes.h"
@@ -67,7 +91,6 @@
 #include "usbhost_ticks.h"
 #include "esp_timer.h"
 #include "esp_system.h"
-#include "soc/soc_caps.h"
 #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
 #include "esp_cache.h"
 #endif
@@ -431,8 +454,10 @@ void usbhost_host_set_class_filter(uint16_t mask) {
 // (TT) is not supported"). Holding the controller to full speed makes a hub
 // run its upstream port at full speed too, where it repeats full- and
 // low-speed traffic and needs no split transactions. High-speed devices then
-// run at full speed. Only the P4's high-speed controller has the choice; on
-// the S2 and S3 the controller is full speed already and this is a no-op.
+// run at full speed. Only the high-speed controllers (P4, S31) have the
+// choice; on the S2 and S3 the controller is full speed already and this is
+// a no-op. Which of the two ways it is done: USBHOST_HOST_FSLS_BY_LIBRARY
+// above.
 // Set by mod_usbhost.c's host_start() before usbhost_host_start_c(), like the
 // class filter above.
 static bool usbhost_host_full_speed = false;
@@ -441,7 +466,7 @@ void usbhost_host_set_full_speed(bool full_speed) {
     usbhost_host_full_speed = full_speed;
 }
 
-#if defined(CONFIG_IDF_TARGET_ESP32P4)
+#if USBHOST_HOST_FSLS_BY_REGISTER
 // HCFG.FSLSSupp holds the core to full and low speed. It is read when the
 // port resets a newly attached device, so it has to be set before the root
 // port is powered: the install below leaves the port off, this runs, and
@@ -666,7 +691,7 @@ void usbhost_host_fifo_limits(uint32_t *in_bytes, uint32_t *ptx_bytes) {
 }
 
 static void usbhost_host_fifo_for(uint16_t classes, usb_host_config_t *config) {
-    #if defined(CONFIG_IDF_TARGET_ESP32P4)
+    #if USBHOST_HOST_HIGH_SPEED
     const uint32_t k = 4;
     #else
     const uint32_t k = 1;
@@ -677,7 +702,7 @@ static void usbhost_host_fifo_for(uint16_t classes, usb_host_config_t *config) {
     // Non-periodic OUT: 64 bytes is a full-speed bulk packet, but a
     // high-speed one is 512 (a tethering phone, a drive), so the P4 keeps
     // 128 lines there and IN gives up the difference.
-    #if defined(CONFIG_IDF_TARGET_ESP32P4)
+    #if USBHOST_HOST_HIGH_SPEED
     const uint32_t nptx = 128, rx_cut = 64;
     #else
     const uint32_t nptx = 16, rx_cut = 0;
@@ -690,7 +715,7 @@ static void usbhost_host_fifo_for(uint16_t classes, usb_host_config_t *config) {
         why = uac ? "uvc asked for, so IN-leaning; a 2.0 speaker's packet will not fit"
                   : "uvc asked for, so IN-leaning";
     } else if (uac) {
-        #if defined(CONFIG_IDF_TARGET_ESP32P4)
+        #if USBHOST_HOST_HIGH_SPEED
         // Four times the S2/S3's lines: IN 1880, periodic OUT 800 bytes.
         config->fifo_settings_custom.rx_fifo_lines = 134 * k - rx_cut;
         config->fifo_settings_custom.nptx_fifo_lines = nptx;
@@ -750,7 +775,7 @@ static void usbhost_host_serve(void) {
         usbhost_host_lock();
         usbhost_host_stage = 2;
         usb_host_lib_handle_events(0, &flags);
-        #if defined(CONFIG_IDF_TARGET_ESP32P4)
+        #if USBHOST_HOST_FSLS_BY_REGISTER
         if (usbhost_host_full_speed) {
             usbhost_host_hold_full_speed();
         }
@@ -805,7 +830,9 @@ static void usbhost_host_task(void *arg) {
         #endif
     };
     usbhost_host_fifo_for(usbhost_host_class_filter, &config);
-    #if defined(CONFIG_IDF_TARGET_ESP32P4)
+    #if USBHOST_HOST_FSLS_BY_LIBRARY
+    config.fsls_only = usbhost_host_full_speed;
+    #elif USBHOST_HOST_FSLS_BY_REGISTER
     const bool full_speed = usbhost_host_full_speed;
     config.root_port_unpowered = full_speed;
     #endif
@@ -826,7 +853,7 @@ static void usbhost_host_task(void *arg) {
             usb_host_uninstall();
         }
     }
-    #if defined(CONFIG_IDF_TARGET_ESP32P4)
+    #if USBHOST_HOST_FSLS_BY_REGISTER
     if (err == ESP_OK && full_speed) {
         usbhost_host_hold_full_speed();
         err = usb_host_lib_set_root_port_power(true);
